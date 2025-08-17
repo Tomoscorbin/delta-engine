@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "tabula"
+version = "0.1.0"
+description = "Domain-driven library for managing data tables and schema evolution."
+authors = ["Tomos Corbin <tom_corbin1@hotmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.1"
+pytest-cov = "^5.0"
+ruff = "^0.12.9"
+mypy = "^1.17.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
