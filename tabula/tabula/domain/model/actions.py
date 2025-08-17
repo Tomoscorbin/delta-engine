@@ -1,15 +1,31 @@
 from __future__ import annotations
+
+import re
 from dataclasses import dataclass
 from typing import Tuple, Iterator, Self
 from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.column import Column
 
+
+def to_snake_case(name: str) -> str:
+    """
+    Convert CamelCase/PascalCase/mixed names to snake_case.
+    Safe for already-snake input (idempotent).
+    """
+    camel_boundary_1 = re.compile(r"(.)([A-Z][a-z]+)")
+    camel_boundary_2 = re.compile(r"([a-z0-9])([A-Z])")
+    if not name:
+        return name
+    s = camel_boundary_1.sub(r"\1_\2", name)
+    s = camel_boundary_2.sub(r"\1_\2", s)
+    return s.replace("-", "_").lower()
+
 class Action:
-    """Marker base for schema actions."""
+    """Base for schema actions."""
     @property
     def kind(self) -> str:
-        return type(self).__name__
-
+        return to_snake_case(self.__class__.__name__).lower()
+    
     def __repr__(self) -> str:
         return f"{self.kind}()"
 

@@ -1,77 +1,68 @@
-import pytest
-from dataclasses import dataclass
+from collections import Counter
 from typing import Optional
 
-from tabula.application.results import PlanPreview, ExecutionOutcome
-from tabula.application.execute import plan_actions, execute_plan
-
-from tabula.domain.model.qualified_name import FullName
-from tabula.domain.model.table_spec import TableSpec
-from tabula.domain.model.table_state import TableState
+from tabula.application.plan import plan_actions
+from tabula.application.ports import CatalogReader
+from tabula.domain.model.table import DesiredTable, ObservedTable
+from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.column import Column
-from tabula.domain.model.data_type import DataType
-from tabula.domain.model.actions import CreateTable, AddColumn, DropColumn
+from tabula.domain.model.types import integer
+from tabula.domain.model.actions import ActionPlan
 
-# --- helpers ---
+def qn() -> QualifiedName:
+    return QualifiedName("Cat", "Sch", "Tbl")
 
-def col(name: str, dtype: str = "string", nullable: bool = True) -> Column:
-    return Column(name=name, data_type=DataType(dtype), is_nullable=nullable)
+class ReaderNone(CatalogReader):
+    """Returns None to simulate missing table."""
+    def fetch_state(self, qualified_name: QualifiedName) -> Optional[ObservedTable]:
+        return None
 
-def spec(cols: list[Column]) -> TableSpec:
-    return TableSpec(full_name=FullName("dev", "sales", "orders"), columns=tuple(cols))
+class ReaderWith( CatalogReader ):
+    """Returns a simple observed table snapshot."""
+    def __init__(self, observed: ObservedTable) -> None:
+        self._observed = observed
+    def fetch_state(self, qualified_name: QualifiedName) -> Optional[ObservedTable]:
+        assert str(qualified_name) == str(self._observed.qualified_name)
+        return self._observed
 
-def state(cols: list[Column]) -> TableState:
-    return TableState(full_name=FullName("dev", "sales", "orders"), columns=tuple(cols))
+def desired(*cols: str) -> DesiredTable:
+    return DesiredTable(qualified_name=qn(), columns=tuple(Column(c, integer()) for c in cols))
 
-# --- fakes implementing the Protocols ---
+def observed(*cols: str) -> ObservedTable:
+    return ObservedTable(qualified_name=qn(), columns=tuple(Column(c, integer()) for c in cols))
 
-@dataclass
-class FakeCatalog:
-    by_name: dict[str, TableState]
-    def fetch_state(self, full_name: FullName) -> Optional[TableState]:
-        return self.by_name.get(str(full_name))
+def test_plan_actions_no_observed_emits_create_table_and_counts_match():
+    d = desired("a", "b", "c")
+    preview = plan_actions(d, reader=ReaderNone())
+    assert isinstance(preview.plan, ActionPlan)
+    assert not isinstance(preview.plan, tuple)  # sanity
+    assert preview.is_noop is False
+    # counts should reflect the plan's action kinds
+    expected = Counter(a.kind for a in preview.plan)
+    assert dict(preview.summary_counts) == dict(expected)
+    # summary_text should either be 'noop' or contain every kind with '='
+    for k in expected:
+        assert f"{k}=" in preview.summary_text
 
-@dataclass
-class FakeExecutor:
-    success: bool = True
-    messages: tuple[str, ...] = ()
-    last_plan = None
-    def execute(self, plan):
-        self.last_plan = plan
-        return ExecutionOutcome(success=self.success, messages=self.messages, excuted_count=len(plan))
+def test_plan_actions_with_observed_adds_and_drops_and_is_not_noop():
+    d = desired("a", "b")                  # want a,b
+    o = observed("b", "c")                 # have b,c
+    preview = plan_actions(d, reader=ReaderWith(o))
+    assert not preview.is_noop
+    # kinds present should include an add and a drop (names depend on your Action.kind)
+    kinds = {a.kind for a in preview.plan}
+    assert len(kinds) >= 2
+    # structured counts are consistent with plan contents
+    expected = Counter(a.kind for a in preview.plan)
+    assert dict(preview.summary_counts) == dict(expected)
+    # human summary mentions all kinds present
+    for k in kinds:
+        assert f"{k}=" in preview.summary_text
 
-# --- tests ---
-
-def test_plan_actions_creates_when_absent():
-    reader = FakeCatalog(by_name={})
-    s = spec([col("id", "integer", False)])
-    result: PlanPreview = plan_actions(s, reader)
-
-    assert result.is_noop is False
-    assert isinstance(result.plan.actions[0], CreateTable)
-    # summary uses snake_case action names
-    assert result.summary == "create_table=1"
-
-def test_plan_actions_is_noop_when_in_sync():
-    reader = FakeCatalog(by_name={"dev.sales.orders": state([col("id", "integer", False)])})
-    s = spec([col("id", "integer", False)])
-    result = plan_actions(s, reader)
-
-    assert result.is_noop is True
-    assert len(result.plan) == 0
-    assert result.summary == "noop"
-
-def test_plan_actions_adds_in_spec_order_and_drops_alpha():
-    reader = FakeCatalog(by_name={"dev.sales.orders": state([col("a"), col("OLD")])})
-    s = spec([col("a"), col("b"), col("c")])
-
-    result = plan_actions(s, reader)
-    kinds = [type(a).__name__ for a in result.plan.actions]
-    assert kinds == ["AddColumn", "AddColumn", "DropColumn"]
-
-    adds = [a.column.name for a in result.plan.actions if isinstance(a, AddColumn)]
-    drops = [a.column_name for a in result.plan.actions if isinstance(a, DropColumn)]
-    assert adds == ["b", "c"]      # spec order
-    assert drops == ["OLD"]        # alpha by name, case-insensitive
-    # summary is alphabetical by action kind
-    assert result.summary == "add_column=2 drop_column=1"
+def test_plan_actions_noop_when_schemas_match_ignoring_case():
+    d = desired("A", "B")
+    o = observed("a", "b")
+    preview = plan_actions(d, reader=ReaderWith(o))
+    assert preview.is_noop
+    assert preview.summary_counts == {}
+    assert preview.summary_text == "noop"

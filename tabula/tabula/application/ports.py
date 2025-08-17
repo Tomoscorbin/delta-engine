@@ -1,16 +1,25 @@
+"""Application ports (adapter interfaces). No business logic here."""
+
 from __future__ import annotations
-from typing import Optional, Protocol, runtime_checkable
-from tabula.domain.model.qualified_name import FullName
-from tabula.domain.model.table_state import TableState
+from typing import Protocol, runtime_checkable
+from tabula.domain.model.qualified_name import QualifiedName
+from tabula.domain.model.table import ObservedTable
 from tabula.domain.model.actions import ActionPlan
 from tabula.application.results import ExecutionOutcome
 
 @runtime_checkable
 class CatalogReader(Protocol):
-    def fetch_state(self, full_name: FullName) -> Optional[TableState]:
-        """Return TableState, or None if the table does not exist."""
+    """Reads current catalog state. Must be side-effect free and consistent for a single call."""
+    def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None: ...
 
 @runtime_checkable
 class PlanExecutor(Protocol):
-    def execute(self, plan: ActionPlan) -> ExecutionOutcome:
-        """Execute actions in order; should be idempotent where possible."""
+    """
+    Executes an ActionPlan against a backing engine (e.g., Delta).
+    Policy:
+    - Must be idempotent per action (safe to re-run).
+    - Returns ExecutionOutcome; truthiness reflects success.
+    - Should not raise for partial failures; surface them in the outcome.
+      (Application layer may raise based on outcome.)
+    """
+    def execute(self, plan: ActionPlan) -> ExecutionOutcome: ...

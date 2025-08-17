@@ -38,6 +38,7 @@ htmlcov/
 
 # --- OS cruft
 .DS_Store
+.DS_Store.*
 
 # --- Local env files
 .env

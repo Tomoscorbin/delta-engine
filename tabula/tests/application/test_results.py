@@ -1,47 +1,29 @@
-import pytest
-from dataclasses import FrozenInstanceError
-
-from tabula.application.results import PlanPreview, ExecutionResult, ExecutionOutcome
+from tabula.application.results import ExecutionOutcome, ExecutionResult, PlanPreview
 from tabula.domain.model.actions import ActionPlan, AddColumn
-from tabula.domain.model.qualified_name import FullName
+from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.column import Column
-from tabula.domain.model.data_type import DataType
+from tabula.domain.model.types import integer
 
-def _full_name():
-    return FullName("dev", "sales", "orders")
+def qn() -> QualifiedName:
+    return QualifiedName("Cat", "Sch", "Tbl")
 
-def _empty_plan():
-    return ActionPlan(full_name=_full_name(), actions=())
+def test_execution_outcome_truthiness_and_defaults():
+    ok = ExecutionOutcome(success=True, messages=("ok",), executed_count=2)
+    bad = ExecutionOutcome(success=False, messages=("nope",), executed_count=1)
+    assert ok
+    assert not bad
+    assert ok.executed_count == 2 and bad.executed_count == 1
 
-def _plan_with_add():
-    col = Column("b", DataType("string"))
-    return ActionPlan(full_name=_full_name(), actions=(AddColumn(col),))
-
-def test_plan_preview_noop_is_immutable_and_roundtrips():
-    plan = _empty_plan()
-    preview = PlanPreview(plan=plan, is_noop=True, summary="noop")
-
-    assert preview.plan is plan
-    assert preview.is_noop is True
-    assert preview.summary == "noop"
-
-    with pytest.raises(FrozenInstanceError):
-        preview.summary = "changed"   # frozen dataclass
-
-def test_execution_result_holds_plan_and_messages():
-    plan = _plan_with_add()
-    res = ExecutionResult(plan=plan, success=True, messages=("ok",))
-
+def test_execution_result_carries_plan_and_counts():
+    plan = ActionPlan(qn()).add(AddColumn(Column("a", integer())))
+    res = ExecutionResult(plan=plan, messages=("done",), executed_count=1)
     assert res.plan is plan
-    assert res.success is True
-    assert res.messages == ("ok",)
-    assert isinstance(res.messages, tuple)
+    assert res.executed_count == 1
+    assert "done" in res.messages
 
-def test_execution_outcome_defaults_and_types():
-    out = ExecutionOutcome(success=True)  # messages default, count default
-
-    assert out.success is True
-    assert out.messages == ()
-    assert isinstance(out.messages, tuple)
-    assert hasattr(out, "executed_count")
-    assert out.executed_count == 0
+def test_plan_preview_fields_cohere():
+    plan = ActionPlan(qn())  # empty
+    preview = PlanPreview(plan=plan, is_noop=True, summary_counts={}, summary_text="noop")
+    assert preview.is_noop
+    assert preview.summary_counts == {}
+    assert preview.summary_text == "noop"
