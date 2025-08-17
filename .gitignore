@@ -1,0 +1,45 @@
+# --- Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual envs (anywhere)
+.venv/
+venv/
+ENV/
+
+# --- Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+
+# --- Tests / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+
+# --- Generic caches
+.cache/
+
+# --- Notebooks
+.ipynb_checkpoints/
+
+# --- Editors / IDE
+.vscode/
+.idea/
+
+# --- OS cruft
+.DS_Store
+
+# --- Databricks (if present)
+.databricks/
+
+# --- Local env files
+.env
+.env.*
