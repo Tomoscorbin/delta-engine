@@ -13,7 +13,7 @@ from tabula.application.errors import ExecutionFailed
 from tabula.adapters.outbound.unity_catalog.sql.executor import SqlPlanExecutor
 
 # --- domain model ---
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.table_spec import TableSpec
 from tabula.domain.model.table_state import TableState
 from tabula.domain.model.column import Column

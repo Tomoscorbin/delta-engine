@@ -3,45 +3,24 @@ from typing import Iterable, Tuple
 from tabula.domain.model.column import Column
 from tabula.domain.model.actions import AddColumn, DropColumn, Action
 
-def diff_columns_for_adds(
-    desired_columns: Iterable[Column],
-    observed_columns: Iterable[Column],
-) -> Tuple[AddColumn, ...]:
-    """
-    Return AddColumn actions for columns that are in desired but not observed.
-    Preserves the order from desired_columns.
-    """
-    observed_names = {c.name for c in observed_columns}
+def diff_columns_for_adds(desired: Iterable[Column], observed: Iterable[Column]) -> Tuple[AddColumn, ...]:
+    """Emit AddColumn for names present in desired but missing in observed. Preserve desired order."""
+    observed_names = {c.name for c in observed}
     adds: list[AddColumn] = []
-    for column in desired_columns:
-        if column.name not in observed_names:
-            adds.append(AddColumn(column=column))
+    for c in desired:
+        if c.name not in observed_names:
+            adds.append(AddColumn(column=c))
     return tuple(adds)
 
-def diff_columns_for_drops(
-    desired_columns: Iterable[Column],
-    observed_columns: Iterable[Column],
-) -> Tuple[DropColumn, ...]:
-    """
-    Return DropColumn actions for columns that are in observed but not desired.
-    Sorts by column name (case-insensitive) for stable, readable output.
-    """
-    desired_names = {c.name for c in desired_columns}
-    drops: list[DropColumn] = []
-    for column in observed_columns:
-        if column.name not in desired_names:
-            drops.append(DropColumn(column_name=column.name))
-    drops.sort(key=lambda a: a.column_name.casefold())  # deterministic
+def diff_columns_for_drops(desired: Iterable[Column], observed: Iterable[Column]) -> Tuple[DropColumn, ...]:
+    """Emit DropColumn for names present in observed but missing in desired. Sort by name deterministically."""
+    desired_names = {c.name for c in desired}
+    drops = [DropColumn(column_name=c.name) for c in observed if c.name not in desired_names]
+    drops.sort(key=lambda a: a.column_name)
     return tuple(drops)
 
-def diff_columns(
-    desired_columns: Iterable[Column],
-    observed_columns: Iterable[Column],
-) -> Tuple[Action, ...]:
-    """
-    Compute add/drop actions. Type changes are out-of-scope for the MVP.
-    Adds are emitted in spec order; drops are name-sorted.
-    """
-    adds = diff_columns_for_adds(desired_columns, observed_columns)
-    drops = diff_columns_for_drops(desired_columns, observed_columns)
-    return tuple(adds) + tuple(drops)
+def diff_columns(desired: Iterable[Column], observed: Iterable[Column]) -> Tuple[Action, ...]:
+    """Compute add/drop actions only. Type/nullable changes are intentionally out-of-scope for now."""
+    adds = diff_columns_for_adds(desired, observed)
+    drops = diff_columns_for_drops(desired, observed)
+    return (adds + drops) if adds or drops else ()

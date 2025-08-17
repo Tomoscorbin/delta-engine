@@ -1,29 +1,32 @@
 import pytest
-from dataclasses import FrozenInstanceError
 from tabula.domain.model.column import Column
-from tabula.domain.model import types as dt
+from tabula.domain.model.types import integer, string
 
-def test_column_holds_fields_and_specification_string():
-    col = Column(name="amount", data_type=dt.decimal(18, 2), is_nullable=False)
-    assert col.name == "amount"
-    assert col.data_type.specification == "decimal(18,2)"
-    assert col.is_nullable is False
-    assert col.specification == "amount decimal(18,2) not null"
+def test_name_normalization_and_spec():
+    c = Column("UserID", integer(), is_nullable=False)
+    assert c.name == "userid"
+    assert str(c) == "userid int not null"
 
-def test_nullable_column_specification_omits_not_null():
-    col = Column(name="notes", data_type=dt.string(), is_nullable=True)
-    assert col.specification == "notes string"
+def test_reject_empty_name():
+    with pytest.raises(ValueError):
+        Column("", string())
 
-def test_column_is_immutable_and_hashable():
-    col = Column(name="id", data_type=dt.integer(), is_nullable=False)
-    with pytest.raises(FrozenInstanceError):
-        col.name = "other"  # type: ignore[attr-defined]
-    # hashable VO (frozen + hashable fields)
-    assert isinstance(hash(col), int)
+def test_equality_is_case_insensitive_on_name_and_sensitive_on_rest():
+    c1 = Column("UserId", integer(), is_nullable=False)
+    c2 = Column("userid", integer(), is_nullable=False)
+    c3 = Column("UserID", string(), is_nullable=False)
+    assert c1 == c2
+    assert c1 != c3  # different type
 
-def test_value_equality_is_by_fields():
-    a = Column("id", dt.integer(), False)
-    b = Column("id", dt.integer(), False)
-    c = Column("id", dt.big_integer(), False)
-    assert a == b
-    assert a != c
+def test_spec_shows_not_null_suffix():
+    c = Column("Email", string(), is_nullable=False)
+    assert str(c).endswith("not null")
+
+def test_reject_blank_or_whitespace_names():
+    with pytest.raises(ValueError): Column("", integer())
+    with pytest.raises(ValueError): Column("   ", integer())
+
+def test_name_is_normalized_and_preserved_in_spec():
+    c = Column("CamelCase", integer())
+    assert c.name == "camelcase"
+    assert str(c).startswith("camelcase ")

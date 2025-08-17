@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Protocol, runtime_checkable
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.table_state import TableState
 from tabula.domain.model.actions import ActionPlan
 from tabula.application.results import ExecutionOutcome

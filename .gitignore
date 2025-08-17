@@ -19,6 +19,8 @@ dist/
 .coverage.*
 coverage.xml
 htmlcov/
+**/.hypothesis/
+
 
 # --- Type checkers / linters
 .mypy_cache/
@@ -36,9 +38,6 @@ htmlcov/
 
 # --- OS cruft
 .DS_Store
-
-# --- Databricks (if present)
-.databricks/
 
 # --- Local env files
 .env

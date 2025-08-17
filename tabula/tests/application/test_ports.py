@@ -3,7 +3,7 @@ from typing import Optional
 
 from tabula.application.ports import CatalogReader, PlanExecutor
 from tabula.application.results import ExecutionOutcome
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.table_state import TableState
 from tabula.domain.model.actions import ActionPlan
 

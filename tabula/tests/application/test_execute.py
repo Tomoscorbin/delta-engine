@@ -5,7 +5,7 @@ from typing import Optional
 from tabula.application.results import ExecutionOutcome, ExecutionResult
 from tabula.application.execute import execute_plan
 from tabula.application.errors import ExecutionFailed
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.column import Column
 from tabula.domain.model.data_type import DataType
 from tabula.domain.model.table_state import TableState

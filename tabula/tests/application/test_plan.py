@@ -5,7 +5,7 @@ from typing import Optional
 from tabula.application.results import PlanPreview, ExecutionOutcome
 from tabula.application.execute import plan_actions, execute_plan
 
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.table_spec import TableSpec
 from tabula.domain.model.table_state import TableState
 from tabula.domain.model.column import Column

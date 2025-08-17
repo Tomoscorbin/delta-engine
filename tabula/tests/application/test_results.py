@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError
 
 from tabula.application.results import PlanPreview, ExecutionResult, ExecutionOutcome
 from tabula.domain.model.actions import ActionPlan, AddColumn
-from tabula.domain.model.full_name import FullName
+from tabula.domain.model.qualified_name import FullName
 from tabula.domain.model.column import Column
 from tabula.domain.model.data_type import DataType
 
