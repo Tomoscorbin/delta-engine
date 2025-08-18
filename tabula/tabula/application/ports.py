@@ -1,16 +1,21 @@
 """Application ports (adapter interfaces). No business logic here."""
 
 from __future__ import annotations
+
 from typing import Protocol, runtime_checkable
+
+from tabula.application.results import ExecutionOutcome
+from tabula.domain.plan.actions import ActionPlan
 from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.table import ObservedTable
-from tabula.domain.model.actions import ActionPlan
-from tabula.application.results import ExecutionOutcome
+
 
 @runtime_checkable
 class CatalogReader(Protocol):
     """Reads current catalog state. Must be side-effect free and consistent for a single call."""
+
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None: ...
+
 
 @runtime_checkable
 class PlanExecutor(Protocol):
@@ -22,4 +27,5 @@ class PlanExecutor(Protocol):
     - Should not raise for partial failures; surface them in the outcome.
       (Application layer may raise based on outcome.)
     """
+
     def execute(self, plan: ActionPlan) -> ExecutionOutcome: ...

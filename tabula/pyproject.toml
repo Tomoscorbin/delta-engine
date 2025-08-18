@@ -14,8 +14,45 @@ pytest = "^8.4.1"
 pytest-cov = "^5.0"
 ruff = "^0.12.9"
 mypy = "^1.17.1"
-hypothesis = "^6.138.0"
+pyspark = "^4.0.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  ".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.ruff.lint]
+# E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: ruff extras; TID: tidy-imports
+select = [
+    "E",    # pyflakes/pycodestyle
+    "F",    # pyflakes/pycodestyle
+    "N",    # pep8-naming
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "RUF",  # ruff extras
+    "TID"   # tidy-imports
+]
+ignore = [
+  "E203",  # allow slice spacing compatible with black/ruff-format
+  "E266",  # allow long inline comments
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"  # enforces absolute imports (TID252)
+
+# So tests can use short fixture names like qn(), col(), etc.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["N802", "N803", "N806"]

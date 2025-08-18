@@ -1,17 +1,17 @@
 import pytest
-from tests.conftest import qn, col, desired, observed
-from tabula.domain.services.differ import diff
-from tabula.domain.model.actions import ActionPlan, CreateTable, AddColumn, DropColumn
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.types import integer
+
+from tabula.domain.plan.actions import ActionPlan, CreateTable, DropColumn
 from tabula.domain.model.column import Column
+from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.table import DesiredTable, ObservedTable
+from tabula.domain.model.types import integer
+from tabula.domain.services.differ import diff
+from tests.conftest import col, desired, observed, qn
 
 
-def qn(
-    cat: str = "Cat", sch: str = "Sch", name: str = "Tbl"
-) -> QualifiedName:
+def qn(cat: str = "Cat", sch: str = "Sch", name: str = "Tbl") -> QualifiedName:
     return QualifiedName(cat, sch, name)
+
 
 def test_create_table_when_observed_missing():
     d = desired(qn(), col("a"), col("b"))
@@ -19,11 +19,13 @@ def test_create_table_when_observed_missing():
     assert isinstance(plan, ActionPlan)
     assert any(isinstance(a, CreateTable) for a in plan)
 
+
 def test_mismatch_name_raises():
-    d = desired(qn("c","s","t1"), col("a"))
-    o = observed(qn("c","s","t2"), col("a"))
+    d = desired(qn("c", "s", "t1"), col("a"))
+    o = observed(qn("c", "s", "t2"), col("a"))
     with pytest.raises(ValueError):
         diff(o, d)
+
 
 def test_add_and_drop_actions_emitted():
     d = desired(qn(), col("a"), col("b"))
@@ -33,6 +35,7 @@ def test_add_and_drop_actions_emitted():
     assert "AddColumn" in kinds
     assert "DropColumn" in kinds
 
+
 def test_noop_when_schemas_match():
     d = desired(qn(), col("a"))
     o = observed(qn(), col("A"))  # case-insensitive
@@ -41,11 +44,14 @@ def test_noop_when_schemas_match():
 
 
 def test_diff_creates_table_with_exact_columns_in_order_when_missing():
-    desired = DesiredTable(qn(), (Column("A", integer()), Column("B", integer()), Column("C", integer())))
+    desired = DesiredTable(
+        qn(), (Column("A", integer()), Column("B", integer()), Column("C", integer()))
+    )
     plan = diff(None, desired)
     assert any(isinstance(a, CreateTable) for a in plan)
     create = next(a for a in plan if isinstance(a, CreateTable))
     assert tuple(c.name for c in create.columns) == ("a", "b", "c")
+
 
 def test_diff_raises_on_mismatched_targets():
     desired = DesiredTable(QualifiedName("c", "s", "t1"), (Column("A", integer()),))
@@ -53,11 +59,13 @@ def test_diff_raises_on_mismatched_targets():
     with pytest.raises(ValueError):
         diff(observed, desired)
 
+
 def test_diff_is_idempotent_when_schemas_match():
     desired = DesiredTable(qn(), (Column("A", integer()),))
     observed = ObservedTable(qn(), (Column("a", integer()),))
     plan = diff(observed, desired)
     assert list(plan) == []
+
 
 def test_diff_emits_adds_then_drops_in_that_order():
     desired = DesiredTable(qn(), (Column("A", integer()), Column("B", integer())))

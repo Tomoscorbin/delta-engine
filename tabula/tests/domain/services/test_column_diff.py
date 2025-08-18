@@ -1,11 +1,15 @@
 from random import shuffle
+
 from hypothesis import given
-from hypothesis import strategies as st
-from tests.conftest import columns_strat
-from tabula.domain.services.column_diff import diff_columns, diff_columns_for_adds, diff_columns_for_drops
-from tabula.domain.model.actions import AddColumn, DropColumn
+
+from tabula.domain.plan.actions import AddColumn, DropColumn
 from tabula.domain.model.column import Column
 from tabula.domain.model.types import integer
+from tabula.domain.services.column_diff import (
+    diff_columns,
+)
+from tests.conftest import columns_strat
+
 
 @given(columns_strat(min_size=0, max_size=6), columns_strat(min_size=0, max_size=6))
 def test_diff_set_semantics_and_determinism(desired_cols, observed_cols):
@@ -26,10 +30,12 @@ def test_diff_set_semantics_and_determinism(desired_cols, observed_cols):
     # determinism: drops are sorted lexicographically
     assert drop_names == sorted(drop_names)
 
+
 def names(actions):
     adds = [a.column.name for a in actions if isinstance(a, AddColumn)]
     drops = [a.column_name for a in actions if isinstance(a, DropColumn)]
     return adds, drops
+
 
 def test_no_actions_when_identical_sets_ignoring_order_and_case():
     desired = [Column("A", integer()), Column("B", integer()), Column("C", integer())]
@@ -37,11 +43,13 @@ def test_no_actions_when_identical_sets_ignoring_order_and_case():
     actions = diff_columns(desired, observed)
     assert list(actions) == []
 
+
 def test_adds_preserve_desired_order_even_if_observed_permuted():
     desired = [Column("A", integer()), Column("B", integer()), Column("D", integer())]
     observed = [Column("B", integer())]
     # Permute desired to check determinism based on input order (should be preserved for adds)
-    permuted_desired = desired[:] ; shuffle(permuted_desired)
+    permuted_desired = desired[:]
+    shuffle(permuted_desired)
     actions = diff_columns(permuted_desired, observed)
     add_names, drop_names = names(actions)
     expected_add_order = [c.name for c in permuted_desired if c.name not in {"b"}]

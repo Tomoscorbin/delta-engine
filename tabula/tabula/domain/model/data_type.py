@@ -1,36 +1,56 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Tuple, Union
+from typing import Iterable, Union
 
 Param = Union[int, "DataType"]
 
+
 @dataclass(frozen=True, slots=True)
 class DataType:
-    """Engine-agnostic logical type. E.g., 'decimal(18,2)', 'bigint', 'array<int>'."""
+    """Engine-agnostic logical type. E.g., 'decimal(18,2)', 'bigint', 'array(int)'."""
+
     name: str
-    parameters: Tuple[Param, ...] = ()
+    parameters: tuple[Param, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.name or not self.name.strip():
+        # --- Type checks / coercions
+        if not isinstance(self.name, str):
+            raise TypeError(f"DataType.name must be str, got {type(self.name).__name__}")
+
+        params = self.parameters
+        # Validate each parameter type
+        for p in params:
+            if not isinstance(p, (int, DataType)):
+                raise TypeError(f"Invalid parameter type: {type(p).__name__}; expected int or DataType")
+
+        # --- Name validation
+        if not self.name:
             raise ValueError("DataType.name cannot be empty")
+        if self.name.strip() != self.name:
+            raise ValueError(f"DataType.name must not have leading/trailing whitespace: {self.name!r}")
+        if any(ch.isspace() for ch in self.name):
+            raise ValueError("DataType.name must not contain whitespace characters")
+        if "." in self.name:
+            raise ValueError("DataType.name must not contain '.'")
+
         n = self.name.casefold()
-        # lightweight checks for common parameterized types
+
+        # --- Known type validations
         if n == "decimal":
-            if len(self.parameters) != 2 or not all(isinstance(p, int) for p in self.parameters):
+            if len(params) != 2 or not all(isinstance(p, int) for p in params):
                 raise ValueError("decimal requires (precision:int, scale:int)")
-            precision, scale = self.parameters  # type: ignore[assignment]
+            precision, scale = params  # type: ignore[assignment]
             if precision <= 0 or not (0 <= scale <= precision):
                 raise ValueError("invalid decimal precision/scale")
-        
-        #TODO: (future: validate array/map/struct shapes)
-        object.__setattr__(self, "name", n)
 
-    @property
-    def specification(self) -> str:
-        if not self.parameters:
-            return self.name
-        parts = [p.specification if isinstance(p, DataType) else str(p) for p in self.parameters]
-        return f"{self.name}({','.join(parts)})"
+        # TODO: future: validate array/map/struct shapes
+
+        # --- Finalize normalized state
+        object.__setattr__(self, "name", n)
+        object.__setattr__(self, "parameters", params)
 
     def __str__(self) -> str:
-        return self.specification
+        if not self.parameters:
+            return self.name
+        parts = [str(p) for p in self.parameters]
+        return f"{self.name}({','.join(parts)})"

@@ -1,58 +1,161 @@
 import pytest
-from hypothesis import given
-from tests.conftest import qname_strat
+from dataclasses import FrozenInstanceError
+
 from tabula.domain.model.qualified_name import QualifiedName
 
-def make_name(c="Cat", s="Sales", n="Orders") -> QualifiedName:
-    return QualifiedName(c, s, n)
+
+# ---------------------------
+# Construction & normalization
+# ---------------------------
+
+def test_normalization_casefold() -> None:
+    qn = QualifiedName("CAT", "Sales", "Transactions")
+    assert qn.catalog == "cat"
+    assert qn.schema == "sales"
+    assert qn.name == "transactions"
 
 
-def test_str_is_canonical_dotted():
-    q = QualifiedName("Cat", "Sch", "Tbl")
-    assert str(q) == "cat.sch.tbl"
-
-def test_rejects_dots_and_empty():
-    with pytest.raises(ValueError): QualifiedName("a.b", "s", "n")
-    with pytest.raises(ValueError): QualifiedName("", "s", "n")
-    with pytest.raises(ValueError): QualifiedName("a", " ", "n")
-
-@given(qname_strat())
-def test_case_insensitive_normalization(q):
-    # already normalized in constructor
-    assert q.catalog == q.catalog.casefold()
-    assert q.schema == q.schema.casefold()
-    assert q.name == q.name.casefold()
-
-def test_equality_and_hash_case_insensitive():
-    a = QualifiedName("Cat", "Sch", "Tbl")
-    b = QualifiedName("cat", "SCH", "tBl")
+def test_equality_and_hash_are_case_insensitive() -> None:
+    a = QualifiedName("Cat", "Sales", "Transactions")
+    b = QualifiedName("CAT", "SALES", "TRANSACTIONS")
     assert a == b
     assert hash(a) == hash(b)
-    # usable as dict keys
-    d = {a: "x"}
-    assert d[b] == "x"
+    as_dict = {a: "value"}
+    assert as_dict[b] == "value"  # hashing compatibility
 
-def test_str_is_canonical_and_stable():
-    q = make_name("CAT", "DATA", "WIDGETS")
-    assert str(q) == "cat.data.widgets"
 
-def test_reject_embedded_dot_in_any_part():
-    with pytest.raises(ValueError): QualifiedName("a.b", "c", "d")
-    with pytest.raises(ValueError): QualifiedName("a", "c.d", "e")
-    with pytest.raises(ValueError): QualifiedName("a", "c", "d.e")
+# ---------------------------
+# Convenience properties / dunder
+# ---------------------------
 
-def test_reject_empty_or_whitespace_only_parts():
-    with pytest.raises(ValueError): QualifiedName("", "c", "t")
-    with pytest.raises(ValueError): QualifiedName("a", " ", "t")
-    with pytest.raises(ValueError): QualifiedName("a", "c", "\t")
+def test_parts_and_dotted_and_str() -> None:
+    qn = QualifiedName("c", "s", "n")
+    assert qn.parts == ("c", "s", "n")
+    assert qn.dotted == "c.s.n"
+    assert str(qn) == "c.s.n"
 
-def test_reject_leading_or_trailing_whitespace_parts():
-    # If your implementation currently allows this, tighten validation.
-    with pytest.raises(ValueError): QualifiedName(" a", "c", "t")
-    with pytest.raises(ValueError): QualifiedName("a", "c ", "t")
-    with pytest.raises(ValueError): QualifiedName("a", "c", " t ")
 
-def test_repr_is_unambiguous_for_debugging():
-    q = make_name()
-    r = repr(q)
-    assert "QualifiedName" in r and "cat" in r and "sales" in r and "orders" in r
+def test_repr_contains_fields() -> None:
+    qn = QualifiedName("c", "s", "n")
+    r = repr(qn)
+    assert r == "QualifiedName(catalog='c', schema='s', name='n')"
+
+# ---------------------------
+# Immutability
+# ---------------------------
+
+def test_immutability() -> None:
+    qn = QualifiedName("c", "s", "n")
+    with pytest.raises(FrozenInstanceError):
+        qn.catalog = "x"
+
+
+# ---------------------------
+# Validation: None / empty
+# ---------------------------
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": None, "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": None, "name": "n"},
+        {"catalog": "c", "schema": "s", "name": None},
+    ],
+)
+def test_none_values_raise_value_error(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualifiedName(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": "", "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": "", "name": "n"},
+        {"catalog": "c", "schema": "s", "name": ""},
+    ],
+)
+def test_empty_values_raise_value_error(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualifiedName(**kwargs)
+
+
+# ---------------------------
+# Validation: whitespace rules (strict)
+#   - Reject leading/trailing whitespace
+#   - Reject ANY internal whitespace (space, tab, newline, etc.)
+# ---------------------------
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": " c", "schema": "s", "name": "n"},
+        {"catalog": "c ", "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": "\ts", "name": "n"},
+        {"catalog": "c", "schema": "s", "name": "n\n"},
+    ],
+)
+def test_leading_or_trailing_whitespace_rejected(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualifiedName(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": "c at", "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": "s\tales", "name": "n"},
+        {"catalog": "c", "schema": "s", "name": "na\nme"},
+    ],
+)
+def test_any_internal_whitespace_is_rejected(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualifiedName(**kwargs)
+
+
+# ---------------------------
+# Validation: dot inside a part
+# ---------------------------
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": "c.at", "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": "s.ch", "name": "n"},
+        {"catalog": "c", "schema": "s", "name": "n.a"},
+    ],
+)
+def test_parts_must_not_contain_dot(kwargs) -> None:
+    with pytest.raises(ValueError):
+        QualifiedName(**kwargs)
+
+
+# ---------------------------
+# Type safety (strict)
+# ---------------------------
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"catalog": 123, "schema": "s", "name": "n"},
+        {"catalog": "c", "schema": object(), "name": "n"},
+        {"catalog": "c", "schema": "s", "name": ["n"]},
+    ],
+)
+def test_non_string_values_raise_type_error(kwargs) -> None:
+    with pytest.raises(TypeError):
+        QualifiedName(**kwargs)
+
+def test_identifier_valid_examples() -> None:
+    QualifiedName("catlog_1", "sales_2025", "transactions_v2")  # no exception
+
+def test_allows_symbols_except_whitespace_and_dot() -> None:
+    q1 = QualifiedName("1catalog", "s", "n")         # leading digit allowed
+    q2 = QualifiedName("c", "sales-data", "n")       # hyphen allowed
+    q3 = QualifiedName("c", "s", "orders/data")      # slash allowed
+    q4 = QualifiedName("c", "s", "100%")             # percent allowed
+
+    assert q1.dotted == "1catalog.s.n"
+    assert q2.dotted == "c.sales-data.n"
+    assert q3.dotted == "c.s.orders/data"
+    assert q4.dotted == "c.s.100%"
