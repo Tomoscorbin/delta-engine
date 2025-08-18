@@ -25,7 +25,10 @@ class ExecutionOutcome:
     success: bool
     messages: Tuple[str, ...] = ()
     executed_count: int = 0
-    def __bool__(self) -> bool:  # allows: if outcome: ...
+    executed_sql: Tuple[str, ...] = ()
+    durations_ms: Tuple[float, ...] = ()
+
+    def __bool__(self) -> bool:
         return self.success
 
 @dataclass(frozen=True, slots=True)
