@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Literal
 from tabula.domain.model.data_type import DataType
 
-# ---- Singleton instances (optional but nice)
+# ---- Singleton instances
 _BIGINT    = DataType("bigint")
 _INT       = DataType("int")
 _SMALLINT  = DataType("smallint")
@@ -11,7 +11,7 @@ _STRING    = DataType("string")
 _DATE      = DataType("date")
 _TIMESTAMP = DataType("timestamp")
 _DOUBLE    = DataType("double")
-_FLOAT     = DataType("float")   # Spark-style: 32-bit float
+_FLOAT     = DataType("float")
 
 # ---- Scalar factories
 def bigint() -> DataType:    return _BIGINT

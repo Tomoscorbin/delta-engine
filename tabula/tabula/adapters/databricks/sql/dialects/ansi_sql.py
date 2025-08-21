@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from .base import SqlDialect
 
 @dataclass(frozen=True)
 class AnsiSqlDialect:

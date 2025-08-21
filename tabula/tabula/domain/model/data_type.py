@@ -49,8 +49,3 @@ class DataType:
         object.__setattr__(self, "name", n)
         object.__setattr__(self, "parameters", params)
 
-    def __str__(self) -> str:
-        if not self.parameters:
-            return self.name
-        parts = [str(p) for p in self.parameters]
-        return f"{self.name}({','.join(parts)})"

@@ -35,10 +35,3 @@ class QualifiedName:
     @property
     def dotted(self) -> str:
         return ".".join(self.parts)
-
-    def __repr__(self) -> str:
-        cls = type(self).__name__
-        return f"{cls}(catalog={self.catalog!r}, schema={self.schema!r}, name={self.name!r})"
-
-    def __str__(self) -> str:
-        return self.dotted

@@ -21,8 +21,6 @@ class CreateTable(Action):
         if not isinstance(self.columns, tuple):
             raise TypeError("columns must be a tuple[Column, ...]")
 
-    def __str__(self) -> str:
-        return f"create table with {len(self.columns)} column(s)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,11 +31,6 @@ class AddColumn(Action):
         if not isinstance(self.column, Column):
             raise TypeError("AddColumn.column must be a Column")
         
-    def __repr__(self) -> str:
-        return f"AddColumn({self.column!r})"    
-
-    def __str__(self) -> str:
-        return f"add column {self.column.name}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +40,6 @@ class DropColumn(Action):
     def __post_init__(self) -> None:
         normalized = normalize_identifier("column_name", self.column_name)
         object.__setattr__(self, "column_name", normalized)
-
-    def __repr__(self) -> str:
-        return f"DropColumn({self.column_name!r})"   
-
-    def __str__(self) -> str:
-        return f"drop column {self.column_name}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,21 +56,16 @@ class ActionPlan:
     def __iter__(self):
         return iter(self.actions)
 
-    def add(self, action: Action) -> Self:
-        if not isinstance(action, Action):
-            raise TypeError("action must be an Action")
-        return ActionPlan(self.target, (*self.actions, action))
-
     def __add__(self, other: Self) -> Self:
         if self.target != other.target:
             raise ValueError("Cannot merge plans for different targets")
         return ActionPlan(self.target, self.actions + other.actions)
 
-    def __str__(self) -> str:
-        if not self.actions:
-            return f"ActionPlan({self.target}): empty"
-        return f"ActionPlan({self.target}): " + "; ".join(str(a) for a in self.actions)
-
+    def add(self, action: Action) -> Self:
+        if not isinstance(action, Action):
+            raise TypeError("action must be an Action")
+        return ActionPlan(self.target, (*self.actions, action))
+    
     def count_by_action(self) -> Counter[type[Action]]:
         """Return a Counter keyed by Action subclass."""
         return Counter(type(a) for a in self.actions)

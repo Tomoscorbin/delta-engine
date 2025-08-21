@@ -32,10 +32,3 @@ class Column:
 
         # Normalize case
         object.__setattr__(self, "name", self.name.casefold())
-
-    def __repr__(self) -> str:
-        return f"Column(name={self.name!r}, data_type={self.data_type!r}, is_nullable={self.is_nullable})"
-
-    def __str__(self) -> str:
-        suffix = "" if self.is_nullable else " not null"
-        return f"{self.name} {self.data_type.specification}{suffix}"

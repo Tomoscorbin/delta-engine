@@ -10,18 +10,26 @@ from tabula.domain.plan.actions import ActionPlan
 
 @dataclass(frozen=True, slots=True)
 class PlanPreview:
-    """
-    Preview of a plan:
-    - plan: the action plan
-    - is_noop: True when no actions are required
-    - summary_counts: e.g., {'create_table': 1, 'add_column': 2}
-    - summary_text: human text, e.g., 'add_column=2 create_table=1'
-    """
+    """Preview of an action plan."""
 
     plan: ActionPlan
     is_noop: bool
     summary_counts: Mapping[str, int]
     total_actions: int
+
+    def __len__(self) -> int:
+        return self.total_actions
+
+    @property
+    def summary_text(self) -> str:
+        """
+        Human-readable summary like:
+        'add_column=2 create_table=1' (keys sorted ascending).
+        """
+        if not self.summary_counts:
+            return ""
+        parts = [f"{k}={self.summary_counts[k]}" for k in sorted(self.summary_counts)]
+        return " ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +40,6 @@ class ExecutionOutcome:
     messages: tuple[str, ...] = ()
     executed_count: int = 0
     executed_sql: tuple[str, ...] = ()
-    durations_ms: tuple[float, ...] = ()
 
     def __bool__(self) -> bool:
         return self.success

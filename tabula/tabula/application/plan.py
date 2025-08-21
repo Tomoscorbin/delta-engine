@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
-
 from tabula.application.ports import CatalogReader
 from tabula.application.results import PlanPreview
 from tabula.domain.model.table import DesiredTable

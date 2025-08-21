@@ -17,7 +17,7 @@ def execute_plan(preview: PlanPreview, executor: PlanExecutor) -> ExecutionResul
     outcome = executor.execute(preview.plan)
     if not outcome:
         raise ExecutionFailed(
-            qualified_name=str(preview.plan.qualified_name),
+            qualified_name=preview.plan.target.dotted,
             messages=outcome.messages,
             executed_count=outcome.executed_count,
         )
@@ -36,6 +36,6 @@ def plan_then_execute(
     Returns a successful no-op result when nothing to do.
     """
     preview = plan_actions(desired_table, reader)
-    if preview.is_noop:
+    if not preview:
         return ExecutionResult(plan=preview.plan, messages=("noop",), executed_count=0)
     return execute_plan(preview, executor)

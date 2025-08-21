@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 # --- outbound SQL adapter ---
-from tabula.adapters.databricks.catalog.plan_executor import SqlPlanExecutor
+from tabula.adapters.databricks.catalog.executor import UCExecutor
 
 # --- application layer ---
 from tabula.application.plan import plan_actions
@@ -42,7 +42,7 @@ class FakeCatalog:
         return self.by_name.get(qualified_name)
 
 
-# Simple callable recorder for SqlPlanExecutor
+# Simple callable recorder for UCExecutor
 class Recorder:
     def __init__(self) -> None:
         self.sql: list[str] = []
@@ -56,7 +56,7 @@ class Recorder:
 def test_e2e_create_then_execute_sql():
     reader = FakeCatalog(by_name={})
     rec = Recorder()
-    executor = SqlPlanExecutor(run_sql=rec)
+    executor = UCExecutor(run_sql=rec)
 
     dt = desired([Column("id", DataType("integer"), is_nullable=False)])
 
@@ -84,7 +84,7 @@ def test_e2e_adds_in_spec_order_and_drop_then_execute_sql():
     existing = observed([col("a"), col("OLD")], is_empty=True)
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
     rec = Recorder()
-    executor = SqlPlanExecutor(run_sql=rec)
+    executor = UCExecutor(run_sql=rec)
 
     dt = desired([col("a"), col("b"), col("c")])
 
@@ -116,7 +116,7 @@ def test_e2e_dry_run_records_would_be_sql_without_executing():
             raise AssertionError("run_sql should not be called during dry_run")
 
     reader = FakeCatalog(by_name={})
-    executor = SqlPlanExecutor(run_sql=MustNotBeCalled(), dry_run=True)
+    executor = UCExecutor(run_sql=MustNotBeCalled(), dry_run=True)
 
     dt = desired([Column("id", DataType("integer"), is_nullable=False)])
 

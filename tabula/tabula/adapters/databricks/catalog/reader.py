@@ -2,13 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
-
 from pyspark.sql import SparkSession
-
-from tabula.adapters.databricks.sql.dialects import (
-    SPARK_SQL,
-    SqlDialect,
-)
 from tabula.adapters.databricks.sql.types import domain_type_from_spark
 from tabula.domain.model.column import Column
 from tabula.domain.model.qualified_name import QualifiedName
@@ -16,15 +10,14 @@ from tabula.domain.model.table import ObservedTable
 
 
 @dataclass(frozen=True, slots=True)
-class SparkCatalogReader:
+class UCReader:
     """
-    Unity Catalog reader backed by Spark catalog and tiny SQL probes.
+    Unity Catalog reader for Databricks.
 
     Public API:
       - fetch_state(...)
     """
     spark: SparkSession
-    dialect: SqlDialect = SPARK_SQL
 
     # ---- public API ---------------------------------------------------------
 
@@ -44,11 +37,9 @@ class SparkCatalogReader:
     # ---- private helpers ----------------------------------------------------
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
-        # Spark API is fine for existence checks.
         return self.spark.catalog.tableExists(qualified_name.dotted)
 
     def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
-        # Spark API is reliable and faster than DESCRIBE.
         cols = self.spark.catalog.listColumns(qualified_name.dotted)
         out: list[Column] = []
         for c in cols:

@@ -1,78 +1,93 @@
 import pytest
 
-from tabula.domain.plan.actions import ActionPlan, CreateTable, DropColumn
-from tabula.domain.model.column import Column
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.table import DesiredTable, ObservedTable
-from tabula.domain.model.types import integer
+from tabula.domain.plan.actions import ActionPlan, AddColumn, DropColumn, CreateTable
 from tabula.domain.services.differ import diff
-from tests.conftest import col, desired, observed, qn
+from tabula.domain.model.column import Column
+from tabula.domain.model.types import integer, string
+from tabula.domain.model.table import DesiredTable, ObservedTable
 
 
-def qn(cat: str = "Cat", sch: str = "Sch", name: str = "Tbl") -> QualifiedName:
-    return QualifiedName(cat, sch, name)
+def make_col(name: str, *, dtype=None, is_nullable: bool = True) -> Column:
+    return Column(name, dtype or integer(), is_nullable=is_nullable)
 
 
-def test_create_table_when_observed_missing():
-    d = desired(qn(), col("a"), col("b"))
-    plan = diff(None, d)
-    assert isinstance(plan, ActionPlan)
-    assert any(isinstance(a, CreateTable) for a in plan)
+def make_desired(qn, cols: tuple[Column, ...]) -> DesiredTable:
+    return DesiredTable(qn, cols)
 
 
-def test_mismatch_name_raises():
-    d = desired(qn("c", "s", "t1"), col("a"))
-    o = observed(qn("c", "s", "t2"), col("a"))
-    with pytest.raises(ValueError):
-        diff(o, d)
+def make_observed(qn, cols: tuple[Column, ...], is_empty: bool | None = None) -> ObservedTable:
+    # ObservedTable may or may not have is_empty; default to signature shown earlier.
+    try:
+        return ObservedTable(qn, cols, is_empty=is_empty)  # type: ignore[arg-type]
+    except TypeError:
+        return ObservedTable(qn, cols, is_empty=False)  # fallback if no is_empty field
 
 
-def test_add_and_drop_actions_emitted():
-    d = desired(qn(), col("a"), col("b"))
-    o = observed(qn(), col("a"), col("c"))
-    plan = diff(o, d)
-    kinds = [type(a).__name__ for a in plan]
-    assert "AddColumn" in kinds
-    assert "DropColumn" in kinds
-
-
-def test_noop_when_schemas_match():
-    d = desired(qn(), col("a"))
-    o = observed(qn(), col("A"))  # case-insensitive
-    plan = diff(o, d)
-    assert len(list(plan)) == 0
-
-
-def test_diff_creates_table_with_exact_columns_in_order_when_missing():
-    desired = DesiredTable(
-        qn(), (Column("A", integer()), Column("B", integer()), Column("C", integer()))
-    )
+def test_when_observed_is_none_plan_creates_table(make_qn):
+    qn = make_qn()
+    desired = make_desired(qn, (make_col("A"), make_col("B")))
     plan = diff(None, desired)
-    assert any(isinstance(a, CreateTable) for a in plan)
-    create = next(a for a in plan if isinstance(a, CreateTable))
-    assert tuple(c.name for c in create.columns) == ("a", "b", "c")
+
+    assert isinstance(plan, ActionPlan)
+    assert plan.target == qn
+    assert plan  # non-empty
+    assert len(tuple(plan)) == 1
+    action = tuple(plan)[0]
+    assert isinstance(action, CreateTable)
+    assert [c.name for c in action.columns] == ["a", "b"]
 
 
-def test_diff_raises_on_mismatched_targets():
-    desired = DesiredTable(QualifiedName("c", "s", "t1"), (Column("A", integer()),))
-    observed = ObservedTable(QualifiedName("c", "s", "t2"), (Column("A", integer()),))
+def test_raises_when_qualified_name_mismatch(make_qn):
+    desired = make_desired(make_qn("c1", "s", "t"), (make_col("a"),))
+    observed = make_observed(make_qn("c2", "s", "t"), (make_col("a"),))
     with pytest.raises(ValueError):
-        diff(observed, desired)
+        _ = diff(observed, desired)
 
 
-def test_diff_is_idempotent_when_schemas_match():
-    desired = DesiredTable(qn(), (Column("A", integer()),))
-    observed = ObservedTable(qn(), (Column("a", integer()),))
+def test_empty_plan_when_schemas_match_case_insensitively(make_qn):
+    qn = make_qn()
+    desired = make_desired(qn, (make_col("A"), make_col("B")))
+    observed = make_observed(qn, (make_col("b"), make_col("a")))
     plan = diff(observed, desired)
-    assert list(plan) == []
+
+    assert isinstance(plan, ActionPlan)
+    assert plan.target == qn
+    assert not plan  # empty
+    assert tuple(plan) == ()
 
 
-def test_diff_emits_adds_then_drops_in_that_order():
-    desired = DesiredTable(qn(), (Column("A", integer()), Column("B", integer())))
-    observed = ObservedTable(qn(), (Column("B", integer()), Column("C", integer())))
-    plan = list(diff(observed, desired))
-    assert [type(a).__name__ for a in plan[:1]] == ["AddColumn"]
-    assert "DropColumn" in [type(a).__name__ for a in plan]
-    # more precise: all adds appear before any drops
-    first_drop_index = next(i for i, a in enumerate(plan) if isinstance(a, DropColumn))
-    assert all(not isinstance(a, DropColumn) for a in plan[:first_drop_index])
+def test_plan_contains_adds_and_drops_from_column_diff(make_qn):
+    qn = make_qn()
+    desired = make_desired(qn, (make_col("a"), make_col("c"), make_col("d")))
+    observed = make_observed(qn, (make_col("a"), make_col("b"), make_col("c")))
+    plan = diff(observed, desired)
+
+    actions = list(plan)
+    assert [type(a) for a in actions] == [AddColumn, DropColumn]
+    add = actions[0]
+    drop = actions[1]
+    assert add.column.name == "d"
+    assert drop.column_name == "b"
+
+
+def test_type_and_nullability_differences_are_ignored(make_qn):
+    qn = make_qn()
+    desired = make_desired(qn, (Column("id", string(), is_nullable=False),))
+    observed = make_observed(qn, (Column("id", integer(), is_nullable=True),))
+    plan = diff(observed, desired)
+    assert not plan
+    assert tuple(plan) == ()
+
+
+def test_is_empty_flag_on_observed_does_not_change_diff(make_qn):
+    qn = make_qn()
+    desired = make_desired(qn, (make_col("a"),))
+    observed_nonempty = make_observed(qn, (make_col("a"), make_col("z")), is_empty=False)
+    observed_empty = make_observed(qn, (make_col("a"), make_col("z")), is_empty=True)
+
+    plan1 = diff(observed_nonempty, desired)
+    plan2 = diff(observed_empty, desired)
+
+    names1 = [a.column_name for a in plan1 if isinstance(a, DropColumn)]
+    names2 = [a.column_name for a in plan2 if isinstance(a, DropColumn)]
+    assert names1 == ["z"] and names2 == ["z"]

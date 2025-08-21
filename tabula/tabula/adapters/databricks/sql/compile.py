@@ -1,63 +1,49 @@
 from __future__ import annotations
-from functools import singledispatch
 
 from tabula.domain.plan.actions import ActionPlan, CreateTable, AddColumn, DropColumn
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.column import Column
-
 from tabula.adapters.databricks.sql.types import sql_type_for_data_type
+from tabula.adapters.databricks.sql.dialects import SqlDialect, SPARK_SQL
 
-from tabula.adapters.databricks.sql.dialects import (
-    SqlDialect,
-    SPARK_SQL,
-    render_fully_qualified_name,
-)
-
-# ---- Public API -------------------------------------------------------------
 
 def compile_plan(plan: ActionPlan, *, dialect: SqlDialect = SPARK_SQL) -> tuple[str, ...]:
-    """Compile an ActionPlan into idempotent Spark SQL statements."""
-    table_sql = render_fully_qualified_name(
+    """
+    Compile an ActionPlan into ordered SQL statements for the given dialect.
+    1 action -> 1 statement (by design).
+    """
+    full_table_name = dialect.render_qualified_name(
         plan.qualified_name.catalog,
         plan.qualified_name.schema,
         plan.qualified_name.name,
-        dialect=dialect,
     )
-    statements: list[str] = []
-    for action in plan:
-        statements.extend(_compile_action(action, table=table_sql, dialect=dialect))
-    return tuple(statements)
+    return tuple(_compile_action(a, full_table_name=full_table_name, dialect=dialect) for a in plan)
 
-# ---- Single-dispatch core ---------------------------------------------------
 
-@singledispatch
-def _compile_action(action: object, *, table: str, dialect: SqlDialect) -> tuple[str, ...]:
-    raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
+def _compile_action(action: object, *, full_table_name: str, dialect: SqlDialect) -> str:
+    """
+    Translate a single action to a single SQL statement.
+    """
+    match action:
+        case CreateTable(columns=columns):
+            cols_sql = ", ".join(_column_definition(c, dialect=dialect) for c in columns)
+            return f"CREATE TABLE IF NOT EXISTS {full_table_name} ({cols_sql})"
 
-# ---- Concrete actions -------------------------------------------------------
+        case AddColumn(column=column):
+            col_sql = _column_definition(column, dialect=dialect)
+            return f"ALTER TABLE {full_table_name} ADD COLUMN IF NOT EXISTS {col_sql}"
 
-@_compile_action.register
-def _(action: CreateTable, *, table: str, dialect: SqlDialect) -> tuple[str, ...]:
-    columns_sql = ", ".join(_column_definition(c, dialect=dialect) for c in action.columns)
-    return (f"CREATE TABLE IF NOT EXISTS {table} ({columns_sql})",) #TODO: choose format
+        case DropColumn(column_name=col_name):
+            col_ident = dialect.quote_identifier(col_name)
+            return f"ALTER TABLE {full_table_name} DROP COLUMN IF EXISTS {col_ident}"
 
-@_compile_action.register
-def _(action: AddColumn, *, table: str, dialect: SqlDialect) -> tuple[str, ...]:
-    # TODO: later batch with ADD COLUMNS (col1..., col2...)
-    col_sql = _column_definition(action.column, dialect=dialect)
-    return (f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col_sql}",)
+        case _:
+            raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
-@_compile_action.register
-def _(action: DropColumn, *, table: str, dialect: SqlDialect) -> tuple[str, ...]:
-    col_ident = dialect.quote_identifier(action.column_name)
-    return (f"ALTER TABLE {table} DROP COLUMN IF EXISTS {col_ident}",)
-
-# ---- Helpers ----------------------------------------------------------------
 
 def _column_definition(column, *, dialect: SqlDialect) -> str:
     """
-    Render a single column definition as <quoted_name> <engine_type> NOT NULL.
+    Render `<quoted_name> <engine_type> [NULL|NOT NULL]`.
     """
-    column_identifier = dialect.quote_identifier(column.name)
-    engine_sql_type = sql_type_for_data_type(column)
-    return f"{column_identifier} {engine_sql_type} NOT NULL"
+    name_sql = dialect.quote_identifier(column.name)
+    type_sql = sql_type_for_data_type(column)
+    nullability = "NULL" if getattr(column, "is_nullable", True) else "NOT NULL"
+    return f"{name_sql} {type_sql} {nullability}"

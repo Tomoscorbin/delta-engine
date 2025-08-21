@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from .base import SqlDialect
 
 @dataclass(frozen=True)
 class SparkSqlDialect:
@@ -22,5 +21,9 @@ class SparkSqlDialect:
 
     def join_qualified_name(self, parts: list[str]) -> str:
         return self.identifier_separator.join(parts)
+    
+    def render_qualified_name(self, catalog: str, schema: str, name: str) -> str:
+        quoted_parts = [self.quote_identifier(p) for p in (catalog, schema, name) if p]
+        return self.join_qualified_name(quoted_parts)
 
 SPARK_SQL = SparkSqlDialect()

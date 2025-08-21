@@ -16,9 +16,6 @@ class IdentityMismatch(ApplicationError):
     expected: str
     actual: str
 
-    def __str__(self) -> str:
-        return f"Identity mismatch: expected {self.expected!r}, actual {self.actual!r}"
-
 
 @dataclass(slots=True)
 class ExecutionFailed(ApplicationError):
@@ -27,7 +24,3 @@ class ExecutionFailed(ApplicationError):
     qualified_name: str
     messages: tuple[str, ...]
     executed_count: int = 0
-
-    def __str__(self) -> str:
-        details = "; ".join(self.messages) if self.messages else "no message"
-        return f"Execution failed for {self.qualified_name}: {details} (executed_count={self.executed_count})"
