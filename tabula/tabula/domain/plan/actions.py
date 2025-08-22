@@ -18,6 +18,10 @@ class Action:
 class CreateTable(Action):
     columns: tuple[Column, ...]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.columns, tuple):
+            raise TypeError("columns must be a tuple[Column, ...]")
+
 
 
 @dataclass(frozen=True, slots=True)
