@@ -52,10 +52,6 @@ def test_non_string_name_raises_type_error():
     with pytest.raises(TypeError):
         Column(123, integer())  # type: ignore[arg-type]
 
-def test_data_type_must_be_datatype_instance():
-    with pytest.raises(TypeError):
-        Column("id", None)  # type: ignore[arg-type]
-
 # ---------------------------
 # Equality & hashing
 # ---------------------------

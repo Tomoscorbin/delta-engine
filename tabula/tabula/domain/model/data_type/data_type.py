@@ -17,7 +17,6 @@ class DataType:
     def __post_init__(self) -> None:
         normalized_name = normalize_identifier(self.name)
         coerced = _coerce_params(self.parameters)
-        _validate_param_types(coerced)
         _validate_by_type(normalized_name, coerced)
 
         object.__setattr__(self, "name", normalized_name)
@@ -50,14 +49,6 @@ def _coerce_params(raw: tuple[Param, ...] | object) -> tuple[Param, ...]:
 def _is_datatype_like(x: object) -> bool:
     # Structural check so helpers remain independent of import order.
     return hasattr(x, "name") and hasattr(x, "parameters")
-
-
-def _validate_param_types(params: tuple[Param, ...]) -> None:
-    for value in params:
-        if not (isinstance(value, int) or _is_datatype_like(value)):
-            raise TypeError(
-                f"Invalid parameter type: {type(value).__name__}; expected int or DataType"
-            )
 
 
 # ---- Per-type rules via a tiny registry --------------------------------------

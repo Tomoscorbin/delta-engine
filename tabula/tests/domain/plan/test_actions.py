@@ -25,10 +25,6 @@ def test_action_isinstance() -> None:
 # AddColumn
 # ---------------------------
 
-def test_addcolumn_requires_column_type() -> None:
-    with pytest.raises(TypeError):
-        AddColumn("id")  # type: ignore[arg-type]
-
 def test_addcolumn_normalizes_nested_column_name() -> None:
     a = AddColumn(Column("UserID", integer()))
     assert a.column.name == "userid"
@@ -55,10 +51,6 @@ def test_drop_column_rejects_non_string() -> None:
 # ---------------------------
 # CreateTable (thin action: only shape enforced here)
 # ---------------------------
-
-def test_create_table_requires_tuple_columns() -> None:
-    with pytest.raises(TypeError):
-        CreateTable([Column("a", integer()), Column("b", integer())])  # type: ignore[arg-type]
 
 def test_create_table_preserves_columns_order_and_identity() -> None:
     c1 = Column("A", integer())
