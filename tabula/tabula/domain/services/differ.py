@@ -5,6 +5,8 @@ from tabula.domain.model.table import DesiredTable, ObservedTable
 from tabula.domain.services.column_diff import diff_columns
 
 
+# TODO: create some class that holds both desried and observed 
+
 def diff(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
     """
     Produce an ActionPlan to move the observed table to the desired schema.

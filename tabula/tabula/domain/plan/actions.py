@@ -38,7 +38,7 @@ class DropColumn(Action):
     column_name: str
 
     def __post_init__(self) -> None:
-        normalized = normalize_identifier("column_name", self.column_name)
+        normalized = normalize_identifier(self.column_name)
         object.__setattr__(self, "column_name", normalized)
 
 

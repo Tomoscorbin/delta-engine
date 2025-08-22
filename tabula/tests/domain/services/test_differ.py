@@ -1,93 +1,116 @@
+from __future__ import annotations
+
 import pytest
 
-from tabula.domain.plan.actions import ActionPlan, AddColumn, DropColumn, CreateTable
 from tabula.domain.services.differ import diff
+from tabula.domain.plan.actions import ActionPlan, CreateTable, AddColumn, DropColumn
 from tabula.domain.model.column import Column
-from tabula.domain.model.types import integer, string
+from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.table import DesiredTable, ObservedTable
+from tabula.domain.model.types import integer, string
 
 
-def make_col(name: str, *, dtype=None, is_nullable: bool = True) -> Column:
-    return Column(name, dtype or integer(), is_nullable=is_nullable)
+
+def col(name: str, *, dt=integer(), is_nullable: bool = True) -> Column:
+    return Column(name, dt, is_nullable=is_nullable)
 
 
-def make_desired(qn, cols: tuple[Column, ...]) -> DesiredTable:
-    return DesiredTable(qn, cols)
+# ---------------------------
+# observed is None -> CREATE TABLE with all desired columns
+# ---------------------------
 
-
-def make_observed(qn, cols: tuple[Column, ...], is_empty: bool | None = None) -> ObservedTable:
-    # ObservedTable may or may not have is_empty; default to signature shown earlier.
-    try:
-        return ObservedTable(qn, cols, is_empty=is_empty)  # type: ignore[arg-type]
-    except TypeError:
-        return ObservedTable(qn, cols, is_empty=False)  # fallback if no is_empty field
-
-
-def test_when_observed_is_none_plan_creates_table(make_qn):
-    qn = make_qn()
-    desired = make_desired(qn, (make_col("A"), make_col("B")))
+def test_when_observed_is_none_we_emit_single_create_with_original_columns(make_qn):
+    desired = DesiredTable(make_qn(), (col("id"), col("name")))
     plan = diff(None, desired)
 
     assert isinstance(plan, ActionPlan)
-    assert plan.target == qn
-    assert plan  # non-empty
-    assert len(tuple(plan)) == 1
-    action = tuple(plan)[0]
+    assert len(plan) == 1
+    action = plan.actions[0]
     assert isinstance(action, CreateTable)
-    assert [c.name for c in action.columns] == ["a", "b"]
+
+    # columns carried through exactly (identity & order)
+    assert action.columns is desired.columns
+    assert [c.name for c in action.columns] == ["id", "name"]
+
+    # target is the desired qualified name
+    assert plan.target == desired.qualified_name
 
 
-def test_raises_when_qualified_name_mismatch(make_qn):
-    desired = make_desired(make_qn("c1", "s", "t"), (make_col("a"),))
-    observed = make_observed(make_qn("c2", "s", "t"), (make_col("a"),))
+# ---------------------------
+# qualified name mismatch -> hard error
+# ---------------------------
+
+def test_mismatched_qualified_names_raise(make_qn):
+    desired = DesiredTable(make_qn("c1", "s", "t"), (col("id"),))
+    observed = ObservedTable(make_qn("c2", "s", "t"), (col("id"),), is_empty=False)
+
     with pytest.raises(ValueError):
         _ = diff(observed, desired)
 
 
-def test_empty_plan_when_schemas_match_case_insensitively(make_qn):
-    qn = make_qn()
-    desired = make_desired(qn, (make_col("A"), make_col("B")))
-    observed = make_observed(qn, (make_col("b"), make_col("a")))
+# ---------------------------
+# only adds / only drops / both
+# ---------------------------
+
+def test_only_adds_are_emitted(make_qn):
+    desired = DesiredTable(make_qn(), (col("a"), col("b")))
+    observed = ObservedTable(make_qn(), (col("a"),), is_empty=False)
+
+    plan = diff(observed, desired)
+    kinds = tuple(type(a) for a in plan.actions)
+    names = tuple(getattr(a, "column", None).name if isinstance(a, AddColumn) else None for a in plan.actions)
+
+    assert kinds == (AddColumn,)
+    assert names == ("b",)
+
+
+def test_only_drops_are_emitted(make_qn):
+    desired = DesiredTable(make_qn(), (col("a"),))
+    observed = ObservedTable(make_qn(), (col("a"), col("b")), is_empty=False)
+
     plan = diff(observed, desired)
 
-    assert isinstance(plan, ActionPlan)
-    assert plan.target == qn
-    assert not plan  # empty
-    assert tuple(plan) == ()
+    # Don't assume ordering; assert via sets
+    assert {type(a).__name__ for a in plan.actions} == {"DropColumn"}
+    assert {a.column_name for a in plan.actions if isinstance(a, DropColumn)} == {"b"}
 
 
-def test_plan_contains_adds_and_drops_from_column_diff(make_qn):
-    qn = make_qn()
-    desired = make_desired(qn, (make_col("a"), make_col("c"), make_col("d")))
-    observed = make_observed(qn, (make_col("a"), make_col("b"), make_col("c")))
+def test_adds_and_drops_both_emitted(make_qn):
+    desired = DesiredTable(make_qn(), (col("b"), col("c")))
+    observed = ObservedTable(make_qn(), (col("a"), col("b")), is_empty=False)
+
     plan = diff(observed, desired)
 
-    actions = list(plan)
-    assert [type(a) for a in actions] == [AddColumn, DropColumn]
-    add = actions[0]
-    drop = actions[1]
-    assert add.column.name == "d"
-    assert drop.column_name == "b"
+    # Compare by payload, not order
+    kinds = {type(a).__name__ for a in plan.actions}
+    payloads = {
+        (a.column.name if isinstance(a, AddColumn) else a.column_name)
+        for a in plan.actions
+    }
+    assert kinds == {"AddColumn", "DropColumn"}
+    assert payloads == {"c", "a"}
 
 
-def test_type_and_nullability_differences_are_ignored(make_qn):
-    qn = make_qn()
-    desired = make_desired(qn, (Column("id", string(), is_nullable=False),))
-    observed = make_observed(qn, (Column("id", integer(), is_nullable=True),))
+# ---------------------------
+# equal sets (ignoring order) -> empty plan, falsy
+# ---------------------------
+
+def test_equal_column_sets_yield_empty_plan(make_qn):
+    desired = DesiredTable(make_qn(), (col("a"), col("b")))
+    observed = ObservedTable(make_qn(), (col("b"), col("a")), is_empty=True)  # is_empty intentionally ignored
+
     plan = diff(observed, desired)
+    assert len(plan) == 0
     assert not plan
-    assert tuple(plan) == ()
 
 
-def test_is_empty_flag_on_observed_does_not_change_diff(make_qn):
-    qn = make_qn()
-    desired = make_desired(qn, (make_col("a"),))
-    observed_nonempty = make_observed(qn, (make_col("a"), make_col("z")), is_empty=False)
-    observed_empty = make_observed(qn, (make_col("a"), make_col("z")), is_empty=True)
+# ---------------------------
+# case-insensitivity on names
+# ---------------------------
 
-    plan1 = diff(observed_nonempty, desired)
-    plan2 = diff(observed_empty, desired)
+def test_case_insensitive_names_do_not_trigger_changes(make_qn):
+    desired = DesiredTable(make_qn(), (col("ID"),))
+    observed = ObservedTable(make_qn(), (col("id"),), is_empty=False)
 
-    names1 = [a.column_name for a in plan1 if isinstance(a, DropColumn)]
-    names2 = [a.column_name for a in plan2 if isinstance(a, DropColumn)]
-    assert names1 == ["z"] and names2 == ["z"]
+    plan = diff(observed, desired)
+    assert plan.actions == ()

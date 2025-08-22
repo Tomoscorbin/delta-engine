@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from tabula.application.ports import CatalogReader
 from tabula.application.results import PlanPreview
+from tabula.application.order_plan import order_plan
 from tabula.domain.model.table import DesiredTable
 from tabula.domain.services.differ import diff
+
 
 
 def plan_actions(desired_table: DesiredTable, reader: CatalogReader) -> PlanPreview:
@@ -14,8 +16,10 @@ def plan_actions(desired_table: DesiredTable, reader: CatalogReader) -> PlanPrev
     is_noop = not plan
     summary_counts = plan.count_by_action()
     total_actions = len(plan)
+    ordered_plan = order_plan(plan)
+    
     return PlanPreview(
-        plan=plan,
+        plan=ordered_plan,
         is_noop=is_noop,
         summary_counts=summary_counts,
         total_actions=total_actions,

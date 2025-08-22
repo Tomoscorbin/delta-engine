@@ -13,7 +13,6 @@ from tabula.application.results import (
 
 def make_plan_stub():
     # ActionPlan is only a runtime hint; results.py doesn't introspect it.
-    # A simple stub is enough.
     return SimpleNamespace(name="dummy-plan")
 
 
@@ -40,16 +39,19 @@ def test_plan_preview_summary_text_sorted_and_formatted():
     assert preview.summary_text == "add_column=2 create_table=1 drop_column=3"
 
 
+def test_plan_preview_len_and_truthiness_follow_total_actions():
+    p0 = PlanPreview(plan=make_plan_stub(), is_noop=True,  summary_counts={}, total_actions=0)
+    p3 = PlanPreview(plan=make_plan_stub(), is_noop=False, summary_counts={}, total_actions=3)
+    assert len(p0) == 0 and bool(p0) is False
+    assert len(p3) == 3 and bool(p3) is True
+
+
 def test_plan_preview_is_frozen():
-    preview = PlanPreview(
-        plan=make_plan_stub(),
-        is_noop=True,
-        summary_counts={},
-        total_actions=0,
-    )
+    preview = PlanPreview(plan=make_plan_stub(), is_noop=True, summary_counts={}, total_actions=0)
     with pytest.raises(FrozenInstanceError):
         preview.total_actions = 1  # type: ignore[attr-defined]
-
+    with pytest.raises(FrozenInstanceError):
+        preview.plan = make_plan_stub()  # type: ignore[attr-defined]
 
 
 # ---------- ExecutionOutcome ----------
@@ -67,44 +69,36 @@ def test_execution_outcome_defaults():
     assert outcome.executed_count == 0
 
 
-def test_execution_outcome_no_coercion_lists_are_kept():
+def test_execution_outcome_coerces_sequences_to_tuples_and_is_immutable():
+    msgs = ["ok", "done"]
+    sqls = ["SQL 1", "SQL 2"]
     outcome = ExecutionOutcome(
         success=True,
-        messages=["ok", "done"],               # type: ignore[list-item]
+        messages=msgs,          # list accepted, stored as tuple
         executed_count=2,
-        executed_sql=["SQL 1", "SQL 2"],       # type: ignore[list-item]
+        executed_sql=sqls,      # list accepted, stored as tuple
     )
-    # The implementation intentionally does not coerce; types remain as passed.
-    assert isinstance(outcome.messages, list)
-    assert isinstance(outcome.executed_sql, list)
-    assert outcome.executed_count == 2
+    # Stored as tuples
+    assert outcome.messages == ("ok", "done")
+    assert outcome.executed_sql == ("SQL 1", "SQL 2")
+    assert isinstance(outcome.messages, tuple)
+    assert isinstance(outcome.executed_sql, tuple)
+    # Mutating caller lists does not affect stored data
+    msgs.append("later")
+    sqls.append("later")
+    assert outcome.messages == ("ok", "done")
+    assert outcome.executed_sql == ("SQL 1", "SQL 2")
 
 
 def test_execution_outcome_is_frozen():
     outcome = ExecutionOutcome(success=True)
     with pytest.raises(FrozenInstanceError):
         outcome.executed_count = 5  # type: ignore[attr-defined]
+    with pytest.raises(FrozenInstanceError):
+        outcome.messages = ("x",)   # type: ignore[attr-defined]
 
 
 # ---------- ExecutionResult ----------
 
 def test_execution_result_defaults():
     result = ExecutionResult(plan=make_plan_stub())
-    assert result.messages == ()
-    assert result.executed_count == 0
-
-
-def test_execution_result_no_coercion():
-    result = ExecutionResult(
-        plan=make_plan_stub(),
-        messages=["one", "two"],  # type: ignore[list-item]
-        executed_count=7,
-    )
-    assert isinstance(result.messages, list)
-    assert result.executed_count == 7
-
-
-def test_execution_result_is_frozen():
-    result = ExecutionResult(plan=make_plan_stub())
-    with pytest.raises(FrozenInstanceError):
-        result.executed_count = 99  # type: ignore[attr-defined]

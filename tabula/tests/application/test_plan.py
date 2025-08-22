@@ -1,3 +1,4 @@
+from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ class StubReader:
 
 
 class FakePlan:
+    """Minimal plan for tests: length, truthiness via __len__, and counts."""
     def __init__(self, n_actions: int, counts: dict[str, int]):
         self._n = n_actions
         self._counts = counts
@@ -24,96 +26,112 @@ class FakePlan:
     def __len__(self):
         return self._n
 
-    # bool() will use __len__ by default
-
     def count_by_action(self):
         return self._counts
 
 
+# --- Helpers ---
+
+def make_desired(qn: str = "cat.schema.table_x"):
+    # Matches what plan_actions reads
+    return SimpleNamespace(qualified_name=qn)
+
+
 # --- Tests ---
 
-def test_plan_actions_happy_path_non_noop(monkeypatch):
-    # Arrange
-    desired = SimpleNamespace(qualified_name="cat.schema.table_x")
+def test_plan_actions_orders_plan_and_preserves_counts_and_total(monkeypatch):
+    desired = make_desired("cat.schema.table_x")
     observed_state = SimpleNamespace(state="observed")
     reader = StubReader(observed_state)
 
-    # Capture diff args and control the returned plan
     call = {}
-    plan_holder = {}
+
+    # Return a non-iterable FakePlan so we *must* go through order_plan
+    original_plan = FakePlan(3, {"add_column": 2, "create_table": 1})
 
     def fake_diff(observed, desired_table):
         call["observed"] = observed
         call["desired"] = desired_table
-        plan = FakePlan(3, {"add_column": 2, "create_table": 1})
-        plan_holder["plan"] = plan
-        return plan
+        return original_plan
+
+    ordered_sentinel = object()  # stand-in for the ordered plan
+
+    def fake_order_plan(plan):
+        call["ordered_with"] = plan
+        return ordered_sentinel
 
     monkeypatch.setattr("tabula.application.plan.diff", fake_diff)
+    monkeypatch.setattr("tabula.application.plan.order_plan", fake_order_plan)
 
     # Act
     preview = plan_actions(desired, reader)
 
-    # Assert: reader + diff interactions
+    # Reader + diff interactions
     assert reader.called_with == "cat.schema.table_x"
     assert call["observed"] is observed_state
     assert call["desired"] is desired
+    # order_plan called with the *original* plan
+    assert call["ordered_with"] is original_plan
 
-    # Assert: preview content
-    assert preview.plan is plan_holder["plan"]
+    # Preview shows ordered plan, but counts/total from original
+    assert preview.plan is ordered_sentinel
     assert preview.is_noop is False
-    assert preview.summary_counts == {"add_column": 2, "create_table": 1}
-    assert preview.total_actions == 3
+    assert preview.summary_counts is original_plan.count_by_action()
+    assert preview.total_actions == len(original_plan)
 
 
-def test_plan_actions_noop_when_plan_empty(monkeypatch):
-    # Arrange
-    desired = SimpleNamespace(qualified_name="c.s.empty_table")
+def test_plan_actions_noop_when_plan_empty_and_still_runs_order(monkeypatch):
+    desired = make_desired("c.s.empty")
     reader = StubReader(observed_state=None)
 
-    plan_holder = {}
+    empty_plan = FakePlan(0, {})
+    monkeypatch.setattr("tabula.application.plan.diff", lambda o, d: empty_plan)
 
-    def fake_diff(observed, desired_table):
-        plan = FakePlan(0, {})
-        plan_holder["plan"] = plan
+    # Even for empty plans, order_plan should be invoked and can return same instance
+    called = {}
+    def fake_order_plan(plan):
+        called["plan"] = plan
         return plan
+    monkeypatch.setattr("tabula.application.plan.order_plan", fake_order_plan)
 
-    monkeypatch.setattr("tabula.application.plan.diff", fake_diff)
-
-    # Act
     preview = plan_actions(desired, reader)
 
-    # Assert
-    assert preview.plan is plan_holder["plan"]
+    assert called["plan"] is empty_plan
+    assert preview.plan is empty_plan
     assert preview.is_noop is True
     assert preview.summary_counts == {}
     assert preview.total_actions == 0
 
 
-def test_plan_actions_propagates_counts_directly(monkeypatch):
-    """
-    Sanity: whatever plan.count_by_action() returns is passed through untouched.
-    Useful if callers depend on Mapping semantics (e.g., dict vs Counter).
-    """
-    desired = SimpleNamespace(qualified_name="c.s.t")
+def test_plan_actions_passes_through_counts_identity(monkeypatch):
+    desired = make_desired("c.s.t")
     reader = StubReader(observed_state=None)
 
     class WeirdCounts(dict):
-        # A dict subclass to ensure we don't copy/convert it
         pass
 
     counts = WeirdCounts({"drop_column": 1})
     plan = FakePlan(1, counts)
 
-    def fake_diff(observed, desired_table):
-        return plan
+    monkeypatch.setattr("tabula.application.plan.diff", lambda o, d: plan)
+    monkeypatch.setattr("tabula.application.plan.order_plan", lambda p: p)
 
-    monkeypatch.setattr("tabula.application.plan.diff", fake_diff)
-
-    # Act
     preview = plan_actions(desired, reader)
 
-    # Assert pass-through semantics
+    # exact object identity, not a copy
     assert preview.summary_counts is counts
     assert preview.total_actions == 1
     assert preview.is_noop is False
+
+
+def test_plan_actions_bubbles_diff_errors(monkeypatch):
+    desired = make_desired("c.s.t")
+    reader = StubReader(observed_state=None)
+
+    def boom(observed, desired_table):
+        raise RuntimeError("diff blew up")
+
+    monkeypatch.setattr("tabula.application.plan.diff", boom)
+
+    with pytest.raises(RuntimeError, match="diff blew up"):
+        plan_actions(desired, reader)

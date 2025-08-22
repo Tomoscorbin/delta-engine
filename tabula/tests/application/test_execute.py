@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import pytest
 from types import SimpleNamespace
 
 from tabula.application.execute import execute_plan, plan_then_execute
 from tabula.application.results import PlanPreview, ExecutionResult
-from tabula.application.errors import ExecutionFailed
+from tabula.application.errors import ExecutionFailed, ApplicationError
 
 
-# ---------- helpers ----------
+# ---------- Helpers ----------
 
 class StubExecutor:
     def __init__(self, outcome):
@@ -50,11 +52,13 @@ def make_preview(plan, *, total_actions: int, is_noop: bool | None = None, count
     )
 
 
-# ---------- PlanPreview truthiness sanity ----------
+# ---------- PlanPreview truthiness / length ----------
 
-def test_plan_preview_truthiness_follows_total_actions():
+def test_plan_preview_truthiness_and_len_follow_total_actions():
     p0 = make_preview(make_plan(), total_actions=0)
     assert bool(p0) is False
+    assert len(p0) == 0
+
     p3 = make_preview(make_plan(), total_actions=3)
     assert bool(p3) is True
     assert len(p3) == 3
@@ -71,7 +75,7 @@ def test_execute_plan_calls_executor_and_returns_success_result():
 
     result = execute_plan(preview, executor)
 
-    # executor called once with exact plan
+    # executor called once with exact plan object
     assert executor.called_with is plan
 
     # result mirrors outcome + keeps same plan
@@ -81,7 +85,20 @@ def test_execute_plan_calls_executor_and_returns_success_result():
     assert result.executed_count == 3
 
 
-def test_execute_plan_raises_on_failure_with_proper_fields():
+def test_execute_plan_allows_empty_messages_and_zero_count():
+    plan = make_plan("c.s.success_empty")
+    preview = make_preview(plan, total_actions=1)
+
+    outcome = Outcome(success=True, messages=(), executed_count=0)
+    executor = StubExecutor(outcome)
+
+    result = execute_plan(preview, executor)
+    assert result.plan is plan
+    assert result.messages == ()
+    assert result.executed_count == 0
+
+
+def test_execute_plan_raises_on_failure_and_populates_fields():
     plan = make_plan("c.s.fail_tbl")
     preview = make_preview(plan, total_actions=2)
 
@@ -92,20 +109,32 @@ def test_execute_plan_raises_on_failure_with_proper_fields():
         execute_plan(preview, executor)
 
     exc = err.value
-    # execute_plan now uses preview.plan.target directly
+    # Exception type hierarchy and fields
+    assert isinstance(exc, ApplicationError)
     assert exc.qualified_name == "c.s.fail_tbl"
     assert exc.messages == ("bad",)
     assert exc.executed_count == 1
 
 
+def test_execute_plan_propagates_executor_exceptions():
+    plan = make_plan("c.s.boom")
+    preview = make_preview(plan, total_actions=1)
+
+    class BoomExecutor:
+        def execute(self, plan):
+            raise RuntimeError("kaboom")
+
+    with pytest.raises(RuntimeError, match="kaboom"):
+        execute_plan(preview, BoomExecutor())
+
+
 # ---------- plan_then_execute ----------
 
-def test_plan_then_execute_noop_uses_falsiness_and_skips_executor(monkeypatch):
+def test_plan_then_execute_noop_skips_executor_and_returns_noop_result(monkeypatch):
     plan = make_plan("c.s.noop")
     preview = make_preview(plan, total_actions=0)  # falsy
 
     captured = {}
-
     def fake_plan_actions(desired_table, reader):
         captured["desired"] = desired_table
         captured["reader"] = reader
@@ -143,7 +172,6 @@ def test_plan_then_execute_delegates_to_execute_plan(monkeypatch):
     sentinel = ExecutionResult(plan=plan, messages=("ran",), executed_count=2)
 
     captured = {}
-
     def fake_execute_plan(pre, ex):
         captured["preview"] = pre
         captured["executor"] = ex

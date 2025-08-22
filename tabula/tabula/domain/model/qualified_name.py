@@ -1,5 +1,4 @@
 from __future__ import annotations
-import re
 from dataclasses import dataclass
 
 from tabula.domain._identifiers import normalize_identifier
@@ -19,9 +18,9 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
-        self_catalog = normalize_identifier("catalog", self.catalog)
-        self_schema  = normalize_identifier("schema", self.schema)
-        self_name    = normalize_identifier("name", self.name)
+        self_catalog = normalize_identifier(self.catalog)
+        self_schema  = normalize_identifier(self.schema)
+        self_name    = normalize_identifier( self.name)
 
         # normalize case
         object.__setattr__(self, "catalog", self_catalog)
