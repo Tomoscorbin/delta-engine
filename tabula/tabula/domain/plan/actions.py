@@ -18,20 +18,11 @@ class Action:
 class CreateTable(Action):
     columns: tuple[Column, ...]
 
-    def __post_init__(self) -> None:
-        # Strict shape only — upstream model guarantees the rest.
-        if not isinstance(self.columns, tuple):
-            raise TypeError("columns must be a tuple[Column, ...]")
-
 
 
 @dataclass(frozen=True, slots=True)
 class AddColumn(Action):
     column: Column
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.column, Column):
-            raise TypeError("AddColumn.column must be a Column")
         
 
 

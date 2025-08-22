@@ -2,9 +2,8 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import pytest
 from tabula.domain.model.data_type.data_type import (
-    DataType, 
-    _coerce_params, 
-    _validate_param_types, 
+    DataType,
+    _coerce_params,
     _validate_by_type,
     register_type,
 )
@@ -88,7 +87,7 @@ def test_nested_datatype_parameter_value_semantics():
 def test_decimal_requires_two_ints():
     with pytest.raises(ValueError): DataType("decimal")                    # missing params
     with pytest.raises(ValueError): DataType("decimal", (18,))             # one param
-    with pytest.raises(TypeError):  DataType("decimal", (18, "2"))         # wrong type
+    with pytest.raises(ValueError): DataType("decimal", (18, "2"))         # wrong type
     with pytest.raises(ValueError): DataType("decimal", (18, 19))          # scale > precision
 
 @pytest.mark.parametrize("precision, scale", [(0, 0), (-1, 0), (10, -1)])
@@ -128,15 +127,6 @@ def test__coerce_params_non_iterable_raises(bad):
     with pytest.raises(TypeError) as exc:
         _coerce_params(bad)  # type: ignore[arg-type]
     assert "iterable" in str(exc.value)
-
-def test__validate_param_types_accepts_int_and_datatype():
-    _validate_param_types((18, DataType("int")))  # no raise
-
-@pytest.mark.parametrize("bad", [(DataType("int"), "18"), ([],), ({},), (1.2,)])
-def test__validate_param_types_rejects_others(bad):
-    with pytest.raises(TypeError) as exc:
-        _validate_param_types(bad)  # type: ignore[arg-type]
-    assert "Invalid parameter type" in str(exc.value)
 
 
 def test__validate_by_type_noop_for_unknown():
