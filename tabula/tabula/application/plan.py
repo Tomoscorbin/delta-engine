@@ -5,7 +5,7 @@ from __future__ import annotations
 from tabula.application.ports import CatalogReader
 from tabula.application.results import PlanPreview
 from tabula.application.order_plan import order_plan
-from tabula.domain.model.table import DesiredTable
+from tabula.domain.model import DesiredTable
 from tabula.domain.services.differ import diff
 
 

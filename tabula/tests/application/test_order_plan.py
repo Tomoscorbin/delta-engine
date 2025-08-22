@@ -1,8 +1,7 @@
 from tabula.application.order_plan import order_plan
 from tabula.domain.plan.actions import ActionPlan, Action, CreateTable, AddColumn, DropColumn
-from tabula.domain.model.column import Column
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.types import integer
+from tabula.domain.model import Column
+from tabula.domain.model.data_type.types import integer
 
 
 

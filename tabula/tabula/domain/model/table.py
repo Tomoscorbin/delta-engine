@@ -56,37 +56,3 @@ class ObservedTable(TableSnapshot):
     """
 
     is_empty: bool
-
-
-
-from tabula.domain.model.data_type import DataType
-from tabula.domain.plan.actions import DropColumn, AddColumn
-t1 = TableSnapshot(
-    qualified_name=QualifiedName("catalog", "schema", "table"),
-    columns=(
-        Column(name="id", data_type=DataType("integer"), is_nullable=False), 
-        Column("name", data_type=DataType("string"), is_nullable=False)
-    ),
-)
-
-t2 = TableSnapshot(
-    qualified_name=QualifiedName("catalog", "schema", "table"),
-    columns=(
-        Column("id", DataType("integer"), is_nullable=False), 
-        Column("name", DataType("string"), is_nullable=False),
-        Column("age", DataType("integer"), is_nullable=True)
-    ),
-)
-
-desired = t1.columns
-observed = t2.columns
-
-
-
-desired_names = {c.name for c in desired}
-observed_names = {c.name for c in observed}
-to_drop_names = observed_names - desired_names
-out = (DropColumn(column_name=name) for name in to_drop_names)
-
-print(type(out))
-print(out)

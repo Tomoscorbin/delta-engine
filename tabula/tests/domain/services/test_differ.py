@@ -4,10 +4,8 @@ import pytest
 
 from tabula.domain.services.differ import diff
 from tabula.domain.plan.actions import ActionPlan, CreateTable, AddColumn, DropColumn
-from tabula.domain.model.column import Column
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.table import DesiredTable, ObservedTable
-from tabula.domain.model.types import integer, string
+from tabula.domain.model import Column, DesiredTable, ObservedTable
+from tabula.domain.model.data_type.types import integer
 
 
 

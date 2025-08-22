@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import pytest
 
-from tabula.domain.model.column import Column
-from tabula.domain.model.types import integer, string, decimal  # your factories
-from tabula.domain.model.data_type import DataType
+from tabula.domain.model import Column, DataType
+from tabula.domain.model.data_type.types import integer, string, decimal
 
 # ---------------------------
 # Construction & normalization

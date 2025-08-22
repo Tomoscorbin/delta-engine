@@ -1,10 +1,13 @@
 from typing import Callable
 import pytest
-from tabula.domain.model.column import Column
-from tabula.domain.model.data_type import DataType
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.table import DesiredTable, ObservedTable
-from tabula.domain.model.types import integer
+from tabula.domain.model import (
+    Column,
+    DataType,
+    QualifiedName,
+    DesiredTable, 
+    ObservedTable,
+)
+from tabula.domain.model.data_type.types import integer
 
 
 # factory helpers

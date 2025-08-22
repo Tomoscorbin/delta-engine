@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import pytest
-from tabula.domain.model.qualified_name import QualifiedName
+from tabula.domain.model import QualifiedName
 
 def test_normalization_casefold_ascii() -> None:
     qn = QualifiedName("CAT", "Sales", "Transactions")

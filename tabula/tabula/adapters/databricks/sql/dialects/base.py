@@ -1,7 +1,7 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Protocol, Optional, Sequence
+from typing import Protocol, Sequence, runtime_checkable
 
+@runtime_checkable
 class SqlDialect(Protocol):
     """Minimal contract every SQL dialect must satisfy."""
 

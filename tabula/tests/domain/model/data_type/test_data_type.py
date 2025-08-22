@@ -1,7 +1,14 @@
 from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import pytest
-from tabula.domain.model.data_type import DataType
+from tabula.domain.model.data_type.data_type import (
+    DataType, 
+    _coerce_params, 
+    _validate_param_types, 
+    _validate_by_type,
+    register_type,
+)
+
 
 # ---------------------------
 # Construction & normalization
@@ -103,3 +110,71 @@ def test_frozen_dataclass_prevents_field_reassignment():
         dt.name = "string"  # type: ignore[attr-defined]
     with pytest.raises(FrozenInstanceError):
         dt.parameters = ()  # type: ignore[attr-defined]
+
+
+def test__coerce_params_tuple_passthrough():
+    raw = (1, DataType("int"))
+    out = _coerce_params(raw)
+    assert out is raw
+
+def test__coerce_params_iterable_to_tuple():
+    raw = [1, DataType("int")]
+    out = _coerce_params(raw)
+    assert isinstance(out, tuple)
+    assert out == (1, DataType("int"))
+
+@pytest.mark.parametrize("bad", [None, 1, 1.2, object()])
+def test__coerce_params_non_iterable_raises(bad):
+    with pytest.raises(TypeError) as exc:
+        _coerce_params(bad)  # type: ignore[arg-type]
+    assert "iterable" in str(exc.value)
+
+def test__validate_param_types_accepts_int_and_datatype():
+    _validate_param_types((18, DataType("int")))  # no raise
+
+@pytest.mark.parametrize("bad", [(DataType("int"), "18"), ([],), ({},), (1.2,)])
+def test__validate_param_types_rejects_others(bad):
+    with pytest.raises(TypeError) as exc:
+        _validate_param_types(bad)  # type: ignore[arg-type]
+    assert "Invalid parameter type" in str(exc.value)
+
+
+def test__validate_by_type_noop_for_unknown():
+    _validate_by_type("unknown", ())  # no raise
+
+def test_decimal_validator_happy():
+    _validate_by_type("decimal", (18, 2))
+
+@pytest.mark.parametrize("params", [(18,), (18, 2, 3), ("18", "2"), (18, -1), (2, 10)])
+def test_decimal_validator_errors(params):
+    with pytest.raises(Exception):
+        _validate_by_type("decimal", params)  # type: ignore[arg-type]
+
+def test_array_validator_shape_and_type():
+    _validate_by_type("array", (DataType("int"),))  # ok
+    with pytest.raises(ValueError):
+        _validate_by_type("array", ())
+    with pytest.raises(ValueError):
+        _validate_by_type("array", (DataType("int"), DataType("int")))
+    with pytest.raises(TypeError):
+        _validate_by_type("array", (123,))  # type: ignore[arg-type]
+
+def test_map_validator_shape_and_type():
+    _validate_by_type("map", (DataType("string"), DataType("int")))  # ok
+    with pytest.raises(ValueError):
+        _validate_by_type("map", (DataType("string"),))
+    with pytest.raises(TypeError):
+        _validate_by_type("map", (DataType("string"), 1))  # type: ignore[arg-type]
+
+def test_register_type_custom_rule():
+    calls = {}
+    @register_type("custom")
+    def _validate(params):
+        calls["seen"] = params
+        if params != ("ok",):
+            raise ValueError("bad")
+
+    _validate_by_type("custom", ("ok",))
+    assert calls["seen"] == ("ok",)
+    with pytest.raises(ValueError):
+        _validate_by_type("custom", ("nope",))

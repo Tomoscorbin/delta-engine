@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from tabula.domain.plan.actions import Action, AddColumn, DropColumn
-from tabula.domain.model.column import Column
+from tabula.domain.model import Column
 
 
 def diff_columns_for_adds(

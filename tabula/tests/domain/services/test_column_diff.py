@@ -7,7 +7,7 @@ from tabula.domain.services.column_diff import (
 )
 from tabula.domain.plan.actions import AddColumn, DropColumn
 from tabula.domain.model.column import Column
-from tabula.domain.model.types import integer, string
+from tabula.domain.model.data_type.types import integer, string
 
 
 def col(name: str, *, dtype=None, is_nullable: bool = True) -> Column:

@@ -28,18 +28,19 @@ def compile_plan(plan: ActionPlan, *, dialect: SqlDialect = SPARK_SQL) -> tuple[
     1 action -> 1 statement.
     """
     context = _make_context(plan, dialect)
-    return (compile_action(action, context) for action in plan)
+    return tuple(compile_action(action, context) for action in plan)
 
 
 def _make_context(plan: ActionPlan, dialect: SqlDialect) -> CompileContext:
-    """Precompute the pieces we need; no nested defs, no dialect threading."""
-    full_table_name = dialect.render_qualified_name(
-        plan.qualified_name.catalog,
-        plan.qualified_name.schema,
-        plan.qualified_name.name,
+    """Precompute the pieces we need."""
+    qualified_name = plan.target
+    sql_table_name = dialect.render_qualified_name(
+        qualified_name.catalog,
+        qualified_name.schema,
+        qualified_name.name,
     )
     return CompileContext(
-        full_table_name=full_table_name,
+        full_table_name=sql_table_name,
         quote_identifier=dialect.quote_identifier,
     )
 
@@ -74,6 +75,6 @@ def _column_definition(column, context: CompileContext) -> str:
     Dialect influence is hidden behind the context.
     """
     name_sql = context.quote_identifier(column.name)
-    type_sql = sql_type_for_data_type(column)  # already Databricks-aware
+    type_sql = sql_type_for_data_type(column.data_type)
     nullability = "NULL" if getattr(column, "is_nullable", True) else "NOT NULL"
     return f"{name_sql} {type_sql} {nullability}"

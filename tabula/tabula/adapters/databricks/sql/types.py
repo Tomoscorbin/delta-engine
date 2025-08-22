@@ -1,77 +1,67 @@
-"""
-Unity Catalog / Delta type mapping (MVP).
-
-Single source of truth for:
-- domain -> UC SQL (sql_type_for_data_type / sql_type_for_column)
-- UC information_schema -> domain (domain_type_from_uc)
-- Spark catalog string -> domain (domain_type_from_spark)
-
-Policy:
-- Readers are tolerant: unknown/complex observed types are passed through
-  (validator/compiler will block using them for CREATE/ADD in the MVP).
-- Compiler is strict: only MVP scalar types are accepted (fail fast).
-"""
-
 from __future__ import annotations
 
 import re
-from typing import Final, Optional, Any
+from typing import Final, Any, Optional
+from tabula.domain.model import DataType
 
-from tabula.domain.model.data_type import DataType
-
-# ---------- UC SQL (engine) mapping for scalar MVP ----------
+# --- UC engine tokens for the domain types we support ---
 _UC_SQL: Final[dict[str, str]] = {
     "string": "STRING",
-    "varchar": "STRING",     # UC normalizes VARCHAR to STRING; length is informational only
     "boolean": "BOOLEAN",
-
     "tinyint": "TINYINT",
     "smallint": "SMALLINT",
     "integer": "INT",
     "bigint": "BIGINT",
-
-    "float": "FLOAT",        # 32-bit
-    "double": "DOUBLE",      # 64-bit
-
+    "float": "FLOAT",
+    "double": "DOUBLE",
     "binary": "BINARY",
-
     "date": "DATE",
     "timestamp": "TIMESTAMP",
-    "timestamp_ntz": "TIMESTAMP_NTZ",  # UC/DBR support
-    "variant": "VARIANT",              # UC JSON-like semi-structured
+    "timestamp_ntz": "TIMESTAMP_NTZ",
+    "variant": "VARIANT",
 }
 
 _DECIMAL_RE_UC: Final[re.Pattern[str]] = re.compile(r"^DECIMAL\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE)
 _DECIMAL_RE_SPARK: Final[re.Pattern[str]] = re.compile(r"^decimal\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE)
 
-# ---------- Compiler-facing helpers ----------
+# ---------------- Compiler-facing ----------------
 
 def sql_type_for_column(column: Any) -> str:
     """
-    Optional convenience: prefer a precomputed engine type on the column, else map domain data_type.
+    Prefer a precomputed engine type on the column, else map its domain data_type.
     Expects:
-      - column.sql_type: Optional[str]      # e.g. "STRING", "DECIMAL(10,2)"
+      - column.sql_type: Optional[str]      # e.g., "STRING", "DECIMAL(10,2)"
       - column.data_type: DataType
     """
-    pre_mapped: Optional[str] = getattr(column, "sql_type", None)
-    if pre_mapped:
-        return pre_mapped
-    data_type: DataType = getattr(column, "data_type", None)
-    if data_type is None:
+    pre = getattr(column, "sql_type", None)
+    if pre:
+        return pre
+    dt = getattr(column, "data_type", None)
+    if dt is None:
         raise ValueError("Column has neither 'sql_type' nor 'data_type'")
-    return sql_type_for_data_type(data_type)
+    return sql_type_for_data_type(dt)
+
+
+def _render_spec(dt: DataType) -> str:
+    """Best-effort 'name(params)' for readable error messages."""
+    if not dt.parameters:
+        return dt.name
+    parts: list[str] = []
+    for p in dt.parameters:
+        parts.append(str(p) if isinstance(p, int) else _render_spec(p))
+    return f"{dt.name}({','.join(parts)})"
 
 
 def sql_type_for_data_type(data_type: DataType) -> str:
     """
-    Map a domain DataType to a UC SQL type (MVP).
-    Raises ValueError for unsupported types to fail fast in the compiler.
+    Map a domain DataType to a UC SQL type (STRICT).
+    Only MVP scalar types + DECIMAL + VARCHAR are accepted.
     """
-    name = data_type.name  # domain should normalize to lowercase
+    name = data_type.name
 
-    # DECIMAL(p,s)
+    # DECIMAL(p[,s])
     if name in {"decimal", "numeric"}:
-        if not data_type.parameters or len(data_type.parameters) < 1:
+        if not data_type.parameters:
             raise ValueError("DECIMAL requires precision (and optional scale)")
         precision = int(data_type.parameters[0])
         scale = int(data_type.parameters[1]) if len(data_type.parameters) > 1 else 0
@@ -79,98 +69,97 @@ def sql_type_for_data_type(data_type: DataType) -> str:
 
     # VARCHAR(n) -> STRING (length informational only)
     if name == "varchar":
-        return _UC_SQL["varchar"]
+        return "STRING"
 
     try:
         return _UC_SQL[name]
     except KeyError as exc:
-        raise ValueError(f"Unsupported data type for UC compiler: {data_type.specification}") from exc
+        raise ValueError(f"Unsupported data type for UC compiler: {_render_spec(data_type)}") from exc
 
-# ---------- Readers (tolerant) ----------
+
+# ---------------- Readers (tolerant) ----------------
 
 def domain_type_from_uc(data_type_text: str) -> DataType:
     """
-    Map UC information_schema 'data_type' to a domain DataType.
-    Tolerant for non-MVP types so we can observe them; validator/compiler will restrict usage.
+    Map UC information_schema 'data_type' to a domain DataType (TOLERANT).
+    Keeps complex/unknown types observable (compiler/validator will restrict usage).
     """
     text = data_type_text.strip().upper()
 
-    # Common scalars
-    if text in {"STRING", "VARCHAR"}:
-        return DataType("string")
-    if text == "BOOLEAN":
-        return DataType("boolean")
-    if text in {"TINYINT"}:
-        return DataType("tinyint")
-    if text == "SMALLINT":
-        return DataType("smallint")
-    if text in {"INT", "INTEGER"}:
-        return DataType("integer")
-    if text == "BIGINT":
-        return DataType("bigint")
-    if text in {"FLOAT", "REAL"}:
-        return DataType("float")
-    if text in {"DOUBLE", "DOUBLE PRECISION"}:
-        return DataType("double")
-    if text == "BINARY":
-        return DataType("binary")
-    if text == "DATE":
-        return DataType("date")
-    if text == "TIMESTAMP":
-        return DataType("timestamp")
-    if text.startswith("TIMESTAMP_NTZ"):
-        return DataType("timestamp_ntz")
-    if text == "VARIANT":
-        return DataType("variant")
-
     # DECIMAL(p,s)
-    decimal_match = _DECIMAL_RE_UC.match(text)
-    if decimal_match:
-        precision, scale = int(decimal_match.group(1)), int(decimal_match.group(2))
+    if m := _DECIMAL_RE_UC.match(text):
+        precision, scale = int(m.group(1)), int(m.group(2))
         return DataType("decimal", (precision, scale))
 
-    # Observed-only passthrough (ARRAY, MAP, STRUCT, INTERVAL, GEOGRAPHY, etc.)
-    return DataType(text.lower())
+    match text:
+        case "STRING" | "VARCHAR":
+            return DataType("string")
+        case "BOOLEAN":
+            return DataType("boolean")
+        case "TINYINT":
+            return DataType("tinyint")
+        case "SMALLINT":
+            return DataType("smallint")
+        case "INT" | "INTEGER":
+            return DataType("integer")
+        case "BIGINT":
+            return DataType("bigint")
+        case "FLOAT" | "REAL":
+            return DataType("float")
+        case "DOUBLE" | "DOUBLE PRECISION":
+            return DataType("double")
+        case "BINARY":
+            return DataType("binary")
+        case "DATE":
+            return DataType("date")
+        case s if s.startswith("TIMESTAMP_NTZ"):
+            return DataType("timestamp_ntz")
+        case "TIMESTAMP":
+            return DataType("timestamp")
+        case "VARIANT":
+            return DataType("variant")
+        case _:
+            # Observed-only passthrough (ARRAY, MAP, STRUCT, INTERVAL, GEOGRAPHY, etc.)
+            return DataType(text.lower())
 
 
 def domain_type_from_spark(data_type_text: str) -> DataType:
     """
-    Map Spark catalog 'dataType' strings to a domain DataType.
+    Map Spark catalog 'dataType' strings to a domain DataType (TOLERANT).
     Examples: 'int', 'string', 'double', 'decimal(10,2)', 'array<int>', ...
     """
     text = data_type_text.strip().lower()
 
-    # Common scalars
-    if text == "string":
-        return DataType("string")
-    if text == "boolean":
-        return DataType("boolean")
-    if text in {"byte", "tinyint"}:
-        return DataType("tinyint")
-    if text == "smallint":
-        return DataType("smallint")
-    if text in {"int", "integer"}:
-        return DataType("integer")
-    if text == "bigint":
-        return DataType("bigint")
-    if text in {"float", "real"}:
-        return DataType("float")
-    if text.startswith("double"):
-        return DataType("double")
-    if text == "binary":
-        return DataType("binary")
-    if text == "date":
-        return DataType("date")
-    if text.startswith("timestamp_ntz"):
-        return DataType("timestamp_ntz")
-    if text.startswith("timestamp"):
-        return DataType("timestamp")
-
     # DECIMAL(p,s)
-    decimal_match = _DECIMAL_RE_SPARK.match(text)
-    if decimal_match:
-        precision, scale = int(decimal_match.group(1)), int(decimal_match.group(2))
+    if m := _DECIMAL_RE_SPARK.match(text):
+        precision, scale = int(m.group(1)), int(m.group(2))
         return DataType("decimal", (precision, scale))
 
-    # Observed-only passthrough (array<...>, map<...>, struct<...>, etc.)
-    return DataType(text)
+    match text:
+        case "string":
+            return DataType("string")
+        case "boolean":
+            return DataType("boolean")
+        case "byte" | "tinyint":
+            return DataType("tinyint")
+        case "smallint":
+            return DataType("smallint")
+        case "int" | "integer":
+            return DataType("integer")
+        case "bigint":
+            return DataType("bigint")
+        case "float" | "real":
+            return DataType("float")
+        case s if s.startswith("double"):
+            return DataType("double")
+        case "binary":
+            return DataType("binary")
+        case "date":
+            return DataType("date")
+        case s if s.startswith("timestamp_ntz"):
+            return DataType("timestamp_ntz")
+        case s if s.startswith("timestamp"):
+            return DataType("timestamp")
+        case _:
+            # Observed-only passthrough (array<...>, map<...>, struct<...>, etc.)
+            return DataType(text)

@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import pytest
 
 from tabula.adapters.databricks.catalog.reader import UCReader
-from tabula.domain.model.data_type import DataType
-from tabula.domain.model.column import Column
+from tabula.domain.model import Column, DataType
 
-# --- minimal domain double for QualifiedName ---------------------------------
+# ---------- minimal QualifiedName double --------------------------------------
+
 @dataclass(frozen=True)
 class _QN:
     catalog: str | None
@@ -20,13 +20,15 @@ class _QN:
         parts = [p for p in (self.catalog, self.schema, self.name) if p]
         return ".".join(parts)
 
-# --- spark stubs -------------------------------------------------------------
+
+# ---------- Spark stubs -------------------------------------------------------
+
 class _FakeCatalog:
     def __init__(self, exists: bool, columns: list[object]):
         self._exists = exists
         self._columns = columns
-        self._last_exists_arg = None
-        self._last_list_arg = None
+        self._last_exists_arg: str | None = None
+        self._last_list_arg: str | None = None
 
     def tableExists(self, name: str) -> bool:
         self._last_exists_arg = name
@@ -36,23 +38,29 @@ class _FakeCatalog:
         self._last_list_arg = name
         return list(self._columns)
 
+
 class _FakeDF:
     def __init__(self, is_empty: bool):
         self._empty = is_empty
+
     def isEmpty(self) -> bool:
         return self._empty
+
 
 class _FakeSpark:
     def __init__(self, exists: bool, columns: list[object], is_empty: bool):
         self.catalog = _FakeCatalog(exists, columns)
         self._is_empty = is_empty
+        self._last_table_arg: str | None = None
+
     def table(self, name: str) -> _FakeDF:
+        self._last_table_arg = name
         return _FakeDF(self._is_empty)
 
-# --- tests -------------------------------------------------------------------
 
-def test_fetch_state_returns_none_when_table_missing(monkeypatch) -> None:
-    # No need to patch type mapping; it won't be called.
+# ---------- tests -------------------------------------------------------------
+
+def test_missing_table_returns_none_and_does_not_probe(monkeypatch) -> None:
     spark = _FakeSpark(exists=False, columns=[], is_empty=True)
     reader = UCReader(spark)
 
@@ -61,14 +69,15 @@ def test_fetch_state_returns_none_when_table_missing(monkeypatch) -> None:
 
     assert result is None
     assert spark.catalog._last_exists_arg == "c.s.t"
+    assert spark.catalog._last_list_arg is None
+    assert spark._last_table_arg is None
 
-def test_fetch_state_returns_observed_table_with_columns_and_empty_flag(monkeypatch) -> None:
-    # Patch type mapping for deterministic domain DataType
+
+def test_maps_columns_and_checks_empty(monkeypatch) -> None:
+    # Patch the mapper at the module UCReader uses.
     from tabula.adapters.databricks.catalog import reader as reader_mod
-    monkeypatch.setattr(reader_mod, "domain_type_from_spark",
-                        lambda spark_dt: DataType("int") if spark_dt == "int" else DataType("string"))
+    monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
-    # Spark columns stub (shape like pyspark.sql.catalog.Column)
     spark_cols = [
         SimpleNamespace(name="id",   dataType="int",    nullable=False),
         SimpleNamespace(name="note", dataType="string", nullable=True),
@@ -82,28 +91,85 @@ def test_fetch_state_returns_observed_table_with_columns_and_empty_flag(monkeypa
     assert observed is not None
     assert observed.qualified_name is qn
     assert observed.is_empty is False
-
-    # Columns mapped correctly and in order
     assert observed.columns == (
-        Column(name="id",   data_type=DataType("int"),    is_nullable=False),
+        Column(name="id", data_type=DataType("int"),    is_nullable=False),
         Column(name="note", data_type=DataType("string"), is_nullable=True),
     )
-
-    # Called the catalog with dotted name
     assert spark.catalog._last_exists_arg == "c.s.t"
     assert spark.catalog._last_list_arg == "c.s.t"
+    assert spark._last_table_arg == "c.s.t"
 
-def test_is_table_empty_true(monkeypatch) -> None:
-    # Patch mapping to avoid errors if called
+
+def test_is_empty_true_path(monkeypatch) -> None:
     from tabula.adapters.databricks.catalog import reader as reader_mod
-    monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda _: DataType("string"))
+    monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
     spark_cols = [SimpleNamespace(name="x", dataType="string", nullable=True)]
     spark = _FakeSpark(exists=True, columns=spark_cols, is_empty=True)
     reader = UCReader(spark)
 
-    qn = _QN(None, "schema", "tbl")
-    observed = reader.fetch_state(qn)
-
+    observed = reader.fetch_state(_QN(None, "schema", "tbl"))
     assert observed is not None
     assert observed.is_empty is True
+    # Dotted name omitted catalog cleanly
+    assert spark.catalog._last_exists_arg == "schema.tbl"
+    assert spark.catalog._last_list_arg == "schema.tbl"
+    assert spark._last_table_arg == "schema.tbl"
+
+
+def test_type_mapping_exception_bubbles(monkeypatch) -> None:
+    from tabula.adapters.databricks.catalog import reader as reader_mod
+
+    def _boom(_):
+        raise ValueError("unsupported spark type")
+
+    monkeypatch.setattr(reader_mod, "domain_type_from_spark", _boom)
+
+    spark_cols = [SimpleNamespace(name="id", dataType="struct<weird:stuff>", nullable=True)]
+    spark = _FakeSpark(exists=True, columns=spark_cols, is_empty=False)
+    reader = UCReader(spark)
+
+    with pytest.raises(ValueError, match="unsupported spark type"):
+        reader.fetch_state(_QN("c", "s", "t"))
+
+
+def test_table_isEmpty_exception_bubbles(monkeypatch) -> None:
+    from tabula.adapters.databricks.catalog import reader as reader_mod
+    monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
+
+    class _BoomSpark(_FakeSpark):
+        def table(self, name: str):
+            self._last_table_arg = name
+            raise RuntimeError("I/O error reading table")
+
+    spark_cols = [SimpleNamespace(name="id", dataType="int", nullable=False)]
+    spark = _BoomSpark(exists=True, columns=spark_cols, is_empty=False)
+    reader = UCReader(spark)
+
+    with pytest.raises(RuntimeError, match="I/O error"):
+        reader.fetch_state(_QN("c", "s", "t"))
+
+    # We still performed existence + column listing before failing
+    assert spark.catalog._last_exists_arg == "c.s.t"
+    assert spark.catalog._last_list_arg == "c.s.t"
+    assert spark._last_table_arg == "c.s.t"
+
+
+def test_listcolumns_iterable_supported_and_order_preserved(monkeypatch) -> None:
+    from tabula.adapters.databricks.catalog import reader as reader_mod
+    monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
+
+    # Supply columns in a specific order
+    spark_cols = [
+        SimpleNamespace(name="b", dataType="int",    nullable=False),
+        SimpleNamespace(name="a", dataType="string", nullable=True),
+    ]
+    spark = _FakeSpark(exists=True, columns=spark_cols, is_empty=False)
+    reader = UCReader(spark)
+
+    observed = reader.fetch_state(_QN("c", None, "t"))
+    assert observed is not None
+    assert observed.columns == (
+        Column(name="b", data_type=DataType("int"),    is_nullable=False),
+        Column(name="a", data_type=DataType("string"), is_nullable=True),
+    )

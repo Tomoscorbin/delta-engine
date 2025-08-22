@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
-from tabula.domain._identifiers import normalize_identifier
+from tabula.domain.model._identifiers import normalize_identifier
 
 
 @dataclass(frozen=True, slots=True)

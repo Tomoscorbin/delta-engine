@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Literal
-from tabula.domain.model.data_type import DataType
+from tabula.domain.model.data_type.data_type import DataType
 
 # ---- Singleton instances
 _BIGINT    = DataType("bigint")

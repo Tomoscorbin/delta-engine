@@ -5,9 +5,8 @@ import pytest
 from tabula.domain.plan.actions import (
     Action, ActionPlan, AddColumn, CreateTable, DropColumn,
 )
-from tabula.domain.model.column import Column
-from tabula.domain.model.types import integer
-from tabula.domain.model.qualified_name import QualifiedName
+from tabula.domain.model import Column, QualifiedName
+from tabula.domain.model.data_type.types import integer
 
 
 # ---------------------------

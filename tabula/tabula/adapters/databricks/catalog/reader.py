@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 from pyspark.sql import SparkSession
 from tabula.adapters.databricks.sql.types import domain_type_from_spark
-from tabula.domain.model.column import Column
+from tabula.domain.model import (
+    Column,
+    QualifiedName,
+    ObservedTable,
+)
 from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain.model.table import ObservedTable
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +23,7 @@ class UCReader:
 
     # ---- public API ---------------------------------------------------------
 
-    def fetch_state(self, qualified_name: QualifiedName) -> Optional[ObservedTable]:
+    def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
         if not self._table_exists(qualified_name):
             return None
 
@@ -47,7 +49,7 @@ class UCReader:
                 Column(
                     name=c.name,
                     data_type=domain_type_from_spark(c.dataType),
-                    is_nullable=bool(c.nullable),
+                    is_nullable=c.nullable,
                 )
             )
         return tuple(out)

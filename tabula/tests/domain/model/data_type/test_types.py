@@ -1,9 +1,9 @@
 import pytest
-from tabula.domain.model.types import (
+from tabula.domain.model.data_type.types import (
     bigint, integer, smallint, boolean, string, date, timestamp,
     double, float32, float64, floating_point, decimal
 )
-from tabula.domain.model.data_type import DataType
+from tabula.domain.model import DataType
 
 
 def test_scalar_factories_return_expected_values():

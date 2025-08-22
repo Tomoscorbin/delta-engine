@@ -3,9 +3,11 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Self
 
-from tabula.domain.model.column import Column
-from tabula.domain.model.qualified_name import QualifiedName
-from tabula.domain._identifiers import normalize_identifier
+from tabula.domain.model import (
+    Column,
+    QualifiedName,
+)
+from tabula.domain.model._identifiers import normalize_identifier
 
 
 class Action:

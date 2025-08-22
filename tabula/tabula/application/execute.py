@@ -6,7 +6,7 @@ from tabula.application.errors import ExecutionFailed
 from tabula.application.plan import plan_actions
 from tabula.application.ports import CatalogReader, PlanExecutor
 from tabula.application.results import ExecutionResult, PlanPreview
-from tabula.domain.model.table import DesiredTable
+from tabula.domain.model import DesiredTable
 
 
 def execute_plan(preview: PlanPreview, executor: PlanExecutor) -> ExecutionResult:
