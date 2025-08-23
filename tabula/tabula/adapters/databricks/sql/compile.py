@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Compile action plans into SQL statements for Databricks."""
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass

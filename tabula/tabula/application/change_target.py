@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for assembling change targets."""
+
+from __future__ import annotations
 
 from tabula.application.ports import CatalogReader
 from tabula.domain.model import ChangeTarget, DesiredTable

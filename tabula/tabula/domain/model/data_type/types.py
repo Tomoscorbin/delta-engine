@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Factory functions for common ``DataType`` instances."""
+
+from __future__ import annotations
 
 from typing import Literal
 

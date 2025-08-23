@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Domain models for table snapshots and derivatives."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for ordering action plans."""
+
+from __future__ import annotations
 
 from dataclasses import replace
 

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Mapping between domain data types and Databricks/Spark SQL types."""
+
+from __future__ import annotations
 
 import re
 from typing import Any, Final

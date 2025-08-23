@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Protocol for SQL dialect implementations."""
+
+from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable

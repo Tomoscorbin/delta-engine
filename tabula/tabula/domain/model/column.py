@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Domain model for table columns."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

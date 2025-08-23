@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Execution adapter for Databricks Unity Catalog."""
+
+from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -59,7 +59,7 @@ class UCExecutor:
                 executed_sql.append(statement)
                 messages.append(f"OK {index}")
                 executed_count += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 messages.append(f"ERROR {index}: {type(exc).__name__}: {exc}")
                 attempted_failure = True
                 if self.on_error == "stop":

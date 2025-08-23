@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Spark SQL dialect implementation."""
+
+from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass

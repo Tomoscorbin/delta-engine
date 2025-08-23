@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Plan preview and execution helpers."""
+
+from __future__ import annotations
 
 from tabula.application.change_target import load_change_target
 from tabula.application.errors import ExecutionFailed

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Reader adapter for Databricks Unity Catalog."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for diffing column definitions."""
+
+from __future__ import annotations
 
 from collections.abc import Iterable
 

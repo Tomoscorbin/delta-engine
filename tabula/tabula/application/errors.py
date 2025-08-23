@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """Application-level error types."""
 
+from __future__ import annotations
 
-class IdentityMismatch(RuntimeError):
+
+class IdentityMismatchError(RuntimeError):
     """Raised when an expected identifier differs from the observed one."""
 
     def __init__(self, *, expected: str, actual: str) -> None:
@@ -20,7 +20,7 @@ class IdentityMismatch(RuntimeError):
         super().__init__(msg)
 
 
-class ExecutionFailed(RuntimeError):
+class ExecutionFailedError(RuntimeError):
     """Raised when plan execution reports failure."""
 
     def __init__(

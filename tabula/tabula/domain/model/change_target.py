@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Domain model representing a table change target."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 

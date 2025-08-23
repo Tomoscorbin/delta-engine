@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Utilities for diffing table schemas."""
+
+from __future__ import annotations
 
 from tabula.domain.model import DesiredTable, ObservedTable
 from tabula.domain.plan.actions import ActionPlan, CreateTable

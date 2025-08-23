@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Validation rules for planned schema changes."""
+
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import ClassVar

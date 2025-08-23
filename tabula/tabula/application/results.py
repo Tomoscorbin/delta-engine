@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Result objects returned by application orchestration."""
+
+from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass

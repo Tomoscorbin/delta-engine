@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Planning utilities for schema changes."""
+
+from __future__ import annotations
 
 from tabula.application.plan.order_plan import order_plan
 from tabula.application.plan.plan_context import PlanContext

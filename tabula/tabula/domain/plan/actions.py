@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Domain representation of schema change actions."""
+
+from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
