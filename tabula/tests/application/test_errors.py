@@ -18,7 +18,11 @@ def test_identity_mismatch_has_clear_message_and_is_exception():
 
 
 def test_execution_failed_formats_with_messages():
-    err = ExecutionFailedError(qualified_name="cat.sch.tbl", messages=("boom", "bad"), executed_count=3)
+    err = ExecutionFailedError(
+        qualified_name="cat.sch.tbl", 
+        messages=("boom", "bad"), 
+        executed_count=3,
+    )
     assert str(err) == "Execution failed for cat.sch.tbl (executed_count=3): boom; bad"
     assert isinstance(err, Exception)
 
