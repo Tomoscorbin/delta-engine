@@ -52,7 +52,7 @@ fixable = [
   "RUF022",   # sort __all__
   "B905",     # add strict= to zip()
 ]
-# If you ever need to explicitly block a fixer, you can add:
+
 # unfixable = ["B", "TID"]
 
 # isort behavior for import sorting
