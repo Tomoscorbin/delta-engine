@@ -1,7 +1,9 @@
 from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
+
 from tabula.domain.plan.actions import ActionPlan
+
 
 @dataclass(frozen=True, slots=True)
 class PlanPreview:
@@ -10,8 +12,8 @@ class PlanPreview:
     summary_counts: Mapping[str, int]
     total_actions: int
 
-    def __len__(self) -> int:
-        return self.total_actions
+    def __bool__(self) -> int:
+        return not self.is_noop
 
     @property
     def summary_text(self) -> str:

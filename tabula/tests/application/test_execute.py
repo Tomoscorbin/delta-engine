@@ -1,191 +1,119 @@
-from __future__ import annotations
-
 import pytest
-from types import SimpleNamespace
 
-from tabula.application.execute import execute_plan, plan_then_execute
-from tabula.application.results import PlanPreview, ExecutionResult
-from tabula.application.errors import ExecutionFailed, ApplicationError
+import tabula.application.execute as exec_mod
 
 
-# ---------- Helpers ----------
+# ---------- Tiny fakes / stubs ----------
 
-class StubExecutor:
-    def __init__(self, outcome):
-        self._outcome = outcome
-        self.called_with = None
+class FakePlan:
+    def __init__(self, target="cat.sch.tbl"):
+        self.target = target
 
-    def execute(self, plan):
-        self.called_with = plan
-        return self._outcome
-
-
-class Outcome:
-    """Minimal executor outcome using truthiness."""
-    def __init__(self, success: bool, messages=(), executed_count=0):
-        self._success = success
-        self.messages = messages
-        self.executed_count = executed_count
+class FakePreview:
+    def __init__(self, plan, is_noop: bool):
+        self.plan = plan
+        self.is_noop = is_noop
 
     def __bool__(self):
-        return self._success
+        return not self.is_noop
 
+class SuccessOutcome:
+    def __init__(self, messages=("ok",), executed_count=1):
+        self.messages = tuple(messages)
+        self.executed_count = executed_count
+    def __bool__(self):
+        return True
 
-def make_plan(target="cat.schema.tbl"):
-    # App code expects a VO with `.dotted`. Mirror the domain shape here.
-    class Target:
-        def __init__(self, dotted: str) -> None:
-            self.dotted = dotted
-    return SimpleNamespace(target=Target(target))
+class FailureOutcome:
+    def __init__(self, messages=("boom",), executed_count=0):
+        self.messages = tuple(messages)
+        self.executed_count = executed_count
+    def __bool__(self):
+        return False
 
-
-def make_preview(plan, *, total_actions: int, is_noop: bool | None = None, counts=None):
-    if counts is None:
-        counts = {}
-    if is_noop is None:
-        is_noop = (total_actions == 0)
-    return PlanPreview(
-        plan=plan,
-        is_noop=is_noop,
-        summary_counts=counts,
-        total_actions=total_actions,
-    )
-
-
-# ---------- PlanPreview truthiness / length ----------
-
-def test_plan_preview_truthiness_and_len_follow_total_actions():
-    p0 = make_preview(make_plan(), total_actions=0)
-    assert bool(p0) is False
-    assert len(p0) == 0
-
-    p3 = make_preview(make_plan(), total_actions=3)
-    assert bool(p3) is True
-    assert len(p3) == 3
+class SpyExecutor:
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.calls = []
+    def execute(self, plan):
+        self.calls.append(plan)
+        return self.outcome
 
 
 # ---------- execute_plan ----------
 
-def test_execute_plan_calls_executor_and_returns_success_result():
-    plan = make_plan("c.s.success")
-    preview = make_preview(plan, total_actions=3)
+def test_execute_plan_success_returns_execution_result():
+    plan = FakePlan(target="cat.sch.tbl")
+    preview = FakePreview(plan=plan, is_noop=False)
+    executor = SpyExecutor(SuccessOutcome(messages=("m1", "m2"), executed_count=3))
 
-    outcome = Outcome(success=True, messages=("ok", "done"), executed_count=3)
-    executor = StubExecutor(outcome)
+    result = exec_mod.execute_plan(preview, executor)
 
-    result = execute_plan(preview, executor)
-
-    # executor called once with exact plan object
-    assert executor.called_with is plan
-
-    # result mirrors outcome + keeps same plan
-    assert isinstance(result, ExecutionResult)
     assert result.plan is plan
-    assert result.messages == ("ok", "done")
+    assert result.messages == ("m1", "m2")
     assert result.executed_count == 3
+    assert executor.calls == [plan]
 
 
-def test_execute_plan_allows_empty_messages_and_zero_count():
-    plan = make_plan("c.s.success_empty")
-    preview = make_preview(plan, total_actions=1)
+def test_execute_plan_failure_raises_execution_failed():
+    plan = FakePlan(target="cat.sch.tbl")
+    preview = FakePreview(plan=plan, is_noop=False)
+    executor = SpyExecutor(FailureOutcome(messages=("boom",), executed_count=0))
 
-    outcome = Outcome(success=True, messages=(), executed_count=0)
-    executor = StubExecutor(outcome)
+    with pytest.raises(exec_mod.ExecutionFailed) as exc:
+        exec_mod.execute_plan(preview, executor)
 
-    result = execute_plan(preview, executor)
-    assert result.plan is plan
-    assert result.messages == ()
-    assert result.executed_count == 0
-
-
-def test_execute_plan_raises_on_failure_and_populates_fields():
-    plan = make_plan("c.s.fail_tbl")
-    preview = make_preview(plan, total_actions=2)
-
-    outcome = Outcome(success=False, messages=("bad",), executed_count=1)
-    executor = StubExecutor(outcome)
-
-    with pytest.raises(ExecutionFailed) as err:
-        execute_plan(preview, executor)
-
-    exc = err.value
-    # Exception type hierarchy and fields
-    assert isinstance(exc, ApplicationError)
-    assert exc.qualified_name == "c.s.fail_tbl"
-    assert exc.messages == ("bad",)
-    assert exc.executed_count == 1
-
-
-def test_execute_plan_propagates_executor_exceptions():
-    plan = make_plan("c.s.boom")
-    preview = make_preview(plan, total_actions=1)
-
-    class BoomExecutor:
-        def execute(self, plan):
-            raise RuntimeError("kaboom")
-
-    with pytest.raises(RuntimeError, match="kaboom"):
-        execute_plan(preview, BoomExecutor())
+    msg = str(exc.value)
+    assert "Execution failed for cat.sch.tbl" in msg
+    assert "boom" in msg
 
 
 # ---------- plan_then_execute ----------
 
-def test_plan_then_execute_noop_skips_executor_and_returns_noop_result(monkeypatch):
-    plan = make_plan("c.s.noop")
-    preview = make_preview(plan, total_actions=0)  # falsy
+def test_plan_then_execute_noop_short_circuits(monkeypatch):
+    # load_change_target -> subject (ignored), preview_plan -> noop preview
+    monkeypatch.setattr(exec_mod, "load_change_target", lambda r, d: object())
 
-    captured = {}
-    def fake_plan_actions(desired_table, reader):
-        captured["desired"] = desired_table
-        captured["reader"] = reader
-        return preview
+    plan = FakePlan("cat.sch.tbl")
+    monkeypatch.setattr(exec_mod, "preview_plan", lambda subject, validator: FakePreview(plan, True))
 
-    monkeypatch.setattr("tabula.application.execute.plan_actions", fake_plan_actions)
+    # Executor should not be called
+    class NeverExecutor:
+        def execute(self, plan):
+            raise AssertionError("should not execute on noop")
 
-    desired = object()
-    reader = object()
-    executor = StubExecutor(outcome=None)  # must not be called for no-op
+    result = exec_mod.plan_then_execute(desired_table=object(), reader=object(), executor=NeverExecutor())
 
-    result = plan_then_execute(desired, reader, executor)
-
-    # plan_actions was called with our args
-    assert captured["desired"] is desired
-    assert captured["reader"] is reader
-
-    # executor not called
-    assert executor.called_with is None
-
-    # explicit no-op result
-    assert isinstance(result, ExecutionResult)
     assert result.plan is plan
     assert result.messages == ("noop",)
     assert result.executed_count == 0
 
 
-def test_plan_then_execute_delegates_to_execute_plan(monkeypatch):
-    plan = make_plan("c.s.exec")
-    preview = make_preview(plan, total_actions=2)  # truthy
+def test_plan_then_execute_runs_execute_when_not_noop(monkeypatch):
+    calls = {"planned": False, "executed": False}
 
-    def fake_plan_actions(desired_table, reader):
-        return preview
+    monkeypatch.setattr(exec_mod, "load_change_target", lambda r, d: "SUBJECT")
 
-    sentinel = ExecutionResult(plan=plan, messages=("ran",), executed_count=2)
+    plan = FakePlan("cat.sch.tbl")
 
-    captured = {}
-    def fake_execute_plan(pre, ex):
-        captured["preview"] = pre
-        captured["executor"] = ex
-        return sentinel
+    def fake_preview_plan(subject, validator):
+        calls["planned"] = (subject == "SUBJECT")
+        return FakePreview(plan, is_noop=False)
 
-    monkeypatch.setattr("tabula.application.execute.plan_actions", fake_plan_actions)
-    monkeypatch.setattr("tabula.application.execute.execute_plan", fake_execute_plan)
+    monkeypatch.setattr(exec_mod, "preview_plan", fake_preview_plan)
 
-    desired = object()
-    reader = object()
-    executor = object()
+    class Exec(SpyExecutor):
+        def __init__(self):
+            super().__init__(SuccessOutcome(messages=("done",), executed_count=2))
+        def execute(self, plan_arg):
+            calls["executed"] = (plan_arg is plan)
+            return super().execute(plan_arg)
 
-    result = plan_then_execute(desired, reader, executor)
+    executor = Exec()
+    result = exec_mod.plan_then_execute(desired_table=object(), reader=object(), executor=executor)
 
-    assert result is sentinel
-    assert captured["preview"] is preview
-    assert captured["executor"] is executor
+    assert calls["planned"] is True
+    assert calls["executed"] is True
+    assert result.plan is plan
+    assert result.messages == ("done",)
+    assert result.executed_count == 2

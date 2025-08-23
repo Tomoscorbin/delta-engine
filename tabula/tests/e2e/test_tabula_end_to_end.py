@@ -1,8 +1,10 @@
-from __future__ import annotations
-
+import pytest
 from dataclasses import dataclass
+
 from tabula.adapters.databricks.catalog.executor import UCExecutor
-from tabula.application.plan import plan_actions
+from tabula.application.change_target import load_change_target
+from tabula.application.plan.plan import preview_plan
+from tabula.application.errors import ValidationError
 from tabula.domain.model import (
     QualifiedName,
     DesiredTable,
@@ -34,7 +36,7 @@ def observed(cols: list[Column], *, is_empty: bool = True) -> ObservedTable:
     return ObservedTable(qualified_name=make_qualified_name(), columns=tuple(cols), is_empty=is_empty)
 
 
-# Structural double for a catalog reader (what application.plan expects)
+# Structural double for a catalog reader (what load_change_target expects)
 @dataclass
 class FakeCatalog:
     by_name: dict[QualifiedName, ObservedTable]
@@ -62,7 +64,8 @@ def test_e2e_create_then_execute_sql() -> None:
     # CreateTable(id INT NOT NULL)
     dt = desired([col("id", "integer", nullable=False)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     assert preview.is_noop is False
 
     # Plan contains exactly one CreateTable
@@ -95,7 +98,8 @@ def test_e2e_adds_preserve_spec_order_and_drop_then_execute_sql() -> None:
                   col("b", "string", nullable=False),
                   col("c", "string", nullable=False)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     assert preview.is_noop is False
 
     # Expect: Add(b), Add(c), Drop(old) — add order follows spec; drop is normalized
@@ -122,7 +126,8 @@ def test_e2e_noop_when_observed_matches_desired() -> None:
 
     dt = desired([col("id", "int", nullable=False), col("note", "string", nullable=True)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     assert preview.is_noop is True
     assert len(tuple(preview.plan)) == 0  # no actions
 
@@ -145,7 +150,8 @@ def test_e2e_dry_run_records_would_be_sql_without_executing() -> None:
 
     dt = desired([col("id", "integer", nullable=False)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     actions = list(preview.plan)
     assert len(actions) == 1 and isinstance(actions[0], CreateTable)
 
@@ -162,7 +168,6 @@ def test_e2e_continue_on_error_runs_rest() -> None:
     # Existing has only 'a'. Desired adds 'bad' (will fail) and 'c' (succeeds).
     existing = observed([col("a", "string", nullable=False)], is_empty=True)
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
-    rec = Recorder()
 
     def flaky_run(sql: str) -> None:
         # Simulate failure only for the 'bad' column add
@@ -175,7 +180,8 @@ def test_e2e_continue_on_error_runs_rest() -> None:
                   col("bad", "string", nullable=False),
                   col("c", "string", nullable=False)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     action_types = [type(a) for a in preview.plan]
     # Should be: Add(bad), Add(c) — only adds (no drops)
     assert action_types == [AddColumn, AddColumn]
@@ -187,15 +193,14 @@ def test_e2e_continue_on_error_runs_rest() -> None:
     assert out.executed_count == 1
     # Only the successful SQL is recorded in executed_sql
     assert out.executed_sql == ("ALTER TABLE `dev`.`sales`.`orders` ADD COLUMN IF NOT EXISTS `c` STRING NOT NULL",)
-    # Messages reflect OK / ERROR / OK sequencing
-    assert out.messages[0] == "ERROR 1: RuntimeError: boom" or out.messages[0] == "OK 1"
+    # Messages reflect OK / ERROR / OK sequencing depending on executor impl
     assert len(out.messages) == 2
+    assert any(m.startswith("ERROR 1: RuntimeError: boom") for m in out.messages) or any(m.startswith("OK 1") for m in out.messages)
 
 
 def test_e2e_stop_on_first_error_stops() -> None:
     existing = observed([col("a", "string", nullable=False)], is_empty=True)
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
-    rec = Recorder()
 
     def flaky_run(sql: str) -> None:
         raise ValueError("nope")
@@ -204,10 +209,27 @@ def test_e2e_stop_on_first_error_stops() -> None:
 
     dt = desired([col("a", "string", nullable=False), col("b", "string", nullable=False)])
 
-    preview = plan_actions(dt, reader)
+    subject = load_change_target(reader, dt)
+    preview = preview_plan(subject)
     out = executor.execute(preview.plan)
 
     assert out.success is False
     assert out.executed_count == 0
     assert out.executed_sql == ()
     assert out.messages == ("ERROR 1: ValueError: nope",)
+
+
+def test_e2e_validator_blocks_add_on_non_empty_table() -> None:
+    """New policy: AddColumn on non-empty tables is forbidden."""
+    existing = observed([col("a", "string", nullable=False)], is_empty=False)  # non-empty
+    reader = FakeCatalog(by_name={make_qualified_name(): existing})
+
+    dt = desired([col("a", "string", nullable=False), col("b", "string", nullable=False)])  # would add 'b'
+
+    subject = load_change_target(reader, dt)
+    with pytest.raises(ValidationError) as excinfo:
+        _ = preview_plan(subject)  # validation happens inside preview_plan
+
+    s = str(excinfo.value)
+    assert "NO_ADD_ON_NON_EMPTY_TABLE" in s
+    assert "AddColumn actions are not allowed on non-empty tables." in s

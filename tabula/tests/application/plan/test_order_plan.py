@@ -1,4 +1,4 @@
-from tabula.application.order_plan import order_plan
+from tabula.application.plan.order_plan import order_plan
 from tabula.domain.plan.actions import ActionPlan, Action, CreateTable, AddColumn, DropColumn
 from tabula.domain.model import Column
 from tabula.domain.model.data_type.types import integer

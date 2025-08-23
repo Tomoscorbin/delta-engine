@@ -39,11 +39,11 @@ def test_plan_preview_summary_text_sorted_and_formatted():
     assert preview.summary_text == "add_column=2 create_table=1 drop_column=3"
 
 
-def test_plan_preview_len_and_truthiness_follow_total_actions():
+def test_plan_preview_truthiness():
     p0 = PlanPreview(plan=make_plan_stub(), is_noop=True,  summary_counts={}, total_actions=0)
     p3 = PlanPreview(plan=make_plan_stub(), is_noop=False, summary_counts={}, total_actions=3)
-    assert len(p0) == 0 and bool(p0) is False
-    assert len(p3) == 3 and bool(p3) is True
+    assert bool(p0) is False
+    assert bool(p3) is True
 
 
 def test_plan_preview_is_frozen():
