@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 def normalize_identifier(value: object) -> str:
     """
     Normalize an identifier part (catalog/schema/name).

@@ -18,6 +18,7 @@ def col(name: str, *, dtype=None, is_nullable: bool = True) -> Column:
 # diff_columns_for_adds
 # ---------------------------
 
+
 def test_adds_when_desired_has_new_columns():
     desired = [col("a"), col("b"), col("d"), col("e")]
     observed = [col("a"), col("c"), col("e")]
@@ -48,6 +49,7 @@ def test_adds_when_observed_is_empty_adds_all_in_order():
 # diff_columns_for_drops
 # ---------------------------
 
+
 def test_drops_when_observed_has_extra_columns():
     desired = [col("a"), col("d")]
     observed = [col("b"), col("c"), col("a")]
@@ -72,13 +74,17 @@ def test_drops_ignore_type_or_nullability_differences():
 # diff_columns (combined)
 # ---------------------------
 
+
 def test_diff_columns_emits_adds_then_drops_in_that_order():
     desired = [col("a"), col("c"), col("d")]
     observed = [col("a"), col("b"), col("c")]
     actions = diff_columns(desired, observed)
     # Adds first (desired order), then drops (sorted by name)
     assert [type(a).__name__ for a in actions] == ["AddColumn", "DropColumn"]
-    assert [(getattr(a, "column", None) and a.column.name) or a.column_name for a in actions] == ["d", "b"]
+    assert [(getattr(a, "column", None) and a.column.name) or a.column_name for a in actions] == [
+        "d",
+        "b",
+    ]
 
 
 def test_diff_columns_returns_empty_tuple_when_sets_equal():

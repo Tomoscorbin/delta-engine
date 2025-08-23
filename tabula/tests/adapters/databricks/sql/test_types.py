@@ -14,6 +14,7 @@ from tabula.domain.model import DataType
 
 # ---------------- compiler mapping: primitives / happy paths ------------------
 
+
 @pytest.mark.parametrize(
     ("logical", "expected_sql"),
     [
@@ -41,8 +42,8 @@ def test_sql_type_for_data_type_decimal_precision_scale() -> None:
 
 
 def test_sql_type_for_data_type_decimal_precision_only_defaults_scale_zero() -> None:
-    assert sql_type_for_data_type(DataType("decimal", (9,0))) == "DECIMAL(9,0)"
-    assert sql_type_for_data_type(DataType("numeric", (12,0))) == "DECIMAL(12,0)"
+    assert sql_type_for_data_type(DataType("decimal", (9, 0))) == "DECIMAL(9,0)"
+    assert sql_type_for_data_type(DataType("numeric", (12, 0))) == "DECIMAL(12,0)"
 
 
 def test_sql_type_for_data_type_varchar_maps_to_string() -> None:
@@ -61,6 +62,7 @@ def test_sql_type_for_data_type_unsupported_raises_with_readable_spec() -> None:
 
 # ---------------- sql_type_for_column precedence / errors ---------------------
 
+
 def test_sql_type_for_column_prefers_pre_mapped_sql_type() -> None:
     col = SimpleNamespace(sql_type="DECIMAL(12,3)", data_type=DataType("integer"))
     assert sql_type_for_column(col) == "DECIMAL(12,3)"
@@ -78,6 +80,7 @@ def test_sql_type_for_column_missing_both_raises() -> None:
 
 
 # ---------------- UC reader (tolerant) ---------------------------------------
+
 
 @pytest.mark.parametrize(
     ("uc_text", "expected"),
@@ -116,6 +119,7 @@ def test_domain_type_from_uc_timestamp_ntz_with_precision_prefix_is_supported() 
 
 # ---------------- Spark reader (tolerant) ------------------------------------
 
+
 @pytest.mark.parametrize(
     ("spark_text", "expected"),
     [
@@ -124,7 +128,7 @@ def test_domain_type_from_uc_timestamp_ntz_with_precision_prefix_is_supported() 
         ("tinyint", DataType("tinyint")),
         ("byte", DataType("tinyint")),
         ("smallint", DataType("smallint")),
-        ("int", DataType("integer")),        # reader normalizes to 'integer'
+        ("int", DataType("integer")),  # reader normalizes to 'integer'
         ("integer", DataType("integer")),
         ("bigint", DataType("bigint")),
         ("float", DataType("float")),

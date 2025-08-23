@@ -2,9 +2,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+
 @dataclass(frozen=True, slots=True)
 class AnsiSqlDialect:
     """ANSI-ish SQL dialect: double-quoted identifiers, single-quoted literals."""
+
     identifier_separator: str = "."
 
     def quote_identifier(self, raw: str) -> str:
@@ -30,5 +32,6 @@ class AnsiSqlDialect:
         parts = [p for p in (catalog, schema, name) if p]
         quoted = [self.quote_identifier(p) for p in parts]
         return self.join_qualified_name(quoted)
+
 
 ANSI_SQL = AnsiSqlDialect()

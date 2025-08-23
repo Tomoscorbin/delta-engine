@@ -38,7 +38,7 @@ class TableSnapshot:
             if col.name.casefold() == target:
                 return col
         return None
-    
+
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):

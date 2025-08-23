@@ -30,7 +30,9 @@ def _make_preview(plan: ActionPlan) -> PlanPreview:
     )
 
 
-def preview_plan(subject: ChangeTarget, validator: PlanValidator = DEFAULT_VALIDATOR) -> PlanPreview:
+def preview_plan(
+    subject: ChangeTarget, validator: PlanValidator = DEFAULT_VALIDATOR
+) -> PlanPreview:
     plan = _compute_plan(subject)
     _validate_plan(plan, subject, validator)
     return _make_preview(plan)

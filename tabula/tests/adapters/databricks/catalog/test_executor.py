@@ -87,6 +87,7 @@ def test_empty_plan_is_noop(monkeypatch) -> None:
 
 def test_dialect_is_threaded_to_compiler_default(monkeypatch) -> None:
     seen = {}
+
     def _compile(plan, dialect=None):
         seen["dialect"] = dialect
         return ("ONLY",)
@@ -102,11 +103,13 @@ def test_dialect_is_threaded_to_compiler_default(monkeypatch) -> None:
 
 def test_dialect_is_threaded_to_compiler_override(monkeypatch) -> None:
     seen = {}
+
     def _compile(plan, dialect=None):
         seen["dialect"] = dialect
         return ("ONLY",)
 
     class _Dialect: ...
+
     d = _Dialect()
 
     monkeypatch.setattr(exec_mod, "compile_plan", _compile)

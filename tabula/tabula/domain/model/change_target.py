@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from tabula.domain.model.table import DesiredTable, ObservedTable, QualifiedName
 
+
 @dataclass(frozen=True, slots=True)
 class ChangeTarget:
     """
@@ -9,6 +10,7 @@ class ChangeTarget:
 
     observed may be None (table does not exist yet).
     """
+
     desired: DesiredTable
     observed: ObservedTable | None
 

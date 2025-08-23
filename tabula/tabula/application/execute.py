@@ -27,6 +27,7 @@ def execute_plan(preview: PlanPreview, executor: PlanExecutor) -> ExecutionResul
         executed_count=outcome.executed_count,
     )
 
+
 def plan_then_execute(
     desired_table: DesiredTable,
     reader: CatalogReader,

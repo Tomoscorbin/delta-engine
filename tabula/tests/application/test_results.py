@@ -11,12 +11,14 @@ from tabula.application.results import (
 
 # ---------- Helpers ----------
 
+
 def make_plan_stub():
     # ActionPlan is only a runtime hint; results.py doesn't introspect it.
     return SimpleNamespace(name="dummy-plan")
 
 
 # ---------- PlanPreview ----------
+
 
 def test_plan_preview_summary_text_empty():
     preview = PlanPreview(
@@ -40,7 +42,7 @@ def test_plan_preview_summary_text_sorted_and_formatted():
 
 
 def test_plan_preview_truthiness():
-    p0 = PlanPreview(plan=make_plan_stub(), is_noop=True,  summary_counts={}, total_actions=0)
+    p0 = PlanPreview(plan=make_plan_stub(), is_noop=True, summary_counts={}, total_actions=0)
     p3 = PlanPreview(plan=make_plan_stub(), is_noop=False, summary_counts={}, total_actions=3)
     assert bool(p0) is False
     assert bool(p3) is True
@@ -55,6 +57,7 @@ def test_plan_preview_is_frozen():
 
 
 # ---------- ExecutionOutcome ----------
+
 
 @pytest.mark.parametrize("success,expected_bool", [(True, True), (False, False)])
 def test_execution_outcome_truthiness(success, expected_bool):
@@ -74,9 +77,9 @@ def test_execution_outcome_coerces_sequences_to_tuples_and_is_immutable():
     sqls = ["SQL 1", "SQL 2"]
     outcome = ExecutionOutcome(
         success=True,
-        messages=msgs,          # list accepted, stored as tuple
+        messages=msgs,  # list accepted, stored as tuple
         executed_count=2,
-        executed_sql=sqls,      # list accepted, stored as tuple
+        executed_sql=sqls,  # list accepted, stored as tuple
     )
     # Stored as tuples
     assert outcome.messages == ("ok", "done")
@@ -95,10 +98,11 @@ def test_execution_outcome_is_frozen():
     with pytest.raises(FrozenInstanceError):
         outcome.executed_count = 5  # type: ignore[attr-defined]
     with pytest.raises(FrozenInstanceError):
-        outcome.messages = ("x",)   # type: ignore[attr-defined]
+        outcome.messages = ("x",)  # type: ignore[attr-defined]
 
 
 # ---------- ExecutionResult ----------
+
 
 def test_execution_result_defaults():
     result = ExecutionResult(plan=make_plan_stub())

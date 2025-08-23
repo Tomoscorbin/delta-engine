@@ -18,6 +18,7 @@ from tabula.adapters.databricks.sql.dialects import SqlDialect, SPARK_SQL
 @dataclass(frozen=True, slots=True)
 class CompileContext:
     """Execution context for compiling a plan to SQL."""
+
     full_table_name: str
     quote_identifier: Callable[[str], str]
 

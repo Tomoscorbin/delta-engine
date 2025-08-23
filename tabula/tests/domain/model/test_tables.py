@@ -51,7 +51,7 @@ def test_contains_with_column_is_name_based_and_case_insensitive(make_qn) -> Non
 
 
 def test_get_column_is_case_insensitive_and_returns_original_object(make_qn) -> None:
-    c_id = DummyColumn("ID")         # stored uppercase on purpose
+    c_id = DummyColumn("ID")  # stored uppercase on purpose
     c_nm = DummyColumn("name")
     ts = TableSnapshot(make_qn(), (c_id, c_nm))
 

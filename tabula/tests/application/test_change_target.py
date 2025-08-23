@@ -6,6 +6,7 @@ from tabula.domain.model.change_target import ChangeTarget
 
 class FakeCatalogReader:
     """Records calls and returns a preconfigured observed."""
+
     def __init__(self, observed):
         self._observed = observed
         self.calls: list[str] = []
@@ -17,12 +18,14 @@ class FakeCatalogReader:
 
 class FakeDesiredTable:
     """Minimal duck-typed desired with only the attribute we need."""
+
     def __init__(self, qualified_name: str):
         self.qualified_name = qualified_name
 
 
 class FakeObservedTable:
     """Minimal duck-typed observed with only the attributes ChangeTarget may touch."""
+
     def __init__(self, qualified_name: str, is_empty: bool = True):
         self.qualified_name = qualified_name
         self.is_empty = is_empty
@@ -48,7 +51,10 @@ def test_load_change_target_returns_change_target_with_expected_parts():
     assert subject.desired is desired
     assert subject.observed is observed
     # qualified_name should be the desired's name
-    assert str(subject.qualified_name) == "cat.schema.table" or subject.qualified_name == "cat.schema.table"
+    assert (
+        str(subject.qualified_name) == "cat.schema.table"
+        or subject.qualified_name == "cat.schema.table"
+    )
 
 
 def test_load_change_target_handles_table_absent_observed_none():

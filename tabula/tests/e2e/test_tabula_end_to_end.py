@@ -17,6 +17,7 @@ from tabula.domain.plan.actions import CreateTable, AddColumn, DropColumn
 
 # ---------- helpers -----------------------------------------------------------
 
+
 def make_qualified_name() -> QualifiedName:
     # Keep this consistent across tests to make exact SQL assertions stable.
     return QualifiedName("dev", "sales", "orders")
@@ -33,7 +34,9 @@ def desired(cols: list[Column]) -> DesiredTable:
 
 def observed(cols: list[Column], *, is_empty: bool = True) -> ObservedTable:
     # is_empty=True allows NOT NULL adds under typical safety rules.
-    return ObservedTable(qualified_name=make_qualified_name(), columns=tuple(cols), is_empty=is_empty)
+    return ObservedTable(
+        qualified_name=make_qualified_name(), columns=tuple(cols), is_empty=is_empty
+    )
 
 
 # Structural double for a catalog reader (what load_change_target expects)
@@ -55,6 +58,7 @@ class Recorder:
 
 
 # ---------- end-to-end tests --------------------------------------------------
+
 
 def test_e2e_create_then_execute_sql() -> None:
     reader = FakeCatalog(by_name={})
@@ -79,7 +83,7 @@ def test_e2e_create_then_execute_sql() -> None:
     expected = [
         "CREATE TABLE IF NOT EXISTS `dev`.`sales`.`orders` (`id` INT NOT NULL)",
     ]
-    assert rec.sql == expected                # what actually ran
+    assert rec.sql == expected  # what actually ran
     assert out.executed_sql == tuple(expected)  # what executor recorded
     assert out.executed_count == 1
     # Message format is adapter’s contract:
@@ -88,15 +92,21 @@ def test_e2e_create_then_execute_sql() -> None:
 
 def test_e2e_adds_preserve_spec_order_and_drop_then_execute_sql() -> None:
     # Existing table has columns a (keep) and OLD (drop after case-normalization)
-    existing = observed([col("a", "string", nullable=False), col("OLD", "string", nullable=True)], is_empty=True)
+    existing = observed(
+        [col("a", "string", nullable=False), col("OLD", "string", nullable=True)], is_empty=True
+    )
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
     rec = Recorder()
     executor = UCExecutor(run_sql=rec)
 
     # Desired spec order: a, b, c  (all NOT NULL to make SQL unambiguous)
-    dt = desired([col("a", "string", nullable=False),
-                  col("b", "string", nullable=False),
-                  col("c", "string", nullable=False)])
+    dt = desired(
+        [
+            col("a", "string", nullable=False),
+            col("b", "string", nullable=False),
+            col("c", "string", nullable=False),
+        ]
+    )
 
     subject = load_change_target(reader, dt)
     preview = preview_plan(subject)
@@ -121,7 +131,9 @@ def test_e2e_adds_preserve_spec_order_and_drop_then_execute_sql() -> None:
 
 
 def test_e2e_noop_when_observed_matches_desired() -> None:
-    existing = observed([col("id", "int", nullable=False), col("note", "string", nullable=True)], is_empty=False)
+    existing = observed(
+        [col("id", "int", nullable=False), col("note", "string", nullable=True)], is_empty=False
+    )
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
 
     dt = desired([col("id", "int", nullable=False), col("note", "string", nullable=True)])
@@ -176,9 +188,13 @@ def test_e2e_continue_on_error_runs_rest() -> None:
 
     executor = UCExecutor(run_sql=flaky_run, on_error="continue")
 
-    dt = desired([col("a", "string", nullable=False),
-                  col("bad", "string", nullable=False),
-                  col("c", "string", nullable=False)])
+    dt = desired(
+        [
+            col("a", "string", nullable=False),
+            col("bad", "string", nullable=False),
+            col("c", "string", nullable=False),
+        ]
+    )
 
     subject = load_change_target(reader, dt)
     preview = preview_plan(subject)
@@ -192,10 +208,14 @@ def test_e2e_continue_on_error_runs_rest() -> None:
     assert out.success is False
     assert out.executed_count == 1
     # Only the successful SQL is recorded in executed_sql
-    assert out.executed_sql == ("ALTER TABLE `dev`.`sales`.`orders` ADD COLUMN IF NOT EXISTS `c` STRING NOT NULL",)
+    assert out.executed_sql == (
+        "ALTER TABLE `dev`.`sales`.`orders` ADD COLUMN IF NOT EXISTS `c` STRING NOT NULL",
+    )
     # Messages reflect OK / ERROR / OK sequencing depending on executor impl
     assert len(out.messages) == 2
-    assert any(m.startswith("ERROR 1: RuntimeError: boom") for m in out.messages) or any(m.startswith("OK 1") for m in out.messages)
+    assert any(m.startswith("ERROR 1: RuntimeError: boom") for m in out.messages) or any(
+        m.startswith("OK 1") for m in out.messages
+    )
 
 
 def test_e2e_stop_on_first_error_stops() -> None:
@@ -224,7 +244,9 @@ def test_e2e_validator_blocks_add_on_non_empty_table() -> None:
     existing = observed([col("a", "string", nullable=False)], is_empty=False)  # non-empty
     reader = FakeCatalog(by_name={make_qualified_name(): existing})
 
-    dt = desired([col("a", "string", nullable=False), col("b", "string", nullable=False)])  # would add 'b'
+    dt = desired(
+        [col("a", "string", nullable=False), col("b", "string", nullable=False)]
+    )  # would add 'b'
 
     subject = load_change_target(reader, dt)
     with pytest.raises(ValidationError) as excinfo:

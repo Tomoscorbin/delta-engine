@@ -19,6 +19,7 @@ class UCReader:
     Public API:
       - fetch_state(...)
     """
+
     spark: SparkSession
 
     # ---- public API ---------------------------------------------------------

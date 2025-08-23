@@ -19,13 +19,13 @@ class QualifiedName:
 
     def __post_init__(self) -> None:
         self_catalog = normalize_identifier(self.catalog)
-        self_schema  = normalize_identifier(self.schema)
-        self_name    = normalize_identifier( self.name)
+        self_schema = normalize_identifier(self.schema)
+        self_name = normalize_identifier(self.name)
 
         # normalize case
         object.__setattr__(self, "catalog", self_catalog)
-        object.__setattr__(self, "schema",  self_schema)
-        object.__setattr__(self, "name",    self_name)
+        object.__setattr__(self, "schema", self_schema)
+        object.__setattr__(self, "name", self_name)
 
     @property
     def parts(self) -> tuple[str, str, str]:

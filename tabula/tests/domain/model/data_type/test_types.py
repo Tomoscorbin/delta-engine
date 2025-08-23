@@ -1,23 +1,33 @@
 import pytest
 from tabula.domain.model.data_type.types import (
-    bigint, integer, smallint, boolean, string, date, timestamp,
-    double, float32, float64, floating_point, decimal
+    bigint,
+    integer,
+    smallint,
+    boolean,
+    string,
+    date,
+    timestamp,
+    double,
+    float32,
+    float64,
+    floating_point,
+    decimal,
 )
 from tabula.domain.model import DataType
 
 
 def test_scalar_factories_return_expected_values():
     cases = [
-        (bigint,    "bigint"),
-        (integer,   "int"),
-        (smallint,  "smallint"),
-        (boolean,   "boolean"),
-        (string,    "string"),
-        (date,      "date"),
+        (bigint, "bigint"),
+        (integer, "int"),
+        (smallint, "smallint"),
+        (boolean, "boolean"),
+        (string, "string"),
+        (date, "date"),
         (timestamp, "timestamp"),
-        (double,    "double"),
-        (float32,   "float"),
-        (float64,   "double"),
+        (double, "double"),
+        (float32, "float"),
+        (float64, "double"),
     ]
     for factory, expected_name in cases:
         dt = factory()
@@ -42,11 +52,11 @@ def test_decimal_factory_value_semantics():
 
 def test_decimal_factory_invalid_inputs_raise():
     with pytest.raises(ValueError):
-        decimal(0, 0)          # precision must be > 0
+        decimal(0, 0)  # precision must be > 0
     with pytest.raises(ValueError):
-        decimal(10, 11)        # scale > precision not allowed
+        decimal(10, 11)  # scale > precision not allowed
     with pytest.raises(ValueError):
-        decimal(10, -1)        # negative scale not allowed
+        decimal(10, -1)  # negative scale not allowed
 
 
 def test_floating_point_accepts_only_32_or_64():

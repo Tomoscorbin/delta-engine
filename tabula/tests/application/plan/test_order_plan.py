@@ -4,12 +4,13 @@ from tabula.domain.model import Column
 from tabula.domain.model.data_type.types import integer
 
 
-
 def col(name: str) -> Column:
     return Column(name, integer())
 
+
 class UnknownAction(Action):
     """A new action type not covered by the ordering policy."""
+
     pass
 
 
@@ -45,7 +46,7 @@ def test_stable_within_phase_preserves_relative_order_of_adds(make_qn) -> None:
     plan = ActionPlan(
         make_qn(),
         actions=(
-            a2,                 # out of desired order
+            a2,  # out of desired order
             DropColumn("x"),
             a1,
             CreateTable((col("id"),)),

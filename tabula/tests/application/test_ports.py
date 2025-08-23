@@ -8,10 +8,12 @@ from tabula.domain.model import QualifiedName, ObservedTable
 
 # --- Positive conformance fakes ---
 
+
 class FakeReader:
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
         # return None (not found) to keep it side-effect free
         return None
+
 
 class FakeExecutor:
     def execute(self, plan: ActionPlan) -> ExecutionOutcome:
@@ -38,11 +40,14 @@ def test_fake_executor_conforms_and_returns_execution_outcome():
 
 # --- Negative conformance: missing methods are rejected ---
 
+
 class NoFetchState:
     pass
 
+
 class NoExecute:
     pass
+
 
 def test_objects_missing_required_methods_do_not_conform():
     assert not isinstance(NoFetchState(), CatalogReader)

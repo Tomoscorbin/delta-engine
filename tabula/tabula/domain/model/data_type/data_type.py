@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, TypeAlias
 
-from tabula.domain.model._identifiers import normalize_identifier  # ensure this does NOT import DataType
+from tabula.domain.model._identifiers import (
+    normalize_identifier,
+)  # ensure this does NOT import DataType
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +13,7 @@ class DataType:
     """
     Engine-agnostic logical type, e.g. 'decimal(18,2)', 'bigint', 'array(int)'.
     """
+
     name: str
     parameters: tuple[Param, ...] = ()
 
@@ -29,6 +32,7 @@ Param: TypeAlias = int | DataType
 
 
 # ---- Coercion & basic type validation (domain-specific, no imports) ----------
+
 
 def _coerce_params(raw: tuple[Param, ...] | object) -> tuple[Param, ...]:
     """
@@ -61,6 +65,7 @@ def register_type(name: str) -> Callable[[Validator], Validator]:
     def _decorator(fn: Validator) -> Validator:
         _VALIDATORS[name] = fn
         return fn
+
     return _decorator
 
 

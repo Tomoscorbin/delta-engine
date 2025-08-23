@@ -12,6 +12,7 @@ from tabula.adapters.databricks.sql.dialects.spark_sql import SPARK_SQL
 
 # ------------------------- minimal plan double -------------------------------
 
+
 @dataclass(frozen=True)
 class _QualifiedName:
     catalog: str | None
@@ -21,8 +22,8 @@ class _QualifiedName:
 
 class _Plan:
     def __init__(self, qualified_name: _QualifiedName, actions: tuple[object, ...]) -> None:
-       self.target = qualified_name
-       self.actions = actions
+        self.target = qualified_name
+        self.actions = actions
 
     def __iter__(self):
         return iter(self.actions)
@@ -35,6 +36,7 @@ def _column(name: str, is_nullable: bool) -> Column:
 
 
 # ------------------------------ tests ----------------------------------------
+
 
 def test_empty_plan_returns_empty_tuple() -> None:
     plan = _Plan(_QualifiedName("c", "s", "t"), actions=())
@@ -115,9 +117,11 @@ def test_compiler_uses_injected_dialect_for_fqn_and_identifiers(monkeypatch) -> 
     Prove we are not hard-wired to Spark: inject a fake ANSI-ish dialect and
     ensure both the table FQN and column identifiers follow that dialect.
     """
+
     class _AnsiLikeDialect:
         def quote_identifier(self, raw: str) -> str:
             return '"' + raw.replace('"', '""') + '"'
+
         def render_qualified_name(self, catalog, schema, name) -> str:
             parts = [p for p in (catalog, schema, name) if p]
             return ".".join(self.quote_identifier(p) for p in parts)
@@ -130,6 +134,4 @@ def test_compiler_uses_injected_dialect_for_fqn_and_identifiers(monkeypatch) -> 
 
     out = compile_mod.compile_plan(plan, dialect=_AnsiLikeDialect())
 
-    assert out == (
-        'ALTER TABLE "c"."s"."t" ADD COLUMN IF NOT EXISTS "weird""name" INT NOT NULL',
-    )
+    assert out == ('ALTER TABLE "c"."s"."t" ADD COLUMN IF NOT EXISTS "weird""name" INT NOT NULL',)

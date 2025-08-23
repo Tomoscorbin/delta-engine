@@ -5,8 +5,10 @@ import tabula.application.plan.plan as plan_mod
 
 # ---------- Tiny fakes ----------
 
+
 class FakeSubject:
     """Minimal ChangeTarget stub used by _compute_plan and preview_plan."""
+
     def __init__(self, observed, desired):
         self.observed = observed
         self.desired = desired
@@ -14,6 +16,7 @@ class FakeSubject:
 
 class FakePlan:
     """Minimal ActionPlan stub with just what's needed by helpers."""
+
     def __init__(self, n_actions: int, *, target: str = "cat.sch.tbl", counts: dict | None = None):
         self._n = n_actions
         self.target = target
@@ -30,6 +33,7 @@ class FakePlan:
 
 
 # ---------- _compute_plan ----------
+
 
 def test_compute_plan_delegates_to_diff(monkeypatch):
     calls = {}
@@ -48,6 +52,7 @@ def test_compute_plan_delegates_to_diff(monkeypatch):
 
 
 # ---------- _validate_plan ----------
+
 
 def test_validate_plan_builds_context_and_calls_validator(monkeypatch):
     seen = {}
@@ -82,6 +87,7 @@ def test_validate_plan_propagates_validation_error():
 
 # ---------- _make_preview ----------
 
+
 def test_make_preview_orders_and_summarises(monkeypatch):
     ordered_sentinel = "ORDERED_PLAN"
 
@@ -98,7 +104,7 @@ def test_make_preview_orders_and_summarises(monkeypatch):
     preview = plan_mod._make_preview(fake_plan)
 
     assert preview.plan == ordered_sentinel
-    assert preview.is_noop is False    # since bool(fake_plan) is True
+    assert preview.is_noop is False  # since bool(fake_plan) is True
     assert preview.summary_counts == {"AddColumn": 2, "DropColumn": 1}
     assert preview.total_actions == 3
 
@@ -116,6 +122,7 @@ def test_make_preview_handles_noop(monkeypatch):
 
 # ---------- preview_plan (end-to-end orchestration) ----------
 
+
 def test_preview_plan_pipeline(monkeypatch):
     calls = {"diff": None, "validate": 0, "order": None}
 
@@ -132,6 +139,7 @@ def test_preview_plan_pipeline(monkeypatch):
     class SpyValidator:
         def __init__(self):
             self.ctx = None
+
         def validate(self, ctx):
             self.ctx = ctx
             calls["validate"] += 1

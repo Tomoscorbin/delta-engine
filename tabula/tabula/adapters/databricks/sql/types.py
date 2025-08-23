@@ -21,10 +21,15 @@ _UC_SQL: Final[dict[str, str]] = {
     "variant": "VARIANT",
 }
 
-_DECIMAL_RE_UC: Final[re.Pattern[str]] = re.compile(r"^DECIMAL\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE)
-_DECIMAL_RE_SPARK: Final[re.Pattern[str]] = re.compile(r"^decimal\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE)
+_DECIMAL_RE_UC: Final[re.Pattern[str]] = re.compile(
+    r"^DECIMAL\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE
+)
+_DECIMAL_RE_SPARK: Final[re.Pattern[str]] = re.compile(
+    r"^decimal\((\d+)\s*,\s*(\d+)\)$", re.IGNORECASE
+)
 
 # ---------------- Compiler-facing ----------------
+
 
 def sql_type_for_column(column: Any) -> str:
     """
@@ -74,10 +79,13 @@ def sql_type_for_data_type(data_type: DataType) -> str:
     try:
         return _UC_SQL[name]
     except KeyError as exc:
-        raise ValueError(f"Unsupported data type for UC compiler: {_render_spec(data_type)}") from exc
+        raise ValueError(
+            f"Unsupported data type for UC compiler: {_render_spec(data_type)}"
+        ) from exc
 
 
 # ---------------- Readers (tolerant) ----------------
+
 
 def domain_type_from_uc(data_type_text: str) -> DataType:
     """

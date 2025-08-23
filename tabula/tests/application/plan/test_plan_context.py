@@ -10,6 +10,7 @@ class FakeChangeTarget:
 
 class FakePlan:
     """Minimal ActionPlan stub for PlanContext."""
+
     def __init__(self, target: str):
         self.target = target
 

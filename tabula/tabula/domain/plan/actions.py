@@ -43,7 +43,7 @@ class ActionPlan:
 
     def __bool__(self) -> bool:
         return bool(self.actions)
-    
+
     def __iter__(self):
         return iter(self.actions)
 
@@ -56,8 +56,7 @@ class ActionPlan:
         if not isinstance(action, Action):
             raise TypeError("action must be an Action")
         return ActionPlan(self.target, (*self.actions, action))
-    
+
     def count_by_action(self) -> Counter[type[Action]]:
         """Return a Counter keyed by Action subclass."""
         return Counter(type(a) for a in self.actions)
-

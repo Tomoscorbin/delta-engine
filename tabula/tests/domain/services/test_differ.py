@@ -8,7 +8,6 @@ from tabula.domain.model import Column, DesiredTable, ObservedTable
 from tabula.domain.model.data_type.types import integer
 
 
-
 def col(name: str, *, dt=integer(), is_nullable: bool = True) -> Column:
     return Column(name, dt, is_nullable=is_nullable)
 
@@ -16,6 +15,7 @@ def col(name: str, *, dt=integer(), is_nullable: bool = True) -> Column:
 # ---------------------------
 # observed is None -> CREATE TABLE with all desired columns
 # ---------------------------
+
 
 def test_when_observed_is_none_we_emit_single_create_with_original_columns(make_qn):
     desired = DesiredTable(make_qn(), (col("id"), col("name")))
@@ -38,6 +38,7 @@ def test_when_observed_is_none_we_emit_single_create_with_original_columns(make_
 # qualified name mismatch -> hard error
 # ---------------------------
 
+
 def test_mismatched_qualified_names_raise(make_qn):
     desired = DesiredTable(make_qn("c1", "s", "t"), (col("id"),))
     observed = ObservedTable(make_qn("c2", "s", "t"), (col("id"),), is_empty=False)
@@ -50,13 +51,16 @@ def test_mismatched_qualified_names_raise(make_qn):
 # only adds / only drops / both
 # ---------------------------
 
+
 def test_only_adds_are_emitted(make_qn):
     desired = DesiredTable(make_qn(), (col("a"), col("b")))
     observed = ObservedTable(make_qn(), (col("a"),), is_empty=False)
 
     plan = diff(observed, desired)
     kinds = tuple(type(a) for a in plan.actions)
-    names = tuple(getattr(a, "column", None).name if isinstance(a, AddColumn) else None for a in plan.actions)
+    names = tuple(
+        getattr(a, "column", None).name if isinstance(a, AddColumn) else None for a in plan.actions
+    )
 
     assert kinds == (AddColumn,)
     assert names == ("b",)
@@ -82,8 +86,7 @@ def test_adds_and_drops_both_emitted(make_qn):
     # Compare by payload, not order
     kinds = {type(a).__name__ for a in plan.actions}
     payloads = {
-        (a.column.name if isinstance(a, AddColumn) else a.column_name)
-        for a in plan.actions
+        (a.column.name if isinstance(a, AddColumn) else a.column_name) for a in plan.actions
     }
     assert kinds == {"AddColumn", "DropColumn"}
     assert payloads == {"c", "a"}
@@ -93,9 +96,12 @@ def test_adds_and_drops_both_emitted(make_qn):
 # equal sets (ignoring order) -> empty plan, falsy
 # ---------------------------
 
+
 def test_equal_column_sets_yield_empty_plan(make_qn):
     desired = DesiredTable(make_qn(), (col("a"), col("b")))
-    observed = ObservedTable(make_qn(), (col("b"), col("a")), is_empty=True)  # is_empty intentionally ignored
+    observed = ObservedTable(
+        make_qn(), (col("b"), col("a")), is_empty=True
+    )  # is_empty intentionally ignored
 
     plan = diff(observed, desired)
     assert len(plan) == 0
@@ -105,6 +111,7 @@ def test_equal_column_sets_yield_empty_plan(make_qn):
 # ---------------------------
 # case-insensitivity on names
 # ---------------------------
+
 
 def test_case_insensitive_names_do_not_trigger_changes(make_qn):
     desired = DesiredTable(make_qn(), (col("ID"),))

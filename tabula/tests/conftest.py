@@ -4,7 +4,7 @@ from tabula.domain.model import (
     Column,
     DataType,
     QualifiedName,
-    DesiredTable, 
+    DesiredTable,
     ObservedTable,
 )
 from tabula.domain.model.data_type.types import integer
@@ -12,6 +12,7 @@ from tabula.domain.model.data_type.types import integer
 
 # factory helpers
 from tabula.domain.model.qualified_name import QualifiedName
+
 
 @pytest.fixture
 def make_qn() -> Callable[[str, str, str], QualifiedName]:
@@ -21,6 +22,7 @@ def make_qn() -> Callable[[str, str, str], QualifiedName]:
         name: str = "tbl",
     ) -> QualifiedName:
         return QualifiedName(catalog, schema, name)
+
     return _make_qn
 
 
@@ -33,8 +35,4 @@ def desired(qualified_name: QualifiedName, *columns: Column) -> DesiredTable:
 
 
 def observed(qualified_name: QualifiedName, *columns: Column) -> ObservedTable:
-    return ObservedTable(
-        qualified_name=qualified_name, 
-        columns=tuple(columns),
-        is_empty= False
-    )
+    return ObservedTable(qualified_name=qualified_name, columns=tuple(columns), is_empty=False)

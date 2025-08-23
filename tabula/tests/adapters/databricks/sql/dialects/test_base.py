@@ -25,10 +25,13 @@ def test_custom_dialect_example_conforms_and_behaves() -> None:
     class AnsiLikeDialect:
         def quote_identifier(self, raw: str) -> str:
             return '"' + raw.replace('"', '""') + '"'
+
         def quote_literal(self, raw: str) -> str:
             return "'" + raw.replace("'", "''") + "'"
+
         def join_qualified_name(self, parts: list[str]) -> str:
             return ".".join(parts)
+
         def render_qualified_name(self, catalog: str | None, schema: str | None, name: str) -> str:
             parts = [p for p in (catalog, schema, name) if p]
             return self.join_qualified_name([self.quote_identifier(p) for p in parts])

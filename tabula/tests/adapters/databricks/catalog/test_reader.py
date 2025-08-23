@@ -9,6 +9,7 @@ from tabula.domain.model import Column, DataType
 
 # ---------- minimal QualifiedName double --------------------------------------
 
+
 @dataclass(frozen=True)
 class _QN:
     catalog: str | None
@@ -22,6 +23,7 @@ class _QN:
 
 
 # ---------- Spark stubs -------------------------------------------------------
+
 
 class _FakeCatalog:
     def __init__(self, exists: bool, columns: list[object]):
@@ -60,6 +62,7 @@ class _FakeSpark:
 
 # ---------- tests -------------------------------------------------------------
 
+
 def test_missing_table_returns_none_and_does_not_probe(monkeypatch) -> None:
     spark = _FakeSpark(exists=False, columns=[], is_empty=True)
     reader = UCReader(spark)
@@ -76,10 +79,11 @@ def test_missing_table_returns_none_and_does_not_probe(monkeypatch) -> None:
 def test_maps_columns_and_checks_empty(monkeypatch) -> None:
     # Patch the mapper at the module UCReader uses.
     from tabula.adapters.databricks.catalog import reader as reader_mod
+
     monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
     spark_cols = [
-        SimpleNamespace(name="id",   dataType="int",    nullable=False),
+        SimpleNamespace(name="id", dataType="int", nullable=False),
         SimpleNamespace(name="note", dataType="string", nullable=True),
     ]
     spark = _FakeSpark(exists=True, columns=spark_cols, is_empty=False)
@@ -92,7 +96,7 @@ def test_maps_columns_and_checks_empty(monkeypatch) -> None:
     assert observed.qualified_name is qn
     assert observed.is_empty is False
     assert observed.columns == (
-        Column(name="id", data_type=DataType("int"),    is_nullable=False),
+        Column(name="id", data_type=DataType("int"), is_nullable=False),
         Column(name="note", data_type=DataType("string"), is_nullable=True),
     )
     assert spark.catalog._last_exists_arg == "c.s.t"
@@ -102,6 +106,7 @@ def test_maps_columns_and_checks_empty(monkeypatch) -> None:
 
 def test_is_empty_true_path(monkeypatch) -> None:
     from tabula.adapters.databricks.catalog import reader as reader_mod
+
     monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
     spark_cols = [SimpleNamespace(name="x", dataType="string", nullable=True)]
@@ -135,6 +140,7 @@ def test_type_mapping_exception_bubbles(monkeypatch) -> None:
 
 def test_table_isEmpty_exception_bubbles(monkeypatch) -> None:
     from tabula.adapters.databricks.catalog import reader as reader_mod
+
     monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
     class _BoomSpark(_FakeSpark):
@@ -157,11 +163,12 @@ def test_table_isEmpty_exception_bubbles(monkeypatch) -> None:
 
 def test_listcolumns_iterable_supported_and_order_preserved(monkeypatch) -> None:
     from tabula.adapters.databricks.catalog import reader as reader_mod
+
     monkeypatch.setattr(reader_mod, "domain_type_from_spark", lambda dt: DataType(dt))
 
     # Supply columns in a specific order
     spark_cols = [
-        SimpleNamespace(name="b", dataType="int",    nullable=False),
+        SimpleNamespace(name="b", dataType="int", nullable=False),
         SimpleNamespace(name="a", dataType="string", nullable=True),
     ]
     spark = _FakeSpark(exists=True, columns=spark_cols, is_empty=False)
@@ -170,6 +177,6 @@ def test_listcolumns_iterable_supported_and_order_preserved(monkeypatch) -> None
     observed = reader.fetch_state(_QN("c", None, "t"))
     assert observed is not None
     assert observed.columns == (
-        Column(name="b", data_type=DataType("int"),    is_nullable=False),
+        Column(name="b", data_type=DataType("int"), is_nullable=False),
         Column(name="a", data_type=DataType("string"), is_nullable=True),
     )

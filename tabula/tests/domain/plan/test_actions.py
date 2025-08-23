@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from tabula.domain.plan.actions import (
-    Action, ActionPlan, AddColumn, CreateTable, DropColumn,
+    Action,
+    ActionPlan,
+    AddColumn,
+    CreateTable,
+    DropColumn,
 )
 from tabula.domain.model import Column, QualifiedName
 from tabula.domain.model.data_type.types import integer
@@ -12,6 +16,7 @@ from tabula.domain.model.data_type.types import integer
 # ---------------------------
 # Base / isinstance
 # ---------------------------
+
 
 def test_action_isinstance() -> None:
     a = AddColumn(Column("x", integer()))
@@ -25,6 +30,7 @@ def test_action_isinstance() -> None:
 # AddColumn
 # ---------------------------
 
+
 def test_addcolumn_normalizes_nested_column_name() -> None:
     a = AddColumn(Column("UserID", integer()))
     assert a.column.name == "userid"
@@ -34,14 +40,17 @@ def test_addcolumn_normalizes_nested_column_name() -> None:
 # DropColumn
 # ---------------------------
 
+
 def test_drop_column_name_normalized() -> None:
     d = DropColumn("UserID")
     assert d.column_name == "userid"
+
 
 @pytest.mark.parametrize("bad", ["", " ", " id", "id ", "first name", "user.id"])
 def test_drop_column_rejects_invalid_names(bad: str) -> None:
     with pytest.raises(ValueError):
         DropColumn(bad)
+
 
 def test_drop_column_rejects_non_string() -> None:
     with pytest.raises(TypeError):
@@ -52,12 +61,13 @@ def test_drop_column_rejects_non_string() -> None:
 # CreateTable (thin action: only shape enforced here)
 # ---------------------------
 
+
 def test_create_table_preserves_columns_order_and_identity() -> None:
     c1 = Column("A", integer())
     c2 = Column("B", integer())
     ct = CreateTable((c1, c2))
-    assert ct.columns == (c1, c2)           # order + identity preserved
-    assert ct.columns is not (c1, c2)       # different tuple object, but
+    assert ct.columns == (c1, c2)  # order + identity preserved
+    assert ct.columns is not (c1, c2)  # different tuple object, but
     assert ct.columns[0] is c1 and ct.columns[1] is c2
 
 
@@ -65,19 +75,23 @@ def test_create_table_preserves_columns_order_and_identity() -> None:
 # ActionPlan: container behavior
 # ---------------------------
 
+
 def make_qn(c: str = "c", s: str = "s", n: str = "t") -> QualifiedName:
     return QualifiedName(c, s, n)
+
 
 def test_len_empty_action_plan() -> None:
     plan = ActionPlan(make_qn())
     assert len(plan) == 0  # empty plan has no actions
 
+
 def test_container_truthiness_and_iteration() -> None:
     plan = ActionPlan(make_qn())
     assert not plan  # empty -> False
     plan2 = plan.add(AddColumn(Column("a", integer())))
-    assert plan2      # non-empty -> True
+    assert plan2  # non-empty -> True
     assert [type(a).__name__ for a in plan2] == ["AddColumn"]
+
 
 def test_action_plan_add_returns_new_instance_and_preserves_order() -> None:
     plan = ActionPlan(make_qn())
@@ -87,6 +101,7 @@ def test_action_plan_add_returns_new_instance_and_preserves_order() -> None:
     plan3 = plan2.add(a2)
     assert [a is b for a, b in zip(plan3, (a1, a2))] == [True, True]  # identity preserved
     assert plan is not plan2 and plan2 is not plan3  # immutability
+
 
 def test_action_plan_add_rejects_non_action() -> None:
     plan = ActionPlan(make_qn())
@@ -98,11 +113,13 @@ def test_action_plan_add_rejects_non_action() -> None:
 # ActionPlan: merge semantics
 # ---------------------------
 
+
 def test_extend_requires_same_target() -> None:
     p1 = ActionPlan(make_qn("c1", "s", "t"))
     p2 = ActionPlan(make_qn("c2", "s", "t"))
     with pytest.raises(ValueError):
         _ = p1 + p2
+
 
 def test_extend_with_same_target_concatenates_and_is_immutable() -> None:
     a1 = AddColumn(Column("a", integer()))
@@ -119,6 +136,7 @@ def test_extend_with_same_target_concatenates_and_is_immutable() -> None:
 # ---------------------------
 # ActionPlan: counting by type
 # ---------------------------
+
 
 def test_counts_by_action_type() -> None:
     plan = ActionPlan(make_qn())

@@ -10,7 +10,9 @@ class IdentityMismatch(RuntimeError):
 
 
 class ExecutionFailed(RuntimeError):
-    def __init__(self, *, qualified_name: str, messages: tuple[str, ...], executed_count: int = 0) -> None:
+    def __init__(
+        self, *, qualified_name: str, messages: tuple[str, ...], executed_count: int = 0
+    ) -> None:
         self.qualified_name = qualified_name
         self.messages = messages
         self.executed_count = executed_count
@@ -19,8 +21,10 @@ class ExecutionFailed(RuntimeError):
         msg = head if not messages else f"{head}: " + "; ".join(messages)
         super().__init__(msg)
 
+
 class ValidationError(Exception):
     """Raised when a plan violates a single validation rule."""
+
     __slots__ = ("code", "message", "target")
 
     def __init__(self, code: str, message: str, target) -> None:

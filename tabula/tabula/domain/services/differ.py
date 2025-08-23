@@ -5,7 +5,8 @@ from tabula.domain.model import DesiredTable, ObservedTable
 from tabula.domain.services.column_diff import diff_columns
 
 
-# TODO: create some class that holds both desried and observed 
+# TODO: create some class that holds both desried and observed
+
 
 def diff(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
     """
