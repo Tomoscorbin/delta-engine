@@ -1,4 +1,3 @@
-import pytest
 
 from tabula.application.plan.plan_context import PlanContext
 

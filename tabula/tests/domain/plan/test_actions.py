@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from tabula.domain.model import Column, QualifiedName
+from tabula.domain.model.data_type.types import integer
 from tabula.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -9,9 +11,6 @@ from tabula.domain.plan.actions import (
     CreateTable,
     DropColumn,
 )
-from tabula.domain.model import Column, QualifiedName
-from tabula.domain.model.data_type.types import integer
-
 
 # ---------------------------
 # Base / isinstance
@@ -99,7 +98,7 @@ def test_action_plan_add_returns_new_instance_and_preserves_order() -> None:
     a2 = AddColumn(Column("B", integer()))
     plan2 = plan.add(a1)
     plan3 = plan2.add(a2)
-    assert [a is b for a, b in zip(plan3, (a1, a2))] == [True, True]  # identity preserved
+    assert [a is b for a, b in zip(plan3, (a1, a2), strict=False)] == [True, True]
     assert plan is not plan2 and plan2 is not plan3  # immutability
 
 
@@ -130,7 +129,7 @@ def test_extend_with_same_target_concatenates_and_is_immutable() -> None:
     assert [type(a).__name__ for a in p3] == ["AddColumn", "AddColumn"]
     assert p3 is not p1 and p3 is not p2
     # ensure actions are the same objects (not copied/rewrapped)
-    assert [a is b for a, b in zip(p3, (a1, a2))] == [True, True]
+    assert [a is b for a, b in zip(p3, (a1, a2), strict=False)] == [True, True]
 
 
 # ---------------------------

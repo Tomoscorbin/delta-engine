@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from tabula.application.errors import ExecutionFailed
 from tabula.application.change_target import load_change_target
+from tabula.application.errors import ExecutionFailed
 from tabula.application.plan.plan import preview_plan
-from tabula.application.validation import PlanValidator, DEFAULT_VALIDATOR
 from tabula.application.ports import CatalogReader, PlanExecutor
 from tabula.application.results import ExecutionResult, PlanPreview
+from tabula.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from tabula.domain.model import DesiredTable
 
 

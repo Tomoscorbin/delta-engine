@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from tabula.domain.services.differ import diff
-from tabula.domain.plan.actions import ActionPlan, CreateTable, AddColumn, DropColumn
 from tabula.domain.model import Column, DesiredTable, ObservedTable
 from tabula.domain.model.data_type.types import integer
+from tabula.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
+from tabula.domain.services.differ import diff
 
 
-def col(name: str, *, dt=integer(), is_nullable: bool = True) -> Column:
-    return Column(name, dt, is_nullable=is_nullable)
+def col(name: str, *, dt=integer, is_nullable: bool = True) -> Column:
+    return Column(name, dt(), is_nullable=is_nullable)
 
 
 # ---------------------------

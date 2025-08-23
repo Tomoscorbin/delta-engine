@@ -1,8 +1,7 @@
 import pytest
 
-import tabula.application.validation as val_mod
 from tabula.application.plan.plan_context import PlanContext
-
+import tabula.application.validation as val_mod
 
 # ---- tiny stubs -------------------------------------------------------------
 

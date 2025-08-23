@@ -1,4 +1,5 @@
 import pytest
+
 from tabula.domain.model._identifiers import normalize_identifier
 
 

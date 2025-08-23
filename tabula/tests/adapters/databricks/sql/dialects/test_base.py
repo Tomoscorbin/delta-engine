@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-import pytest
-
 from tabula.adapters.databricks.sql.dialects import SqlDialect
 from tabula.adapters.databricks.sql.dialects.spark_sql import SPARK_SQL
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from tabula.application.results import ExecutionOutcome
-from tabula.domain.plan.actions import ActionPlan
 from tabula.domain.model import (
-    QualifiedName,
     ObservedTable,
+    QualifiedName,
 )
+from tabula.domain.plan.actions import ActionPlan
 
 
 @runtime_checkable

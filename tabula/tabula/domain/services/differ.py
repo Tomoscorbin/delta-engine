@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from tabula.domain.plan.actions import ActionPlan, CreateTable
 from tabula.domain.model import DesiredTable, ObservedTable
+from tabula.domain.plan.actions import ActionPlan, CreateTable
 from tabula.domain.services.column_diff import diff_columns
-
 
 # TODO: create some class that holds both desried and observed
 

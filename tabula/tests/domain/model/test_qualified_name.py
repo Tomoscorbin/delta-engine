@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import FrozenInstanceError
+
 import pytest
+
 from tabula.domain.model import QualifiedName
 
 
@@ -93,6 +96,6 @@ def test_parts_must_not_contain_dot(kwargs) -> None:
 
 def test_non_ascii_rejected() -> None:
     with pytest.raises(ValueError):
-        QualifiedName("c", "Satış", "n")  # non-ASCII 'ş'
+        QualifiedName("c", "Sat\u0131\u015F", "n")
     with pytest.raises(ValueError):
-        QualifiedName("KİTAB", "s", "n")  # 'İ'
+        QualifiedName("K\u0130TAB", "s", "n")

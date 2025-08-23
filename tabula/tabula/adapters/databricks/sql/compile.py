@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import singledispatch
-from typing import Callable
 
+from tabula.adapters.databricks.sql.dialects import SPARK_SQL, SqlDialect
+from tabula.adapters.databricks.sql.types import sql_type_for_data_type
 from tabula.domain.plan.actions import (
-    ActionPlan,
     Action,
-    CreateTable,
+    ActionPlan,
     AddColumn,
+    CreateTable,
     DropColumn,
 )
-from tabula.adapters.databricks.sql.types import sql_type_for_data_type
-from tabula.adapters.databricks.sql.dialects import SqlDialect, SPARK_SQL
 
 
 @dataclass(frozen=True, slots=True)

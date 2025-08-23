@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from tabula.application.ports import CatalogReader
-from tabula.domain.model import DesiredTable, ChangeTarget
+from tabula.domain.model import ChangeTarget, DesiredTable
 
 
 def load_change_target(reader: CatalogReader, desired_table: DesiredTable) -> ChangeTarget:

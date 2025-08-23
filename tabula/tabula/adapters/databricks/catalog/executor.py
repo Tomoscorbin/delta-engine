@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Literal, Sequence
+from typing import Literal
 
 from tabula.adapters.databricks.sql.compile import compile_plan
-from tabula.adapters.databricks.sql.dialects import SqlDialect, SPARK_SQL
+from tabula.adapters.databricks.sql.dialects import SPARK_SQL, SqlDialect
 from tabula.application.results import ExecutionOutcome
 from tabula.domain.plan.actions import ActionPlan
-
 
 RunSql = Callable[[str], None]
 OnError = Literal["stop", "continue"]

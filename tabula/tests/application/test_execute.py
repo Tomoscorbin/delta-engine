@@ -2,7 +2,6 @@ import pytest
 
 import tabula.application.execute as exec_mod
 
-
 # ---------- Tiny fakes / stubs ----------
 
 

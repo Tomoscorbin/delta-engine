@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Final, Any, Optional
+from typing import Any, Final
+
 from tabula.domain.model import DataType
 
 # --- UC engine tokens for the domain types we support ---

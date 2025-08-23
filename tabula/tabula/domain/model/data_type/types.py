@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from typing import Literal
+
 from tabula.domain.model.data_type.data_type import DataType
 
 # ---- Singleton instances

@@ -2,7 +2,6 @@ import pytest
 
 import tabula.application.plan.plan as plan_mod
 
-
 # ---------- Tiny fakes ----------
 
 

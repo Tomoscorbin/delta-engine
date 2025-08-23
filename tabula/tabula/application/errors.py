@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-class IdentityMismatch(RuntimeError):
+class IdentityMismatchError(RuntimeError):
     def __init__(self, *, expected: str, actual: str) -> None:
         self.expected = expected
         self.actual = actual
@@ -9,7 +9,7 @@ class IdentityMismatch(RuntimeError):
         super().__init__(msg)
 
 
-class ExecutionFailed(RuntimeError):
+class ExecutionFailedError(RuntimeError):
     def __init__(
         self, *, qualified_name: str, messages: tuple[str, ...], executed_count: int = 0
     ) -> None:

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from pyspark.sql import SparkSession
+
 from tabula.adapters.databricks.sql.types import domain_type_from_spark
 from tabula.domain.model import (
     Column,
-    QualifiedName,
     ObservedTable,
+    QualifiedName,
 )
-from tabula.domain.model.qualified_name import QualifiedName
 
 
 @dataclass(frozen=True, slots=True)

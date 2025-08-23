@@ -8,7 +8,6 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.12"
 
-
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
 pytest-cov = "^5.0"
@@ -20,39 +19,52 @@ pyspark = "^4.0.0"
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-
+# -------------------- Ruff (global) --------------------
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
-extend-exclude = [
-  ".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"
-]
+extend-exclude = [".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"]
+fix = true
+unsafe-fixes = false
 
+# Formatting (separate from lint fixes)
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 docstring-code-format = true
 
+# Lint selection (what to check)
 [tool.ruff.lint]
-# E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: ruff extras; TID: tidy-imports
-select = [
-    "E",    # pyflakes/pycodestyle
-    "F",    # pyflakes/pycodestyle
-    "N",    # pep8-naming
-    "I",    # isort
-    "UP",   # pyupgrade
-    "B",    # bugbear
-    "RUF",  # ruff extras
-    "TID"   # tidy-imports
-]
+# E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: extras; TID: tidy-imports
+select = ["E", "F", "N", "I", "UP", "B", "RUF", "TID"]
 ignore = [
-  "E203",  # allow slice spacing compatible with black/ruff-format
+  "E203",  # slice spacing (compatible with ruff-format/black)
   "E266",  # allow long inline comments
 ]
 
-[tool.ruff.lint.flake8-tidy-imports]
-ban-relative-imports = "all"  # enforces absolute imports (TID252)
+# Control what Ruff is allowed to AUTO-FIX when you pass --fix
+# (Everything else will still be reported, just not auto-fixed.)
+fixable = [
+  "I",        # import sorting/grouping
+  "UP",       # safe pyupgrade rewrites
+  "F401",     # remove unused imports
+  "RUF100",   # remove unused noqa comments
+  "RUF022",   # sort __all__
+  "B905",     # add strict= to zip()
+]
+# If you ever need to explicitly block a fixer, you can add:
+# unfixable = ["B", "TID"]
 
-# So tests can use short fixture names like qn(), col(), etc.
+# isort behavior for import sorting
+[tool.ruff.lint.isort]
+known-first-party = ["tabula"]
+force-sort-within-sections = true
+combine-as-imports = true
+
+# Tidy imports
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"  # enforce absolute imports (TID252)
+
+# Test file exceptions (short fixture names etc.)
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["N802", "N803", "N806"]

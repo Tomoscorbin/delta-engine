@@ -1,13 +1,12 @@
-import pytest
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 
-from tabula.application.results import (
-    PlanPreview,
-    ExecutionOutcome,
-    ExecutionResult,
-)
+import pytest
 
+from tabula.application.results import (
+    ExecutionOutcome,
+    PlanPreview,
+)
 
 # ---------- Helpers ----------
 
@@ -101,8 +100,4 @@ def test_execution_outcome_is_frozen():
         outcome.messages = ("x",)  # type: ignore[attr-defined]
 
 
-# ---------- ExecutionResult ----------
 
-
-def test_execution_result_defaults():
-    result = ExecutionResult(plan=make_plan_stub())

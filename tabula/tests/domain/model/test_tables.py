@@ -1,7 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass, FrozenInstanceError
+
+from dataclasses import FrozenInstanceError, dataclass
+
 import pytest
-from tabula.domain.model import TableSnapshot, DesiredTable, ObservedTable
+
+from tabula.domain.model import DesiredTable, ObservedTable, TableSnapshot
 
 
 @dataclass(frozen=True, slots=True)

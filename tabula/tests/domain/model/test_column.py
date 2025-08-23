@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+
 import pytest
 
 from tabula.domain.model import Column, DataType
-from tabula.domain.model.data_type.types import integer, string, decimal
+from tabula.domain.model.data_type.types import decimal, integer, string
 
 # ---------------------------
 # Construction & normalization

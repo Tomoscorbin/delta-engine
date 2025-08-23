@@ -1,19 +1,20 @@
 import pytest
+
+from tabula.domain.model import DataType
 from tabula.domain.model.data_type.types import (
     bigint,
-    integer,
-    smallint,
     boolean,
-    string,
     date,
-    timestamp,
+    decimal,
     double,
     float32,
     float64,
     floating_point,
-    decimal,
+    integer,
+    smallint,
+    string,
+    timestamp,
 )
-from tabula.domain.model import DataType
 
 
 def test_scalar_factories_return_expected_values():
@@ -68,5 +69,5 @@ def test_floating_point_accepts_only_32_or_64():
 
 
 def test_float_aliases_are_consistent():
-    # Ensure synonyms map to the same value (or same singleton if that’s intentional)
+    # Ensure synonyms map to the same value (or same singleton if that's intentional)
     assert float64() == double()

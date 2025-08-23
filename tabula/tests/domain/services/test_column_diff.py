@@ -1,13 +1,12 @@
-import pytest
 
-from tabula.domain.services.column_diff import (
-    diff_columns_for_adds,
-    diff_columns_for_drops,
-    diff_columns,
-)
-from tabula.domain.plan.actions import AddColumn, DropColumn
 from tabula.domain.model.column import Column
 from tabula.domain.model.data_type.types import integer, string
+from tabula.domain.plan.actions import AddColumn, DropColumn
+from tabula.domain.services.column_diff import (
+    diff_columns,
+    diff_columns_for_adds,
+    diff_columns_for_drops,
+)
 
 
 def col(name: str, *, dtype=None, is_nullable: bool = True) -> Column:

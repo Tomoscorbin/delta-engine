@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
 
+import pytest
+
 from tabula.adapters.databricks.sql.types import (
-    sql_type_for_data_type,
-    sql_type_for_column,
-    domain_type_from_uc,
     domain_type_from_spark,
+    domain_type_from_uc,
+    sql_type_for_column,
+    sql_type_for_data_type,
 )
 from tabula.domain.model import DataType
-
 
 # ---------------- compiler mapping: primitives / happy paths ------------------
 

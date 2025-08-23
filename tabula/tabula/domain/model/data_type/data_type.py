@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TypeAlias
 
 from tabula.domain.model._identifiers import (
     normalize_identifier,
@@ -28,7 +28,7 @@ class DataType:
 
 # ---- Type aliases (after the class so no quoted forward refs) -----------------
 
-Param: TypeAlias = int | DataType
+Param: type = int | DataType
 
 
 # ---- Coercion & basic type validation (domain-specific, no imports) ----------

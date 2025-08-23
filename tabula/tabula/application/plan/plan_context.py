@@ -1,5 +1,6 @@
-from tabula.domain.model import ChangeTarget, QualifiedName
 from dataclasses import dataclass
+
+from tabula.domain.model import ChangeTarget, QualifiedName
 from tabula.domain.plan.actions import ActionPlan
 
 

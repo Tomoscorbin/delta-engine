@@ -1,7 +1,7 @@
 from tabula.application.plan.order_plan import order_plan
-from tabula.domain.plan.actions import ActionPlan, Action, CreateTable, AddColumn, DropColumn
 from tabula.domain.model import Column
 from tabula.domain.model.data_type.types import integer
+from tabula.domain.plan.actions import Action, ActionPlan, AddColumn, CreateTable, DropColumn
 
 
 def col(name: str) -> Column:
@@ -53,10 +53,9 @@ def test_stable_within_phase_preserves_relative_order_of_adds(make_qn) -> None:
         ),
     )
     ordered = order_plan(plan)
-    # AddColumn phase comes after CreateTable, but within the phase original relative order (a2 then a1) is preserved
     assert kinds(ordered) == ["CreateTable", "AddColumn", "AddColumn", "DropColumn"]
     adds = [a for a in ordered.actions if isinstance(a, AddColumn)]
-    assert adds[0] is a2 and adds[1] is a1  # identity & relative order preserved
+    assert adds[0] is a2 and adds[1] is a1
 
 
 def test_unknown_actions_sink_to_end_preserving_their_order(make_qn) -> None:

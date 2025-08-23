@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 from dataclasses import FrozenInstanceError
+
 import pytest
+
 from tabula.domain.model.data_type.data_type import (
     DataType,
     _coerce_params,
     _validate_by_type,
     register_type,
 )
-
 
 # ---------------------------
 # Construction & normalization
@@ -171,7 +173,7 @@ def test_decimal_validator_happy():
 
 @pytest.mark.parametrize("params", [(18,), (18, 2, 3), ("18", "2"), (18, -1), (2, 10)])
 def test_decimal_validator_errors(params):
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         _validate_by_type("decimal", params)  # type: ignore[arg-type]
 
 

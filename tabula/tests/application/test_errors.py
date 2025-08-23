@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import pytest
 
 from tabula.application.errors import (
-    IdentityMismatch,
     ExecutionFailed,
+    IdentityMismatch,
     ValidationError,
 )
 

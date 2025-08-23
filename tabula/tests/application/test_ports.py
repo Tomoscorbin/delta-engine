@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from tabula.application.ports import CatalogReader, PlanExecutor
 from tabula.application.results import ExecutionOutcome
+from tabula.domain.model import ObservedTable, QualifiedName
 from tabula.domain.plan.actions import ActionPlan
-from tabula.domain.model import QualifiedName, ObservedTable
-
 
 # --- Positive conformance fakes ---
 

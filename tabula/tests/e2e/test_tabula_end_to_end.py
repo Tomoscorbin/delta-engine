@@ -1,19 +1,19 @@
-import pytest
 from dataclasses import dataclass
+
+import pytest
 
 from tabula.adapters.databricks.catalog.executor import UCExecutor
 from tabula.application.change_target import load_change_target
-from tabula.application.plan.plan import preview_plan
 from tabula.application.errors import ValidationError
+from tabula.application.plan.plan import preview_plan
 from tabula.domain.model import (
-    QualifiedName,
-    DesiredTable,
-    ObservedTable,
     Column,
     DataType,
+    DesiredTable,
+    ObservedTable,
+    QualifiedName,
 )
-from tabula.domain.plan.actions import CreateTable, AddColumn, DropColumn
-
+from tabula.domain.plan.actions import AddColumn, CreateTable, DropColumn
 
 # ---------- helpers -----------------------------------------------------------
 
@@ -86,7 +86,7 @@ def test_e2e_create_then_execute_sql() -> None:
     assert rec.sql == expected  # what actually ran
     assert out.executed_sql == tuple(expected)  # what executor recorded
     assert out.executed_count == 1
-    # Message format is adapter’s contract:
+    # Message format is adapter's contract:
     assert out.messages == ("OK 1",)
 
 

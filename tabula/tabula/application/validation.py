@@ -1,10 +1,11 @@
 from __future__ import annotations
-from typing import ClassVar
-from abc import ABC, abstractmethod
 
+from abc import ABC, abstractmethod
+from typing import ClassVar
+
+from tabula.application.errors import ValidationError
 from tabula.application.plan.plan_context import PlanContext
 from tabula.domain.plan.actions import AddColumn
-from tabula.application.errors import ValidationError
 
 
 class Rule(ABC):

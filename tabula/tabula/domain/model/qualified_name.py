@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 from tabula.domain.model._identifiers import normalize_identifier

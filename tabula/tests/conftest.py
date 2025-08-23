@@ -1,17 +1,15 @@
-from typing import Callable
+from collections.abc import Callable
+
 import pytest
+
 from tabula.domain.model import (
     Column,
     DataType,
-    QualifiedName,
     DesiredTable,
     ObservedTable,
+    QualifiedName,
 )
 from tabula.domain.model.data_type.types import integer
-
-
-# factory helpers
-from tabula.domain.model.qualified_name import QualifiedName
 
 
 @pytest.fixture

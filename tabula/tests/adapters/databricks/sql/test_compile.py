@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
+
 import pytest
 
 from tabula.adapters.databricks.sql import compile as compile_mod
-from tabula.domain.plan.actions import CreateTable, AddColumn, DropColumn
-from tabula.domain.model import Column, DataType
 from tabula.adapters.databricks.sql.dialects.spark_sql import SPARK_SQL
-
+from tabula.domain.model import Column, DataType
+from tabula.domain.plan.actions import AddColumn, CreateTable, DropColumn
 
 # ------------------------- minimal plan double -------------------------------
 

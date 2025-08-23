@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from dataclasses import replace
-from tabula.domain.plan.actions import ActionPlan, Action, CreateTable, AddColumn, DropColumn
+
+from tabula.domain.plan.actions import Action, ActionPlan, AddColumn, CreateTable, DropColumn
 
 
 # Single source of truth for order

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from tabula.domain.plan.actions import Action, AddColumn, DropColumn
 from tabula.domain.model import Column
+from tabula.domain.plan.actions import Action, AddColumn, DropColumn
 
 
 def diff_columns_for_adds(
@@ -25,7 +25,10 @@ def diff_columns_for_drops(
 
 
 def diff_columns(desired: Iterable[Column], observed: Iterable[Column]) -> tuple[Action, ...]:
-    """Compute add/drop actions only. Type/nullable changes are intentionally out-of-scope for now."""
+    """
+    Compute add/drop actions only. Type/nullable changes are
+    intentionally out-of-scope for now.
+    """
     adds = diff_columns_for_adds(desired, observed)
     drops = diff_columns_for_drops(desired, observed)
     return adds + drops
