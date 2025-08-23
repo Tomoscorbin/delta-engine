@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from tabula.application.change_target import load_change_target
-from tabula.application.errors import ExecutionFailed
+from tabula.application.errors import ExecutionFailedError
 from tabula.application.plan.plan import preview_plan
 from tabula.application.ports import CatalogReader, PlanExecutor
 from tabula.application.results import ExecutionResult, PlanPreview
@@ -22,12 +22,12 @@ def execute_plan(preview: PlanPreview, executor: PlanExecutor) -> ExecutionResul
         Result of the execution.
 
     Raises:
-        ExecutionFailed: If the executor reports failure.
+        ExecutionFailedError: If the executor reports failure.
     """
 
     outcome = executor.execute(preview.plan)
     if not outcome:
-        raise ExecutionFailed(
+        raise ExecutionFailedError(
             qualified_name=preview.plan.target,
             messages=outcome.messages,
             executed_count=outcome.executed_count,

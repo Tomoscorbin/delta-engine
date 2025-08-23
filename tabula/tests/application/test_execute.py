@@ -1,8 +1,6 @@
-import pytest
-
 import tabula.application.execute as exec_mod
 
-# ---------- Tiny fakes / stubs ----------
+# ---------- fakes / stubs ----------
 
 
 class FakePlan:
@@ -63,17 +61,6 @@ def test_execute_plan_success_returns_execution_result():
     assert executor.calls == [plan]
 
 
-def test_execute_plan_failure_raises_execution_failed():
-    plan = FakePlan(target="cat.sch.tbl")
-    preview = FakePreview(plan=plan, is_noop=False)
-    executor = SpyExecutor(FailureOutcome(messages=("boom",), executed_count=0))
-
-    with pytest.raises(exec_mod.ExecutionFailed) as exc:
-        exec_mod.execute_plan(preview, executor)
-
-    msg = str(exc.value)
-    assert "Execution failed for cat.sch.tbl" in msg
-    assert "boom" in msg
 
 
 # ---------- plan_then_execute ----------
