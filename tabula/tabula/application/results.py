@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Result objects returned by application orchestration."""
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -8,6 +10,15 @@ from tabula.domain.plan.actions import ActionPlan
 
 @dataclass(frozen=True, slots=True)
 class PlanPreview:
+    """Summary of a planned set of actions.
+
+    Attributes:
+        plan: Ordered action plan.
+        is_noop: Whether the plan has no actions.
+        summary_counts: Mapping of action type name to counts.
+        total_actions: Total number of actions.
+    """
+
     plan: ActionPlan
     is_noop: bool
     summary_counts: Mapping[str, int]
@@ -18,6 +29,8 @@ class PlanPreview:
 
     @property
     def summary_text(self) -> str:
+        """Human-readable summary of action counts."""
+
         if not self.summary_counts:
             return ""
         parts = [f"{k}={self.summary_counts[k]}" for k in sorted(self.summary_counts)]
@@ -26,6 +39,15 @@ class PlanPreview:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionOutcome:
+    """Outcome returned by a plan executor.
+
+    Attributes:
+        success: Whether execution completed without errors.
+        messages: Messages reported by the executor.
+        executed_count: Number of statements successfully executed.
+        executed_sql: SQL statements that were run.
+    """
+
     success: bool
     messages: tuple[str, ...] = ()
     executed_count: int = 0
@@ -41,6 +63,8 @@ class ExecutionOutcome:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionResult:
+    """Result returned by the ``plan_then_execute`` orchestration."""
+
     plan: ActionPlan
     messages: tuple[str, ...] = ()
     executed_count: int = 0

@@ -1,3 +1,5 @@
+"""Domain data type value object and helpers."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -10,8 +12,11 @@ from tabula.domain.model._identifiers import (
 
 @dataclass(frozen=True, slots=True)
 class DataType:
-    """
-    Engine-agnostic logical type, e.g. 'decimal(18,2)', 'bigint', 'array(int)'.
+    """Engine-agnostic logical type, e.g., ``decimal(18,2)`` or ``array(int)``.
+
+    Attributes:
+        name: Type name such as ``int`` or ``decimal``.
+        parameters: Optional type parameters.
     """
 
     name: str
@@ -35,12 +40,18 @@ Param: type = int | DataType
 
 
 def _coerce_params(raw: tuple[Param, ...] | object) -> tuple[Param, ...]:
+    """Normalize a parameter iterable.
+
+    Args:
+        raw: Iterable of parameters or a tuple of them.
+
+    Returns:
+        Tuple of parameters.
+
+    Raises:
+        TypeError: If ``raw`` is not iterable.
     """
-    Normalize 'raw' to a tuple[Param, ...].
-    - tuple -> returned as-is
-    - iterable -> tuple(iterable)
-    - None or non-iterable -> TypeError
-    """
+
     if isinstance(raw, tuple):
         return raw
     try:
@@ -51,7 +62,8 @@ def _coerce_params(raw: tuple[Param, ...] | object) -> tuple[Param, ...]:
 
 
 def _is_datatype_like(x: object) -> bool:
-    # Structural check so helpers remain independent of import order.
+    """Return ``True`` if ``x`` has ``name`` and ``parameters`` attributes."""
+
     return hasattr(x, "name") and hasattr(x, "parameters")
 
 
@@ -62,6 +74,8 @@ _VALIDATORS: dict[str, Validator] = {}
 
 
 def register_type(name: str) -> Callable[[Validator], Validator]:
+    """Register a validator function for a type name."""
+
     def _decorator(fn: Validator) -> Validator:
         _VALIDATORS[name] = fn
         return fn
@@ -70,6 +84,8 @@ def register_type(name: str) -> Callable[[Validator], Validator]:
 
 
 def _validate_by_type(name: str, params: tuple[Param, ...]) -> None:
+    """Run a registered validator for ``name`` if one exists."""
+
     validator = _VALIDATORS.get(name)
     if validator:
         validator(params)

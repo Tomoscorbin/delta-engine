@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+"""Domain representation of schema change actions."""
+
 from collections import Counter
 from dataclasses import dataclass
 from typing import Self
 
-from tabula.domain.model import (
-    Column,
-    QualifiedName,
-)
+from tabula.domain.model import Column, QualifiedName
 from tabula.domain.model._identifiers import normalize_identifier
 
 
@@ -17,16 +16,22 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
+    """Create a new table with the specified columns."""
+
     columns: tuple[Column, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class AddColumn(Action):
+    """Add a column to an existing table."""
+
     column: Column
 
 
 @dataclass(frozen=True, slots=True)
 class DropColumn(Action):
+    """Remove a column from a table."""
+
     column_name: str
 
     def __post_init__(self) -> None:
@@ -36,6 +41,8 @@ class DropColumn(Action):
 
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
+    """Collection of actions targeting a single qualified name."""
+
     target: QualifiedName
     actions: tuple[Action, ...] = ()
 
@@ -59,5 +66,6 @@ class ActionPlan:
         return ActionPlan(self.target, (*self.actions, action))
 
     def count_by_action(self) -> Counter[type[Action]]:
-        """Return a Counter keyed by Action subclass."""
+        """Return a counter keyed by action subclass."""
+
         return Counter(type(a) for a in self.actions)

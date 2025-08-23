@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Mapping between domain data types and Databricks/Spark SQL types."""
+
 import re
 from typing import Any, Final
 
@@ -33,12 +35,18 @@ _DECIMAL_RE_SPARK: Final[re.Pattern[str]] = re.compile(
 
 
 def sql_type_for_column(column: Any) -> str:
+    """Return the engine-specific SQL type for a column.
+
+    Args:
+        column: Object with ``sql_type`` or ``data_type`` attributes.
+
+    Returns:
+        SQL type token understood by Databricks.
+
+    Raises:
+        ValueError: If neither ``sql_type`` nor ``data_type`` is present.
     """
-    Prefer a precomputed engine type on the column, else map its domain data_type.
-    Expects:
-      - column.sql_type: Optional[str]      # e.g., "STRING", "DECIMAL(10,2)"
-      - column.data_type: DataType
-    """
+
     pre = getattr(column, "sql_type", None)
     if pre:
         return pre
@@ -49,7 +57,7 @@ def sql_type_for_column(column: Any) -> str:
 
 
 def _render_spec(dt: DataType) -> str:
-    """Best-effort 'name(params)' for readable error messages."""
+    """Return a human-readable ``name(params)`` representation."""
     if not dt.parameters:
         return dt.name
     parts: list[str] = []
@@ -59,9 +67,18 @@ def _render_spec(dt: DataType) -> str:
 
 
 def sql_type_for_data_type(data_type: DataType) -> str:
-    """
-    Map a domain DataType to a UC SQL type (STRICT).
-    Only MVP scalar types + DECIMAL + VARCHAR are accepted.
+    """Map a domain data type to a Unity Catalog SQL type.
+
+    Only scalar types plus DECIMAL and VARCHAR are accepted.
+
+    Args:
+        data_type: Domain ``DataType`` instance.
+
+    Returns:
+        SQL type token.
+
+    Raises:
+        ValueError: If the data type is unsupported or invalid.
     """
     name = data_type.name
 
@@ -89,9 +106,13 @@ def sql_type_for_data_type(data_type: DataType) -> str:
 
 
 def domain_type_from_uc(data_type_text: str) -> DataType:
-    """
-    Map UC information_schema 'data_type' to a domain DataType (TOLERANT).
-    Keeps complex/unknown types observable (compiler/validator will restrict usage).
+    """Convert Unity Catalog ``data_type`` text to a domain type.
+
+    Args:
+        data_type_text: Value from information_schema.
+
+    Returns:
+        Corresponding ``DataType`` instance.
     """
     text = data_type_text.strip().upper()
 
@@ -133,9 +154,13 @@ def domain_type_from_uc(data_type_text: str) -> DataType:
 
 
 def domain_type_from_spark(data_type_text: str) -> DataType:
-    """
-    Map Spark catalog 'dataType' strings to a domain DataType (TOLERANT).
-    Examples: 'int', 'string', 'double', 'decimal(10,2)', 'array<int>', ...
+    """Convert Spark ``dataType`` strings to a domain type.
+
+    Args:
+        data_type_text: Raw type string from Spark.
+
+    Returns:
+        Corresponding ``DataType`` instance.
     """
     text = data_type_text.strip().lower()
 

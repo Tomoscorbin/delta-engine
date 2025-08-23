@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Utilities for ordering action plans."""
+
 from dataclasses import replace
 
 from tabula.domain.plan.actions import Action, ActionPlan, AddColumn, CreateTable, DropColumn
@@ -19,7 +21,15 @@ def _phase_rank(a: Action) -> int:
 
 
 def order_plan(plan: ActionPlan) -> ActionPlan:
-    """Return a new ActionPlan ordered by _PHASE_RANK."""
+    """Return a new plan ordered by execution phase.
+
+    Args:
+        plan: Plan to reorder.
+
+    Returns:
+        New ``ActionPlan`` with actions sorted for safe execution.
+    """
+
     if not plan:
         return plan
     ordered = tuple(sorted(plan, key=_phase_rank))

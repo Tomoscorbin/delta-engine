@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+"""Utilities for diffing table schemas."""
+
 from tabula.domain.model import DesiredTable, ObservedTable
 from tabula.domain.plan.actions import ActionPlan, CreateTable
 from tabula.domain.services.column_diff import diff_columns
 
-# TODO: create some class that holds both desried and observed
-
 
 def diff(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
-    """
-    Produce an ActionPlan to move the observed table to the desired schema.
+    """Compute the actions required to reach the desired schema.
 
-    Rules:
-      - If observed is None: create the table with all desired columns.
-      - If qualified names differ: hard error.
-      - Otherwise: only column adds/drops (type/nullability diffs are ignored here).
+    Args:
+        observed: Current table definition or ``None`` if the table is missing.
+        desired: Desired table definition.
+
+    Returns:
+        Action plan describing the necessary changes.
+
+    Raises:
+        ValueError: If the qualified names of ``observed`` and ``desired`` differ.
     """
+
     if observed is None:
         return ActionPlan(desired.qualified_name, (CreateTable(columns=desired.columns),))
 

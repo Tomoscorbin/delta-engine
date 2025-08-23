@@ -1,31 +1,34 @@
 from __future__ import annotations
 
+"""Reader adapter for Databricks Unity Catalog."""
+
 from dataclasses import dataclass
 
 from pyspark.sql import SparkSession
 
 from tabula.adapters.databricks.sql.types import domain_type_from_spark
-from tabula.domain.model import (
-    Column,
-    ObservedTable,
-    QualifiedName,
-)
+from tabula.domain.model import Column, ObservedTable, QualifiedName
 
 
 @dataclass(frozen=True, slots=True)
 class UCReader:
-    """
-    Unity Catalog reader for Databricks.
+    """Unity Catalog reader for Databricks.
 
-    Public API:
-      - fetch_state(...)
+    Attributes:
+        spark: Active Spark session connected to Databricks.
     """
 
     spark: SparkSession
 
-    # ---- public API ---------------------------------------------------------
-
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
+        """Return catalog information for the given table.
+
+        Args:
+            qualified_name: Fully qualified table name.
+
+        Returns:
+            Observed table information or ``None`` if the table does not exist.
+        """
         if not self._table_exists(qualified_name):
             return None
 

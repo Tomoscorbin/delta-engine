@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Domain model for table columns."""
+
 from dataclasses import dataclass
 
 from tabula.domain.model._identifiers import normalize_identifier
@@ -8,12 +10,12 @@ from tabula.domain.model.data_type.data_type import DataType
 
 @dataclass(frozen=True, slots=True)
 class Column:
-    """
-    Immutable, case-insensitive column definition.
+    """Immutable, case-insensitive column definition.
 
-    - `name` is normalized by `normalize_identifier` (ASCII-only, no whitespace/dot, lowercased)
-    - `data_type` is a DataType value object
-    - `is_nullable` defaults to True
+    Attributes:
+        name: Column name (normalized to lowercase).
+        data_type: Logical data type of the column.
+        is_nullable: Whether the column accepts ``NULL`` values.
     """
 
     name: str

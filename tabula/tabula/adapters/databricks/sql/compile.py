@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compile action plans into SQL statements for Databricks."""
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import singledispatch
@@ -17,23 +19,34 @@ from tabula.domain.plan.actions import (
 
 @dataclass(frozen=True, slots=True)
 class CompileContext:
-    """Execution context for compiling a plan to SQL."""
+    """Execution context for plan compilation.
+
+    Attributes:
+        full_table_name: Fully qualified table name.
+        quote_identifier: Function that quotes an identifier for the dialect.
+    """
 
     full_table_name: str
     quote_identifier: Callable[[str], str]
 
 
 def compile_plan(plan: ActionPlan, *, dialect: SqlDialect = SPARK_SQL) -> tuple[str, ...]:
+    """Compile an action plan into SQL statements.
+
+    Args:
+        plan: Ordered actions to convert into SQL.
+        dialect: SQL dialect used for rendering.
+
+    Returns:
+        Tuple of SQL statements corresponding to the actions.
     """
-    Compile an ActionPlan into ordered SQL statements for the given dialect.
-    1 action -> 1 statement.
-    """
+
     context = _make_context(plan, dialect)
     return tuple(compile_action(action, context) for action in plan)
 
 
 def _make_context(plan: ActionPlan, dialect: SqlDialect) -> CompileContext:
-    """Precompute the pieces we need."""
+    """Precompute compilation context for the plan."""
     qualified_name = plan.target
     sql_table_name = dialect.render_qualified_name(
         qualified_name.catalog,
@@ -48,7 +61,16 @@ def _make_context(plan: ActionPlan, dialect: SqlDialect) -> CompileContext:
 
 @singledispatch
 def compile_action(action: Action, context: CompileContext) -> str:
-    """Dispatch by action type; adapter-only logic lives here."""
+    """Dispatch to action-specific SQL compiler.
+
+    Args:
+        action: The action to render.
+        context: Compilation context containing helpers.
+
+    Returns:
+        SQL statement for the given action.
+    """
+
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
 
@@ -71,10 +93,16 @@ def _(action: DropColumn, context: CompileContext) -> str:
 
 
 def _column_definition(column, context: CompileContext) -> str:
+    """Render a column definition fragment.
+
+    Args:
+        column: Column definition object.
+        context: Active compilation context.
+
+    Returns:
+        SQL fragment describing the column.
     """
-    Render `<quoted_name> <engine_type> [NULL|NOT NULL]`.
-    Dialect influence is hidden behind the context.
-    """
+
     name_sql = context.quote_identifier(column.name)
     type_sql = sql_type_for_data_type(column.data_type)
     nullability = "NULL" if getattr(column, "is_nullable", True) else "NOT NULL"
