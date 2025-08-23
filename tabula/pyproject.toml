@@ -27,13 +27,11 @@ extend-exclude = [".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"
 fix = true
 unsafe-fixes = false
 
-# Formatting (separate from lint fixes)
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 docstring-code-format = true
 
-# Lint selection (what to check)
 [tool.ruff.lint]
 # E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: extras; TID: tidy-imports
 select = ["E", "F", "N", "I", "UP", "B", "RUF", "TID", "D"]
@@ -44,8 +42,7 @@ ignore = [
   "D107",  # don't require docstrings on __init__ methods
 ]
 
-# Control what Ruff is allowed to AUTO-FIX when you pass --fix
-# (Everything else will still be reported, just not auto-fixed.)
+# Control what Ruff is allowed to AUTO-FIX when passed --fix
 fixable = [
   "I",        # import sorting/grouping
   "UP",       # safe pyupgrade rewrites

@@ -1,3 +1,5 @@
+"""Convenience exports for key domain model classes and factories."""
+
 from tabula.domain.model.change_target import ChangeTarget
 from tabula.domain.model.column import Column
 from tabula.domain.model.data_type.data_type import DataType
@@ -39,3 +41,4 @@ __all__ = [
     "string",
     "timestamp",
 ]
+

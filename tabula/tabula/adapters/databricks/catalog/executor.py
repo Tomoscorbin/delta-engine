@@ -1,3 +1,5 @@
+"""Execution adapter for Databricks Unity Catalog."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -15,14 +17,13 @@ OnError = Literal["stop", "continue"]
 
 @dataclass(frozen=True, slots=True)
 class UCExecutor:
-    """
-    Minimal executor: compile -> run sequentially.
+    """Compile an action plan to SQL and execute statements sequentially.
 
-    - on_error:
-        'stop'     -> stop at first error (default)
-        'continue' -> attempt all statements; success=False if any failed
-    - dry_run: do not execute, just echo would-be SQL statements
-    - dialect: SQL dialect for compilation (defaults to Spark/Databricks)
+    Attributes:
+        run_sql: Callable used to execute a single SQL statement.
+        on_error: Policy for error handling ("stop" or "continue").
+        dry_run: If True, log statements without executing them.
+        dialect: SQL dialect used during compilation.
     """
 
     run_sql: RunSql
@@ -31,6 +32,15 @@ class UCExecutor:
     dialect: SqlDialect = SPARK_SQL
 
     def execute(self, plan: ActionPlan) -> ExecutionOutcome:
+        """Compile and run the given action plan.
+
+        Args:
+            plan: Ordered actions to perform.
+
+        Returns:
+            Outcome of the execution including messages and executed SQL.
+        """
+
         statements: Sequence[str] = compile_plan(plan, dialect=self.dialect)
 
         executed_sql: list[str] = []

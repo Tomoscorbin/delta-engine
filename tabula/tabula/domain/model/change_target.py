@@ -1,3 +1,5 @@
+"""Domain model representing a table change target."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,10 +9,11 @@ from tabula.domain.model.table import DesiredTable, ObservedTable, QualifiedName
 
 @dataclass(frozen=True, slots=True)
 class ChangeTarget:
-    """
-    One logical table to be changed: current (observed) -> desired.
+    """Represents a desired table alongside its current observed state.
 
-    observed may be None (table does not exist yet).
+    Attributes:
+        desired: Desired table definition.
+        observed: Observed table state or ``None`` if the table does not exist.
     """
 
     desired: DesiredTable
@@ -22,12 +25,18 @@ class ChangeTarget:
 
     @property
     def qualified_name(self) -> QualifiedName:
+        """Fully qualified name of the target table."""
+
         return self.desired.qualified_name
 
     @property
     def is_new(self) -> bool:
+        """Return ``True`` if the table does not currently exist."""
+
         return self.observed is None
 
     @property
     def is_existing_and_non_empty(self) -> bool:
+        """Return ``True`` if the table exists and has data."""
+
         return bool(self.observed and not self.observed.is_empty)

@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+"""Identifier normalization helpers."""
+
 
 def normalize_identifier(value: object) -> str:
-    """
-    Normalize an identifier part (catalog/schema/name).
+    """Normalize an identifier part such as catalog, schema, or table name.
 
-    Policy: ASCII-only. No whitespace, no dots. Case-insensitive via lower().
+    Args:
+        value: Raw identifier value.
+
+    Returns:
+        Normalized identifier in lowercase.
 
     Raises:
-      TypeError  - if value is not str
-      ValueError - if empty, has leading/trailing/internal whitespace, contains '.', or non-ASCII
+        TypeError: If ``value`` is not a string.
+        ValueError: If the identifier is empty, contains whitespace or dots,
+            or is not ASCII.
     """
+
     if not isinstance(value, str):
         raise TypeError(f"identifier must be str, got {type(value).__name__}")
     if value == "":

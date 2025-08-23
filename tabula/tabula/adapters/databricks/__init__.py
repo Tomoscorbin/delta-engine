@@ -1,0 +1,1 @@
+"""Databricks-specific adapter implementations."""
