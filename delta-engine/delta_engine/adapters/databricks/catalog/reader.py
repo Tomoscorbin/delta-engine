@@ -46,10 +46,10 @@ class DatabricksReader:
     # ---- private helpers ----------------------------------------------------
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
-        return self.spark.catalog.tableExists(qualified_name.dotted)
+        return self.spark.catalog.tableExists(str(qualified_name))
 
-    def _list_columns(self, dotted_name: str) -> tuple[Column, ...]:
-        cols = self.spark.catalog.listColumns(dotted_name)
+    def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
+        cols = self.spark.catalog.listColumns(str(qualified_name))
         out: list[Column] = []
         for c in cols:
             # c.dataType can be a string ("bigint") or a Spark DataType object.
@@ -66,4 +66,4 @@ class DatabricksReader:
         return tuple(out)
 
     def _is_table_empty(self, qualified_name: QualifiedName) -> bool:
-        return self.spark.table(qualified_name.dotted).isEmpty()
+        return self.spark.table(str(qualified_name)).isEmpty()

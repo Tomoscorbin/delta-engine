@@ -74,7 +74,7 @@ class Engine:
         """Run validation for every context, collect all failures by table name."""
         failures: dict[str, tuple[ValidationFailure, ...]] = {}
         for name, ctx in contexts.items():
-            table_failures = self.validator.evaluate(ctx)
+            table_failures = self.validator.validate(ctx)
             if table_failures:
                 failures[name] = table_failures
         return failures

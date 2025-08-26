@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Callable, Iterable, Any, runtime_checkable
 
 from delta_engine.application.results import ExecutionReport
 from delta_engine.domain.model import (
@@ -27,3 +27,17 @@ class PlanExecutor(Protocol):
     def execute(self, plan: ActionPlan) -> ExecutionReport:
         """Run the plan and return the execution outcome."""
         ...
+
+
+@runtime_checkable
+class TableObject(Protocol):
+    catalog: str | None
+    schema: str | None
+    name: str
+    columns: Iterable[Any]
+
+@runtime_checkable
+class ColumnObject(Protocol):
+    name: str
+    data_type: Any
+    is_nullable: bool

@@ -19,7 +19,7 @@ class PlanContext:
     plan: ActionPlan
 
 
-def compute_plan(*, observed, desired) -> ActionPlan:
+def compute_plan(observed, desired) -> ActionPlan:
     """Create a sorted ActionPlan from observed/desired."""
     unsorted_plan = diff_tables(desired=desired, observed=observed)
     sorted_actions = tuple(sorted(unsorted_plan.actions, key=action_sort_key))
