@@ -10,4 +10,3 @@ class DeltaTable:
     schema: str
     name: str
     columns: Sequence[Column]
-    comment: str | None = None
