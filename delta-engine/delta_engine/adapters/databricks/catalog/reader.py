@@ -10,7 +10,7 @@ from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True) #TODO: this shouldnt be a dataclass
 class DatabricksReader:
     """Unity Catalog reader for Databricks.
 
