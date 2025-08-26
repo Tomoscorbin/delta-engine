@@ -1,66 +1,57 @@
-"""Result objects returned by application orchestration."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from tabula.domain.plan.actions import ActionPlan
+from tabula.application.validation import ValidationFailure
+from tabula.domain.plan import ActionPlan
 
 
 @dataclass(frozen=True, slots=True)
 class PlanPreview:
-    """Summary of a planned set of actions.
-
-    Attributes:
-        plan: Ordered action plan.
-        is_noop: Whether the plan has no actions.
-        summary_counts: Mapping of action type name to counts.
-        total_actions: Total number of actions.
-    """
+    """Per-table, ordered plan summary (also carries validation failures)."""
 
     plan: ActionPlan
     is_noop: bool
     summary_counts: Mapping[str, int]
     total_actions: int
-
-    def __bool__(self) -> int:
-        return not self.is_noop
+    failures: tuple[ValidationFailure, ...] = ()
 
     @property
-    def summary_text(self) -> str:
-        """Human-readable summary of action counts."""
-
+    def summary(self) -> str:
         if not self.summary_counts:
             return ""
-        parts = [f"{k}={self.summary_counts[k]}" for k in self.summary_counts]
+        parts = [f"{k}={self.summary_counts[k]}" for k in sorted(self.summary_counts)]
         return " ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionOutcome:
-    """Outcome returned by a plan executor.
+class ExecutionReport:
+    """Per-table execution report from the executor."""
 
-    Attributes:
-        success: Whether execution completed without errors.
-        messages: Messages reported by the executor.
-        executed_count: Number of statements successfully executed.
-        executed_sql: SQL statements that were run.
-    """
-
-    success: bool
+    fully_qualified_name: str
     messages: tuple[str, ...] = ()
-    executed_count: int = 0
     executed_sql: tuple[str, ...] = ()
+    executed_count: int = 0
+    failed_sql: tuple[str, ...] = ()
+    failed_count: int = 0
 
-    def __bool__(self) -> bool:
-        return self.success
+    @property
+    def has_failures(self) -> bool:
+        return self.failed_count > 0
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionResult:
-    """Result returned by the ``plan_then_execute`` orchestration."""
+class SyncPreview:
+    """Engine dry-run: what would be done, grouped by table."""
 
-    plan: ActionPlan
-    messages: tuple[str, ...] = ()
-    executed_count: int = 0
+    previews: tuple[PlanPreview, ...] = ()
+    failures_by_table: Mapping[str, tuple[ValidationFailure, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class SyncReport:
+    """Engine real-run: what actually ran."""
+
+    previews: tuple[PlanPreview, ...]
+    executions: tuple[ExecutionReport, ...]

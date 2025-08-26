@@ -1,121 +1,48 @@
-from __future__ import annotations
-
 import pytest
 
-from tabula.domain.model import Column, DesiredTable, ObservedTable
-from tabula.domain.model.data_type.types import integer
-from tabula.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
-from tabula.domain.services.differ import diff
+from tabula.domain.model.column import Column
+from tabula.domain.model.data_type import Int64, String
+from tabula.domain.model.table import DesiredTable, ObservedTable
+from tabula.domain.services.differ import diff_tables
+from tests.factories import columns, qualified_name
 
 
-def col(name: str, *, dt=integer, is_nullable: bool = True) -> Column:
-    return Column(name, dt(), is_nullable=is_nullable)
-
-
-# ---------------------------
-# observed is None -> CREATE TABLE with all desired columns
-# ---------------------------
-
-
-def test_when_observed_is_none_we_emit_single_create_with_original_columns(make_qn):
-    desired = DesiredTable(make_qn(), (col("id"), col("name")))
-    plan = diff(None, desired)
-
-    assert isinstance(plan, ActionPlan)
-    assert len(plan) == 1
-    action = plan.actions[0]
-    assert isinstance(action, CreateTable)
-
-    # columns carried through exactly (identity & order)
-    assert action.columns is desired.columns
-    assert [c.name for c in action.columns] == ["id", "name"]
-
-    # target is the desired qualified name
-    assert plan.target == desired.qualified_name
-
-
-# ---------------------------
-# qualified name mismatch -> hard error
-# ---------------------------
-
-
-def test_mismatched_qualified_names_raise(make_qn):
-    desired = DesiredTable(make_qn("c1", "s", "t"), (col("id"),))
-    observed = ObservedTable(make_qn("c2", "s", "t"), (col("id"),), is_empty=False)
-
-    with pytest.raises(ValueError):
-        _ = diff(observed, desired)
-
-
-# ---------------------------
-# only adds / only drops / both
-# ---------------------------
-
-
-def test_only_adds_are_emitted(make_qn):
-    desired = DesiredTable(make_qn(), (col("a"), col("b")))
-    observed = ObservedTable(make_qn(), (col("a"),), is_empty=False)
-
-    plan = diff(observed, desired)
-    kinds = tuple(type(a) for a in plan.actions)
-    names = tuple(
-        getattr(a, "column", None).name if isinstance(a, AddColumn) else None for a in plan.actions
+def test_diff_tables_returns_create_table_when_observed_missing():
+    desired = DesiredTable(
+        qualified_name=qualified_name("core", "gold", "customers"),
+        columns=columns([("id", Int64()), ("name", String())]),
     )
 
-    assert kinds == (AddColumn,)
-    assert names == ("b",)
+    plan = diff_tables(observed=None, desired=desired)
+
+    from tabula.domain.plan.actions import CreateTable
+    assert str(plan.target) == "core.gold.customers"
+    assert len(plan.actions) == 1
+    assert isinstance(plan.actions[0], CreateTable)
+    assert plan.actions[0].columns == desired.columns  # same tuple object OK
 
 
-def test_only_drops_are_emitted(make_qn):
-    desired = DesiredTable(make_qn(), (col("a"),))
-    observed = ObservedTable(make_qn(), (col("a"), col("b")), is_empty=False)
+def test_diff_tables_raises_on_mismatched_qualified_name():
+    desired = DesiredTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]))
+    observed = ObservedTable(qualified_name("core", "gold", "orders"), columns([("id", Int64())]), is_empty=False)
 
-    plan = diff(observed, desired)
-
-    # Don't assume ordering; assert via sets
-    assert {type(a).__name__ for a in plan.actions} == {"DropColumn"}
-    assert {a.column_name for a in plan.actions if isinstance(a, DropColumn)} == {"b"}
+    with pytest.raises(ValueError):
+        diff_tables(observed=observed, desired=desired)
 
 
-def test_adds_and_drops_both_emitted(make_qn):
-    desired = DesiredTable(make_qn(), (col("b"), col("c")))
-    observed = ObservedTable(make_qn(), (col("a"), col("b")), is_empty=False)
+def test_diff_tables_delegates_to_column_diff(monkeypatch):
+    desired = DesiredTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]))
+    observed = ObservedTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]), is_empty=False)
 
-    plan = diff(observed, desired)
+    # Stub diff_columns to prove delegation and passthrough
+    from tabula.domain.model.data_type import String
+    from tabula.domain.plan.actions import AddColumn
 
-    # Compare by payload, not order
-    kinds = {type(a).__name__ for a in plan.actions}
-    payloads = {
-        (a.column.name if isinstance(a, AddColumn) else a.column_name) for a in plan.actions
-    }
-    assert kinds == {"AddColumn", "DropColumn"}
-    assert payloads == {"c", "a"}
+    fake_action = AddColumn(column=Column("email", String()))
 
+    import tabula.domain.services.differ as differ_mod
+    monkeypatch.setattr(differ_mod, "diff_columns", lambda d, o: (fake_action,))
 
-# ---------------------------
-# equal sets (ignoring order) -> empty plan, falsy
-# ---------------------------
-
-
-def test_equal_column_sets_yield_empty_plan(make_qn):
-    desired = DesiredTable(make_qn(), (col("a"), col("b")))
-    observed = ObservedTable(
-        make_qn(), (col("b"), col("a")), is_empty=True
-    )  # is_empty intentionally ignored
-
-    plan = diff(observed, desired)
-    assert len(plan) == 0
-    assert not plan
-
-
-# ---------------------------
-# case-insensitivity on names
-# ---------------------------
-
-
-def test_case_insensitive_names_do_not_trigger_changes(make_qn):
-    desired = DesiredTable(make_qn(), (col("ID"),))
-    observed = ObservedTable(make_qn(), (col("id"),), is_empty=False)
-
-    plan = diff(observed, desired)
-    assert plan.actions == ()
+    plan = diff_tables(observed=observed, desired=desired)
+    assert plan.actions == (fake_action,)
+    assert str(plan.target) == "core.gold.customers"

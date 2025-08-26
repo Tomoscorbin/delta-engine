@@ -2,65 +2,47 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 
-class IdentityMismatchError(RuntimeError):
-    """Raised when an expected identifier differs from the observed one."""
-
-    def __init__(self, *, expected: str, actual: str) -> None:
-        """Initialize the error.
-
-        Args:
-            expected: Expected identifier string.
-            actual: Observed identifier string.
-        """
-
-        self.expected = expected
-        self.actual = actual
-        msg = f"Identity mismatch: expected={expected!r} actual={actual!r}"
-        super().__init__(msg)
+from tabula.application.results import SyncReport
+from tabula.application.validation import ValidationFailure
 
 
-class ExecutionFailedError(RuntimeError):
-    """Raised when plan execution reports failure."""
+class ValidationFailedError(Exception):
+    """Raised after validating all tables when one or more tables failed validation.
+    Engine must NOT execute any plans if this is raised.
+    """
+
+    __slots__ = ("failures_by_table", "report")
 
     def __init__(
-        self, *, qualified_name: str, messages: tuple[str, ...], executed_count: int = 0
+        self,
+        *,
+        failures_by_table: Mapping[str, tuple[ValidationFailure, ...]],
+        report: SyncReport | None = None,
     ) -> None:
-        """Initialize the error.
-
-        Args:
-            qualified_name: Fully qualified table name.
-            messages: Execution messages from the executor.
-            executed_count: Number of statements successfully executed.
-        """
-
-        self.qualified_name = qualified_name
-        self.messages = messages
-        self.executed_count = executed_count
-
-        head = f"Execution failed for {qualified_name} (executed_count={executed_count})"
-        msg = head if not messages else f"{head}: " + "; ".join(messages)
-        super().__init__(msg)
+        self.failures_by_table = dict(failures_by_table)
+        self.report = report
+        n = len(self.failures_by_table)
+        head = ", ".join(sorted(self.failures_by_table)[:5]) + ("…" if n > 5 else "")
+        super().__init__(f"Validation failed for {n} table(s): {head}.")
 
 
-class ValidationError(Exception):
-    """Raised when a plan violates a single validation rule."""
+class ExecutionFailedError(Exception):
+    """Raised after executing all plans when one or more tables failed execution.
+    Validation was already clean at this point.
+    """
 
-    __slots__ = ("code", "message", "target")
+    __slots__ = ("failures_by_table", "report")
 
-    def __init__(self, code: str, message: str, target) -> None:
-        """Create a validation error.
-
-        Args:
-            code: Short validation code.
-            message: Human-readable message.
-            target: Object that failed validation.
-        """
-
-        self.code = code
-        self.message = message
-        self.target = target
-        super().__init__(code, message, str(target))
-
-    def __str__(self) -> str:
-        return f"{self.code}: {self.message}\nTable: {self.target}"
+    def __init__(
+        self,
+        *,
+        failures_by_table: Mapping[str, str],
+        report: SyncReport | None = None,
+    ) -> None:
+        self.failures_by_table = dict(failures_by_table)
+        self.report = report
+        n = len(self.failures_by_table)
+        head = ", ".join(sorted(self.failures_by_table)[:5]) + ("…" if n > 5 else "")
+        super().__init__(f"Execution failed for {n} table(s): {head}.")

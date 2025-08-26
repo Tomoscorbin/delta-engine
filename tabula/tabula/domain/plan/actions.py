@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from tabula.domain.model import Column, QualifiedName
-from tabula.domain.model._identifiers import normalize_identifier
+from tabula.domain.model.identifier import Identifier
 
 
 class Action:
@@ -32,11 +32,10 @@ class AddColumn(Action):
 class DropColumn(Action):
     """Remove a column from a table."""
 
-    column_name: str
+    name: str
 
     def __post_init__(self) -> None:
-        normalized = normalize_identifier(self.column_name)
-        object.__setattr__(self, "column_name", normalized)
+        object.__setattr__(self, "name", Identifier(self.name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,5 +66,4 @@ class ActionPlan:
 
     def count_by_action(self) -> Counter[type[Action]]:
         """Return a counter keyed by action subclass."""
-
         return Counter(type(a) for a in self.actions)

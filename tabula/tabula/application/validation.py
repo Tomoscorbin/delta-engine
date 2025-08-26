@@ -3,56 +3,61 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import ClassVar
 
-from tabula.application.errors import ValidationError
-from tabula.application.plan.plan_context import PlanContext
-from tabula.domain.plan.actions import AddColumn
+from tabula.application.plan import PlanContext
+from tabula.domain.plan import AddColumn
 
+
+@dataclass(frozen=True, slots=True)
+class ValidationFailure:
+    """Single validation failure for a plan."""
+
+    rule: str
+    fully_qualified_name: str
+    message: str
 
 class Rule(ABC):
-    """Base class for validation rules."""
-
-    code: ClassVar[str]
-    message: ClassVar[str]
+    name: ClassVar[str]
 
     @abstractmethod
-    def fails(self, ctx: PlanContext) -> bool:
-        """Return ``True`` if the rule is violated."""
-
-    def __call__(self, ctx: PlanContext) -> bool:
-        return self.fails(ctx)
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None: ...
 
 
-class NoAddColumnOnNonEmptyTable(Rule):
-    """Disallow adding columns to non-empty tables."""
 
-    code: ClassVar[str] = "NO_ADD_ON_NON_EMPTY_TABLE"
-    message: ClassVar[str] = "AddColumn actions are not allowed on non-empty tables."
-
-    def fails(self, ctx: PlanContext) -> bool:
-        """Check whether any AddColumn actions target a non-empty table."""
-
-        if not ctx.subject.is_existing_and_non_empty:
-            return False  # rule doesn't apply
-        return any(isinstance(a, AddColumn) for a in ctx.plan.actions)
-
+class ForbidNonNullableAddOnNonEmptyTable(Rule):
+    name = "forbid-required-add-on-non-empty"
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        if ctx.observed is None or not ctx.observed.is_empty:
+            return None
+        for a in ctx.plan.actions:
+            if isinstance(a, AddColumn) and (not a.column.is_nullable):
+                return ValidationFailure(
+                    rule=self.name,
+                    message=(
+                        f"Cannot add column '{a.column.name}' without default"
+                        f" to non-empty table {ctx.qualified_name}."
+                    ),
+                    table=str(ctx.qualified_name),
+                )
+        return None
 
 class PlanValidator:
     """Run a sequence of validation rules against a plan."""
 
     def __init__(self, rules: tuple[Rule, ...]) -> None:
         """Initialize the validator with rules."""
-
         self.rules = rules
 
-    def validate(self, ctx: PlanContext) -> None:
-        """Validate the plan context, raising ``ValidationError`` on failure."""
-
+    def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
+        failures: list[ValidationFailure] = []
         for rule in self.rules:
-            if rule.fails(ctx):
-                raise ValidationError(rule.code, rule.message, ctx.target)
+            issue = rule.evaluate(ctx)
+            if issue is not None:
+                failures.append(issue)
+        return tuple(failures)
 
 
-DEFAULT_RULES: tuple[Rule, ...] = (NoAddColumnOnNonEmptyTable(),)
+DEFAULT_RULES: tuple[Rule, ...] = (ForbidNonNullableAddOnNonEmptyTable(),)
 DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)

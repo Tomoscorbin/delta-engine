@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from tabula.adapters.databricks.sql import compile as compile_mod
+from tabula.adapters.databricks.catalog import compile as compile_mod
 from tabula.adapters.databricks.sql.dialects.spark_sql import SPARK_SQL
 from tabula.domain.model import Column, DataType
 from tabula.domain.plan.actions import AddColumn, CreateTable, DropColumn
@@ -112,8 +112,7 @@ def test_unknown_action_raises_not_implemented() -> None:
 
 
 def test_compiler_uses_injected_dialect_for_fqn_and_identifiers(monkeypatch) -> None:
-    """
-    Prove we are not hard-wired to Spark: inject a fake ANSI-ish dialect and
+    """Prove we are not hard-wired to Spark: inject a fake ANSI-ish dialect and
     ensure both the table FQN and column identifiers follow that dialect.
     """
 

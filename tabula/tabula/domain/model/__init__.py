@@ -1,44 +1,40 @@
 """Convenience exports for key domain model classes and factories."""
 
-from tabula.domain.model.change_target import ChangeTarget
 from tabula.domain.model.column import Column
-from tabula.domain.model.data_type.data_type import DataType
-from tabula.domain.model.data_type.types import (
-    bigint,
-    boolean,
-    date,
-    decimal,
-    double,
-    float32,
-    float64,
-    floating_point,
-    integer,
-    smallint,
-    string,
-    timestamp,
+from tabula.domain.model.data_type import (
+    Array,
+    Boolean,
+    DataType,
+    Date,
+    Decimal,
+    Float32,
+    Float64,
+    Int32,
+    Int64,
+    Map,
+    String,
+    Timestamp,
 )
 from tabula.domain.model.qualified_name import QualifiedName
 from tabula.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
 
 __all__ = [
-    "ChangeTarget",
+    "Array",
+    "Boolean",
     "Column",
     "DataType",
+    "Date",
+    "Decimal",
     "DesiredTable",
+    "Float32",
+    "Float64",
+    "Int32",
+    "Int64",
+    "Map",
     "ObservedTable",
     "QualifiedName",
+    "String",
     "TableSnapshot",
-    "bigint",
-    "boolean",
-    "date",
-    "decimal",
-    "double",
-    "float32",
-    "float64",
-    "floating_point",
-    "integer",
-    "smallint",
-    "string",
-    "timestamp",
+    "Timestamp",
 ]
 

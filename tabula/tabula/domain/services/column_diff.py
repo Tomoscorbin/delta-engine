@@ -11,8 +11,7 @@ from tabula.domain.plan.actions import Action, AddColumn, DropColumn
 def diff_columns_for_adds(
     desired: Iterable[Column], observed: Iterable[Column]
 ) -> tuple[AddColumn, ...]:
-    """Return ``AddColumn`` actions for columns missing in ``observed``."""
-
+    """Return AddColumn actions for columns present in desired but missing in observed."""
     observed_names = {c.name for c in observed}
     return tuple(AddColumn(column=c) for c in desired if c.name not in observed_names)
 
@@ -20,17 +19,15 @@ def diff_columns_for_adds(
 def diff_columns_for_drops(
     desired: Iterable[Column], observed: Iterable[Column]
 ) -> tuple[DropColumn, ...]:
-    """Return ``DropColumn`` actions for columns missing in ``desired``."""
-
+    """Return DropColumn actions for columns present in observed but missing in desired."""
     desired_names = {c.name for c in desired}
-    observed_names = {c.name for c in observed}
-    drop_names = observed_names - desired_names
-    return tuple(DropColumn(column_name=name) for name in drop_names)
+    return tuple(DropColumn(name=c.name) for c in observed if c.name not in desired_names)
 
 
-def diff_columns(desired: Iterable[Column], observed: Iterable[Column]) -> tuple[Action, ...]:
-    """Return add and drop actions between desired and observed columns."""
-
+def diff_columns(
+    desired: Iterable[Column], observed: Iterable[Column]
+) -> tuple[Action, ...]:
+    """Return the column-level actions to transform `observed` into `desired`."""
     adds = diff_columns_for_adds(desired, observed)
     drops = diff_columns_for_drops(desired, observed)
     return adds + drops

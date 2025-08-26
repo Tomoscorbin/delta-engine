@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tabula.domain.model._identifiers import normalize_identifier
+from tabula.domain.model.identifier import Identifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,29 +15,22 @@ class QualifiedName:
         catalog: Catalog name.
         schema: Schema name.
         name: Table or view name.
+
     """
 
-    catalog: str
-    schema: str
-    name: str
+    catalog: Identifier
+    schema: Identifier
+    name: Identifier
 
     def __post_init__(self) -> None:
-        self_catalog = normalize_identifier(self.catalog)
-        self_schema = normalize_identifier(self.schema)
-        self_name = normalize_identifier(self.name)
+        object.__setattr__(self, "catalog", Identifier(self.catalog))
+        object.__setattr__(self, "schema", Identifier(self.schema))
+        object.__setattr__(self, "name", Identifier(self.name))
 
-        object.__setattr__(self, "catalog", self_catalog)
-        object.__setattr__(self, "schema", self_schema)
-        object.__setattr__(self, "name", self_name)
-
-    @property
-    def parts(self) -> tuple[str, str, str]:
-        """Return the identifier components as a tuple."""
-
-        return (self.catalog, self.schema, self.name)
+    def __str__(self) -> str:
+        parts = [p for p in (self.catalog, self.schema, self.name) if p]
+        return ".".join(parts)
 
     @property
-    def dotted(self) -> str:
-        """Return the dotted ``catalog.schema.name`` string."""
-
-        return ".".join(self.parts)
+    def fully_qualified_name(self) -> str:
+        return str(self)

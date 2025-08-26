@@ -34,25 +34,13 @@ docstring-code-format = true
 
 [tool.ruff.lint]
 # E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: extras; TID: tidy-imports
-select = ["E", "F", "N", "I", "UP", "B", "RUF", "TID", "D"]
+select = ["E", "W", "F", "N", "I", "UP", "B", "RUF", "TID", "D"]
 ignore = [
   "E203",  # slice spacing (compatible with ruff-format/black)
   "E266",  # allow long inline comments
   "D104",  # don't require package docstrings in __init__.py
   "D107",  # don't require docstrings on __init__ methods
 ]
-
-# Control what Ruff is allowed to AUTO-FIX when passed --fix
-fixable = [
-  "I",        # import sorting/grouping
-  "UP",       # safe pyupgrade rewrites
-  "F401",     # remove unused imports
-  "RUF100",   # remove unused noqa comments
-  "RUF022",   # sort __all__
-  "B905",     # add strict= to zip()
-]
-
-# unfixable = ["B", "TID"]
 
 # isort behavior for import sorting
 [tool.ruff.lint.isort]

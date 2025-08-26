@@ -1,6 +1,6 @@
 import pytest
 
-from tabula.domain.model._identifiers import normalize_identifier
+from tabula.domain.model.identifier import normalize_identifier
 
 
 def test_type_and_empty_checks():

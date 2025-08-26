@@ -7,7 +7,7 @@ from tabula.domain.plan.actions import ActionPlan, CreateTable
 from tabula.domain.services.column_diff import diff_columns
 
 
-def diff(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
+def diff_tables(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
     """Compute the actions required to reach the desired schema.
 
     Args:
@@ -19,8 +19,8 @@ def diff(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
 
     Raises:
         ValueError: If the qualified names of ``observed`` and ``desired`` differ.
-    """
 
+    """
     if observed is None:
         return ActionPlan(desired.qualified_name, (CreateTable(columns=desired.columns),))
 

@@ -11,7 +11,7 @@ from tabula.domain.model import Column, ObservedTable, QualifiedName
 
 
 @dataclass(frozen=True, slots=True)
-class UCReader:
+class DatabricksReader:
     """Unity Catalog reader for Databricks.
 
     Attributes:
@@ -46,15 +46,19 @@ class UCReader:
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
         return self.spark.catalog.tableExists(qualified_name.dotted)
 
-    def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
-        cols = self.spark.catalog.listColumns(qualified_name.dotted)
+    def _list_columns(self, dotted_name: str) -> tuple[Column, ...]:
+        cols = self.spark.catalog.listColumns(dotted_name)
         out: list[Column] = []
         for c in cols:
+            # c.dataType can be a string ("bigint") or a Spark DataType object.
+            spark_dtype = getattr(c, "dataType", None)
+            domain_dtype = domain_type_from_spark(spark_dtype)
+            is_nullable = bool(getattr(c, "nullable", True))
             out.append(
                 Column(
                     name=c.name,
-                    data_type=domain_type_from_spark(c.dataType),
-                    is_nullable=c.nullable,
+                    data_type=domain_dtype,
+                    is_nullable=is_nullable,
                 )
             )
         return tuple(out)
