@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Iterable, Mapping
+
 from delta_engine.application.errors import (
     ExecutionFailedError,
     ValidationFailedError,
@@ -11,7 +14,7 @@ from delta_engine.application.plan import (
 )
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import ExecutionReport, PlanPreview, SyncReport
+from delta_engine.application.results import PlanPreview, RunReport, TableValidationReport, ValidationRunReport
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator, ValidationFailure
 
 
@@ -39,25 +42,11 @@ class Engine:
 
         # 2) Validate ALL plans
         previews = self._build_previews(contexts)
-        validation_failures = self._validate_all(contexts)
-        if validation_failures:
-            partial = SyncReport(previews=previews, executions={})
-            raise ValidationFailedError(
-                failures_by_table=validation_failures,
-                report=partial,
-            )
+        self._validate_all(contexts)
 
         # 3) Execute ALL plans
-        executions, exec_failures = self._execute_all(contexts)
-        if exec_failures:
-            partial = SyncReport(previews=previews, executions=executions)
-            raise ExecutionFailedError(
-                failures_by_table=exec_failures,
-                report=partial,
-            )
+        self._execute_all(contexts)
 
-        # 4) Final report
-        return SyncReport(previews=previews, executions=executions)
 
     def _build_contexts(self, registry: Registry) -> dict[str, PlanContext]:
         """Build contexts for every desired table.
@@ -69,15 +58,6 @@ class Engine:
             observed = self.reader.fetch_state(desired.qualified_name)
             contexts[name] = make_plan_context(desired=desired, observed=observed)
         return contexts
-
-    def _validate_all(self, contexts: dict[str, PlanContext]) -> dict[str, tuple[ValidationFailure, ...]]:
-        """Run validation for every context, collect all failures by table name."""
-        failures: dict[str, tuple[ValidationFailure, ...]] = {}
-        for name, ctx in contexts.items():
-            table_failures = self.validator.validate(ctx)
-            if table_failures:
-                failures[name] = table_failures
-        return failures
 
     def _build_previews(self, contexts: PlanContext) -> dict[str, PlanPreview]:
         """Build a PlanPreview for each table."""
@@ -91,17 +71,49 @@ class Engine:
                 total_actions=len(plan.actions),
             )
         return previews
-
-    def _execute_all(self, contexts):
-        """Execute every plan.
-        Returns (executions, failures) by table name.
-        """
-        executions: dict[str, ExecutionReport] = {}
-        failures: dict[str, str] = {}
+    
+    def _validate_all(self, contexts: dict[str, PlanContext]) -> ValidationRunReport:
+        started = datetime.utcnow().isoformat()
+        validations: dict[str, TableValidationReport] = {}
 
         for name, ctx in contexts.items():
-            try:
-                executions[name] = self.executor.execute(ctx.plan)
-            except Exception as exc:
-                failures[name] = str(exc)
-        return executions, failures
+            table_started = datetime.utcnow().isoformat()
+            failures = self.validator.validate(ctx)
+            validations[name] = TableValidationReport(
+                fully_qualified_name=name,
+                failures=failures,
+                started_at=table_started,
+                ended_at=datetime.utcnow().isoformat(),
+            )
+
+        validation_report = ValidationRunReport(
+            run_id=datetime.utcnow().strftime("%Y%m%dT%H%M%S"),
+            started_at=started,
+            ended_at=datetime.utcnow().isoformat(),
+            validations=validations,
+        )
+
+        if validation_report.any_failures():
+            raise ValidationFailedError(validation_report)
+
+        print(validation_report)
+
+
+    def _execute_all(self, contexts) -> RunReport:
+        run_started = datetime.utcnow().isoformat()
+        executions: dict[str, TableExecutionReport] = {}
+
+        for table_name, ctx in contexts.items():
+            executions[table_name] = self.executor.execute_table(ctx.plan)
+
+        run_report = RunReport(
+            run_id=datetime.utcnow().strftime("%Y%m%dT%H%M%S"),
+            started_at=run_started,
+            ended_at=datetime.utcnow().isoformat(),
+            executions=executions,
+        )
+
+        if run_report.any_failures():
+            raise ExecutionFailedError(run_report)
+
+        print(run_report)

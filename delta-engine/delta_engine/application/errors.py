@@ -2,47 +2,66 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from typing import Mapping
+from collections import OrderedDict
 
-from delta_engine.application.results import SyncReport
+
 from delta_engine.application.validation import ValidationFailure
+from delta_engine.application.formatting import format_run_report, format_validation_run_report
 
 
 class ValidationFailedError(Exception):
     """Raised after validating all tables when one or more tables failed validation.
-    Engine must NOT execute any plans if this is raised.
+       Engine must NOT execute any plans if this is raised.
     """
+    __slots__ = ("report",)
 
-    __slots__ = ("failures_by_table", "report")
-
-    def __init__(
-        self,
-        *,
-        failures_by_table: Mapping[str, tuple[ValidationFailure, ...]],
-        report: SyncReport | None = None,
-    ) -> None:
-        self.failures_by_table = dict(failures_by_table)
+    def __init__(self, report: ValidationRunReport) -> None:
         self.report = report
-        n = len(self.failures_by_table)
-        head = ", ".join(sorted(self.failures_by_table)[:5]) + ("…" if n > 5 else "")
-        super().__init__(f"Validation failed for {n} table(s): {head}.")
+        # super().__init__(self._format(report.failures()))
+        super().__init__(format_validation_run_report(report, max_width=100))
+
+    @staticmethod
+    def _format(failures: Iterable[ValidationFailure]) -> str:
+        groups = OrderedDict()
+        for f in failures:
+            groups.setdefault(f.fully_qualified_name, []).append(f)
+
+        blocks: list[str] = []
+        for table, items in groups.items():
+            lines = [table]
+            for f in items:
+                lines += [
+                    f"- {f.rule_name}",
+                    f"  {f.message}",
+                ]
+            blocks.append("\n".join(lines))
+        return "\n----\n\n".join(blocks)
 
 
 class ExecutionFailedError(Exception):
-    """Raised after executing all plans when one or more tables failed execution.
-    Validation was already clean at this point.
-    """
+    __slots__ = ("report",)
 
-    __slots__ = ("failures_by_table", "report")
-
-    def __init__(
-        self,
-        *,
-        failures_by_table: Mapping[str, str],
-        report: SyncReport | None = None,
-    ) -> None:
-        self.failures_by_table = dict(failures_by_table)
+    def __init__(self, report: RunReport) -> None:
         self.report = report
-        n = len(self.failures_by_table)
-        head = ", ".join(sorted(self.failures_by_table)[:5]) + ("…" if n > 5 else "")
-        super().__init__(f"Execution failed for {n} table(s): {head}.")
+        # super().__init__(self._format(report.failures()))
+        super().__init__(format_run_report(report, max_width=100))
+
+
+    @staticmethod
+    def _format(failures: Iterable[ExecutionFailure]) -> str:
+        groups = OrderedDict()
+        for f in failures:
+            groups.setdefault(f.fully_qualified_name, []).append(f)
+
+        blocks: list[str] = []
+        for table, items in groups.items():
+            lines = [table]
+            for f in items:
+                lines += [
+                    f"- action #{f.action_index} | {f.exception_type}",
+                    f"  {f.message}",
+                    f"  {f.statement_preview}",
+                ]
+            blocks.append("\n".join(lines))
+        return "\n----\n\n".join(blocks)

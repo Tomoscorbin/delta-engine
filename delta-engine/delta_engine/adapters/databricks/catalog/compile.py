@@ -67,5 +67,5 @@ def _column_def(column) -> str:
     """Render a single column definition fragment."""
     name_sql = quote_identifier(column.name)
     type_sql = sql_type_for_data_type(column.data_type)
-    nullable_sql = "NULL" if column.is_nullable else "NOT NULL"
+    nullable_sql = "" if column.is_nullable else "NOT NULL"
     return f"{name_sql} {type_sql} {nullable_sql}"

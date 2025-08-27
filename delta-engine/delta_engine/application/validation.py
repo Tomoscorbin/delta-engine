@@ -8,15 +8,8 @@ from typing import ClassVar
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.domain.plan import AddColumn
+from delta_engine.application.results import ValidationFailure
 
-
-@dataclass(frozen=True, slots=True)
-class ValidationFailure:
-    """Single validation failure for a plan."""
-
-    rule: str
-    fully_qualified_name: str
-    message: str
 
 class Rule(ABC):
     name: ClassVar[str]
@@ -25,21 +18,22 @@ class Rule(ABC):
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None: ...
 
 
-
+@dataclass(frozen=True, slots=True)
 class ForbidNonNullableAddOnNonEmptyTable(Rule):
     name = "forbid-required-add-on-non-empty"
+
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        if ctx.observed is None or not ctx.observed.is_empty:
+        if ctx.observed is None or ctx.observed.is_empty:
             return None
-        for a in ctx.plan.actions:
-            if isinstance(a, AddColumn) and (not a.column.is_nullable):
+        for action in ctx.plan.actions:
+            if isinstance(action, AddColumn) and (not action.column.is_nullable):
                 return ValidationFailure(
-                    rule=self.name,
+                    rule_name=self.name,
+                    fully_qualified_name=str(ctx.qualified_name),
                     message=(
-                        f"Cannot add column '{a.column.name}' without default"
-                        f" to non-empty table {ctx.qualified_name}."
+                        f"Cannot add non-nullable column '{action.column.name}' "
+                        f"to non-empty table {ctx.qualified_name} without a default."
                     ),
-                    table=str(ctx.qualified_name),
                 )
         return None
 
