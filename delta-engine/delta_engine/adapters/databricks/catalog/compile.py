@@ -54,13 +54,13 @@ def _(action: CreateTable, full_table_name: str) -> str:
 @_compile_action.register
 def _(action: AddColumn, full_table_name: str) -> str:
     column_sql = _column_def(action.column)
-    return f"ALTER TABLE {full_table_name} ADD COLUMN IF NOT EXISTS {column_sql}"
+    return f"ALTER TABLE {full_table_name} ADD COLUMN {column_sql}"
 
 
 @_compile_action.register
 def _(action: DropColumn, full_table_name: str) -> str:
     column_ident = quote_identifier(action.column_name)
-    return f"ALTER TABLE {full_table_name} DROP COLUMN IF EXISTS {column_ident}"
+    return f"ALTER TABLE {full_table_name} DROP COLUMN {column_ident}"
 
 
 def _column_def(column) -> str:

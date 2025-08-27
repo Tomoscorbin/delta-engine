@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import ClassVar
@@ -11,29 +13,23 @@ from delta_engine.domain.plan import AddColumn
 from delta_engine.application.results import ValidationFailure
 
 
-class Rule(ABC):
-    name: ClassVar[str]
+_LOGGER = logging.getLogger(__name__)
 
+class Rule(ABC):
     @abstractmethod
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None: ...
 
 
-@dataclass(frozen=True, slots=True)
-class ForbidNonNullableAddOnNonEmptyTable(Rule):
-    name = "forbid-required-add-on-non-empty"
-
+@dataclass(frozen=True, slots=True)        #TODO: shouldnt be dataclass
+class NonNullableColumnAdd(Rule):
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        if ctx.observed is None or ctx.observed.is_empty:
+        if ctx.observed is None:
             return None
         for action in ctx.plan.actions:
             if isinstance(action, AddColumn) and (not action.column.is_nullable):
                 return ValidationFailure(
-                    rule_name=self.name,
-                    fully_qualified_name=str(ctx.qualified_name),
-                    message=(
-                        f"Cannot add non-nullable column '{action.column.name}' "
-                        f"to non-empty table {ctx.qualified_name} without a default."
-                    ),
+                    rule_name=self.__class__.__name__, 
+                    message=f"Operation not allowed: add non-nullable column '{action.column.name}'",
                 )
         return None
 
@@ -47,11 +43,11 @@ class PlanValidator:
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
         failures: list[ValidationFailure] = []
         for rule in self.rules:
-            issue = rule.evaluate(ctx)
-            if issue is not None:
-                failures.append(issue)
+            failure = rule.evaluate(ctx) 
+            if failure is not None:
+                failures.append(failure)
         return tuple(failures)
 
 
-DEFAULT_RULES: tuple[Rule, ...] = (ForbidNonNullableAddOnNonEmptyTable(),)
+DEFAULT_RULES: tuple[Rule, ...] = (NonNullableColumnAdd(),)
 DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)

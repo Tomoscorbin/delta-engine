@@ -1,10 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from enum import StrEnum
-from typing import Optional, Mapping, Iterable
+from typing import Mapping, Iterable
 from datetime import datetime
-from delta_engine.application.formatting import format_run_report, format_validation_run_report
-from delta_engine.application.validation import ValidationFailure
 from delta_engine.domain.plan import ActionPlan
 
 
@@ -20,18 +18,11 @@ class ValidationStatus(StrEnum):
     PASSED = "PASSED"
     FAILED = "FAILED"
 
-# ---- Helpers ----------------------------------------------------------------
-
-def sql_preview(sql: str, limit: int = 200) -> str:
-    one_line = " ".join(sql.split())
-    return one_line if len(one_line) <= limit else f"{one_line[:limit]}…"
-
 # ---- Records ----------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class ValidationFailure:
     rule_name: str
-    fully_qualified_name: str
     message: str
 
 @dataclass(frozen=True, slots=True)
@@ -44,20 +35,17 @@ class ExecutionFailure:
 
 @dataclass(frozen=True, slots=True)
 class ActionResult:
+    name: str
     action_index: int
     status: ActionStatus
-    started_at: str
-    ended_at: str
     statement_preview: str
-    failure: Optional[ExecutionFailure] = None
+    failure: ExecutionFailure | None = None
 
 @dataclass(frozen=True, slots=True)
 class TableExecutionReport:
     fully_qualified_name: str
     total_actions: int
     results: tuple[ActionResult, ...]
-    started_at: str
-    ended_at: str
 
     @property
     def status(self) -> ActionStatus:
@@ -71,8 +59,6 @@ class TableExecutionReport:
 class TableValidationReport:
     fully_qualified_name: str
     failures: tuple[ValidationFailure, ...]
-    started_at: str
-    ended_at: str
 
     @property
     def status(self) -> ValidationStatus:
@@ -96,24 +82,11 @@ class RunReport:
                 if r.failure:
                     out.append(r.failure)
         return out
-    
-    def __str__(self) -> str:
-        return format_run_report(self, max_width=120)
-
-    def _repr_pretty_(self, p, cycle: bool) -> None:
-        p.text(format_run_report(self, max_width=120))
-
-    def _repr_html_(self) -> str:
-        text = format_run_report(self, max_width=120)
-        return f"<pre>{html.escape(text)}</pre>"
-
 
     
 @dataclass(frozen=True, slots=True)
 class ValidationRunReport:
     run_id: str
-    started_at: str
-    ended_at: str
     validations: Mapping[str, TableValidationReport]
 
     def any_failures(self) -> bool:
@@ -124,16 +97,6 @@ class ValidationRunReport:
         for t in self.validations.values():
             out.extend(t.failures)
         return out
-    
-    def __str__(self) -> str:
-        return format_validation_run_report(self, max_width=120)
-
-    def _repr_pretty_(self, p, cycle: bool) -> None:
-        p.text(format_validation_run_report(self, max_width=120))
-
-    def _repr_html_(self) -> str:
-        text = format_validation_run_report(self, max_width=120)
-        return f"<pre>{html.escape(text)}</pre>"
 
 
 @dataclass(frozen=True, slots=True)

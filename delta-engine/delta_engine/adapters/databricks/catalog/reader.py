@@ -45,14 +45,20 @@ class DatabricksReader:
 
     # ---- private helpers ----------------------------------------------------
 
-    def _table_exists(self, qualified_name: QualifiedName) -> bool:
-        return self.spark.catalog.tableExists(str(qualified_name))
+    def _table_exists(self, qualified_name: QualifiedName) -> bool: #TODO: put sql in compiler
+        sql = f"""
+        SELECT 1
+        FROM `{qualified_name.catalog}`.information_schema.tables
+        WHERE table_schema = '{qualified_name.schema}'
+            AND table_name   = '{qualified_name.name}'
+        LIMIT 1
+        """
+        return bool(self.spark.sql(sql).head(1))
 
     def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
         cols = self.spark.catalog.listColumns(str(qualified_name))
         out: list[Column] = []
         for c in cols:
-            # c.dataType can be a string ("bigint") or a Spark DataType object.
             spark_dtype = getattr(c, "dataType", None)
             domain_dtype = domain_type_from_spark(spark_dtype)
             is_nullable = bool(getattr(c, "nullable", True))

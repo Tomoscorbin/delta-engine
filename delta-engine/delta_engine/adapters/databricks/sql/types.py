@@ -60,30 +60,59 @@ def sql_type_for_data_type(type: DataType) -> str:
             raise TypeError(f"Unsupported DataType variant: {cls}")
 
 
-def domain_type_from_spark(type: SparkType) -> DataType:
-    if isinstance(type, IntegerType):
-        return Int32()
-    if isinstance(type, LongType):
-        return Int64()
-    if isinstance(type, FloatType):
-        return Float32()
-    if isinstance(type, DoubleType):
-        return Float64()
-    if isinstance(type, BooleanType):
-        return Boolean()
-    if isinstance(type, StringType):
-        return String()
-    if isinstance(type, DateType):
-        return Date()
-    if isinstance(type, TimestampType):
-        return Timestamp()
-    if isinstance(type, DecimalType):
-        return Decimal(type.precision, type.scale)
-    if isinstance(type, ArrayType):
-        return Array(domain_type_from_spark(type.elementType))
-    if isinstance(type, MapType):
-        return Map(
-            domain_type_from_spark(type.keyType),
-            domain_type_from_spark(type.valueType),
-        )
-    raise TypeError(f"Unsupported Spark type: {type!r}")
+def domain_type_from_spark(type: str | SparkType) -> DataType:
+    if isinstance(type, str):
+        type = SparkType.fromDDL(type)
+        
+    match type:
+        case IntegerType():
+            return Int32()
+        case LongType():
+            return Int64()
+        case FloatType():
+            return Float32()
+        case DoubleType():
+            return Float64()
+        case BooleanType():
+            return Boolean()
+        case StringType():
+            return String()
+        case DateType():
+            return Date()
+        case TimestampType():
+            return Timestamp()
+        case DecimalType(p, s):
+            return Decimal(p, s)
+        case ArrayType(elem):
+            return Array(domain_type_from_spark(elem))
+        case MapType(k, v):
+            return Map(domain_type_from_spark(k), domain_type_from_spark(v))
+        case _:
+            raise TypeError(f"Unsupported Spark type: {spark_type!r}")
+
+    # if isinstance(type, IntegerType):
+    #     return Int32()
+    # if isinstance(type, LongType):
+    #     return Int64()
+    # if isinstance(type, FloatType):
+    #     return Float32()
+    # if isinstance(type, DoubleType):
+    #     return Float64()
+    # if isinstance(type, BooleanType):
+    #     return Boolean()
+    # if isinstance(type, StringType):
+    #     return String()
+    # if isinstance(type, DateType):
+    #     return Date()
+    # if isinstance(type, TimestampType):
+    #     return Timestamp()
+    # if isinstance(type, DecimalType):
+    #     return Decimal(type.precision, type.scale)
+    # if isinstance(type, ArrayType):
+    #     return Array(domain_type_from_spark(type.elementType))
+    # if isinstance(type, MapType):
+    #     return Map(
+    #         domain_type_from_spark(type.keyType),
+    #         domain_type_from_spark(type.valueType),
+    #     )
+    # raise TypeError(f"Unsupported Spark type: {type!r}")

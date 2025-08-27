@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Self
 
 from delta_engine.domain.model import Column, QualifiedName
-from delta_engine.domain.model.identifier import Identifier
 
 
 class Action:
@@ -32,10 +31,7 @@ class AddColumn(Action):
 class DropColumn(Action):
     """Remove a column from a table."""
 
-    name: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "name", Identifier(self.name))
+    column_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +49,9 @@ class ActionPlan:
 
     def __iter__(self):
         return iter(self.actions)
+    
+    def __getitem__(self, index):
+        return self.actions[index]
 
     def __add__(self, other: Self) -> Self:
         if self.target != other.target:

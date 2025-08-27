@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from delta_engine.domain.model.identifier import Identifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,14 +17,9 @@ class QualifiedName:
 
     """
 
-    catalog: Identifier
-    schema: Identifier
-    name: Identifier
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "catalog", Identifier(self.catalog))
-        object.__setattr__(self, "schema", Identifier(self.schema))
-        object.__setattr__(self, "name", Identifier(self.name))
+    catalog: str
+    schema: str
+    name: str
 
     def __str__(self) -> str:
         parts = [p for p in (self.catalog, self.schema, self.name) if p]

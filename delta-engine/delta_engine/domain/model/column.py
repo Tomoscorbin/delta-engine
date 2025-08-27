@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from delta_engine.domain.model.data_type import DataType
-from delta_engine.domain.model.identifier import Identifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,9 +18,6 @@ class Column:
 
     """
 
-    name: Identifier
+    name: str
     data_type: DataType
     is_nullable: bool = True
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "name", Identifier(self.name))
