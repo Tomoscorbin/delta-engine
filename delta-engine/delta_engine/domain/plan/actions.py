@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
-from typing import Self
 
 from delta_engine.domain.model import Column, QualifiedName
-from delta_engine.domain.model.identifier import Identifier
 
 
 class Action:
@@ -32,10 +29,7 @@ class AddColumn(Action):
 class DropColumn(Action):
     """Remove a column from a table."""
 
-    name: str
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "name", Identifier(self.name))
+    column_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,24 +40,17 @@ class ActionPlan:
     actions: tuple[Action, ...] = ()
 
     def __len__(self) -> int:
+        """Return the number of actions in the plan."""
         return len(self.actions)
 
     def __bool__(self) -> bool:
+        """Return ``True`` if the plan contains any actions."""
         return bool(self.actions)
 
     def __iter__(self):
+        """Iterate over actions in plan order."""
         return iter(self.actions)
 
-    def __add__(self, other: Self) -> Self:
-        if self.target != other.target:
-            raise ValueError("Cannot merge plans for different targets")
-        return ActionPlan(self.target, self.actions + other.actions)
-
-    def add(self, action: Action) -> Self:
-        if not isinstance(action, Action):
-            raise TypeError("action must be an Action")
-        return ActionPlan(self.target, (*self.actions, action))
-
-    def count_by_action(self) -> Counter[type[Action]]:
-        """Return a counter keyed by action subclass."""
-        return Counter(type(a) for a in self.actions)
+    def __getitem__(self, index):
+        """Return the action at ``index`` (supports slicing)."""
+        return self.actions[index]

@@ -1,19 +1,19 @@
 from delta_engine.domain.model.data_type import (
     Boolean,
     Date,
-    Float32,
-    Float64,
-    Int32,
-    Int64,
+    Double,
+    Float,
+    Integer,
+    Long,
     String,
     Timestamp,
 )
 
 # optional singletons for users
-INT32 = Int32()
-INT64 = Int64()
-FLOAT32 = Float32()
-FLOAT64 = Float64()
+INT32 = Integer()
+INT64 = Long()
+FLOAT32 = Float()
+FLOAT64 = Double()
 BOOLEAN = Boolean()
 STRING = String()
 DATE = Date()

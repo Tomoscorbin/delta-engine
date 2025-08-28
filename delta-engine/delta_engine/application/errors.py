@@ -2,66 +2,87 @@
 
 from __future__ import annotations
 
-from typing import Mapping
-from collections import OrderedDict
-
-
-from delta_engine.application.validation import ValidationFailure
-from delta_engine.application.formatting import format_run_report, format_validation_run_report
+from delta_engine.application.validation import RunReport, ValidationFailure
 
 
 class ValidationFailedError(Exception):
-    """Raised after validating all tables when one or more tables failed validation.
-       Engine must NOT execute any plans if this is raised.
+    """Raised when one or more tables fail validation.
+
+    Contains a mapping from fully qualified table name to the collection of
+    validation failures for that table, and renders a human-readable summary
+    message in ``str(exc)``.
     """
     __slots__ = ("report",)
 
-    def __init__(self, report: ValidationRunReport) -> None:
-        self.report = report
-        # super().__init__(self._format(report.failures()))
-        super().__init__(format_validation_run_report(report, max_width=100))
+    def __init__(self, failures_by_table: dict[str, tuple[ValidationFailure,...]]) -> None:
+        self.failures_by_table = failures_by_table
+        super().__init__(self._format(failures_by_table))
 
     @staticmethod
-    def _format(failures: Iterable[ValidationFailure]) -> str:
-        groups = OrderedDict()
-        for f in failures:
-            groups.setdefault(f.fully_qualified_name, []).append(f)
+    def _format(failures_by_table: dict[str, tuple[ValidationFailure,...]]) -> str:
+        """Build a compact, readable multi-line summary of failures."""
+        items = sorted(failures_by_table.items(), key=lambda kv: kv[0])
+        total_tables = len(failures_by_table)
+        total_failures = sum(len(failures) for _, failures in failures_by_table.items())
 
-        blocks: list[str] = []
-        for table, items in groups.items():
-            lines = [table]
-            for f in items:
-                lines += [
-                    f"- {f.rule_name}",
-                    f"  {f.message}",
-                ]
-            blocks.append("\n".join(lines))
-        return "\n----\n\n".join(blocks)
+        lines = [
+            f"Validation failed: {total_tables} tables, {total_failures} failures",
+            "",
+        ]
+
+        for table_name, failures in items:
+            lines.append(table_name)
+            for failure in failures:
+                rule_name = getattr(failure, "rule_name", "UNKNOWN_RULE")
+                message = str(getattr(failure, "message", "")).replace("\n", " ").strip()
+                lines.append(f"    -- [{rule_name}] {message}")
+            lines.append("")  # blank line between tables
+
+        return "\n".join(lines).rstrip()
 
 
 class ExecutionFailedError(Exception):
+    """Raised when one or more actions fail during execution.
+
+    Wraps a :class:`RunReport` that summarizes execution results and formats a
+    readable failure summary in ``str(exc)``.
+    """
     __slots__ = ("report",)
 
     def __init__(self, report: RunReport) -> None:
         self.report = report
-        # super().__init__(self._format(report.failures()))
-        super().__init__(format_run_report(report, max_width=100))
-
+        super().__init__(self._format(report))
 
     @staticmethod
-    def _format(failures: Iterable[ExecutionFailure]) -> str:
-        groups = OrderedDict()
-        for f in failures:
-            groups.setdefault(f.fully_qualified_name, []).append(f)
+    def _format(report: RunReport) -> str:
+        """Build a compact, readable multi-line summary of execution failures."""
+        failures_by_table = report.failures_by_table
+        items = sorted(failures_by_table.items(), key=lambda kv: kv[0])
+        total_tables = len(items)
+        total_failures = sum(len(fails) for _, fails in items)
 
-        blocks: list[str] = []
-        for table, items in groups.items():
-            lines = [table]
-            for f in items:
-                lines += [
-                    f"- action #{f.action_index} | {f.exception_type}",
-                    f"  {f.message}",
-                    f"  {f.statement_preview}",
-                ]
-            blocks.append("\n".join(lines))
-        return "\n----\n\n".join(blocks)
+        lines: list[str] = [
+            f"Execution failed: {total_tables} tables, {total_failures} failures",
+            "",
+        ]
+
+        for table_name, failures in items:
+            lines.append(table_name)
+            for f in sorted(
+                failures,
+                key=lambda f: (getattr(f, "action_index", -1), getattr(f, "exception_type", "")),
+            ):
+                action_index = getattr(f, "action_index", -1)
+                exception_type = getattr(f, "exception_type", "UNKNOWN_EXCEPTION")
+                message = str(getattr(f, "message", "")).replace("\n", " ").strip()
+                statement_preview = str(getattr(f, "statement_preview", "")).replace("\n", " ").strip()
+
+                lines.append(
+                    f'    -- action #{action_index} | type="{exception_type}" | details="{message}"'
+                )
+                if statement_preview:
+                    lines.append(f"       statement: {statement_preview}")
+
+            lines.append("")  # blank line between tables
+
+        return "\n".join(lines).rstrip()

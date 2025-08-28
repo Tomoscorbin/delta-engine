@@ -15,32 +15,20 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
 )
 
-# ----------------------------
-# Public entry point
-# ----------------------------
 
 def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
-    """Compile an *ordered* ActionPlan into SQL statements.
-
-    Args:
-        plan: Ordered actions to convert into SQL.
-
-    Returns:
-        Tuple of SQL statements corresponding to the actions.
-
-    """
-    qn = plan.target # QualifiedName
-    table_name_sql = render_qualified_name(qn.catalog, qn.schema, qn.name)
+    """Compile an :class:`ActionPlan` into Spark SQL statements."""
+    qualified_name = plan.target
+    table_name_sql = render_qualified_name(
+        qualified_name.catalog,
+        qualified_name.schema,
+        qualified_name.name,
+    )
     return tuple(_compile_action(action, table_name_sql) for action in plan)
 
 
-# ----------------------------
-# Internal helpers
-# ----------------------------
-
-
 @singledispatch
-def _compile_action(action: Action, full_table_name: str) -> str:  # pragma: no cover
+def _compile_action(action: Action, full_table_name: str) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
@@ -54,13 +42,13 @@ def _(action: CreateTable, full_table_name: str) -> str:
 @_compile_action.register
 def _(action: AddColumn, full_table_name: str) -> str:
     column_sql = _column_def(action.column)
-    return f"ALTER TABLE {full_table_name} ADD COLUMN IF NOT EXISTS {column_sql}"
+    return f"ALTER TABLE {full_table_name} ADD COLUMN {column_sql}"
 
 
 @_compile_action.register
 def _(action: DropColumn, full_table_name: str) -> str:
     column_ident = quote_identifier(action.column_name)
-    return f"ALTER TABLE {full_table_name} DROP COLUMN IF EXISTS {column_ident}"
+    return f"ALTER TABLE {full_table_name} DROP COLUMN {column_ident}"
 
 
 def _column_def(column) -> str:
@@ -68,4 +56,4 @@ def _column_def(column) -> str:
     name_sql = quote_identifier(column.name)
     type_sql = sql_type_for_data_type(column.data_type)
     nullable_sql = "" if column.is_nullable else "NOT NULL"
-    return f"{name_sql} {type_sql} {nullable_sql}"
+    return f"{name_sql} {type_sql} {nullable_sql}".strip()

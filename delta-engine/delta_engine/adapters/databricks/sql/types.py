@@ -21,25 +21,26 @@ from delta_engine.domain.model import (
     DataType,
     Date,
     Decimal,
-    Float32,
-    Float64,
-    Int32,
-    Int64,
+    Double,
+    Float,
+    Integer,
+    Long,
     Map,
     String,
     Timestamp,
 )
 
 
-def sql_type_for_data_type(type: DataType) -> str:
-    match type:
-        case Int32():
+def sql_type_for_data_type(data_type: DataType) -> str:
+    """Return a Spark SQL type string for a domain :class:`DataType`."""
+    match data_type:
+        case Integer():
             return "INT"
-        case Int64():
+        case Long():
             return "BIGINT"
-        case Float32():
+        case Float():
             return "FLOAT"
-        case Float64():
+        case Double():
             return "DOUBLE"
         case Boolean():
             return "BOOLEAN"
@@ -49,41 +50,46 @@ def sql_type_for_data_type(type: DataType) -> str:
             return "DATE"
         case Timestamp():
             return "TIMESTAMP"
-        case Decimal(p, s):
-            return f"DECIMAL({p},{s})"
-        case Array(elem):
-            return f"ARRAY<{sql_type_for_data_type(elem)}>"
-        case Map(k, v):
-            return f"MAP<{sql_type_for_data_type(k)},{sql_type_for_data_type(v)}>"
+        case Decimal(precision, scale):
+            return f"DECIMAL({precision},{scale})"
+        case Array(element):
+            return f"ARRAY<{sql_type_for_data_type(element)}>"
+        case Map(key, value):
+            return f"MAP<{sql_type_for_data_type(key)},{sql_type_for_data_type(value)}>"
         case _:
-            cls = type.__class__.__name__
+            cls = data_type.__class__.__name__
             raise TypeError(f"Unsupported DataType variant: {cls}")
 
 
-def domain_type_from_spark(type: SparkType) -> DataType:
-    if isinstance(type, IntegerType):
-        return Int32()
-    if isinstance(type, LongType):
-        return Int64()
-    if isinstance(type, FloatType):
-        return Float32()
-    if isinstance(type, DoubleType):
-        return Float64()
-    if isinstance(type, BooleanType):
-        return Boolean()
-    if isinstance(type, StringType):
-        return String()
-    if isinstance(type, DateType):
-        return Date()
-    if isinstance(type, TimestampType):
-        return Timestamp()
-    if isinstance(type, DecimalType):
-        return Decimal(type.precision, type.scale)
-    if isinstance(type, ArrayType):
-        return Array(domain_type_from_spark(type.elementType))
-    if isinstance(type, MapType):
-        return Map(
-            domain_type_from_spark(type.keyType),
-            domain_type_from_spark(type.valueType),
-        )
-    raise TypeError(f"Unsupported Spark type: {type!r}")
+def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
+    """Map a Spark SQL type (instance or DDL string) to a domain type."""
+    if isinstance(spark_type, str):
+        spark_type = SparkType.fromDDL(spark_type)
+
+    match spark_type:
+        case IntegerType():
+            return Integer()
+        case LongType():
+            return Long()
+        case FloatType():
+            return Float()
+        case DoubleType():
+            return Double()
+        case BooleanType():
+            return Boolean()
+        case StringType():
+            return String()
+        case DateType():
+            return Date()
+        case TimestampType():
+            return Timestamp()
+        case DecimalType():
+            return Decimal(spark_type.precision, spark_type.scale)
+        case ArrayType():
+            return Array(domain_type_from_spark(spark_type.elementType))
+        case MapType():
+            return Map(
+                domain_type_from_spark(spark_type.keyType),
+                domain_type_from_spark(spark_type.valueType))
+        case _:
+            raise TypeError(f"Unsupported Spark type: {spark_type!r}")

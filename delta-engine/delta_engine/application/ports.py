@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Callable, Iterable, Any, runtime_checkable
+from collections.abc import Iterable
+from typing import Any, Protocol, runtime_checkable
 
-from delta_engine.application.results import TableExecutionReport
+from delta_engine.application.results import ExecutionResult
 from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
@@ -17,6 +18,14 @@ class CatalogStateReader(Protocol):
     """Reads current catalog state."""
 
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
+        """Return the observed definition for ``qualified_name`` or ``None``.
+
+        Args:
+            qualified_name: Fully qualified object name to look up.
+
+        Returns:
+            The observed table definition if it exists, otherwise ``None``.
+        """
         ...
 
 
@@ -24,13 +33,14 @@ class CatalogStateReader(Protocol):
 class PlanExecutor(Protocol):
     """Executes an action plan against a backing engine."""
 
-    def execute(self, plan: ActionPlan) -> TableExecutionReport:
+    def execute(self, plan: ActionPlan) -> ExecutionResult:
         """Run the plan and return the execution outcome."""
         ...
 
 
 @runtime_checkable
 class TableObject(Protocol):
+    """Lightweight table specification accepted by the registry."""
     catalog: str | None
     schema: str | None
     name: str
@@ -38,6 +48,7 @@ class TableObject(Protocol):
 
 @runtime_checkable
 class ColumnObject(Protocol):
+    """Lightweight column specification accepted by the registry."""
     name: str
     data_type: Any
     is_nullable: bool

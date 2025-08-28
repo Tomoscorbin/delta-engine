@@ -1,39 +1,60 @@
+"""Domain data type variants used to describe table schemas."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Union
 
-# ---- Scalar variants ---------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
-class Int32: pass
+class Integer:
+    """32-bit signed integer type."""
+
 
 @dataclass(frozen=True, slots=True)
-class Int64: pass
+class Long:
+    """64-bit signed integer type."""
+
 
 @dataclass(frozen=True, slots=True)
-class Float32: pass
+class Float:
+    """32-bit floating point type."""
+
 
 @dataclass(frozen=True, slots=True)
-class Float64: pass
+class Double:
+    """64-bit floating point type."""
+
 
 @dataclass(frozen=True, slots=True)
-class Boolean: pass
+class Boolean:
+    """Boolean truth value type."""
+
 
 @dataclass(frozen=True, slots=True)
-class String: pass
+class String:
+    """Unicode string type."""
+
 
 @dataclass(frozen=True, slots=True)
-class Date: pass
+class Date:
+    """Calendar date without time or timezone."""
+
 
 @dataclass(frozen=True, slots=True)
-class Timestamp: pass
+class Timestamp:
+    """Timestamp with date and time (timezone handling is engine-specific)."""
 
-
-# ---- Parameterized variants --------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class Decimal:
+    """Fixed-precision decimal type.
+
+    Attributes:
+        precision: Total number of digits.
+        scale: Digits to the right of the decimal point.
+    """
+
     precision: int
     scale: int = 0
 
@@ -41,27 +62,33 @@ class Decimal:
         if self.precision <= 0 or not (0 <= self.scale <= self.precision):
             raise ValueError("invalid decimal(precision, scale)")
 
+
 @dataclass(frozen=True, slots=True)
 class Array:
+    """Array of homogeneous ``element`` values."""
+
     element: DataType
+
 
 @dataclass(frozen=True, slots=True)
 class Map:
+    """Dictionary of ``key`` to ``value`` elements."""
+
     key: DataType
     value: DataType
 
 
 # Public union for type annotations
 DataType = Union[
-    Int32,
-    Int64,
-    Float32,
-    Float64,
+    Integer,
+    Long,
+    Float,
+    Double,
     Boolean,
     String,
     Date,
     Timestamp,
     Decimal,
     Array,
-    Map
+    Map,
 ]
