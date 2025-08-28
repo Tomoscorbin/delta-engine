@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol, Callable, Iterable, Any, runtime_checkable
+from collections.abc import Iterable
+from typing import Any, Protocol, runtime_checkable
 
-from delta_engine.application.results import TableExecutionReport
+from delta_engine.application.results import ExecutionResult
 from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
@@ -24,7 +25,7 @@ class CatalogStateReader(Protocol):
 class PlanExecutor(Protocol):
     """Executes an action plan against a backing engine."""
 
-    def execute(self, plan: ActionPlan) -> TableExecutionReport:
+    def execute(self, plan: ActionPlan) -> ExecutionResult:
         """Run the plan and return the execution outcome."""
         ...
 

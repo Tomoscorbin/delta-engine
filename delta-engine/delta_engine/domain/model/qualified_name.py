@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from delta_engine.domain.model._normalise_identifier import normalize_identifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,9 +22,13 @@ class QualifiedName:
     schema: str
     name: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "catalog", normalize_identifier(self.catalog))
+        object.__setattr__(self, "schema", normalize_identifier(self.schema))
+        object.__setattr__(self, "name", normalize_identifier(self.name))
+
     def __str__(self) -> str:
-        parts = [p for p in (self.catalog, self.schema, self.name) if p]
-        return ".".join(parts)
+        return f"{self.catalog}.{self.schema}.{self.name}"
 
     @property
     def fully_qualified_name(self) -> str:

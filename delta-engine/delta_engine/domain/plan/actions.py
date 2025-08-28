@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
-from typing import Self
 
 from delta_engine.domain.model import Column, QualifiedName
 
@@ -49,20 +47,6 @@ class ActionPlan:
 
     def __iter__(self):
         return iter(self.actions)
-    
+
     def __getitem__(self, index):
         return self.actions[index]
-
-    def __add__(self, other: Self) -> Self:
-        if self.target != other.target:
-            raise ValueError("Cannot merge plans for different targets")
-        return ActionPlan(self.target, self.actions + other.actions)
-
-    def add(self, action: Action) -> Self:
-        if not isinstance(action, Action):
-            raise TypeError("action must be an Action")
-        return ActionPlan(self.target, (*self.actions, action))
-
-    def count_by_action(self) -> Counter[type[Action]]:
-        """Return a counter keyed by action subclass."""
-        return Counter(type(a) for a in self.actions)

@@ -3,19 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Union
 
-# ---- Scalar variants ---------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
-class Int32: pass
+class Integer: pass
 
 @dataclass(frozen=True, slots=True)
-class Int64: pass
+class Long: pass
 
 @dataclass(frozen=True, slots=True)
-class Float32: pass
+class Float: pass
 
 @dataclass(frozen=True, slots=True)
-class Float64: pass
+class Double: pass
 
 @dataclass(frozen=True, slots=True)
 class Boolean: pass
@@ -30,7 +29,6 @@ class Date: pass
 class Timestamp: pass
 
 
-# ---- Parameterized variants --------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class Decimal:
@@ -53,10 +51,10 @@ class Map:
 
 # Public union for type annotations
 DataType = Union[
-    Int32,
-    Int64,
-    Float32,
-    Float64,
+    Integer,
+    Long,
+    Float,
+    Double,
     Boolean,
     String,
     Date,

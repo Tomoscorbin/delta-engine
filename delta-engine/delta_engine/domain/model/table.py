@@ -29,22 +29,8 @@ class TableSnapshot:
         for c in self.columns:
             n = c.name.casefold()
             if n in seen:
-                raise ValueError(f"Duplicate column name (case-insensitive): {c.name}")
+                raise ValueError(f"Duplicate column name: {c.name}")
             seen.add(n)
-
-    def __contains__(self, item: str | Column) -> bool:
-        """Return ``True`` if a column with the given name exists."""
-        target = item.casefold() if isinstance(item, str) else item.name.casefold()
-        return any(col.name.casefold() == target for col in self.columns)
-
-    def get_column(self, name: str) -> Column | None:
-        """Return a column by name or ``None`` if not present."""
-        target = name.casefold()
-        for col in self.columns:
-            if col.name.casefold() == target:
-                return col
-        return None
-
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
@@ -59,5 +45,3 @@ class ObservedTable(TableSnapshot):
         is_empty: ``True`` if the table exists and has zero rows.
 
     """
-
-    is_empty: bool
