@@ -22,17 +22,35 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class Engine:
+    """High-level orchestrator to plan, validate, and execute changes.
+
+    The engine coordinates reading current state from a catalog, computing a
+    plan to reach desired state, validating that plan, and executing it using
+    the provided adapter implementations.
+    """
     def __init__(
         self,
         reader: CatalogStateReader,
         executor: PlanExecutor,
         validator: PlanValidator = DEFAULT_VALIDATOR,
     ) -> None:
+        """Initialize the engine with adapters and a validator.
+
+        Args:
+            reader: Adapter that fetches the current catalog state.
+            executor: Adapter that executes action plans.
+            validator: Validator that checks plans for policy violations.
+        """
         self.reader = reader
         self.executor = executor
         self.validator = validator
 
     def sync(self, registry: Registry) -> None:
+        """Synchronize all registered tables to their desired state.
+
+        Computes, validates, and executes plans for each table in the supplied
+        registry. Raises on validation or execution failures with rich context.
+        """
 
         # 1) Plans for all tables
         contexts = self._build_contexts(registry)
@@ -45,6 +63,7 @@ class Engine:
 
 
     def _build_contexts(self, registry: Registry) -> tuple[PlanContext, ...]:
+        """Build planning contexts for each desired table in the registry."""
         contexts: list[PlanContext] = []
         for desired in registry:
             observed = self.reader.fetch_state(desired.qualified_name)
@@ -53,6 +72,7 @@ class Engine:
         return contexts
 
     def _validate_all(self, contexts: tuple[PlanContext, ...]) -> None:
+        """Run validation rules for all plans and raise on failure."""
         failures_by_table: dict[str, tuple[ValidationFailure,...]] = {}
 
         for ctx in contexts:
@@ -66,6 +86,7 @@ class Engine:
 
 
     def _execute_all(self, contexts: tuple[PlanContext, ...]) -> None:
+        """Execute all plans and raise if any action fails."""
         run_started = datetime.now(UTC).isoformat()
         executions_by_table: dict[str, tuple[ExecutionResult, ...]] = {}
 
@@ -83,4 +104,3 @@ class Engine:
 
         if report.any_failures():
             raise ExecutionFailedError(report)
-

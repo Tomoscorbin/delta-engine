@@ -5,6 +5,7 @@ from enum import StrEnum
 
 
 class ActionStatus(StrEnum):
+    """Outcome status for an executed action."""
     OK = "OK"
     FAILED = "FAILED"
     NOOP = "NOOP"
@@ -12,12 +13,14 @@ class ActionStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ValidationFailure:
+    """Description of a validation rule failure."""
     rule_name: str
     message: str
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionFailure:
+    """Details about a failed action execution."""
     action_index: int
     exception_type: str
     message: str
@@ -25,6 +28,7 @@ class ExecutionFailure:
 
 @dataclass(frozen=True, slots=True)
 class ExecutionResult:
+    """Result of executing a single action in a plan."""
     action: str
     action_index: int
     status: ActionStatus
@@ -34,6 +38,7 @@ class ExecutionResult:
 
 @dataclass(frozen=True, slots=True)
 class RunReport:
+    """Aggregate report for a run across all tables."""
     run_id: str
     started_at: str
     ended_at: str
@@ -41,6 +46,7 @@ class RunReport:
 
     @property
     def any_failures(self) -> bool:
+        """Return ``True`` if any action failed in the run."""
         return any(
             entry.failure is not None
             for entries in self.executions_by_table.values()
@@ -49,6 +55,7 @@ class RunReport:
 
     @property
     def failures_by_table(self) -> dict[str, ExecutionFailure]:
+        """Return a mapping of table name to its execution failures."""
         failures: dict[str, tuple[ExecutionFailure, ...]] = {}
         for table, entries in self.executions_by_table.items():
             table_failures = tuple(

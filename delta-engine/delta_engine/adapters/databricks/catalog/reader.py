@@ -10,9 +10,11 @@ from delta_engine.domain.model import Column, ObservedTable, QualifiedName
 
 
 class DatabricksReader:
+    """Catalog state reader backed by a Databricks/Spark session."""
     spark: SparkSession
 
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
+        """Return the observed table definition, or ``None`` if not found."""
         if not self._table_exists(qualified_name):
             return None
 
@@ -26,6 +28,7 @@ class DatabricksReader:
     # ---- private helpers ----------------------------------------------------
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool: #TODO: put sql in compiler
+        """Return ``True`` if a table exists in Unity Catalog."""
         sql = f"""
         SELECT 1
         FROM {quote_literal(qualified_name.catalog)}.information_schema.tables
@@ -36,6 +39,7 @@ class DatabricksReader:
         return bool(self.spark.sql(sql).head(1))
 
     def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
+        """List column definitions for the given table."""
         cols = self.spark.catalog.listColumns(str(qualified_name))
         out: list[Column] = []
         for c in cols:

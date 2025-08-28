@@ -10,11 +10,22 @@ from delta_engine.domain.plan import AddColumn
 
 
 class Rule(ABC):
+    """Abstract interface for plan validation rules."""
     @abstractmethod
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None: ...
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Evaluate the rule against a planning context.
+
+        Args:
+            ctx: The plan context to validate.
+
+        Returns:
+            A failure description if the rule is violated, otherwise ``None``.
+        """
+        ...
 
 
 class NonNullableColumnAdd(Rule):           # Are classes and ABCs the best approach?
+    """Disallow adding non-nullable columns to non-empty existing tables."""
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
         if ctx.observed is None:
             return None
@@ -36,6 +47,14 @@ class PlanValidator:
         self.rules = rules
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
+        """Evaluate all rules and collect any failures.
+
+        Args:
+            ctx: The plan context being validated.
+
+        Returns:
+            A tuple of failures in rule evaluation order (empty if none).
+        """
         failures: list[ValidationFailure] = ()
         for rule in self.rules:
             failure = rule.evaluate(ctx)

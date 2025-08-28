@@ -17,6 +17,7 @@ from delta_engine.domain.plan.actions import (
 
 
 def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
+    """Compile an :class:`ActionPlan` into Spark SQL statements."""
     qualified_name = plan.target
     table_name_sql = render_qualified_name(
         qualified_name.catalog,

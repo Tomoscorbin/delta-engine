@@ -12,14 +12,17 @@ from delta_engine.domain.plan.actions import ActionPlan
 
 
 def _sql_preview(sql: str, limit: int = 200) -> str:  # does this belong here?
+    """Return a single-line preview of a SQL statement, truncated to ``limit``."""
     one_line = " ".join(sql.split())
     return one_line if len(one_line) <= limit else f"{one_line[:limit]}…"
 
 class DatabricksExecutor:
+    """Plan executor that runs compiled statements via a Spark session."""
     def __init__(self, spark: SparkSession) -> None:
         self.spark = spark
 
     def execute_table(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
+        """Execute all actions in the plan, returning per-action results."""
         results: list[ExecutionResult] = []
         statements = compile_plan(plan)
 
@@ -65,4 +68,3 @@ class DatabricksExecutor:
             status=ActionStatus.OK,
             statement_preview=preview,
         )
-

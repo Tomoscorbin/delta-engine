@@ -32,6 +32,7 @@ from delta_engine.domain.model import (
 
 
 def sql_type_for_data_type(data_type: DataType) -> str:
+    """Return a Spark SQL type string for a domain :class:`DataType`."""
     match data_type:
         case Integer():
             return "INT"
@@ -61,6 +62,7 @@ def sql_type_for_data_type(data_type: DataType) -> str:
 
 
 def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
+    """Map a Spark SQL type (instance or DDL string) to a domain type."""
     if isinstance(spark_type, str):
         spark_type = SparkType.fromDDL(spark_type)
 

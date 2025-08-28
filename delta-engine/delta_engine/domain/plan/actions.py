@@ -40,13 +40,17 @@ class ActionPlan:
     actions: tuple[Action, ...] = ()
 
     def __len__(self) -> int:
+        """Return the number of actions in the plan."""
         return len(self.actions)
 
     def __bool__(self) -> bool:
+        """Return ``True`` if the plan contains any actions."""
         return bool(self.actions)
 
     def __iter__(self):
+        """Iterate over actions in plan order."""
         return iter(self.actions)
 
     def __getitem__(self, index):
+        """Return the action at ``index`` (supports slicing)."""
         return self.actions[index]

@@ -6,6 +6,12 @@ from delta_engine.application.validation import RunReport, ValidationFailure
 
 
 class ValidationFailedError(Exception):
+    """Raised when one or more tables fail validation.
+
+    Contains a mapping from fully qualified table name to the collection of
+    validation failures for that table, and renders a human-readable summary
+    message in ``str(exc)``.
+    """
     __slots__ = ("report",)
 
     def __init__(self, failures_by_table: dict[str, tuple[ValidationFailure,...]]) -> None:
@@ -14,6 +20,7 @@ class ValidationFailedError(Exception):
 
     @staticmethod
     def _format(failures_by_table: dict[str, tuple[ValidationFailure,...]]) -> str:
+        """Build a compact, readable multi-line summary of failures."""
         items = sorted(failures_by_table.items(), key=lambda kv: kv[0])
         total_tables = len(failures_by_table)
         total_failures = sum(len(failures) for _, failures in failures_by_table.items())
@@ -35,6 +42,11 @@ class ValidationFailedError(Exception):
 
 
 class ExecutionFailedError(Exception):
+    """Raised when one or more actions fail during execution.
+
+    Wraps a :class:`RunReport` that summarizes execution results and formats a
+    readable failure summary in ``str(exc)``.
+    """
     __slots__ = ("report",)
 
     def __init__(self, report: RunReport) -> None:
@@ -43,6 +55,7 @@ class ExecutionFailedError(Exception):
 
     @staticmethod
     def _format(report: RunReport) -> str:
+        """Build a compact, readable multi-line summary of execution failures."""
         failures_by_table = report.failures_by_table
         items = sorted(failures_by_table.items(), key=lambda kv: kv[0])
         total_tables = len(items)

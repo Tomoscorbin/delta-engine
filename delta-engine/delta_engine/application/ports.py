@@ -18,6 +18,14 @@ class CatalogStateReader(Protocol):
     """Reads current catalog state."""
 
     def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
+        """Return the observed definition for ``qualified_name`` or ``None``.
+
+        Args:
+            qualified_name: Fully qualified object name to look up.
+
+        Returns:
+            The observed table definition if it exists, otherwise ``None``.
+        """
         ...
 
 
@@ -32,6 +40,7 @@ class PlanExecutor(Protocol):
 
 @runtime_checkable
 class TableObject(Protocol):
+    """Lightweight table specification accepted by the registry."""
     catalog: str | None
     schema: str | None
     name: str
@@ -39,6 +48,7 @@ class TableObject(Protocol):
 
 @runtime_checkable
 class ColumnObject(Protocol):
+    """Lightweight column specification accepted by the registry."""
     name: str
     data_type: Any
     is_nullable: bool

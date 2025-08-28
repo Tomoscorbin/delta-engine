@@ -28,8 +28,10 @@ class QualifiedName:
         object.__setattr__(self, "name", normalize_identifier(self.name))
 
     def __str__(self) -> str:
+        """Return the canonical fully qualified string ``catalog.schema.name``."""
         return f"{self.catalog}.{self.schema}.{self.name}"
 
     @property
     def fully_qualified_name(self) -> str:
+        """Return the string form of the qualified name."""
         return str(self)
