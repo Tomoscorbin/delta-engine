@@ -28,6 +28,7 @@ class Engine:
     plan to reach desired state, validating that plan, and executing it using
     the provided adapter implementations.
     """
+
     def __init__(
         self,
         reader: CatalogStateReader,
@@ -40,6 +41,7 @@ class Engine:
             reader: Adapter that fetches the current catalog state.
             executor: Adapter that executes action plans.
             validator: Validator that checks plans for policy violations.
+
         """
         self.reader = reader
         self.executor = executor
@@ -51,14 +53,8 @@ class Engine:
         Computes, validates, and executes plans for each table in the supplied
         registry. Raises on validation or execution failures with rich context.
         """
-
-        # 1) Plans for all tables
         contexts = self._build_contexts(registry)
-
-        # # 2) Validate all plans
         self._validate_all(contexts)
-
-        # 3) Execute all plans
         self._execute_all(contexts)
 
 
