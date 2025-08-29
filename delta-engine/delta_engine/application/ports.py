@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
-from delta_engine.application.results import ExecutionResult
+from delta_engine.application.results import CatalogReadResult, ExecutionResult
 from delta_engine.domain.model import (
-    ObservedTable,
     QualifiedName,
 )
 from delta_engine.domain.plan.actions import ActionPlan
@@ -17,7 +16,7 @@ from delta_engine.domain.plan.actions import ActionPlan
 class CatalogStateReader(Protocol):
     """Reads current catalog state."""
 
-    def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
+    def fetch_state(self, qualified_name: QualifiedName) -> CatalogReadResult:
         """Return the observed definition for ``qualified_name`` or ``None``.
 
         Args:
@@ -25,6 +24,7 @@ class CatalogStateReader(Protocol):
 
         Returns:
             The observed table definition if it exists, otherwise ``None``.
+
         """
         ...
 
@@ -41,14 +41,17 @@ class PlanExecutor(Protocol):
 @runtime_checkable
 class TableObject(Protocol):
     """Lightweight table specification accepted by the registry."""
+
     catalog: str | None
     schema: str | None
     name: str
     columns: Iterable[Any]
 
+
 @runtime_checkable
 class ColumnObject(Protocol):
     """Lightweight column specification accepted by the registry."""
+
     name: str
     data_type: Any
     is_nullable: bool
