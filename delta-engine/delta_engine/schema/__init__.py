@@ -1,25 +1,26 @@
-from .column import Column
-from .delta import DeltaTable
 from delta_engine.schema.types import (
     Boolean,
     Date,
-    Float32,
-    Float64,
-    Int32,
-    Int64,
+    Double,
+    Float,
+    Integer,
+    Long,
     String,
     Timestamp,
 )
 
+from .column import Column
+from .delta import DeltaTable
+
 __all__ = [
-    "Column", 
-    "DeltaTable",
     "Boolean",
+    "Column",
     "Date",
-    "Float32",
-    "Float64",
-    "Int32",
-    "Int64",
+    "DeltaTable",
+    "Double",
+    "Float",
+    "Integer",
+    "Long",
     "String",
     "Timestamp",
 ]
