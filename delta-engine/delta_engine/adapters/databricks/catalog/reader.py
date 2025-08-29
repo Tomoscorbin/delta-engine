@@ -4,53 +4,47 @@ from __future__ import annotations
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.sql.dialect import quote_literal
+from delta_engine.adapters.databricks.errors import DatabricksError
+from delta_engine.adapters.databricks.preview import error_preview
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
+from delta_engine.application.results import CatalogReadResult, ReadFailure
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName
 
 
 class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
-    spark: SparkSession
 
-    def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
-        """Return the observed table definition, or ``None`` if not found."""
-        if not self._table_exists(qualified_name):
-            return None
+    def __init__(self, spark: SparkSession) -> None:
+        self.spark = spark
+        
+    def fetch_state(self, qualified_name: QualifiedName) -> CatalogReadResult:
+        try:
+            columns = self._list_columns(qualified_name)
+        except Exception as exc:
+            error_class = exc.getCondition()
+            failure = ReadFailure(error_class, error_preview)
 
-        columns = self._list_columns(qualified_name)
+            if error_class == DatabricksError.TABLE_OR_VIEW_NOT_FOUND:
+                return CatalogReadResult.absent()
+            return CatalogReadResult.failed(failure)
 
-        return ObservedTable(
-            qualified_name=qualified_name,
-            columns=columns,
-        )
+        observed = ObservedTable(qualified_name, columns)
 
-    # ---- private helpers ----------------------------------------------------
-
-    def _table_exists(self, qualified_name: QualifiedName) -> bool: #TODO: put sql in compiler
-        """Return ``True`` if a table exists in Unity Catalog."""
-        sql = f"""
-        SELECT 1
-        FROM {quote_literal(qualified_name.catalog)}.information_schema.tables
-        WHERE table_schema = '{quote_literal(qualified_name.schema)}'
-            AND table_name   = '{quote_literal(qualified_name.name)}'
-        LIMIT 1
-        """
-        return bool(self.spark.sql(sql).head(1))
+        return CatalogReadResult.present(observed)
 
     def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
         """List column definitions for the given table."""
-        cols = self.spark.catalog.listColumns(str(qualified_name))
-        out: list[Column] = []
-        for c in cols:
-            spark_dtype = getattr(c, "dataType", None)
+        catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
+        domain_columns = []
+        for column in catalog_columns:
+            spark_dtype = getattr(column, "dataType", None)
             domain_dtype = domain_type_from_spark(spark_dtype)
-            is_nullable = bool(getattr(c, "nullable", True))
-            out.append(
+            is_nullable = bool(getattr(column, "nullable", True))
+            domain_columns.append(
                 Column(
-                    name=c.name,
+                    name=column.name,
                     data_type=domain_dtype,
                     is_nullable=is_nullable,
                 )
             )
-        return tuple(out)
+        return tuple(domain_columns)

@@ -12,7 +12,7 @@ from delta_engine.domain.model.data_type import (
 # optional singletons for users
 INTEGER = Integer()
 LONG = Long()
-FLOAT = Float()
+FLAOT = Float()
 DOUBLE = Double()
 BOOLEAN = Boolean()
 STRING = String()
