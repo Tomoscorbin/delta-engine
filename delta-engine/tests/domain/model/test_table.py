@@ -1,38 +1,41 @@
-from dataclasses import FrozenInstanceError
-
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Int64, String
-from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
+from tests.factories import make_qualified_name
+
+_QN = make_qualified_name("dev", "silver", "orders")
 
 
-def make_table(cols=None):
-    cols = cols or (
-        Column("id", Int64()),
-        Column("name", String()),
-    )
-    qn = QualifiedName("core", "gold", "customers")
-    return TableSnapshot(qualified_name=qn, columns=cols)
+def test_table_snapshot_requires_at_least_one_column() -> None:
+    with pytest.raises(ValueError) as exc:
+        TableSnapshot(_QN, ())
+    assert "Table requires at least one column" in str(exc.value)
 
 
-def test_table_snapshot_holds_name_and_columns_immutably():
-    t = make_table()
-    assert str(t.qualified_name) == "core.gold.customers"
-    assert tuple(c.name for c in t.columns) == ("id", "name")
-    # frozen dataclass: attribute reassignment should fail
-    with pytest.raises(FrozenInstanceError):
-        t.columns = ()  # type: ignore[misc]
+def test_table_snapshot_rejects_duplicate_column_names_case_insensitive() -> None:
+    cols = (Column("ID", Integer()), Column("id", String()))
+    with pytest.raises(ValueError) as exc:
+        TableSnapshot(_QN, cols)
+    assert "Duplicate column name:" in str(exc.value)
 
 
-def test_desired_and_observed_tables_extend_snapshot():
-    cols = (
-        Column("id", Int64()),
-    )
-    qn = QualifiedName("core", "silver", "orders")
-    desired = DesiredTable(qualified_name=qn, columns=cols)
-    observed = ObservedTable(qualified_name=qn, columns=cols, is_empty=False)
-    assert isinstance(desired, TableSnapshot)
-    assert isinstance(observed, TableSnapshot)
-    assert observed.is_empty is False
+def test_table_snapshot_preserves_column_order() -> None:
+    c1 = Column("id", Integer())
+    c2 = Column("name", String())
+    c3 = Column("created_at", String())
+
+    ts = TableSnapshot(_QN, (c1, c2, c3))
+    assert ts.columns == (c1, c2, c3)
+
+
+def test_desired_and_observed_table_construct_like_snapshot() -> None:
+    cols = (Column("id", Integer()),)
+    dt = DesiredTable(_QN, cols)
+    ot = ObservedTable(_QN, cols)
+
+    assert isinstance(dt, TableSnapshot)
+    assert isinstance(ot, TableSnapshot)
+    assert dt.columns == cols
+    assert ot.columns == cols

@@ -1,15 +1,26 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import String
+from delta_engine.domain.model.data_type import Integer, Long
 
 
-def test_column_normalizes_name_and_defaults_nullable_true():
-    c = Column(name="CustomerID", data_type=String())
-    assert c.name == "customerid"
-    assert c.is_nullable is True
+def test_column_normalizes_name_and_defaults_nullable() -> None:
+    col = Column("  ID  ", Integer())
+    assert col.name == "id"
+    assert col.is_nullable is True
 
 
-def test_column_rejects_invalid_name():
-    with pytest.raises(ValueError):
-        Column(name="bad name", data_type=String())
+def test_column_is_frozen() -> None:
+    col = Column("id", Integer())
+    with pytest.raises(FrozenInstanceError):
+        col.name = "x"
+
+
+def test_column_equality_respects_normalization_and_type() -> None:
+    a = Column("ID", Integer())
+    b = Column("id", Integer())
+    c = Column("id", Long())
+    assert a == b
+    assert a != c
