@@ -1,16 +1,41 @@
-"""Application-level error types."""
-
-from __future__ import annotations
-
-from delta_engine.application.validation import RunReport
-
+from delta_engine.application.results import (
+    SyncReport,
+    ExecutionFailure,
+    ExecutionResult,
+    ValidationFailure,
+    ReadFailure,
+)
 
 class SyncFailedError(Exception):
     """Raised when one or more tables failed during sync."""
 
-    def __init__(self, report: RunReport) -> None:
+    def __init__(self, report: SyncReport) -> None:
         self.report = report
-        super().__init__(  # TODO: format properly
-            f"Sync failed: {len(report.tables)} tables, "
-            f"{sum(t.has_failures() for t in report.tables)} failed"
-        )
+
+        # Count tables
+        failed_tables = [t for t in report.table_reports if t.has_failures()]
+        num_failed = len(failed_tables)
+        total = len(report.table_reports)
+
+        header = f"Sync failed: {num_failed}/{total} tables failed"
+        details: list[str] = []
+
+        for t in failed_tables:
+            details.append(f"\n❌ {t.fully_qualified_name} [{t.status.value}]")
+
+            if t.failure:
+                for fail in t.failure:
+                    if isinstance(fail, ReadFailure):
+                        details.append(f"    Read error: {fail.exception_type} - {fail.message}")
+                    elif isinstance(fail, ValidationFailure):
+                        details.append(f"    Validation failed: {fail.rule_name} - {fail.message}")
+                    elif isinstance(fail, ExecutionFailure):
+                        details.append(f"    Execution failed at action {fail.action_index}: {fail.exception_type} - {fail.message}")
+
+            if t.execution_results:
+                for result in t.execution_results:
+                    if result.failure:
+                        details.append(f"    Failed SQL preview (action {result.action_index}):")
+                        details.append(f"        {result.statement_preview}")
+
+        super().__init__("\n".join([header] + details))

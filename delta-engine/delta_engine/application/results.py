@@ -109,23 +109,22 @@ class SyncReport:
 
     started_at: str
     ended_at: str
-    executions_by_table: dict[str, tuple[ExecutionResult, ...]]
+    table_reports: tuple[TableRunReport, ...]
 
     @property
     def any_failures(self) -> bool:
-        """Return ``True`` if any action failed in the run."""
-        return any(
-            entry.failure is not None
-            for entries in self.executions_by_table.values()
-            for entry in entries
-        )
+        """Return ``True`` if any table failed in the run."""
+        return any(t.has_failures() for t in self.table_reports)
 
     @property
-    def failures_by_table(self) -> dict[str, ExecutionFailure]:
-        """Return a mapping of table name to its execution failures."""
-        failures: dict[str, tuple[ExecutionFailure, ...]] = {}
-        for table, entries in self.executions_by_table.items():
-            table_failures = tuple(e.failure for e in entries if e.failure is not None)
-            if table_failures:
-                failures[table] = table_failures
+    def failures_by_table(self) -> dict[str, tuple[Failure, ...]]:
+        """Return a mapping of table name to its failures (any type)."""
+        failures: dict[str, tuple[Failure, ...]] = {}
+        for t in self.table_reports:
+            if t.failure:
+                failures[t.fully_qualified_name] = t.failure
         return failures
+
+    def __iter__(self) -> Iterator[TableRunReport]:
+        return iter(self.table_reports)
+    

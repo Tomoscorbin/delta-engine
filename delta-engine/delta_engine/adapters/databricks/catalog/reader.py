@@ -14,8 +14,9 @@ from delta_engine.domain.model import Column, ObservedTable, QualifiedName
 class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
-    spark: SparkSession
-
+    def __init__(self, spark: SparkSession) -> None:
+        self.spark = spark
+        
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogReadResult:
         try:
             columns = self._list_columns(qualified_name)

@@ -16,9 +16,8 @@ from delta_engine.application.results import (
 )
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.log_config import configure_logging
+from delta_engine.application.format_report import format_sync_report
 
-configure_logging()
 
 
 def _utc_now():
@@ -63,13 +62,13 @@ class Engine:
         run_report = SyncReport(
             started_at=run_started,
             ended_at=_utc_now(),
-            tables=table_reports,
+            table_reports=tuple(table_reports),
         )
 
         if run_report.any_failures:
             raise SyncFailedError(run_report)
 
-        return run_report
+        print(format_sync_report(run_report))
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
         """Synchronize a single table to its desired state."""
