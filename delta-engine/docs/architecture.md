@@ -80,7 +80,6 @@ sequenceDiagram
         X-->>E: ExecutionResults
         end
     end
-    E-->>U: report or SyncFailedError
 ```
 
 
