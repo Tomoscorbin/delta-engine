@@ -59,7 +59,6 @@ classDiagram
     Action <|-- AddColumn
     Action <|-- DropColumn
     ActionPlan o--> Action : 0..*
-</div>
 
 ## Sync Flow (Sequence)
 
