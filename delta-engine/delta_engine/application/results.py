@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Union
 
 from delta_engine.domain.model import ObservedTable
+
+# ---------- Status enums ----------
 
 
 class ActionStatus(StrEnum):
@@ -20,6 +24,9 @@ class TableRunStatus(StrEnum):
     READ_FAILED = "READ_FAILED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
+
+
+# ---------- Failure value objects ----------
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,8 +54,53 @@ class ExecutionFailure:
     message: str
 
 
+Failure = Union[ReadFailure, ValidationFailure, ExecutionFailure]
+
+
+# ---------- ReadResult ----------
+
+
 @dataclass(frozen=True, slots=True)
-class ExecutionResult:
+class ReadResult:
+    observed: ObservedTable | None = None
+    failure: ReadFailure | None = None
+
+    @classmethod
+    def create_present(cls, observed: ObservedTable) -> ReadResult:
+        return cls(observed=observed)
+
+    @classmethod
+    def create_absent(cls) -> ReadResult:
+        return cls()
+
+    @classmethod
+    def create_failed(cls, failure: ReadFailure) -> ReadResult:
+        return cls(failure=failure)
+
+    @property
+    def failed(self) -> bool:
+        return self.failure is not None
+
+
+# ---------- ValidationResult ----------
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationResult:
+    """Outcome of plan validation."""
+
+    failures: tuple[ValidationFailure, ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        return bool(self.failures)
+
+
+# ---------- ExecutionResult ----------
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionResult:  # do we want an ActionResult and then an aggregate ExecutionResult?
     """Result of executing a single action in a plan."""
 
     action: str
@@ -57,74 +109,79 @@ class ExecutionResult:
     statement_preview: str
     failure: ExecutionFailure | None = None
 
-
-@dataclass(frozen=True, slots=True)
-class CatalogReadResult:
-    observed: ObservedTable | None = None
-    failure: ReadFailure | None = None
-
-    @classmethod
-    def present(cls, observed: ObservedTable) -> CatalogReadResult:
-        return cls(observed=observed)
-
-    @classmethod
-    def absent(cls) -> CatalogReadResult:
-        return cls()
-
-    @classmethod
-    def failed(cls, failure: ReadFailure) -> CatalogReadResult:
-        return cls(failure=failure)
+    def __post_init__(self) -> None:
+        if (
+            self.status is ActionStatus.FAILED and self.failure is None
+        ):  # are these really necessary?
+            raise ValueError("FAILED ExecutionResult must include an ExecutionFailure.")
+        if self.status is not ActionStatus.FAILED and self.failure is not None:
+            raise ValueError("Only FAILED results may include an ExecutionFailure.")
 
 
-Failure = Union[ReadFailure, ValidationFailure, ExecutionFailure]
+# ---------- Reports ----------
 
 
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
     fully_qualified_name: str
-    started_at: str
-    ended_at: str
-    execution_results: tuple[ExecutionResult, ...] | None = None
-    failure: tuple[Failure] | None = None
+    started_at: datetime
+    ended_at: datetime
+    read: ReadResult
+    validation: ValidationResult
+    execution_results: tuple[ExecutionResult, ...] = ()
+
+    @property
+    def _any_action_failed(self) -> bool:
+        return any(e.status is ActionStatus.FAILED for e in self.execution_results)
 
     @property
     def status(self) -> TableRunStatus:
-        failure = self.failure
-        if isinstance(failure, ReadFailure):
+        if self.read.failed:
             return TableRunStatus.READ_FAILED
-        if isinstance(failure, ValidationFailure):
+        if self.validation.failed:
             return TableRunStatus.VALIDATION_FAILED
-        if isinstance(failure, ExecutionFailure):
+        if self._any_action_failed:
             return TableRunStatus.EXECUTION_FAILED
-        else:
-            return TableRunStatus.SUCCESS
+        return TableRunStatus.SUCCESS
 
+    @property
     def has_failures(self) -> bool:
-        return self.failure is not None
+        return self.status is not TableRunStatus.SUCCESS
+
+    @property
+    def action_failures(self) -> tuple[ExecutionFailure, ...]:
+        return tuple(e.failure for e in self.execution_results if e.status is ActionStatus.FAILED)
+
+    @property
+    def all_failures(self) -> tuple[Failure, ...]:
+        """All failures for this table (read, validation, execution)."""
+        out: list[Failure] = []
+        if self.read.failed:
+            out.append(self.read.failure)
+        if self.validation.failed:
+            out.extend(self.validation.failures)
+        out.extend(self.action_failures)
+        return tuple(out)
 
 
 @dataclass(frozen=True, slots=True)
 class SyncReport:
     """Aggregate report for a run across all tables."""
 
-    started_at: str
-    ended_at: str
+    started_at: datetime
+    ended_at: datetime
     table_reports: tuple[TableRunReport, ...]
 
     @property
     def any_failures(self) -> bool:
-        """Return ``True`` if any table failed in the run."""
-        return any(t.has_failures() for t in self.table_reports)
+        """Return True if any table failed in the run."""
+        return any(t.has_failures for t in self.table_reports)
 
     @property
     def failures_by_table(self) -> dict[str, tuple[Failure, ...]]:
-        """Return a mapping of table name to its failures (any type)."""
-        failures: dict[str, tuple[Failure, ...]] = {}
-        for t in self.table_reports:
-            if t.failure:
-                failures[t.fully_qualified_name] = t.failure
-        return failures
+        return {
+            t.fully_qualified_name: t.all_failures for t in self.table_reports if t.has_failures
+        }
 
     def __iter__(self) -> Iterator[TableRunReport]:
         return iter(self.table_reports)
-    

@@ -10,7 +10,8 @@ from delta_engine.domain.model.qualified_name import QualifiedName
 
 @dataclass(frozen=True, slots=True)
 class TableSnapshot:
-    """Immutable snapshot of a table schema.
+    """
+    Immutable snapshot of a table schema.
 
     Attributes:
         qualified_name: Fully qualified table name.
@@ -32,6 +33,7 @@ class TableSnapshot:
                 raise ValueError(f"Duplicate column name: {c.name}")
             seen.add(n)
 
+
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
@@ -39,7 +41,8 @@ class DesiredTable(TableSnapshot):
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
-    """Observed definition derived from the catalog (current state).
+    """
+    Observed definition derived from the catalog (current state).
 
     Attributes:
         is_empty: ``True`` if the table exists and has zero rows.

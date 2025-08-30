@@ -1,61 +1,43 @@
+from dataclasses import FrozenInstanceError
 
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import String
-from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
-from tests.factories import qualified_name
+from tests.factories import make_qualified_name
 
-_QN = qualified_name("core", "gold", "customers")
-
-def test_action_plan_iter_len_and_add():
-    c1 = AddColumn(column=Column("name", String()))
-    c2 = DropColumn(name="old_field")
-
-    plan = ActionPlan(target=_QN, actions=(c1,))
-    assert list(iter(plan)) == [c1]
-    assert len(plan) == 1
-
-    plan2 = plan.add(c2)
-    assert len(plan2) == 2
-    assert plan2.actions == (c1, c2)
+_QN = make_qualified_name("dev", "silver", "orders")
 
 
-def test_action_plan_add_requires_action_type():
+def test_action_plan_len_bool_iter_and_indexing() -> None:
+    actions = (
+        AddColumn(Column("age", Integer())),
+        DropColumn("nickname"),
+    )
+    plan = ActionPlan(target=_QN, actions=actions)
+
+    assert len(plan) == 2
+    assert bool(plan) is True
+    assert list(iter(plan)) == list(actions)
+    assert plan[0] == actions[0]
+    assert plan[0:2] == actions
+
+
+def test_action_plan_empty_is_falsey() -> None:
     plan = ActionPlan(target=_QN, actions=())
-    with pytest.raises(TypeError):
-        plan.add("not-an-action")  # type: ignore[arg-type]
+    assert len(plan) == 0
+    assert bool(plan) is False
+    assert list(plan) == []
 
 
-def test_action_plan_merge_concatenates_when_same_target():
-    a1 = AddColumn(column=Column("name", String()))
-    a2 = DropColumn(name="age")
-
-    p1 = ActionPlan(target=_QN, actions=(a1,))
-    p2 = ActionPlan(target=_QN, actions=(a2,))
-
-    merged = p1 + p2
-    assert merged.actions == (a1, a2)
-    assert str(merged.target) == "core.gold.customers"
+def test_action_plan_is_frozen() -> None:
+    plan = ActionPlan(target=_QN, actions=())
+    with pytest.raises(FrozenInstanceError):
+        plan.target = _QN
 
 
-def test_action_plan_merge_rejects_different_targets():
-    p1 = ActionPlan(target=QualifiedName("core", "gold", "a"), actions=())
-    p2 = ActionPlan(target=QualifiedName("core", "gold", "b"), actions=())
-    with pytest.raises(ValueError):
-        _ = p1 + p2
-
-
-def test_count_by_action_returns_counts_keyed_by_type():
-    a1 = AddColumn(column=Column("name", String()))
-    a2 = DropColumn(name="age")
-    a3 = DropColumn(name="email")
-
-    plan = ActionPlan(target=_QN, actions=(a1, a2, a3))
-    counts = plan.count_by_action()
-
-    # Keys are classes, values are counts
-    assert counts.get(AddColumn) == 1
-    assert counts.get(DropColumn) == 2
-    assert counts.get(CreateTable, 0) == 0
+def test_action_classes_are_value_objects() -> None:
+    c = CreateTable(columns=(Column("id", Integer()), Column("name", String())))
+    assert isinstance(c.columns, tuple)
+    assert c.columns[0].name == "id"

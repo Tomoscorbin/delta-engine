@@ -1,48 +1,58 @@
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Int64, String
+from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
+from delta_engine.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
 from delta_engine.domain.services.differ import diff_tables
-from tests.factories import columns, qualified_name
+from tests.factories import make_qualified_name
 
 
-def test_diff_tables_returns_create_table_when_observed_missing():
+def test_diff_tables_returns_create_table_when_observed_is_none() -> None:
     desired = DesiredTable(
-        qualified_name=qualified_name("core", "gold", "customers"),
-        columns=columns([("id", Int64()), ("name", String())]),
+        make_qualified_name("dev", "silver", "people"),
+        (Column("id", Integer()), Column("name", String())),
     )
-
     plan = diff_tables(observed=None, desired=desired)
 
-    from delta_engine.domain.plan.actions import CreateTable
-    assert str(plan.target) == "core.gold.customers"
-    assert len(plan.actions) == 1
-    assert isinstance(plan.actions[0], CreateTable)
-    assert plan.actions[0].columns == desired.columns  # same tuple object OK
+    assert isinstance(plan, ActionPlan)
+    assert isinstance(plan[0], CreateTable)
 
 
-def test_diff_tables_raises_on_mismatched_qualified_name():
-    desired = DesiredTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]))
-    observed = ObservedTable(qualified_name("core", "gold", "orders"), columns([("id", Int64())]), is_empty=False)
-
+def test_diff_tables_raises_on_qualified_name_mismatch() -> None:
+    observed = ObservedTable(
+        make_qualified_name("dev", "silver", "people_old"), (Column("id", Integer()),)
+    )
+    desired = DesiredTable(
+        make_qualified_name("dev", "silver", "people_new"), (Column("id", Integer()),)
+    )
     with pytest.raises(ValueError):
-        diff_tables(observed=observed, desired=desired)
+        diff_tables(observed, desired)
 
 
-def test_diff_tables_delegates_to_column_diff(monkeypatch):
-    desired = DesiredTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]))
-    observed = ObservedTable(qualified_name("core", "gold", "customers"), columns([("id", Int64())]), is_empty=False)
+def test_diff_tables_produces_adds_and_drops_from_column_diff() -> None:
+    observed = ObservedTable(
+        make_qualified_name("dev", "silver", "people"),
+        (Column("id", Integer()), Column("nickname", String())),
+    )
+    desired = DesiredTable(
+        make_qualified_name("dev", "silver", "people"),
+        (Column("id", Integer()), Column("age", Integer())),
+    )
+    plan = diff_tables(observed, desired)
 
-    # Stub diff_columns to prove delegation and passthrough
-    from delta_engine.domain.model.data_type import String
-    from delta_engine.domain.plan.actions import AddColumn
+    assert tuple(plan) == (
+        AddColumn(Column("age", Integer())),
+        DropColumn("nickname"),
+    )
 
-    fake_action = AddColumn(column=Column("email", String()))
 
-    import delta_engine.domain.services.differ as differ_mod
-    monkeypatch.setattr(differ_mod, "diff_columns", lambda d, o: (fake_action,))
+def test_diff_tables_no_changes_returns_empty_plan() -> None:
+    cols = (Column("id", Integer()), Column("name", String()))
+    observed = ObservedTable(make_qualified_name("dev", "silver", "people"), cols)
+    desired = DesiredTable(make_qualified_name("dev", "silver", "people"), cols)
+    plan = diff_tables(observed, desired)
 
-    plan = diff_tables(observed=observed, desired=desired)
-    assert plan.actions == (fake_action,)
-    assert str(plan.target) == "core.gold.customers"
+    assert len(plan) == 0
+    assert not plan
+    assert list(plan) == []

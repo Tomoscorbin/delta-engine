@@ -40,6 +40,7 @@ ignore = [
   "E266",  # allow long inline comments
   "D104",  # don't require package docstrings in __init__.py
   "D107",  # don't require docstrings on __init__ methods
+  "D212",  # don't require multi-line docstring summary to start at the first line
 ]
 
 # isort behavior for import sorting
@@ -55,3 +56,19 @@ ban-relative-imports = "all"  # enforce absolute imports (TID252)
 # Test file exceptions (short fixture names etc.)
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["N802", "N803", "N806"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = """
+--cov
+--cov-report=term-missing:skip-covered
+--cov-report=xml:reports/coverage.xml
+"""
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.coverage.run]
+branch = true
+source = ["delta_engine"]

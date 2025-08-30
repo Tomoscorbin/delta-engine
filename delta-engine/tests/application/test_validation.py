@@ -1,87 +1,63 @@
-import pytest
+from types import SimpleNamespace
 
-from delta_engine.application.plan.plan_context import PlanContext
-import delta_engine.application.validation as val_mod
+from delta_engine.application.results import ValidationFailure
+from delta_engine.application.validation import (
+    NonNullableColumnAdd,
+    PlanValidator,
+)
+from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.data_type import Integer, String
+from delta_engine.domain.model.table import ObservedTable
+from delta_engine.domain.plan.actions import ActionPlan, AddColumn
+from tests.factories import make_qualified_name
 
-# ---- tiny stubs -------------------------------------------------------------
-
-
-class FakeSubject:
-    def __init__(self, is_existing_and_non_empty: bool):
-        self.is_existing_and_non_empty = is_existing_and_non_empty
-
-
-class FakePlan:
-    def __init__(self, actions, target: str = "cat.sch.tbl"):
-        self.actions = tuple(actions)
-        self.target = target
+_QN = make_qualified_name("dev", "silver", "people")
 
 
-# ---- Rule behavior ----------------------------------------------------------
+def _ctx(observed, actions) -> SimpleNamespace:
+    """Build a duck-typed PlanContext with just the attributes used by rules."""
+    plan = ActionPlan(target=_QN, actions=tuple(actions))
+    return SimpleNamespace(observed=observed, plan=plan)
 
 
-def test_rule_is_ok_when_table_is_new_or_empty():
-    subject = FakeSubject(is_existing_and_non_empty=False)
-    plan = FakePlan(actions=())
-    ctx = PlanContext(subject=subject, plan=plan)
+def test_non_nullable_add_on_existing_table_returns_failure() -> None:
+    observed_table = ObservedTable(_QN, (Column("id", Integer()),))
+    add_non_nullable_age = AddColumn(Column("age", Integer(), is_nullable=False))
+    ctx = _ctx(observed_table, [add_non_nullable_age])
 
-    rule = val_mod.NoAddColumnOnNonEmptyTable()
-    assert rule.fails(ctx) is False  # rule doesn't apply → OK
+    failure = NonNullableColumnAdd().evaluate(ctx)
 
-
-def test_rule_is_ok_when_non_empty_but_no_addcolumn():
-    subject = FakeSubject(is_existing_and_non_empty=True)
-    plan = FakePlan(actions=(object(), object()))
-    ctx = PlanContext(subject=subject, plan=plan)
-
-    rule = val_mod.NoAddColumnOnNonEmptyTable()
-    assert rule.fails(ctx) is False  # no AddColumn present
+    assert isinstance(failure, ValidationFailure)
+    assert failure.rule_name == "NonNullableColumnAdd"
+    assert isinstance(failure.message, str)  # catches an accidental tuple message bug I made
+    assert "cannot add non-nullable" in failure.message.lower()
+    assert "age" in failure.message.lower()
 
 
-def test_rule_fails_when_non_empty_and_addcolumn_present(monkeypatch):
-    # Make the module-under-test see our fake AddColumn class
-    class FakeAddColumn: ...
+def test_nullable_add_on_existing_table_is_allowed() -> None:
+    observed_table = ObservedTable(_QN, (Column("id", Integer()),))
+    add_nullable_nickname = AddColumn(Column("nickname", String(), is_nullable=True))
+    ctx = _ctx(observed_table, [add_nullable_nickname])
 
-    monkeypatch.setattr(val_mod, "AddColumn", FakeAddColumn)
+    failure = NonNullableColumnAdd().evaluate(ctx)
 
-    subject = FakeSubject(is_existing_and_non_empty=True)
-    plan = FakePlan(actions=(FakeAddColumn(), object()))
-    ctx = PlanContext(subject=subject, plan=plan)
-
-    rule = val_mod.NoAddColumnOnNonEmptyTable()
-    assert rule.fails(ctx) is True
+    assert failure is None
 
 
-# ---- Validator behavior -----------------------------------------------------
+def test_non_nullable_add_on_missing_table_is_allowed() -> None:  # i.e. CreateTable
+    add_non_nullable_age = AddColumn(Column("age", Integer(), is_nullable=False))
+    ctx = _ctx(None, [add_non_nullable_age])
+
+    failure = NonNullableColumnAdd().evaluate(ctx)
+
+    assert failure is None
 
 
-def test_validator_raises_with_rule_code_message_and_target(monkeypatch):
-    # Arrange a plan containing "AddColumn" to trigger the rule
-    class FakeAddColumn: ...
+def test_plan_validator_returns_empty_tuple_when_no_failures() -> None:
+    observed_table = ObservedTable(_QN, (Column("id", Integer()),))
+    add_nullable_nickname = AddColumn(Column("nickname", String(), is_nullable=True))
+    ctx = _ctx(observed_table, [add_nullable_nickname])
 
-    monkeypatch.setattr(val_mod, "AddColumn", FakeAddColumn)
+    failures = PlanValidator(rules=(NonNullableColumnAdd(),)).validate(ctx)
 
-    subject = FakeSubject(is_existing_and_non_empty=True)
-    plan = FakePlan(actions=(FakeAddColumn(),), target="cat.sch.tbl")
-    ctx = PlanContext(subject=subject, plan=plan)
-
-    validator = val_mod.PlanValidator((val_mod.NoAddColumnOnNonEmptyTable(),))
-
-    with pytest.raises(val_mod.ValidationError) as excinfo:
-        validator.validate(ctx)
-
-    err = excinfo.value
-    # string format and fields come from your ValidationError implementation
-    assert "NO_ADD_ON_NON_EMPTY_TABLE" in str(err)
-    assert "AddColumn actions are not allowed on non-empty tables." in str(err)
-    assert "cat.sch.tbl" in str(err)
-
-
-def test_validator_does_not_raise_when_all_rules_pass():
-    subject = FakeSubject(is_existing_and_non_empty=False)  # rule not applicable
-    plan = FakePlan(actions=(), target="cat.sch.tbl")
-    ctx = PlanContext(subject=subject, plan=plan)
-
-    validator = val_mod.PlanValidator((val_mod.NoAddColumnOnNonEmptyTable(),))
-    # Should not raise
-    validator.validate(ctx)
+    assert failures == ()

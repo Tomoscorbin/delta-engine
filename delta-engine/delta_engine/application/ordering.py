@@ -4,14 +4,18 @@ from delta_engine.domain.plan import Action, AddColumn, CreateTable, DropColumn
 
 
 def target_name(action: Action) -> str:
-    """Return the target identifier used for ordering (usually table name)."""
+    """Return the target identifier used for ordering."""
     return str(getattr(action, "target", ""))
+
 
 def subject_name(action: Action) -> str:
     """Return the subject identifier used for ordering (e.g., column name)."""
     if isinstance(action, AddColumn):
         return action.column.name
+    if isinstance(action, DropColumn):
+        return action.column_name
     return getattr(action, "name", "")
+
 
 _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
     CreateTable,
@@ -21,8 +25,10 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
 
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}
 
+
 def action_sort_key(action: Action) -> tuple[int, str, str]:
-    """Return a sortable key for action ordering.
+    """
+    Return a sortable key for action ordering.
 
     Orders by phase (create, add, drop), then by target name, then by subject
     name to achieve deterministic planning.

@@ -12,19 +12,22 @@ from delta_engine.domain.services.differ import diff_tables
 
 @dataclass(frozen=True, slots=True)
 class PlanContext:
-    """Planning context capturing desired/observed state and the action plan.
+    """
+    Planning context capturing desired/observed state and the action plan.
 
     Attributes:
         desired: The user-authored desired definition.
         observed: The currently observed definition or ``None`` if missing.
         plan: The computed and ordered action plan to reach ``desired``.
+
     """
+
     desired: DesiredTable
     observed: ObservedTable | None
     plan: ActionPlan
 
 
-def make_plan_context(observed: ObservedTable | None, desired: DesiredTable) -> PlanContext:
+def make_plan_context(desired: DesiredTable, observed: ObservedTable | None) -> PlanContext:
     """Create a :class:`PlanContext` for a pair of tables and its plan."""
     plan = _compute_plan(observed, desired)
     return PlanContext(

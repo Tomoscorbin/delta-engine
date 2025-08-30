@@ -1,131 +1,89 @@
-from __future__ import annotations
+import delta_engine.adapters.databricks.catalog.executor as exec_mod
+from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
+from delta_engine.application.results import ActionStatus, ExecutionResult
+from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.data_type import Integer
+from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.plan.actions import ActionPlan, AddColumn, DropColumn
 
-import pytest
-
-from delta_engine.adapters.databricks.catalog import executor as exec_mod
-
-
-def _mk_executor(run_sql=lambda s: None, **kwargs) -> exec_mod.UCExecutor:
-    return exec_mod.UCExecutor(run_sql=run_sql, **kwargs)
-
-
-def test_dry_run_echoes_and_executes_nothing(monkeypatch) -> None:
-    monkeypatch.setattr(exec_mod, "compile_plan", lambda plan, dialect=None: ("S1", "S2"))
-    ran: list[str] = []
-    ex = _mk_executor(run_sql=ran.append, dry_run=True)
-
-    out = ex.execute(object())
-
-    assert out.success is True
-    assert out.executed_count == 0
-    assert out.executed_sql == ("S1", "S2")
-    assert out.messages == ("DRY RUN 1: S1", "DRY RUN 2: S2")
-    assert ran == []
+# --- stubs ----------------------------------------------------------------
 
 
-def test_stop_on_first_error(monkeypatch) -> None:
-    monkeypatch.setattr(exec_mod, "compile_plan", lambda plan, dialect=None: ("A", "B", "C"))
+class _StubSpark:
+    def __init__(self):
+        self.statements: list[str] = []
+        self.to_fail_at_index: set[int] = set()
 
-    def run_sql(sql: str) -> None:
-        if sql == "B":
-            raise RuntimeError("boom")
-
-    ex = _mk_executor(run_sql, on_error="stop")
-    out = ex.execute(object())
-
-    assert out.success is False
-    assert out.executed_count == 1
-    assert out.executed_sql == ("A",)
-    # Message numbering and formatting matter:
-    assert out.messages[0] == "OK 1"
-    assert out.messages[1] == "ERROR 2: RuntimeError: boom"
-    # No message for 3 because we stopped
+    def sql(self, stmt: str):
+        idx = len(self.statements)
+        self.statements.append(stmt)
+        if idx in self.to_fail_at_index:
+            raise ValueError(f"bad sql at {idx}")
 
 
-def test_continue_runs_remaining_after_error(monkeypatch) -> None:
-    monkeypatch.setattr(exec_mod, "compile_plan", lambda plan, dialect=None: ("A", "B", "C"))
-
-    def run_sql(sql: str) -> None:
-        if sql == "B":
-            raise ValueError("bad")
-
-    ex = _mk_executor(run_sql, on_error="continue")
-    out = ex.execute(object())
-
-    assert out.success is False
-    assert out.executed_count == 2  # A and C executed
-    assert out.executed_sql == ("A", "C")
-    assert out.messages == ("OK 1", "ERROR 2: ValueError: bad", "OK 3")
+def _plan_two() -> ActionPlan:
+    qn = QualifiedName("dev", "silver", "people")
+    actions = (
+        AddColumn(Column("age", Integer(), is_nullable=False)),
+        DropColumn("nickname"),
+    )
+    return ActionPlan(target=qn, actions=actions)
 
 
-def test_first_statement_failure(monkeypatch) -> None:
-    monkeypatch.setattr(exec_mod, "compile_plan", lambda plan, dialect=None: ("X", "Y"))
-
-    def run_sql(sql: str) -> None:
-        raise RuntimeError("kaboom")
-
-    ex = _mk_executor(run_sql, on_error="stop")
-    out = ex.execute(object())
-
-    assert out.success is False
-    assert out.executed_count == 0
-    assert out.executed_sql == ()
-    assert out.messages == ("ERROR 1: RuntimeError: kaboom",)
+# --- tests ---------------------------------------------------------------------
 
 
-def test_empty_plan_is_noop(monkeypatch) -> None:
-    monkeypatch.setattr(exec_mod, "compile_plan", lambda plan, dialect=None: ())
-    ex = _mk_executor(lambda s: (_ for _ in ()).throw(AssertionError("should not run")))
+def test_execute_success_returns_one_result_per_action_and_ok(monkeypatch) -> None:
+    # Arrange: compile_plan returns one statement per action
+    def fake_compile_plan(plan: ActionPlan):
+        return ("ALTER ... ADD", "ALTER ... DROP")
 
-    out = ex.execute(object())
+    monkeypatch.setattr(exec_mod, "compile_plan", fake_compile_plan)
 
-    assert out.success is True
-    assert out.executed_count == 0
-    assert out.executed_sql == ()
-    assert out.messages == ()
+    spark = _StubSpark()
+    ex = DatabricksExecutor(spark)
 
+    results = ex.execute(_plan_two())
 
-def test_dialect_is_threaded_to_compiler_default(monkeypatch) -> None:
-    seen = {}
-
-    def _compile(plan, dialect=None):
-        seen["dialect"] = dialect
-        return ("ONLY",)
-
-    monkeypatch.setattr(exec_mod, "compile_plan", _compile)
-    ex = _mk_executor(lambda s: None)  # use default dialect
-    out = ex.execute(object())
-
-    assert out.success is True
-    # Just check that *something* was passed; the exact object is SPARK_SQL
-    assert seen["dialect"] is exec_mod.SPARK_SQL
+    assert isinstance(results, tuple)
+    assert len(results) == 2
+    assert all(isinstance(r, ExecutionResult) for r in results)
+    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.OK]
+    assert [r.action for r in results] == ["AddColumn", "DropColumn"]
+    assert results[0].statement_preview.startswith("ALTER")
+    assert results[1].statement_preview.startswith("ALTER")
 
 
-def test_dialect_is_threaded_to_compiler_override(monkeypatch) -> None:
-    seen = {}
+def test_execute_failure_on_second_action_captures_failure(monkeypatch) -> None:
+    def fake_compile_plan(plan: ActionPlan):
+        return ("S1", "S2")
 
-    def _compile(plan, dialect=None):
-        seen["dialect"] = dialect
-        return ("ONLY",)
+    monkeypatch.setattr(exec_mod, "compile_plan", fake_compile_plan)
 
-    class _Dialect: ...
+    spark = _StubSpark()
+    spark.to_fail_at_index.add(1)  # second statement fails
+    ex = DatabricksExecutor(spark)
 
-    d = _Dialect()
+    results = ex.execute(_plan_two())
 
-    monkeypatch.setattr(exec_mod, "compile_plan", _compile)
-    ex = _mk_executor(lambda s: None, dialect=d)
-    out = ex.execute(object())
+    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.FAILED]
+    fail = results[1].failure
+    assert fail is not None
+    assert fail.action_index == 1
+    assert fail.exception_type in {"ValueError"}
 
-    assert out.success is True
-    assert seen["dialect"] is d
 
+def test_execute_empty_plan_returns_empty_tuple(monkeypatch) -> None:
+    def fake_compile_plan(plan: ActionPlan):
+        return ()
 
-def test_compile_exception_bubbles_up(monkeypatch) -> None:
-    def _compile(plan, dialect=None):
-        raise RuntimeError("compiler blew up")
+    monkeypatch.setattr(exec_mod, "compile_plan", fake_compile_plan)
 
-    monkeypatch.setattr(exec_mod, "compile_plan", _compile)
-    ex = _mk_executor(lambda s: None)
+    spark = _StubSpark()
+    ex = DatabricksExecutor(spark)
 
-    with pytest.raises(RuntimeError, match="compiler blew up"):
-        ex.execute(object())
+    empty_plan = ActionPlan(target=QualifiedName("dev", "silver", "empty"), actions=())
+    results = ex.execute(empty_plan)
+
+    assert results == ()
+    assert spark.statements == []

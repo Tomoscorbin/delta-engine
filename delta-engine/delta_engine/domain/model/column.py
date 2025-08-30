@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from delta_engine.domain.model._normalise_identifier import normalize_identifier
 from delta_engine.domain.model.data_type import DataType
+from delta_engine.domain.model.normalise_identifier import normalize_identifier
 
 
 @dataclass(frozen=True, slots=True)
 class Column:
-    """Immutable, case-insensitive column definition.
+    """
+    Immutable, case-insensitive column definition.
 
     Attributes:
         name: Column name (normalized to lowercase).

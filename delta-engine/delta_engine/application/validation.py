@@ -11,6 +11,7 @@ from delta_engine.domain.plan import AddColumn
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
+
     @abstractmethod
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
         """Evaluate the rule against a planning context.
@@ -20,12 +21,14 @@ class Rule(ABC):
 
         Returns:
             A failure description if the rule is violated, otherwise ``None``.
+
         """
         ...
 
 
-class NonNullableColumnAdd(Rule):           # Are classes and ABCs the best approach?
+class NonNullableColumnAdd(Rule):  # Are classes and ABCs the best approach?
     """Disallow adding non-nullable columns to non-empty existing tables."""
+
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
         if ctx.observed is None:
             return None
@@ -35,10 +38,11 @@ class NonNullableColumnAdd(Rule):           # Are classes and ABCs the best appr
                     rule_name=self.__class__.__name__,
                     message=(
                         "Operation not allowed: cannot add non-nullable"
-                        f" column '{action.column.name}'",
-                    )
+                        f" column '{action.column.name}'"
+                    ),
                 )
         return None
+
 
 class PlanValidator:
     """Run a sequence of validation rules against a plan."""
@@ -54,8 +58,9 @@ class PlanValidator:
 
         Returns:
             A tuple of failures in rule evaluation order (empty if none).
+
         """
-        failures: list[ValidationFailure] = ()
+        failures: list[ValidationFailure] = []
         for rule in self.rules:
             failure = rule.evaluate(ctx)
             if failure is not None:

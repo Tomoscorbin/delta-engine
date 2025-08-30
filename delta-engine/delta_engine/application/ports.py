@@ -1,11 +1,11 @@
-"""Application ports (adapter interfaces). No business logic here."""
+"""Application ports / adapter interfaces."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any, Protocol, runtime_checkable
 
-from delta_engine.application.results import CatalogReadResult, ExecutionResult
+from delta_engine.application.results import ExecutionResult, ReadResult
 from delta_engine.domain.model import (
     QualifiedName,
 )
@@ -16,14 +16,12 @@ from delta_engine.domain.plan.actions import ActionPlan
 class CatalogStateReader(Protocol):
     """Reads current catalog state."""
 
-    def fetch_state(self, qualified_name: QualifiedName) -> CatalogReadResult:
-        """Return the observed definition for ``qualified_name`` or ``None``.
+    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+        """
+        Return the result of an attempted catalog read against a table.
 
         Args:
             qualified_name: Fully qualified object name to look up.
-
-        Returns:
-            The observed table definition if it exists, otherwise ``None``.
 
         """
         ...
@@ -33,7 +31,7 @@ class CatalogStateReader(Protocol):
 class PlanExecutor(Protocol):
     """Executes an action plan against a backing engine."""
 
-    def execute(self, plan: ActionPlan) -> ExecutionResult:
+    def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
         """Run the plan and return the execution outcome."""
         ...
 

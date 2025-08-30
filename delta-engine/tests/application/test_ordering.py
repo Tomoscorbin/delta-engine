@@ -1,96 +1,103 @@
-import types
-
 import pytest
 
-import delta_engine.application.ordering as mod
+from delta_engine.application.ordering import (
+    action_sort_key,
+    subject_name,
+    target_name,
+)
+from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.data_type import Integer, String
+from delta_engine.domain.plan.actions import Action, AddColumn, CreateTable, DropColumn
 
-# ----------------------------
-# target_name
-# ----------------------------
+# --- Helpers -----------------------------------------------------------------
 
-def test_target_name_returns_str_of_target_when_present():
-    class FakeQualifiedName:
-        def __init__(self, text: str) -> None:
-            self.text = text
-        def __str__(self) -> str:
-            return self.text
 
-    class FakeAction:
+def _add(name: str) -> AddColumn:
+    return AddColumn(Column(name, Integer()))
+
+
+def _drop(name: str) -> DropColumn:
+    # DropColumn has `column_name`, not `name`
+    return DropColumn(name)
+
+
+def _create(*cols: str) -> CreateTable:
+    return CreateTable(columns=tuple(Column(c, String()) for c in cols))
+
+
+# --- target_name / subject_name behaviour ------------------------------------
+
+
+def test_target_name_is_empty_for_current_actions() -> None:
+    # None of the Action subclasses carry a `target` attribute.
+    assert target_name(_create("id")) == ""
+    assert target_name(_add("age")) == ""
+    assert target_name(_drop("nickname")) == ""
+
+
+def test_subject_name_for_addcolumn_is_column_name() -> None:
+    assert subject_name(_add("Age")) == "age"  # normalized by Column
+
+
+def test_action_sort_key_sorts_dropcolumns_by_subject_name() -> None:
+    from delta_engine.application.ordering import action_sort_key
+    from delta_engine.domain.plan.actions import DropColumn
+
+    d1 = DropColumn("a_col")
+    d2 = DropColumn("b_col")
+    ordered = sorted([d2, d1], key=action_sort_key)
+    assert ordered == [d1, d2]
+
+
+# --- action_sort_key ordering ------------------------------------------------
+
+
+def test_action_sort_key_phase_order_create_add_drop() -> None:
+    c = _create("id")
+    a = _add("age")
+    d = _drop("old")
+    # Expect phase ranks: CreateTable < AddColumn < DropColumn
+    keys = [action_sort_key(x) for x in (c, a, d)]
+    assert keys[0][0] < keys[1][0] < keys[2][0]
+
+
+def test_action_sort_key_sorts_addcolumns_by_subject_name_when_same_phase() -> None:
+    a1 = _add("a_col")
+    a2 = _add("b_col")
+    ordered = sorted([a2, a1], key=action_sort_key)
+    assert ordered == [a1, a2]  # lexicographic by subject name
+
+
+def test_action_sort_key_is_stable_with_equal_keys() -> None:
+    # Equal subject names => equal keys; Python's sort is stable
+    a1 = _add("x")
+    a2 = _add("x")
+    ordered = sorted([a1, a2], key=action_sort_key)
+    assert ordered == [a1, a2]
+
+
+def test_action_sort_key_raises_for_unknown_action_type() -> None:
+    class RenameColumn(Action):
         pass
 
-    action = FakeAction()
-    action.target = FakeQualifiedName("cat.schema.table_a")  # type: ignore[attr-defined]
-    assert mod.target_name(action) == "cat.schema.table_a"
+    with pytest.raises(ValueError) as exc:
+        action_sort_key(RenameColumn())
+    assert "Place RenameColumn in PHASE_ORDER" in str(exc.value)
 
 
-def test_target_name_returns_empty_string_when_no_target():
-    class FakeAction:  # no target attribute
-        pass
-    assert mod.target_name(FakeAction()) == ""
+def test_action_sort_key_orders_by_phase_then_subject_name() -> None:
+    from delta_engine.application.ordering import action_sort_key
+    from delta_engine.domain.model.column import Column
+    from delta_engine.domain.model.data_type import Integer
+    from delta_engine.domain.plan.actions import AddColumn, DropColumn
 
+    a1 = AddColumn(Column("a_col", Integer()))
+    a2 = AddColumn(Column("b_col", Integer()))
+    d1 = DropColumn("a_col")
+    d2 = DropColumn("b_col")
 
-# ----------------------------
-# subject_name
-# ----------------------------
+    shuffled = [d2, a2, d1, a1]
+    ordered = sorted(shuffled, key=action_sort_key)
 
-def test_subject_name_uses_add_column_column_name(monkeypatch):
-    class FakeAddColumn:
-        pass
-    monkeypatch.setattr(mod, "AddColumn", FakeAddColumn)
-
-    column = types.SimpleNamespace(name="new_col")
-    action = FakeAddColumn()
-    action.column = column  # type: ignore[attr-defined]
-    action.name = "should_be_ignored"  # type: ignore[attr-defined]
-
-    assert mod.subject_name(action) == "new_col"
-
-
-def test_subject_name_falls_back_to_name_for_non_addcolumn():
-    class NotAddColumn:
-        pass
-    action = NotAddColumn()
-    action.name = "plain_name"  # type: ignore[attr-defined]
-    assert mod.subject_name(action) == "plain_name"
-
-
-def test_subject_name_empty_when_no_column_or_name():
-    class Empty:
-        pass
-    assert mod.subject_name(Empty()) == ""
-
-
-def test_phase_order_and_rank_alignment():
-    # PHASE_ORDER is the source of truth; PHASE_RANK must enumerate it 0..n-1
-    assert isinstance(mod.PHASE_ORDER, tuple)
-    expected_rank = {cls: i for i, cls in enumerate(mod.PHASE_ORDER)}
-    assert mod.PHASE_RANK == expected_rank
-
-def test_action_sort_key_raises_for_unknown_action_type():
-    class Unknown:
-        pass
-    with pytest.raises(ValueError) as err:
-        mod.action_sort_key(Unknown())
-    # Helpful message mentions the missing type and PHASE_ORDER
-    assert "Place Unknown in PHASE_ORDER." in str(err.value)
-
-
-
-def test_action_sort_key_orders_by_rank_then_target_then_subject(monkeypatch):
-    class PhaseCreate: pass
-    class PhaseDrop: pass
-    class PhaseAdd: pass  # acts as AddColumn
-
-    monkeypatch.setattr(mod, "AddColumn", PhaseAdd)
-    monkeypatch.setattr(mod, "PHASE_ORDER", (PhaseCreate, PhaseDrop, PhaseAdd), raising=False)
-    monkeypatch.setattr(mod, "PHASE_RANK", {PhaseCreate: 0, PhaseDrop: 1, PhaseAdd: 2}, raising=False)
-
-    create_t1 = PhaseCreate(); create_t1.target = "t1"; create_t1.name = "zzz"
-    create_t2 = PhaseCreate(); create_t2.target = "t2"; create_t2.name = "zzz"
-    drop_t1   = PhaseDrop();   drop_t1.target   = "t1"; drop_t1.name   = "m"
-    add_t2_a  = PhaseAdd();    add_t2_a.target  = "t2"; add_t2_a.column = types.SimpleNamespace(name="a")
-    add_t2_b  = PhaseAdd();    add_t2_b.target  = "t2"; add_t2_b.column = types.SimpleNamespace(name="b")
-
-    ordered = sorted([add_t2_b, drop_t1, create_t2, add_t2_a, create_t1], key=mod.action_sort_key)
-    assert ordered == [create_t1, create_t2, drop_t1, add_t2_a, add_t2_b]
-    assert mod.action_sort_key(add_t2_a) == (2, "t2", "a")
+    # Phase: AddColumn before DropColumn; within each phase, alphabetical by column
+    assert ordered == [a1, a2, d1, d2]

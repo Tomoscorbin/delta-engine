@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from delta_engine.domain.model._normalise_identifier import normalize_identifier
+from delta_engine.domain.model.normalise_identifier import normalize_identifier
 
 
 @dataclass(frozen=True, slots=True)
 class QualifiedName:
-    """Case-insensitive, fully qualified identifier (catalog.schema.name).
+    """
+    Case-insensitive, fully qualified identifier (catalog.schema.name).
 
     Attributes:
         catalog: Catalog name.

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.errors import DatabricksError
 from delta_engine.adapters.databricks.preview import error_preview
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
-from delta_engine.application.results import CatalogReadResult, ReadFailure
+from delta_engine.application.results import ReadFailure, ReadResult
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName
 
 
@@ -16,21 +15,20 @@ class DatabricksReader:
 
     def __init__(self, spark: SparkSession) -> None:
         self.spark = spark
-        
-    def fetch_state(self, qualified_name: QualifiedName) -> CatalogReadResult:
+
+    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+        fully_qualified_name = str(qualified_name)
+        if not self.spark.catalog.tableExists(fully_qualified_name):  # TODO: verify
+            return ReadResult.create_absent()
+
         try:
             columns = self._list_columns(qualified_name)
         except Exception as exc:
-            error_class = exc.getCondition()
-            failure = ReadFailure(error_class, error_preview)
-
-            if error_class == DatabricksError.TABLE_OR_VIEW_NOT_FOUND:
-                return CatalogReadResult.absent()
-            return CatalogReadResult.failed(failure)
+            failure = ReadFailure(type(exc).__name__, error_preview(exc))
+            return ReadResult.create_failed(failure)
 
         observed = ObservedTable(qualified_name, columns)
-
-        return CatalogReadResult.present(observed)
+        return ReadResult.create_present(observed)
 
     def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
         """List column definitions for the given table."""

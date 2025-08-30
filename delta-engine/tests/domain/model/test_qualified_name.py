@@ -1,24 +1,42 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
-def test_qualified_name_normalizes_each_part_and_compares_case_insensitively():
-    a = QualifiedName(catalog="CAT", schema="SALES", name="ORDERS")
-    b = QualifiedName(catalog="cat", schema="sales", name="orders")
-    assert a == b
+def test_qualified_name_normalizes_and_stringifies() -> None:
+    qn = QualifiedName(" Dev ", "Silver", "Test")
+    assert qn.fully_qualified_name == "dev.silver.test"
+    assert str(qn) == "dev.silver.test"
 
 
-def test_str_is_canonical_join_of_parts():
-    qn = QualifiedName(catalog="core", schema="gold", name="orders")
-    assert str(qn) == "core.gold.orders"
+def test_qualified_name_is_frozen() -> None:
+    qn = QualifiedName("dev", "silver", "test")
+    with pytest.raises(FrozenInstanceError):
+        qn.schema = "x"
 
 
-@pytest.mark.parametrize("kw", [
-    {"catalog": "bad.name", "schema": "x", "name": "y"},
-    {"catalog": "x", "schema": "bad name", "name": "y"},
-    {"catalog": "x", "schema": "y", "name": "bad name"},
-])
-def test_qualified_name_rejects_invalid_parts(kw):
+@pytest.mark.parametrize(
+    "catalog,schema,name",
+    [
+        ("dev", "silver", "bad.name"),
+        ("dev", "sil ver", "test"),
+        ("naïve", "silver", "test"),
+    ],
+)
+def test_qualified_name_invalid_parts_raise(catalog: str, schema: str, name: str) -> None:
     with pytest.raises(ValueError):
-        QualifiedName(**kw)  # type: ignore[arg-type]
+        QualifiedName(catalog, schema, name)
+
+
+def test_qualified_name_equality_and_hash_after_normalization() -> None:
+    a = QualifiedName("DEV", "SILVER", "TEST")
+    b = QualifiedName("dev", "silver", "test")
+    c = QualifiedName("dev", "silver", "other")
+    assert a == b
+    assert a != c
+
+    d = {a: 1, b: 2}
+    assert len(d) == 1
+    assert d[b] == 2

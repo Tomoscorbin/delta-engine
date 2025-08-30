@@ -1,56 +1,121 @@
-from __future__ import annotations
+from collections.abc import Iterable
+from dataclasses import dataclass
 
-from delta_engine.application.ports import CatalogReader, PlanExecutor
-from delta_engine.application.results import ExecutionOutcome
-from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.application.ports import (
+    CatalogStateReader,
+    ColumnObject,
+    PlanExecutor,
+    TableObject,
+)
+from delta_engine.application.results import (
+    ActionStatus,
+    ExecutionResult,
+    ReadResult,
+)
+from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
-# --- Positive conformance fakes ---
+# ----------------------------
+# CatalogStateReader Protocol
+# ----------------------------
 
 
-class FakeReader:
-    def fetch_state(self, qualified_name: QualifiedName) -> ObservedTable | None:
-        # return None (not found) to keep it side-effect free
-        return None
+class GoodReader:
+    # Correct method name; returns a ReadResult
+    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+        # pretend we couldn't find the table
+        return ReadResult.create_absent()
 
 
-class FakeExecutor:
-    def execute(self, plan: ActionPlan) -> ExecutionOutcome:
-        # Success outcome; executed_count mirrors len(plan)
-        return ExecutionOutcome(success=True, messages=("ok",), executed_count=len(plan))
+class BadReaderMissingMethod:
+    # No fetch_state at all
+    pass
 
 
-def test_fake_reader_conforms_and_returns_observed_or_none():
-    r = FakeReader()
-    assert isinstance(r, CatalogReader)
-    assert r.fetch_state(QualifiedName("c", "s", "t")) is None  # sanity
+class BadReaderWrongName:
+    # Has a method, but wrong name
+    def get_state(self, qualified_name: QualifiedName) -> ReadResult:
+        return ReadResult.create_absent()
 
 
-def test_fake_executor_conforms_and_returns_execution_outcome():
-    e = FakeExecutor()
+def test_catalog_state_reader_runtime_conformance_passes_with_required_method() -> None:
+    r = GoodReader()
+    assert isinstance(r, CatalogStateReader)  # runtime structural check
+
+
+def test_catalog_state_reader_runtime_conformance_fails_when_method_missing() -> None:
+    r = BadReaderMissingMethod()
+    assert not isinstance(r, CatalogStateReader)
+
+    r2 = BadReaderWrongName()
+    assert not isinstance(r2, CatalogStateReader)
+
+
+# ----------------------------
+# PlanExecutor Protocol
+# ----------------------------
+
+
+class GoodExecutor:
+    # Current interface says: execute(plan) -> ExecutionResult (single)
+    def execute(self, plan: ActionPlan) -> ExecutionResult:
+        # trivial “no-op success” result
+        return ExecutionResult(
+            action="NOOP",
+            action_index=0,
+            status=ActionStatus.NOOP,
+            statement_preview="",
+        )
+
+
+class BadExecutorMissingMethod:
+    pass
+
+
+def test_plan_executor_runtime_conformance_passes_with_execute() -> None:
+    e = GoodExecutor()
     assert isinstance(e, PlanExecutor)
-    plan = ActionPlan(QualifiedName("c", "s", "t"))
-    out = e.execute(plan)
-    assert isinstance(out, ExecutionOutcome)
-    assert bool(out) is True  # truthiness reflects success policy
-    assert out.messages == ("ok",)
-    assert out.executed_count == len(plan)
 
 
-# --- Negative conformance: missing methods are rejected ---
+def test_plan_executor_runtime_conformance_fails_without_execute() -> None:
+    e = BadExecutorMissingMethod()
+    assert not isinstance(e, PlanExecutor)
 
 
-class NoFetchState:
-    pass
+# ----------------------------
+# TableObject / ColumnObject Protocols
+# ----------------------------
 
 
-class NoExecute:
-    pass
+@dataclass
+class ColSpec:
+    name: str
+    data_type: object
+    is_nullable: bool = True
 
 
-def test_objects_missing_required_methods_do_not_conform():
-    assert not isinstance(NoFetchState(), CatalogReader)
-    assert not isinstance(NoExecute(), PlanExecutor)
+@dataclass
+class TableSpec:
+    catalog: str | None
+    schema: str | None
+    name: str
+    columns: Iterable[ColSpec]
 
 
-# --- Document runtime_chec_
+def test_columnobject_and_tableobject_runtime_conformance() -> None:
+    col = ColSpec(name="id", data_type=int, is_nullable=False)
+    tbl = TableSpec(catalog="dev", schema="silver", name="people", columns=(col,))
+    assert isinstance(col, ColumnObject)
+    assert isinstance(tbl, TableObject)
+
+
+def test_tableobject_runtime_conformance_fails_when_member_missing() -> None:
+    @dataclass
+    class NoColumnsTable:
+        catalog: str | None
+        schema: str | None
+        name: str
+        # columns missing
+
+    t = NoColumnsTable(catalog="dev", schema="silver", name="people")
+    assert not isinstance(t, TableObject)
