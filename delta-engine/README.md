@@ -48,6 +48,8 @@ Module outline:
 - `delta_engine/adapters/databricks`: Databricks reader/executor, SQL compiler, and small helpers.
 - `delta_engine/domain`: core models and diffing logic used by the application layer.
 
+See the full architecture diagrams here: [docs/architecture.md](docs/architecture.md).
+
 ## Example usage
 
 Requires an active `SparkSession` on Databricks or local Spark.
