@@ -30,7 +30,6 @@ classDiagram
     class DatabricksExecutor {
       +execute(plan)
     }
-    class DeltaTable
     class Column
     class DesiredTable
     class ObservedTable
@@ -76,8 +75,7 @@ sequenceDiagram
     loop per table
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult (present/absent/failure)
-        E->>E: diff + order -> ActionPlan
-        E->>V: validate(plan)
+        E->>V: diff + order -> ActionPlan  ->validate(plan)
         V-->>E: failures?
         alt plan valid
             E->>X: execute(plan)
