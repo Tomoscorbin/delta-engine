@@ -37,6 +37,7 @@ Key design choices:
 - Clear separation: domain models and planning are independent of any engine. Adapters implement small ports for reading catalog state and executing plans.
 - Deterministic planning: actions are ordered (create, then adds, then drops; subjects alphabetically) for stable, predictable diffs and runs.
 - Early validation: rules check a computed plan before execution. For example, it rejects adding NOT NULL columns to existing tables.
+- Single registry: all defined tables live in one registry in order to manage the set as a single asset. This allows for organized inter‑table dependencies (like primary and foreign keys) in one place.
 - Focused results: Each run produces a structured report summarizing the sync status of all tables. Failures in individual tables do not halt the sync of others, ensuring maximum progress per run. Instead, failures are captured in the report (with SQL/error previews) and surfaced collectively via a single SyncFailedError.
 - Adapter first: Databricks/Spark adapter compiles plans to SQL and runs them via a `SparkSession`. Other adapters can be added behind the same ports.
 
