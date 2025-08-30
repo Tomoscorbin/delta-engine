@@ -20,11 +20,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: poetry
-          cache-dependency-path: '**/poetry.lock'
+          cache-dependency-path: delta-engine/poetry.lock
+
+      - name: Install Poetry via pipx (and add to PATH)
+        run: |
+          python -m pip install --upgrade pip pipx
+          python -m pipx ensurepath
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          pipx install "poetry==3.4.1"
 
     # strategy:
     #   fail-fast: false
