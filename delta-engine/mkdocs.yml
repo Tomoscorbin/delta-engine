@@ -1,0 +1,9 @@
+site_name: delta-engine
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
