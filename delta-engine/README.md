@@ -33,13 +33,16 @@ User Table Specs  ──>  Registry  ──────────────�
 ```
 
 Key design choices:
-
-- Clear separation: domain models and planning are independent of any engine. Adapters implement small ports for reading catalog state and executing plans.
-- Deterministic planning: actions are ordered (create, then adds, then drops; subjects alphabetically) for stable, predictable diffs and runs.
-- Early validation: rules check a computed plan before execution. For example, it rejects adding NOT NULL columns to existing tables.
-- Single registry: all defined tables live in one registry in order to manage the set as a single asset. This allows for organized inter‑table dependencies (like primary and foreign keys) in one place.
-- Focused results: Each run produces a structured report summarizing the sync status of all tables. Failures in individual tables do not halt the sync of others, ensuring maximum progress per run. Instead, failures are captured in the report (with SQL/error previews) and surfaced collectively via a single SyncFailedError.
-- Adapter first: Databricks/Spark adapter compiles plans to SQL and runs them via a `SparkSession`. Other adapters can be added behind the same ports.
+- Clear separation: Domain models and planning are independent of any engine. Adapters implement small ports for reading catalog state and executing plans.
+- Deterministic planning: Actions are ordered (create → adds → drops; subjects alphabetical) for stable, predictable diffs and runs.
+- Deterministic naming: Constraint names are derived from a stable scheme to avoid collisions and churn across runs.
+- Early validation: Rules check a computed plan before execution (e.g., reject adding NOT NULL columns to existing tables without defaults).
+- Single registry: All defined tables live in one registry so the set is managed as a single asset. This centralizes inter-table dependencies (PK/FK, uniqueness, references) and performs guardrails:
+  - Enforces unique fully-qualified names (no table collisions).
+  - Detects duplicate logical definitions pointing at the same physical table.
+  - Optionally enforces a declared namespace/schema policy.
+- Focused results: Each run produces a structured report summarizing the sync status of all tables. Failures in individual tables do not halt the sync of others; they’re captured in the report (with SQL/error previews) and surfaced collectively via a single SyncFailedError.
+- Adapter-first: The Databricks/Spark adapter compiles plans to SQL and runs them via a SparkSession. Other adapters can be added behind the same ports.
 
 Module outline:
 
