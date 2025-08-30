@@ -24,7 +24,10 @@ from delta_engine.application.registry import Registry
 from delta_engine.application.results import SyncReport, TableRunReport, ValidationResult
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from delta_engine.domain.model.table import DesiredTable
+from delta_engine.log_config import configure_logging
+import logging
 
+configure_logging(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -122,6 +125,7 @@ class Engine:
         logger.info("Planned %d action(s) for %s", num_actions, fully_qualified_name)
 
         # --- Step 3: Validate
+        logger.info("Validating plan for %s", fully_qualified_name)
         validation_failures = self.validator.validate(context)
         validation = ValidationResult(failures=validation_failures)
         if validation.failed:
@@ -139,6 +143,7 @@ class Engine:
                 execution_results=(),
             )
 
+        logger.info("Validation passed for %s", fully_qualified_name)
         # --- Step 4: Execute
         executions = self.executor.execute(context.plan)
         failed_execs = sum(1 for e in executions if e.failure is not None)
