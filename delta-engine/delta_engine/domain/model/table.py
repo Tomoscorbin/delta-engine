@@ -44,10 +44,4 @@ class DesiredTable(TableSnapshot):
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
-    """
-    Observed definition derived from the catalog (current state).
-
-    Attributes:
-        is_empty: ``True`` if the table exists and has zero rows.
-
-    """
+    """Observed definition derived from the catalog (current state)."""

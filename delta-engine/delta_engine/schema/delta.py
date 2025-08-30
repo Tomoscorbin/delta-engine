@@ -6,7 +6,7 @@ are normalized and duplicate column names are rejected to catch mistakes early.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from delta_engine.domain.model.normalise_identifier import normalize_identifier
 from delta_engine.schema.column import Column
@@ -14,12 +14,13 @@ from delta_engine.schema.column import Column
 
 @dataclass(frozen=True, slots=True)
 class DeltaTable:
-    """Convenience container for describing a Delta table schema."""
+    """Defines a Delta table schema."""
 
     catalog: str
     schema: str
     name: str
     columns: Sequence[Column]
+    properties: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate identifiers and ensure column names are unique (casefolded)."""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from delta_engine.application.results import ExecutionResult, ReadResult
@@ -44,6 +44,7 @@ class TableObject(Protocol):
     schema: str
     name: str
     columns: Iterable[ColumnObject]
+    properties: Mapping[str, str] | None
 
 
 @runtime_checkable
