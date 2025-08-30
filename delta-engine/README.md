@@ -1,115 +1,80 @@
-```mermaid
-classDiagram
-    %% Domain Value Objects
-    class FullName {
-      +catalog: str
-      +schema: str
-      +name: str
-      +qualified_name(): str
-    }
-    class DataType {
-      +name: str
-      +parameters: tuple
-    }
-    class Column {
-      +name: str
-      +data_type: DataType
-      +is_nullable: bool
-      +specification: str
-    }
+# delta-engine
 
-    %% Domain Entities / Aggregates
-    class TableSpec {
-      +full_name: FullName
-      +columns: tuple~Column~
-    }
-    class TableState {
-      +full_name: FullName
-      +columns: tuple~Column~
-    }
+Domain-driven library for describing Delta tables, planning safe schema changes, validating them, and executing them on Databricks/Spark.
 
-    %% Domain Actions
-    class CreateTable { +columns: tuple~Column~ }
-    class AddColumn    { +column: Column }
-    class DropColumn   { +column_name: str }
-    class ActionPlan   { +full_name: FullName
-                         +actions: tuple~Action~ }
+## Project overview
 
-    %% Domain Services
-    class Differ {
-      +diff(observed: TableState|None, spec: TableSpec) ActionPlan
-      +diff_columns(...)
-    }
+- Problem: keeping table schemas in sync across environments is error‑prone. Hand‑written DDL can fail part way through or drift from the intended design. Teams need a simple way to state the desired table shape, see what will change, check for risky operations, and then apply changes in a predictable order.
+- What this package does: you declare desired tables. The engine computes a plan (create/add/drop), validates that plan against rules, and then executes it. It reports results with clear statuses and short previews.
+- Table validation: By validating plans before any SQL is executed, predictable breakages are caught early. This reduces the chance of broken tables and avoids starting work that would fail.
+- Where it fits: this focuses on DDL for Delta tables on Databricks. It complements ETL/ELT tools and schedulers. It does not move data, run transformations, or manage jobs. The design is adapter‑based, so other backends could be added; the provided adapter targets Databricks/Spark.
 
-    %% Application Layer
-    class PlanPreview { +plan: ActionPlan
-                        +is_noop: bool
-                        +summary: str }
-    class ExecutionOutcome { +success: bool
-                             +messages: tuple~str~
-                             +executed_count: int }
-    class ExecutionResult { +plan: ActionPlan
-                            +success: bool
-                            +messages: tuple~str~ }
+## Architecture/Design
 
-    %% Ports (Application)
-    class CatalogReader~Protocol~ {
-      +fetch_state(FullName) TableState|None
-    }
-    class PlanExecutor~Protocol~ {
-      +execute(ActionPlan) ExecutionOutcome
-    }
-
-    %% Adapters (Outbound)
-    class UnityCatalogReader {
-      +query_rows(sql): Iterable[Row]
-      +fetch_state(...)
-    }
-    class SqlCompiler {
-      +compile_plan(plan): tuple~str~
-    }
-    class SqlPlanExecutor {
-      +run_sql(sql): None
-      +execute(plan): ExecutionOutcome
-    }
-
-    %% Relationships
-    TableSpec "1" o-- "many" Column
-    TableState "1" o-- "many" Column
-    Column "1" o-- "1" DataType
-    TableSpec "1" --> "1" FullName
-    TableState "1" --> "1" FullName
-
-
-    ActionPlan "1" o-- "many" CreateTable
-    ActionPlan "1" o-- "many" AddColumn
-    ActionPlan "1" o-- "many" DropColumn
-
-    Differ <.. TableSpec
-    Differ <.. TableState
-    Differ --> ActionPlan
-
-    PlanPreview ..> ActionPlan
-    ExecutionResult ..> ActionPlan
-
-    CatalogReader <|.. UnityCatalogReader
-    PlanExecutor <|.. SqlPlanExecutor
-
-    SqlPlanExecutor ..> SqlCompiler : uses
-```
-
-
-```mermaid
-flowchart LR
-  A["User code builds TableSpec"] --> B["plan_actions(spec, reader)"]
-  B --> C["CatalogReader.fetch_state(full_name)"]
-  C --> D["Differ.diff(observed, spec)"]
-  D --> E["ActionPlan"]
-  E --> F["PlanPreview (is_noop, summary)"]
-  E --> G["execute_plan(spec, reader, executor)"]
-  G --> H["compile_plan(ActionPlan)"]
-  H --> I["SqlPlanExecutor.run_sql(sql)"]
-  I --> J["ExecutionOutcome mapped to ExecutionResult"]
-  F -. "optional: if not noop" .-> G
+High‑level flow:
 
 ```
+User Table Specs  ──>  Registry  ─────────────────────────────────────┐
+                                  │                                   │
+                                  ▼                                   │
+                              Engine (orchestrator)                   │
+                       ┌───────────┬───────────┬───────────┐          │
+                       │   Read    │  Plan     │ Validate  │          │
+                       └─────┬─────┴────┬──────┴────┬──────┘          │
+                             │          │           │                 │
+                             ▼          ▼           ▼                 │
+                    Catalog Reader   ActionPlan   Rules               │
+                      (Databricks)   (create/     (fail fast)         │
+                                      add/drop
+                                      ordered)
+                             │                                    Report
+                             ▼                                        ▲
+                        Plan Executor  ──> SQL ──> Spark/Databricks ──┘
+```
+
+Key design choices:
+
+- Clear separation: domain models and planning are independent of any engine. Adapters implement small ports for reading catalog state and executing plans.
+- Deterministic planning: actions are ordered (create, then adds, then drops; subjects alphabetically) for stable, predictable diffs and runs.
+- Early validation: rules check a computed plan before execution. For example, it rejects adding NOT NULL columns to existing tables.
+- Focused results: Each run produces a structured report summarizing the sync status of all tables. Failures in individual tables do not halt the sync of others, ensuring maximum progress per run. Instead, failures are captured in the report (with SQL/error previews) and surfaced collectively via a single SyncFailedError.
+- Adapter first: Databricks/Spark adapter compiles plans to SQL and runs them via a `SparkSession`. Other adapters can be added behind the same ports.
+
+Module outline:
+
+- `delta_engine/schema`: user‑facing `DeltaTable`, `Column`, and data types.
+- `delta_engine/application`: `Engine`, `Registry`, planning/ordering, validation, results/reporting.
+- `delta_engine/adapters/databricks`: Databricks reader/executor, SQL compiler, and small helpers.
+- `delta_engine/domain`: core models and diffing logic used by the application layer.
+
+## Example usage
+
+Requires an active `SparkSession` on Databricks or local Spark.
+
+```python
+from delta_engine.adapters.databricks import build_databricks_engine
+from delta_engine.application.registry import Registry
+from delta_engine.schema import DeltaTable, Column, Integer, String
+
+engine = build_databricks_engine(spark)
+registry = Registry()
+
+customers = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customers",
+    columns=[
+        Column("id", Integer()),
+        Column("name", String()),
+    ],
+)
+
+registry.register(customers)
+engine.sync(registry)
+```
+
+Notes:
+
+- If validation fails, no SQL is executed for that table and `SyncFailedError` is raised with a report.
+- If the observed schema already matches the desired schema, the plan is a no‑op.
+- The Databricks adapter compiles actions to Spark SQL (CREATE TABLE, ALTER TABLE ADD/DROP COLUMN) and executes them with `spark.sql`.
