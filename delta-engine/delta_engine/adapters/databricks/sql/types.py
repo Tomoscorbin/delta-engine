@@ -90,6 +90,7 @@ def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
         case MapType():
             return Map(
                 domain_type_from_spark(spark_type.keyType),
-                domain_type_from_spark(spark_type.valueType))
+                domain_type_from_spark(spark_type.valueType),
+            )
         case _:
             raise TypeError(f"Unsupported Spark type: {spark_type!r}")
