@@ -13,7 +13,7 @@ def quote_literal(raw: str) -> str:
     return "'" + raw.replace("'", "''") + "'"
 
 
-def render_qualified_name(catalog: str, schema: str, name: str) -> str:
+def quote_qualified_name(catalog: str, schema: str, name: str) -> str:
     """Render a fully qualified table name with dot separators and backticks."""
     parts = [p for p in (catalog, schema, name) if p]
     return ".".join(quote_identifier(p) for p in parts)

@@ -11,7 +11,8 @@ from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql import (
     quote_identifier,
-    render_qualified_name,
+    quote_literal,
+    quote_qualified_name,
     sql_type_for_data_type,
 )
 from delta_engine.domain.plan.actions import (
@@ -20,13 +21,15 @@ from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
+    SetProperty,
+    UnsetProperty,
 )
 
 
 def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
     """Compile an :class:`ActionPlan` into Spark SQL statements."""
     qualified_name = plan.target
-    table_name_sql = render_qualified_name(
+    table_name_sql = quote_qualified_name(
         qualified_name.catalog,
         qualified_name.schema,
         qualified_name.name,
@@ -59,6 +62,21 @@ def _(action: DropColumn, full_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
     column_ident = quote_identifier(action.column_name)
     return f"ALTER TABLE {full_table_name} DROP COLUMN {column_ident}"
+
+
+@_compile_action.register
+def _(action: SetProperty, table_sql: str) -> str:
+    pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
+    return f"ALTER TABLE {table_sql} SET TBLPROPERTIES ({pair})"
+
+
+@_compile_action.register
+def _(action: UnsetProperty, table_sql: str) -> str:
+    key = quote_literal(action.name)
+    return f"ALTER TABLE {table_sql} UNSET TBLPROPERTIES ({key})"
+
+
+# ----------- helpers ------------
 
 
 def _column_def(column) -> str:

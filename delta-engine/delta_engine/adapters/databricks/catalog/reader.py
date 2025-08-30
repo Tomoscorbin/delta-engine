@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pyspark.sql import SparkSession
+import pyspark.sql.Column
 
 from delta_engine.adapters.databricks.preview import error_preview
+from delta_engine.adapters.databricks.sql.catalog_read import query_table_properties
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
 from delta_engine.application.results import ReadFailure, ReadResult
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName
@@ -30,27 +32,47 @@ class DatabricksReader:
             return ReadResult.create_absent()
 
         try:
-            columns = self._list_columns(qualified_name)
+            columns = self._fetch_columns(fully_qualified_name)
+            properties = self._fetch_properties(qualified_name)
         except Exception as exc:
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
 
-        observed = ObservedTable(qualified_name, columns)
+        observed = ObservedTable(
+            qualified_name,
+            columns,
+            properties,
+        )
         return ReadResult.create_present(observed)
 
-    def _list_columns(self, qualified_name: QualifiedName) -> tuple[Column, ...]:
+    def _fetch_columns(self, fully_qualified_name: str) -> tuple[Column, ...]:
         """List column definitions for the given table."""
-        catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
-        domain_columns = []
-        for column in catalog_columns:
-            spark_dtype = column.dataType
-            domain_dtype = domain_type_from_spark(spark_dtype)
-            is_nullable = bool(getattr(column, "nullable", True))
-            domain_columns.append(
-                Column(
-                    name=column.name,
-                    data_type=domain_dtype,
-                    is_nullable=is_nullable,
-                )
-            )
-        return tuple(domain_columns)
+        catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
+        return tuple(self._to_domain_column(column) for column in catalog_columns)
+
+    def _fetch_properties(self, qualified_name: QualifiedName) -> dict[str, str]:
+        """
+        Return table properties as a dict[str, str].
+
+        Uses `SHOW TBLPROPERTIES` which yields rows: key: string, value: string|NULL.
+        """
+        query = query_table_properties(qualified_name)
+        df = self.spark.sql(query)
+        props: dict[str, str] = {}
+        for row in df.collect():
+            key = row["key"]
+            val = row["value"]
+            props[key] = "" if val is None else str(val)
+        return props
+
+    def _to_domain_column(self, spark_column: pyspark.sql.Column) -> Column:
+        """Convert a pyspark.sql.Column object into a domain `Column`."""
+        spark_data_type = getattr(spark_column, "dataType", None)
+        domain_data_type = domain_type_from_spark(spark_data_type)
+        is_nullable = bool(getattr(spark_column, "nullable", True))
+
+        return Column(
+            name=spark_column.name,
+            data_type=domain_data_type,
+            is_nullable=is_nullable,
+        )

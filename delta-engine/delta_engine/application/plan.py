@@ -42,7 +42,7 @@ def make_plan_context(desired: DesiredTable, observed: ObservedTable | None) -> 
     )
 
 
-def _compute_plan(observed, desired) -> ActionPlan:
+def _compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """Create a sorted :class:`ActionPlan` from observed and desired states."""
     unsorted_plan = diff_tables(desired=desired, observed=observed)
     sorted_actions = tuple(sorted(unsorted_plan.actions, key=action_sort_key))

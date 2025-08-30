@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -21,6 +22,7 @@ class TableSnapshot:
 
     qualified_name: QualifiedName
     columns: tuple[Column, ...]
+    properties: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate non-empty column list and uniqueness by name (casefolded)."""

@@ -33,6 +33,21 @@ class DropColumn(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class SetProperty(Action):
+    """Set a table property."""
+
+    name: str
+    value: object
+
+
+@dataclass(frozen=True, slots=True)
+class UnsetProperty(Action):
+    """Unset a table property."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Collection of actions targeting a single qualified name."""
 
