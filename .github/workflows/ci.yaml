@@ -7,6 +7,10 @@ on:
     branches: [ main ]
     paths: [ 'delta-engine/**', '.github/workflows/**' ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -15,11 +19,12 @@ jobs:
         working-directory: delta-engine
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-        cache: 'pip'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: poetry
+          cache-dependency-path: '**/poetry.lock'
 
     # strategy:
     #   fail-fast: false
