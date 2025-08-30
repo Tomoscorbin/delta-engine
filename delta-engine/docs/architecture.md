@@ -75,8 +75,8 @@ sequenceDiagram
     loop per table
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult
-        E->>V: ActionPlan  -> validate(plan)
-        E->>X: execute(plan)
+        E->>V: ActionPlan  -> validate plan
+        E->>X: execute plan
         X-->>U: ExecutionResults
     end
 ```
