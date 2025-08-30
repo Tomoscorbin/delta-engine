@@ -1,4 +1,5 @@
-"""Result and reporting types for engine runs.
+"""
+Result and reporting types for engine runs.
 
 Defines status enums, lightweight failure value objects, and aggregates used to
 propagate outcomes from the read, validation, and execution phases. Provides

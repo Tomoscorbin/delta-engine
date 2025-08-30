@@ -1,4 +1,5 @@
-"""Compile domain action plans into Spark/Databricks SQL statements.
+"""
+Compile domain action plans into Spark/Databricks SQL statements.
 
 Uses `functools.singledispatch` to render SQL per action type and returns a
 tuple of statements ready to execute against a Spark session.

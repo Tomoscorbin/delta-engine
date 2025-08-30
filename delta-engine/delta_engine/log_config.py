@@ -1,4 +1,5 @@
-"""Logging helpers with ANSI-colored level output.
+"""
+Logging helpers with ANSI-colored level output.
 
 Provides a `LevelColorFormatter` and `configure_logging` to install a colored
 stderr handler on the root logger for consistent, readable logs across the
@@ -8,7 +9,11 @@ package.
 import logging
 import sys
 
-RESET = "\033[0m"; YELLOW = "\033[33m"; RED = "\033[31m"; BRIGHT_RED = "\033[91m"
+RESET = "\033[0m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+BRIGHT_RED = "\033[91m"
+
 
 class LevelColorFormatter(logging.Formatter):
     """
@@ -38,6 +43,7 @@ class LevelColorFormatter(logging.Formatter):
             return f"{BRIGHT_RED}{text}{RESET}"
         return text
 
+
 def configure_logging(level: int = logging.INFO) -> None:
     """
     Configure root logging with a colored formatter to stderr.
@@ -55,8 +61,9 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.setLevel(level)
 
     handler = logging.StreamHandler(stream=sys.stderr)
-    handler.setFormatter(LevelColorFormatter(
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    ))
+    handler.setFormatter(
+        LevelColorFormatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        )
+    )
     root.addHandler(handler)

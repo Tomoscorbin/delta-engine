@@ -1,4 +1,5 @@
-"""Human-readable formatting for sync run reports.
+"""
+Human-readable formatting for sync run reports.
 
 Transforms a `SyncReport` into a concise text summary: normalizes timestamps,
 computes durations, summarizes per-table status, and includes brief previews of

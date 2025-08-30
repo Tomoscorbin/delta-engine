@@ -1,4 +1,5 @@
-"""Deterministic ordering for action plans.
+"""
+Deterministic ordering for action plans.
 
 Defines a sort key that orders actions by phase (create, add, drop), then by
 target name, then by subject name to yield stable, readable plans.

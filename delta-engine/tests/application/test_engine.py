@@ -124,7 +124,7 @@ class StubExecutorFailed:
 class StubValidatorOK:
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
         # sanity: ensure observed/desired ordering is correct
-        assert isinstance(ctx.observed, (ObservedTable, type(None)))
+        assert isinstance(ctx.observed, ObservedTable | type(None))
         assert isinstance(ctx.desired, DesiredTable)
         return ()
 

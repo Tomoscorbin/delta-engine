@@ -1,4 +1,5 @@
-"""Public schema container for describing a Delta table.
+"""
+Public schema container for describing a Delta table.
 
 `DeltaTable` is a thin, user-facing dataclass validated on init: identifiers
 are normalized and duplicate column names are rejected to catch mistakes early.

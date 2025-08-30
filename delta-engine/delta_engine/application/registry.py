@@ -1,4 +1,5 @@
-"""In-memory registry of desired table definitions for planning.
+"""
+In-memory registry of desired table definitions for planning.
 
 Accepts lightweight table/column specs, converts them to domain models, and
 iterates in fully qualified name order to produce deterministic planning input
