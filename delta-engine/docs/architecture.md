@@ -81,13 +81,17 @@ sequenceDiagram
 
     U->>R: register(DeltaTable)
     E->>R: iterate desired tables
+
     loop per table
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult
-        E->>V: ActionPlan  -> validate plan
+        E->>V: validate(ActionPlan)
         E->>X: execute plan
-        X-->>U: ExecutionResults
+        X-->>E: ExecutionResults
     end
+
+    E-->>U: Final report
+
 ```
 
 
