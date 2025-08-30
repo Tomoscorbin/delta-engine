@@ -4,9 +4,9 @@ Domain-driven library for describing Delta tables, planning safe schema changes,
 
 ## Project overview
 
-- Problem: keeping table schemas in sync across environments is error‑prone. Hand‑written DDL can fail part way through or drift from the intended design. Teams need a simple way to state the desired table shape, see what will change, check for risky operations, and then apply changes in a predictable order.
+- Problem: keeping table schemas in sync across environments is error‑prone. Schema changes can break things; hand-written DDL can drift across environments; failures can occur mid-run; leaveing tables inconsistent. Teams can lose time fighting schema drift instead of delivering changes safely. What’s needed is a simple way to declare the desired table shape, preview changes, catch risky operations, and apply them in a predictable order.
 - What this package does: you declare desired tables. The engine computes a plan (create/add/drop), validates that plan against rules, and then executes it. It reports results with clear statuses and short previews.
-- Table validation: By validating plans before any SQL is executed, predictable breakages are caught early. This reduces the chance of broken tables and avoids starting work that would fail.
+- Table validation: By validating plans before any SQL is executed, predictable breakages are caught early. This reduces the chance of broken or partially-built tables and avoids starting work that would fail.
 - Where it fits: this focuses on DDL for Delta tables on Databricks. It complements ETL/ELT tools and schedulers. It does not move data, run transformations, or manage jobs. The design is adapter‑based, so other backends could be added; the provided adapter targets Databricks/Spark.
 
 ## Architecture/Design
@@ -14,22 +14,21 @@ Domain-driven library for describing Delta tables, planning safe schema changes,
 High‑level flow:
 
 ```
-User Table Specs  ──>  Registry  ─────────────────────────────────────┐
-                                  │                                   │
-                                  ▼                                   │
-                                      Engine                          │
-                       ┌───────────┬───────────┬───────────┐          │
-                       │   Read    │  Plan     │ Validate  │          │
-                       └─────┬─────┴────┬──────┴────┬──────┘          │
-                             │          │           │                 │
-                             ▼          ▼           ▼                 │
-                    Catalog Reader   ActionPlan   Rules               │
-                      (Databricks)   (create/                         │
-                                      add/drop
-                                      ordered)
-                             │                                    Report
-                             ▼                                        ▲
-                        Plan Executor  ──> SQL ──> Spark/Databricks ──┘
+User defined table  ──>  Registry  ─────────────────────────────┐
+                                  │                             │
+                                  ▼                             │
+                                Engine                          │
+                 ┌───────────┬───────────┬───────────┐          │
+                 │   Read    │  Plan     │ Validate  │          │
+                 └─────┬─────┴────┬──────┴────┬──────┘          │
+                       │          │           │                 │
+                       ▼          ▼           ▼                 │
+              Catalog Reader   ActionPlan   Rules               │
+                (Databricks)   (create/                         │
+                                add/drop)
+                                  │                           Report
+                                  ▼                             ▲
+                  Plan Executor  ──> SQL ──> Spark/Databricks ──┘
 ```
 
 Key design choices:
