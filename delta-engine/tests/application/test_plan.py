@@ -38,7 +38,7 @@ def test_make_plan_context_delegates_to_compute_and_returns_sorted_plan(monkeypa
     monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
     monkeypatch.setattr(plan_mod, "action_sort_key", fake_action_sort_key)
 
-    ctx = make_plan_context(observed, desired)
+    ctx = make_plan_context(desired, observed)
 
     # PlanContext wiring
     assert ctx.desired is desired

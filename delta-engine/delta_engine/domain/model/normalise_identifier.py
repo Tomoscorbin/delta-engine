@@ -2,7 +2,8 @@
 
 
 def normalize_identifier(value: str) -> str:
-    """Return a normalized identifier: trimmed, ASCII, lowercase, [A-Za-z0-9_]+ only.
+    """
+    Return a normalized identifier: trimmed, ASCII, lowercase, [A-Za-z0-9_]+ only.
 
     Args:
         value: Raw identifier value.

@@ -27,7 +27,7 @@ class PlanContext:
     plan: ActionPlan
 
 
-def make_plan_context(observed: ObservedTable | None, desired: DesiredTable) -> PlanContext:
+def make_plan_context(desired: DesiredTable, observed: ObservedTable | None) -> PlanContext:
     """Create a :class:`PlanContext` for a pair of tables and its plan."""
     plan = _compute_plan(observed, desired)
     return PlanContext(
