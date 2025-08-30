@@ -76,7 +76,7 @@ sequenceDiagram
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult (present/absent/failure)
         E->>V: diff + order -> ActionPlan  ->validate(plan)
-        V-->>E: failures?
+        V-->>E: failures
         alt plan valid
             E->>X: execute(plan)
             X-->>E: ExecutionResults
