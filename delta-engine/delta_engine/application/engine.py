@@ -25,10 +25,9 @@ from delta_engine.application.results import SyncReport, TableRunReport, Validat
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.log_config import configure_logging
-import logging
 
 configure_logging(logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # do we need to DI the logger?
 
 
 def _utc_now():
