@@ -28,7 +28,7 @@ User defined table  ──>  Registry  ─────────────�
                                 add/drop)
                                   │                           Report
                                   ▼                             ▲
-                  Plan Executor  ──> SQL ──> Spark/Databricks ──┘
+                               Executor  ───────────────────────┘
 ```
 
 Key design choices:
