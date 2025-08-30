@@ -18,7 +18,8 @@ class DatabricksReader:
         self.spark = spark
 
     def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
-        """Fetch observed table schema or absence for a qualified name.
+        """
+        Fetch observed table schema or absence for a qualified name.
 
         Returns a successful `ReadResult` with the current columns, an absent
         result when the table doesn't exist, or a failed result if catalog

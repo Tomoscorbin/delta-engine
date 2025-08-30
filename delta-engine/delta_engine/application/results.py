@@ -28,6 +28,7 @@ class ActionStatus(StrEnum):
 
 
 class TableRunStatus(StrEnum):
+    """High-level status of a table's sync run."""
     SUCCESS = "SUCCESS"
     READ_FAILED = "READ_FAILED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
@@ -70,6 +71,11 @@ Failure = Union[ReadFailure, ValidationFailure, ExecutionFailure]
 
 @dataclass(frozen=True, slots=True)
 class ReadResult:
+    """Outcome of reading current state for a table.
+
+    Encodes one of three states: present with an observed schema; absent when
+    the table does not exist; or failed with exception details.
+    """
     observed: ObservedTable | None = None
     failure: ReadFailure | None = None
 
@@ -137,6 +143,7 @@ class ExecutionResult:  # do we want an ActionResult and then an aggregate Execu
 
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
+    """Per-table report with timings, outcomes, and failures."""
     fully_qualified_name: str
     started_at: datetime
     ended_at: datetime

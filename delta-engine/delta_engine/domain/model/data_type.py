@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,16 +81,6 @@ class Map:
 
 
 # Public union for type annotations
-DataType = Union[
-    Integer,
-    Long,
-    Float,
-    Double,
-    Boolean,
-    String,
-    Date,
-    Timestamp,
-    Decimal,
-    Array,
-    Map,
-]
+DataType = (
+    Integer | Long | Float | Double | Boolean | String | Date | Timestamp | Decimal | Array | Map,
+)
