@@ -1,88 +1,129 @@
-from dataclasses import dataclass
-import types
+from delta_engine.application import plan as plan_mod
+from delta_engine.application.plan import _compute_plan, make_plan_context
+from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.data_type import Integer, String
+from delta_engine.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
+from tests.factories import make_desired_table, make_observed_table, make_qualified_name
 
-import delta_engine.application.plan as mod
-
-# --- compute_plan -------------------------------------------------------------
-
-def test_compute_plan_sorts_actions_and_returns_new_plan(monkeypatch):
-    @dataclass(frozen=True)
-    class FakePlan:
-        actions: tuple[object, ...]
-        keep: str = "unchanged"
-
-    # Unsorted by our key: 3,1,2
-    a3 = types.SimpleNamespace(k=3)
-    a1 = types.SimpleNamespace(k=1)
-    a2 = types.SimpleNamespace(k=2)
-    original = FakePlan(actions=(a3, a1, a2))
-
-    # diff_tables returns our unsorted plan
-    monkeypatch.setattr(mod, "diff_tables", lambda *, desired, observed: original)
-    # action_sort_key uses the .k attribute
-    monkeypatch.setattr(mod, "action_sort_key", lambda a: a.k)
-
-    result = mod.compute_plan(observed="OBS", desired="DES")
-
-    # New instance of the same "shape", actions sorted and tupled
-    assert isinstance(result, FakePlan)
-    assert result is not original
-    assert result.actions == (a1, a2, a3)
-    # Original plan not mutated
-    assert original.actions == (a3, a1, a2)
-    # Other fields preserved through dataclasses.replace
-    assert result.keep == "unchanged"
+_QN = make_qualified_name("dev", "silver", "people")
+_DESIRED = make_desired_table(_QN, (Column("id", Integer()), Column("name", String())))
+_OBSERVED = make_observed_table(_QN, (Column("id", Integer()), Column("name", String())))
 
 
-# --- plan_summary_counts ------------------------------------------------------
+def test_make_plan_context_delegates_to_compute_and_returns_sorted_plan(monkeypatch) -> None:
+    desired = _DESIRED
+    observed = _OBSERVED
 
-def test_plan_summary_counts_prefers_action_name_and_falls_back_to_class_name():
-    @dataclass(frozen=True)
-    class FakePlan:
-        actions: tuple[object, ...]
-
-    class Fallback:  # no action_name attribute → falls back to class name
-        pass
-
-    actions = (
-        types.SimpleNamespace(action_name="CreateTable"),
-        types.SimpleNamespace(action_name="CreateTable"),
-        types.SimpleNamespace(action_name="AddColumn"),
-        Fallback(),
+    # intentionally out-of-order actions from diff
+    unsorted_actions = (
+        DropColumn("zzz"),
+        AddColumn(Column("age", Integer())),
+        CreateTable(columns=desired.columns),
     )
 
-    counts = mod.plan_summary_counts(FakePlan(actions=actions))
+    def fake_diff_tables(*, desired, observed):
+        # preserve target to ensure replace keeps it
+        return ActionPlan(target=desired.qualified_name, actions=unsorted_actions)
 
-    assert counts == {"CreateTable": 2, "AddColumn": 1, "Fallback": 1}
+    # Sort order: CreateTable (0) < AddColumn (1) < DropColumn (2)
+    def fake_action_sort_key(a):
+        if isinstance(a, CreateTable):
+            return 0
+        if isinstance(a, AddColumn):
+            return 1
+        if isinstance(a, DropColumn):
+            return 2
+        return 99
 
+    monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
+    monkeypatch.setattr(plan_mod, "action_sort_key", fake_action_sort_key)
 
-# --- make_plan_context --------------------------------------------------------
+    ctx = make_plan_context(observed, desired)
 
-def test_make_plan_context_wires_fields_and_calls_compute_plan_keyword_only(monkeypatch):
-    """This will FAIL until make_plan_context calls compute_plan with keywords."""
-    @dataclass(frozen=True)
-    class FakePlan:
-        actions: tuple[object, ...] = ()
-
-    calls: list[tuple[object, object]] = []
-
-    def fake_compute_plan(observed, desired):
-        calls.append((observed, desired))
-        return FakePlan()
-
-    monkeypatch.setattr(mod, "compute_plan", fake_compute_plan)
-
-    qn = object()
-    desired = types.SimpleNamespace(qualified_name=qn)
-    observed = object()
-
-    ctx = mod.make_plan_context(observed=observed, desired=desired)
-
-    # compute_plan got called once with keyword args in correct order
-    assert calls == [(observed, desired)]
-
-    # PlanContext fields populated correctly
-    assert ctx.qualified_name is qn
+    # PlanContext wiring
     assert ctx.desired is desired
     assert ctx.observed is observed
-    assert isinstance(ctx.plan, FakePlan)
+
+    # Sorted order is enforced
+    assert tuple(type(a).__name__ for a in ctx.plan.actions) == (
+        "CreateTable",
+        "AddColumn",
+        "DropColumn",
+    )
+    # Target preserved
+    assert ctx.plan.target == desired.qualified_name
+
+
+def test__compute_plan_sorts_and_preserves_target(monkeypatch) -> None:
+    desired = _DESIRED
+    observed = None  # missing table
+
+    # Two adds around a drop to test basic ordering
+    unsorted_actions = (
+        AddColumn(Column("b", String())),
+        DropColumn("old"),
+        AddColumn(Column("a", Integer())),
+    )
+
+    def fake_diff_tables(*, desired, observed):
+        return ActionPlan(target=desired.qualified_name, actions=unsorted_actions)
+
+    # Sort: Add (1), Drop (2) — both adds tie on key
+    def fake_action_sort_key(a):
+        if isinstance(a, AddColumn):
+            return 1
+        if isinstance(a, DropColumn):
+            return 2
+        return 99
+
+    monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
+    monkeypatch.setattr(plan_mod, "action_sort_key", fake_action_sort_key)
+
+    result = _compute_plan(observed, desired)
+
+    # Adds come before drop
+    kinds = tuple(type(a).__name__ for a in result.actions)
+    assert kinds == ("AddColumn", "AddColumn", "DropColumn")
+
+    # Stable sort: equal-key items keep their original relative order ("b" then "a")
+    add_cols = [a.column.name for a in result.actions if isinstance(a, AddColumn)]
+    assert add_cols == ["b", "a"]
+
+    # Same target preserved via dataclasses.replace
+    assert result.target == desired.qualified_name
+
+
+def test__compute_plan_no_actions_returns_empty_tuple(monkeypatch) -> None:
+    desired = _DESIRED
+    observed = _OBSERVED
+
+    def fake_diff_tables(*, desired, observed):
+        return ActionPlan(target=desired.qualified_name, actions=())
+
+    monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
+
+    result = _compute_plan(observed, desired)
+    assert result.actions == ()
+    assert bool(result) is False  # ActionPlan.__bool__ delegates to actions
+
+
+def test_iteration_and_len_of_sorted_plan(monkeypatch) -> None:
+    desired = _DESIRED
+
+    unsorted_actions = (
+        DropColumn("x"),
+        AddColumn(Column("y", Integer())),
+    )
+
+    def fake_diff_tables(*, desired, observed):
+        return ActionPlan(target=desired.qualified_name, actions=unsorted_actions)
+
+    # Sort puts Add before Drop
+    def fake_action_sort_key(a):
+        return 0 if isinstance(a, AddColumn) else 1
+
+    monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
+
+    plan = _compute_plan(None, desired)
+    assert len(plan) == 2
+    assert [type(a).__name__ for a in list(plan)] == ["AddColumn", "DropColumn"]

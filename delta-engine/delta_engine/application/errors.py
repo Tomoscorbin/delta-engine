@@ -1,10 +1,10 @@
 from delta_engine.application.results import (
-    SyncReport,
     ExecutionFailure,
-    ExecutionResult,
-    ValidationFailure,
     ReadFailure,
+    SyncReport,
+    ValidationFailure,
 )
+
 
 class SyncFailedError(Exception):
     """Raised when one or more tables failed during sync."""
@@ -12,8 +12,7 @@ class SyncFailedError(Exception):
     def __init__(self, report: SyncReport) -> None:
         self.report = report
 
-        # Count tables
-        failed_tables = [t for t in report.table_reports if t.has_failures()]
+        failed_tables = [t for t in report.table_reports if t.has_failures]
         num_failed = len(failed_tables)
         total = len(report.table_reports)
 
@@ -21,17 +20,22 @@ class SyncFailedError(Exception):
         details: list[str] = []
 
         for t in failed_tables:
+            # Table headline
             details.append(f"\n❌ {t.fully_qualified_name} [{t.status.value}]")
 
-            if t.failure:
-                for fail in t.failure:
-                    if isinstance(fail, ReadFailure):
-                        details.append(f"    Read error: {fail.exception_type} - {fail.message}")
-                    elif isinstance(fail, ValidationFailure):
-                        details.append(f"    Validation failed: {fail.rule_name} - {fail.message}")
-                    elif isinstance(fail, ExecutionFailure):
-                        details.append(f"    Execution failed at action {fail.action_index}: {fail.exception_type} - {fail.message}")
+            # Top-level & aggregated failures (read, validation, execution)
+            for fail in t.all_failures:
+                if isinstance(fail, ReadFailure):
+                    details.append(f"    Read error: {fail.exception_type} - {fail.message}")
+                elif isinstance(fail, ValidationFailure):
+                    details.append(f"    Validation failed: {fail.rule_name} - {fail.message}")
+                elif isinstance(fail, ExecutionFailure):
+                    details.append(
+                        f"    Execution failed at action {fail.action_index}: "
+                        f"{fail.exception_type} - {fail.message}"
+                    )
 
+            # Failed SQL previews for failed actions (if provided)
             if t.execution_results:
                 for result in t.execution_results:
                     if result.failure:

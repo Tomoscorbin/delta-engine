@@ -40,6 +40,7 @@ ignore = [
   "E266",  # allow long inline comments
   "D104",  # don't require package docstrings in __init__.py
   "D107",  # don't require docstrings on __init__ methods
+  "D212",  # don't require multi-line docstring summary to start at the first line
 ]
 
 # isort behavior for import sorting

@@ -5,27 +5,24 @@ from datetime import UTC, datetime
 from delta_engine.application.errors import (
     SyncFailedError,
 )
+from delta_engine.application.format_report import format_sync_report
 from delta_engine.application.plan import (
     make_plan_context,
 )
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import (
-    SyncReport,
-    TableRunReport,
-)
+from delta_engine.application.results import SyncReport, TableRunReport, ValidationResult
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.application.format_report import format_sync_report
-
 
 
 def _utc_now():
-    return datetime.now(UTC).isoformat()
+    return datetime.now(UTC)
 
 
 class Engine:
-    """High-level orchestrator to plan, validate, and execute changes.
+    """
+    High-level orchestrator to plan, validate, and execute changes.
 
     The engine coordinates reading current state from a catalog, computing a
     plan to reach desired state, validating that plan, and executing it using
@@ -38,7 +35,8 @@ class Engine:
         executor: PlanExecutor,
         validator: PlanValidator = DEFAULT_VALIDATOR,
     ) -> None:
-        """Initialize the engine with adapters and a validator.
+        """
+        Initialize the engine with adapters and a validator.
 
         Args:
             reader: Adapter that fetches the current catalog state.
@@ -51,7 +49,8 @@ class Engine:
         self.validator = validator
 
     def sync(self, registry: Registry) -> None:
-        """Synchronize all registered tables to their desired state.
+        """
+        Synchronize all registered tables to their desired state.
 
         Computes, validates, and executes plans for each table in the supplied
         registry. Raises on validation or execution failures with rich context.
@@ -59,16 +58,16 @@ class Engine:
         run_started = _utc_now()
         table_reports = [self._sync_table(t) for t in registry]
 
-        run_report = SyncReport(
+        report = SyncReport(
             started_at=run_started,
             ended_at=_utc_now(),
             table_reports=tuple(table_reports),
         )
 
-        if run_report.any_failures:
-            raise SyncFailedError(run_report)
+        if report.any_failures:
+            raise SyncFailedError(report)
 
-        print(format_sync_report(run_report))
+        print(format_sync_report(report))
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
         """Synchronize a single table to its desired state."""
@@ -82,7 +81,9 @@ class Engine:
                 fully_qualified_name=fully_qualified_name,
                 started_at=started,
                 ended_at=_utc_now(),
-                failure=(read_result.failure,),
+                read=read_result,
+                validation=ValidationResult(failures=()),
+                execution_results=(),
             )
 
         observed = read_result.observed  # may be None if absent
@@ -91,21 +92,26 @@ class Engine:
         context = make_plan_context(desired, observed)
 
         # --- Step 3: Validate
-        failures = self.validator.validate(context)
-        if failures:
+        validation_failures = self.validator.validate(context)
+        validation = ValidationResult(failures=validation_failures)
+        if validation.failed:
             return TableRunReport(
                 fully_qualified_name=fully_qualified_name,
                 started_at=started,
                 ended_at=_utc_now(),
-                failure=failures,
+                read=read_result,
+                validation=validation,
+                execution_results=(),
             )
 
         # --- Step 4: Execute
-        executions = self.executor.execute_table(context.plan)
+        executions = self.executor.execute(context.plan)
 
         return TableRunReport(
             fully_qualified_name=fully_qualified_name,
             started_at=started,
             ended_at=_utc_now(),
+            read=read_result,
+            validation=ValidationResult(failures=()),
             execution_results=executions,
         )

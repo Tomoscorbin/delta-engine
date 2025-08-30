@@ -3,16 +3,19 @@ from delta_engine.domain.model import Column as DomainColumn, DesiredTable, Qual
 
 
 class Registry:
-    """In-memory registry of desired table definitions.
+    """
+    In-memory registry of desired table definitions.
 
     Register user-supplied table specs and iterate over them in deterministic
     (name-sorted) order for planning.
     """
+
     def __init__(self) -> None:
         self._tables_by_name: dict[str, DesiredTable] = {}
 
     def register(self, *tables: TableObject) -> None:
-        """Register one or more table specifications.
+        """
+        Register one or more table specifications.
 
         Args:
             *tables: Table-like objects providing ``catalog``, ``schema``,
@@ -20,6 +23,7 @@ class Registry:
 
         Raises:
             ValueError: If the same fully qualified name is registered twice.
+
         """
         for table in tables:
             desired = self._to_desired_table(table)
