@@ -23,6 +23,7 @@ class TableSnapshot:
     columns: tuple[Column, ...]
 
     def __post_init__(self) -> None:
+        """Validate non-empty column list and uniqueness by name (casefolded)."""
         if not self.columns:
             raise ValueError("Table requires at least one column")
 

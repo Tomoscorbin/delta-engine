@@ -22,6 +22,7 @@ class DeltaTable:
     columns: Sequence[Column]
 
     def __post_init__(self) -> None:
+        """Validate identifiers and ensure column names are unique (casefolded)."""
         normalize_identifier(self.catalog)
         normalize_identifier(self.schema)
         normalize_identifier(self.name)

@@ -14,10 +14,12 @@ from delta_engine.application.results import ActionStatus, SyncReport, TableRunS
 
 
 def _as_dt(v: str | datetime) -> datetime:
+    """Coerce an ISO8601 string or datetime into a datetime instance."""
     return v if isinstance(v, datetime) else datetime.fromisoformat(v)
 
 
 def _fmt_td(td: timedelta) -> str:
+    """Format a timedelta as seconds with two decimals (e.g., '1.23s')."""
     return f"{td.total_seconds():.2f}s"
 
 

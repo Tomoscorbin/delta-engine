@@ -24,6 +24,7 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
+        """Normalize all identifier parts to validated, case-insensitive forms."""
         object.__setattr__(self, "catalog", normalize_identifier(self.catalog))
         object.__setattr__(self, "schema", normalize_identifier(self.schema))
         object.__setattr__(self, "name", normalize_identifier(self.name))

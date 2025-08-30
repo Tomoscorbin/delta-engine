@@ -14,9 +14,16 @@ class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:
+        """Initialize the reader with a `SparkSession`."""
         self.spark = spark
 
     def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+        """Fetch observed table schema or absence for a qualified name.
+
+        Returns a successful `ReadResult` with the current columns, an absent
+        result when the table doesn't exist, or a failed result if catalog
+        access raised an exception.
+        """
         fully_qualified_name = str(qualified_name)
         if not self.spark.catalog.tableExists(fully_qualified_name):  # TODO: verify
             return ReadResult.create_absent()

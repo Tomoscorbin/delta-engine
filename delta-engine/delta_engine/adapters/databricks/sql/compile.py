@@ -42,18 +42,21 @@ def _compile_action(action: Action, full_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: CreateTable, full_table_name: str) -> str:
+    """Compile a CREATE TABLE statement with the plan's column definitions."""
     columns_sql = ", ".join(_column_def(c) for c in action.columns)
     return f"CREATE TABLE IF NOT EXISTS {full_table_name} ({columns_sql})"
 
 
 @_compile_action.register
 def _(action: AddColumn, full_table_name: str) -> str:
+    """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
     column_sql = _column_def(action.column)
     return f"ALTER TABLE {full_table_name} ADD COLUMN {column_sql}"
 
 
 @_compile_action.register
 def _(action: DropColumn, full_table_name: str) -> str:
+    """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
     column_ident = quote_identifier(action.column_name)
     return f"ALTER TABLE {full_table_name} DROP COLUMN {column_ident}"
 

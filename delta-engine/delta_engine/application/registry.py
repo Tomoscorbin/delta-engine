@@ -19,6 +19,7 @@ class Registry:
     """
 
     def __init__(self) -> None:
+        """Create an empty registry."""
         self._tables_by_name: dict[str, DesiredTable] = {}
 
     def register(self, *tables: TableObject) -> None:

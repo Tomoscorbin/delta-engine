@@ -23,6 +23,7 @@ class DatabricksExecutor:
     """Plan executor that runs compiled statements via a Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:
+        """Initialize the executor with a `SparkSession`."""
         self.spark = spark
 
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:

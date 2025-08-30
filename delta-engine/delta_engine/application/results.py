@@ -75,18 +75,22 @@ class ReadResult:
 
     @classmethod
     def create_present(cls, observed: ObservedTable) -> ReadResult:
+        """Construct a successful read result with an observed table."""
         return cls(observed=observed)
 
     @classmethod
     def create_absent(cls) -> ReadResult:
+        """Construct a successful read result indicating the object is missing."""
         return cls()
 
     @classmethod
     def create_failed(cls, failure: ReadFailure) -> ReadResult:
+        """Construct a failed read result with failure details."""
         return cls(failure=failure)
 
     @property
     def failed(self) -> bool:
+        """True when the read encountered a failure."""
         return self.failure is not None
 
 
@@ -101,6 +105,7 @@ class ValidationResult:
 
     @property
     def failed(self) -> bool:
+        """True when any validation failures are present."""
         return bool(self.failures)
 
 
@@ -118,6 +123,7 @@ class ExecutionResult:  # do we want an ActionResult and then an aggregate Execu
     failure: ExecutionFailure | None = None
 
     def __post_init__(self) -> None:
+        """Enforce consistency between status and presence of `failure`."""
         if (
             self.status is ActionStatus.FAILED and self.failure is None
         ):  # are these really necessary?
@@ -140,10 +146,12 @@ class TableRunReport:
 
     @property
     def _any_action_failed(self) -> bool:
+        """True if any execution result has status=FAILED."""
         return any(e.status is ActionStatus.FAILED for e in self.execution_results)
 
     @property
     def status(self) -> TableRunStatus:
+        """Aggregate table status across read, validation, and execution phases."""
         if self.read.failed:
             return TableRunStatus.READ_FAILED
         if self.validation.failed:
@@ -154,10 +162,12 @@ class TableRunReport:
 
     @property
     def has_failures(self) -> bool:
+        """True if the table did not fully succeed."""
         return self.status is not TableRunStatus.SUCCESS
 
     @property
     def action_failures(self) -> tuple[ExecutionFailure, ...]:
+        """Failures captured from action execution results only."""
         return tuple(e.failure for e in self.execution_results if e.status is ActionStatus.FAILED)
 
     @property
@@ -187,9 +197,11 @@ class SyncReport:
 
     @property
     def failures_by_table(self) -> dict[str, tuple[Failure, ...]]:
+        """Mapping of fully qualified table name to its failures (if any)."""
         return {
             t.fully_qualified_name: t.all_failures for t in self.table_reports if t.has_failures
         }
 
     def __iter__(self) -> Iterator[TableRunReport]:
+        """Iterate over per-table reports in the sync run."""
         return iter(self.table_reports)

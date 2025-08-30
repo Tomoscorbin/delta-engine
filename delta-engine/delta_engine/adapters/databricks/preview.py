@@ -17,5 +17,6 @@ def sql_preview(sql: str, *, max_chars: int = 240, single_line: bool = True) -> 
 
 
 def error_preview(exception: Exception) -> str:
+    """Return a short, single-string preview of an exception message body."""
     message_head = str(exception)
     return "\n".join(message_head.splitlines()[:5])

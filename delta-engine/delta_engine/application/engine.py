@@ -26,6 +26,7 @@ from delta_engine.domain.model.table import DesiredTable
 
 
 def _utc_now():
+    """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(UTC)
 
 

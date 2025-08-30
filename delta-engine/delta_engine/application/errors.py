@@ -12,6 +12,7 @@ class SyncFailedError(Exception):
     """Raised when one or more tables failed during sync."""
 
     def __init__(self, report: SyncReport) -> None:
+        """Build a rich error message from the supplied sync `report`."""
         self.report = report
 
         failed_tables = [t for t in report.table_reports if t.has_failures]

@@ -61,6 +61,7 @@ class Decimal:
     scale: int = 0
 
     def __post_init__(self) -> None:
+        """Validate that precision > 0 and 0 <= scale <= precision."""
         if self.precision <= 0 or not (0 <= self.scale <= self.precision):
             raise ValueError("invalid decimal(precision, scale)")
 

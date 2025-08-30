@@ -25,4 +25,5 @@ class Column:
     is_nullable: bool = True
 
     def __post_init__(self) -> None:
+        """Normalize the column name to a valid, case-insensitive form."""
         object.__setattr__(self, "name", normalize_identifier(self.name))
