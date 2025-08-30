@@ -1,3 +1,11 @@
+"""High-level orchestration of planning, validation, and execution.
+
+`Engine.sync` reads current catalog state, computes a plan (schema diff +
+deterministic ordering), validates it against rules, executes it via provided
+adapters, and aggregates results into a `SyncReport`. If any table fails,
+`SyncFailedError` is raised with a formatted summary.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

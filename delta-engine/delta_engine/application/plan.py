@@ -1,4 +1,8 @@
-"""Utilities for ordering action plans."""
+"""Compute and order action plans.
+
+Provides `PlanContext` and helpers to diff desired vs. observed tables and
+return an `ActionPlan` with actions sorted for deterministic execution.
+"""
 
 from __future__ import annotations
 

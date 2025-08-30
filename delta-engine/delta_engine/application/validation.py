@@ -14,7 +14,8 @@ class Rule(ABC):
 
     @abstractmethod
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Evaluate the rule against a planning context.
+        """
+        Evaluate the rule against a planning context.
 
         Args:
             ctx: The plan context to validate.
@@ -51,7 +52,8 @@ class PlanValidator:
         self.rules = rules
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        """Evaluate all rules and collect any failures.
+        """
+        Evaluate all rules and collect any failures.
 
         Args:
             ctx: The plan context being validated.

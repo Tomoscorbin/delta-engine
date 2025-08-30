@@ -1,3 +1,9 @@
+"""Compile domain action plans into Spark/Databricks SQL statements.
+
+Uses `functools.singledispatch` to render SQL per action type and returns a
+tuple of statements ready to execute against a Spark session.
+"""
+
 from __future__ import annotations
 
 from functools import singledispatch

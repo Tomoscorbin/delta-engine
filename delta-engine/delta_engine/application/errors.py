@@ -1,3 +1,5 @@
+"""Application-level exception types for sync operations."""
+
 from delta_engine.application.results import (
     ExecutionFailure,
     ReadFailure,

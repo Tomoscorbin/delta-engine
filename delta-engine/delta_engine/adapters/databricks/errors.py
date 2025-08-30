@@ -1,3 +1,5 @@
+"""Error codes surfaced by Databricks adapter implementations."""
+
 from enum import StrEnum
 
 

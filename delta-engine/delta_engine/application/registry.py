@@ -1,3 +1,10 @@
+"""In-memory registry of desired table definitions for planning.
+
+Accepts lightweight table/column specs, converts them to domain models, and
+iterates in fully qualified name order to produce deterministic planning input
+for the engine.
+"""
+
 from delta_engine.application.ports import ColumnObject, TableObject
 from delta_engine.domain.model import Column as DomainColumn, DesiredTable, QualifiedName
 

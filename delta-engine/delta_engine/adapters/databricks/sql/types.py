@@ -1,3 +1,9 @@
+"""Map between domain `DataType` and Spark SQL types.
+
+Provides conversions to Spark SQL DDL strings and from
+`pyspark.sql.types.DataType` instances or DDL strings back to domain types.
+"""
+
 from __future__ import annotations
 
 from pyspark.sql.types import (

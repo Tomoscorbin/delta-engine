@@ -1,8 +1,11 @@
+"""Compact previews for SQL statements and exceptions in logs/errors."""
+
 from __future__ import annotations
 
 
 def sql_preview(sql: str, *, max_chars: int = 240, single_line: bool = True) -> str:
-    """Return a compact, bounded preview of a SQL statement for logs/errors.
+    """
+    Return a compact, bounded preview of a SQL statement for logs/errors.
 
     - Normalizes whitespace to a single line when single_line=True.
     - Truncates with an ellipsis when longer than max_chars.

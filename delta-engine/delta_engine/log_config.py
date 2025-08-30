@@ -1,22 +1,33 @@
+"""Logging helpers with ANSI-colored level output.
+
+Provides a `LevelColorFormatter` and `configure_logging` to install a colored
+stderr handler on the root logger for consistent, readable logs across the
+package.
+"""
+
 import logging
 import sys
 
 RESET = "\033[0m"; YELLOW = "\033[33m"; RED = "\033[31m"; BRIGHT_RED = "\033[91m"
 
 class LevelColorFormatter(logging.Formatter):
-    """Formatter that colorizes log records based on the level.
+    """
+    Formatter that colorizes log records based on the level.
 
     Levels map to colors using ANSI escape codes. Non-colored levels are left
     unchanged.
     """
+
     def format(self, record):
-        """Return a formatted message, wrapped with a color for the level.
+        """
+        Return a formatted message, wrapped with a color for the level.
 
         Args:
             record: The log record to format.
 
         Returns:
             The formatted and optionally colorized message.
+
         """
         text = super().format(record)
         if record.levelno == logging.WARNING:
@@ -28,13 +39,15 @@ class LevelColorFormatter(logging.Formatter):
         return text
 
 def configure_logging(level: int = logging.INFO) -> None:
-    """Configure root logging with a colored formatter to stderr.
+    """
+    Configure root logging with a colored formatter to stderr.
 
     If handlers are already installed, they are cleared before applying the
     new configuration.
 
     Args:
         level: The root logger level to use (defaults to ``logging.INFO``).
+
     """
     root = logging.getLogger()
     if root.handlers:

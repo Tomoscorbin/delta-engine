@@ -48,11 +48,13 @@ class Timestamp:
 
 @dataclass(frozen=True, slots=True)
 class Decimal:
-    """Fixed-precision decimal type.
+    """
+    Fixed-precision decimal type.
 
     Attributes:
         precision: Total number of digits.
         scale: Digits to the right of the decimal point.
+
     """
 
     precision: int
