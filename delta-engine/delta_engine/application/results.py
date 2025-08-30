@@ -12,7 +12,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Union
 
 from delta_engine.domain.model import ObservedTable
 
@@ -29,6 +28,7 @@ class ActionStatus(StrEnum):
 
 class TableRunStatus(StrEnum):
     """High-level status of a table's sync run."""
+
     SUCCESS = "SUCCESS"
     READ_FAILED = "READ_FAILED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
@@ -63,7 +63,7 @@ class ExecutionFailure:
     message: str
 
 
-Failure = Union[ReadFailure, ValidationFailure, ExecutionFailure]
+Failure = ReadFailure | ValidationFailure | ExecutionFailure
 
 
 # ---------- ReadResult ----------
@@ -71,11 +71,13 @@ Failure = Union[ReadFailure, ValidationFailure, ExecutionFailure]
 
 @dataclass(frozen=True, slots=True)
 class ReadResult:
-    """Outcome of reading current state for a table.
+    """
+    Outcome of reading current state for a table.
 
     Encodes one of three states: present with an observed schema; absent when
     the table does not exist; or failed with exception details.
     """
+
     observed: ObservedTable | None = None
     failure: ReadFailure | None = None
 
@@ -93,11 +95,6 @@ class ReadResult:
     def create_failed(cls, failure: ReadFailure) -> ReadResult:
         """Construct a failed read result with failure details."""
         return cls(failure=failure)
-
-    @property
-    def failed(self) -> bool:
-        """True when the read encountered a failure."""
-        return self.failure is not None
 
 
 # ---------- ValidationResult ----------
@@ -144,6 +141,7 @@ class ExecutionResult:  # do we want an ActionResult and then an aggregate Execu
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
     """Per-table report with timings, outcomes, and failures."""
+
     fully_qualified_name: str
     started_at: datetime
     ended_at: datetime
@@ -159,7 +157,7 @@ class TableRunReport:
     @property
     def status(self) -> TableRunStatus:
         """Aggregate table status across read, validation, and execution phases."""
-        if self.read.failed:
+        if self.read.failure:
             return TableRunStatus.READ_FAILED
         if self.validation.failed:
             return TableRunStatus.VALIDATION_FAILED
@@ -175,13 +173,13 @@ class TableRunReport:
     @property
     def action_failures(self) -> tuple[ExecutionFailure, ...]:
         """Failures captured from action execution results only."""
-        return tuple(e.failure for e in self.execution_results if e.status is ActionStatus.FAILED)
+        return tuple(e.failure for e in self.execution_results if e.failure is not None)
 
     @property
     def all_failures(self) -> tuple[Failure, ...]:
         """All failures for this table (read, validation, execution)."""
         out: list[Failure] = []
-        if self.read.failed:
+        if self.read.failure:
             out.append(self.read.failure)
         if self.validation.failed:
             out.extend(self.validation.failures)

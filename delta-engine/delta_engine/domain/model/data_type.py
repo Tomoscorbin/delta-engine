@@ -80,7 +80,6 @@ class Map:
     value: DataType
 
 
-# Public union for type annotations
-DataType = (
-    Integer | Long | Float | Double | Boolean | String | Date | Timestamp | Decimal | Array | Map,
+type DataType = (
+    Integer | Long | Float | Double | Boolean | String | Date | Timestamp | Decimal | Array | Map
 )

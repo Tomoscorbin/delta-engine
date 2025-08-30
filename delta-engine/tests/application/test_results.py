@@ -39,13 +39,10 @@ def test_read_result_present_absent_failed_flags() -> None:
 
     assert present.observed is not None
     assert present.failure is None
-    assert present.failed is False
     assert absent.observed is None
     assert absent.failure is None
-    assert absent.failed is False
     assert failed.observed is None
     assert failed.failure is not None
-    assert failed.failed is True
 
 
 def test_validation_result_failed_boolean() -> None:

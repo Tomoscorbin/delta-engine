@@ -1,5 +1,7 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -7,6 +9,7 @@ from delta_engine.application import engine as engine_mod
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.plan import PlanContext
+from delta_engine.application.ports import ColumnObject
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ActionStatus,
@@ -18,6 +21,7 @@ from delta_engine.application.results import (
     TableRunStatus,
     ValidationFailure,
 )
+from delta_engine.application.validation import PlanValidator
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -58,19 +62,19 @@ def _fixed_now_seq(n=4):
     return _now
 
 
-@dataclass(frozen=True)
+@dataclass
 class ColSpec:
     name: str
-    data_type: object
+    data_type: Any
     is_nullable: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass
 class TableSpec:
-    catalog: str | None
-    schema: str | None
+    catalog: str
+    schema: str
     name: str
-    columns: tuple[ColSpec, ...]
+    columns: Iterable[ColumnObject]
 
 
 # ---- stubs ------------------------------------------------------------------
@@ -121,15 +125,21 @@ class StubExecutorFailed:
         )
 
 
-class StubValidatorOK:
+class StubValidatorOK(PlanValidator):
+    def __init__(self) -> None:
+        super().__init__(rules=())
+
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        # sanity: ensure observed/desired ordering is correct
+        # ensure observed/desired ordering is correct
         assert isinstance(ctx.observed, ObservedTable | type(None))
         assert isinstance(ctx.desired, DesiredTable)
         return ()
 
 
-class StubValidatorFail:
+class StubValidatorFail(PlanValidator):
+    def __init__(self) -> None:
+        super().__init__(rules=())
+
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
         return (ValidationFailure("RuleX", "bad"),)
 
@@ -147,7 +157,7 @@ def test_sync_table_read_failure_short_circuits_and_returns_read_failed(monkeypa
 
     assert isinstance(report, TableRunReport)
     assert report.status == TableRunStatus.READ_FAILED
-    assert report.read.failed is True
+    assert report.read.failure is not None
     assert report.validation is None or report.validation.failed is False
     assert report.execution_results == ()
 
@@ -251,12 +261,18 @@ class ExecutorOKButCounting(ExecutorOK):
         return super().execute(plan)
 
 
-class ValidatorPass:
+class ValidatorPass(PlanValidator):
+    def __init__(self) -> None:
+        super().__init__(rules=())
+
     def validate(self, ctx: PlanContext):
         return ()
 
 
-class ValidatorFailAlways:
+class ValidatorFailAlways(PlanValidator):
+    def __init__(self) -> None:
+        super().__init__(rules=())
+
     def validate(self, ctx: PlanContext):
         return (ValidationFailure("Rule", "bad"),)
 

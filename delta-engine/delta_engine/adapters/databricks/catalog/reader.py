@@ -43,7 +43,7 @@ class DatabricksReader:
         catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
         domain_columns = []
         for column in catalog_columns:
-            spark_dtype = getattr(column, "dataType", None)
+            spark_dtype = column.dataType
             domain_dtype = domain_type_from_spark(spark_dtype)
             is_nullable = bool(getattr(column, "nullable", True))
             domain_columns.append(

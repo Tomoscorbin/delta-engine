@@ -38,5 +38,11 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --no-ansi
 
+      - name: Type check
+        run: poetry run mypy .
+
+      - name: Lint
+        run: poetry run mypy .
+        
       - name: Test
         run: poetry run pytest -q

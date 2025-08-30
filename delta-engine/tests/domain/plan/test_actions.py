@@ -34,7 +34,7 @@ def test_action_plan_empty_is_falsey() -> None:
 def test_action_plan_is_frozen() -> None:
     plan = ActionPlan(target=_QN, actions=())
     with pytest.raises(FrozenInstanceError):
-        plan.target = _QN
+        plan.target = _QN  # type: ignore[misc]
 
 
 def test_action_classes_are_value_objects() -> None:

@@ -40,10 +40,10 @@ class PlanExecutor(Protocol):
 class TableObject(Protocol):
     """Lightweight table specification accepted by the registry."""
 
-    catalog: str | None
-    schema: str | None
+    catalog: str
+    schema: str
     name: str
-    columns: Iterable[Any]
+    columns: Iterable[ColumnObject]
 
 
 @runtime_checkable

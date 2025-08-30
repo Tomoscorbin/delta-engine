@@ -45,4 +45,4 @@ class SyncFailedError(Exception):
                         details.append(f"    Failed SQL preview (action {result.action_index}):")
                         details.append(f"        {result.statement_preview}")
 
-        super().__init__("\n".join([header] + details))
+        super().__init__("\n".join([header, *details]))
