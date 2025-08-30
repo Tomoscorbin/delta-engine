@@ -74,14 +74,10 @@ sequenceDiagram
     E->>R: iterate desired tables
     loop per table
         E->>CR: fetch_state(qualified_name)
-        CR-->>E: ReadResult (present/absent/failure)
-        E->>V: diff + order -> ActionPlan  ->validate(plan)
-        V-->>E: failures
-        alt plan valid
-            E->>X: execute(plan)
-            X-->>E: ExecutionResults
-        else validation failed
-            E-->>E: skip execution
+        CR-->>E: ReadResult
+        E->>V: ActionPlan  -> validate(plan)
+        E->>X: execute(plan)
+        X-->>E: ExecutionResults
         end
     end
     E-->>U: report or SyncFailedError
