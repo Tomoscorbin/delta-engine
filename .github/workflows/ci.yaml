@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - 'delta-engine/**'   # only run when this package changes
+      - '.github/workflows/**'
+  push:
+    branches: [ main ]
+    paths:
+      - 'delta-engine/**'
+      - '.github/workflows/**'
+
+jobs:
+  tests:
+    name: pytest (${{ matrix.pkg }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        pkg: [ 'delta-engine' ]
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.pkg }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'poetry'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Install dependencies
+        run: |
+          poetry install --no-interaction --with test
+
+      - name: Run tests
+        run: |
+          poetry run pytest -q
