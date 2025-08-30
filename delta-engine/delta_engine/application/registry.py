@@ -1,3 +1,11 @@
+"""
+In-memory registry of desired table definitions for planning.
+
+Accepts lightweight table/column specs, converts them to domain models, and
+iterates in fully qualified name order to produce deterministic planning input
+for the engine.
+"""
+
 from delta_engine.application.ports import ColumnObject, TableObject
 from delta_engine.domain.model import Column as DomainColumn, DesiredTable, QualifiedName
 
@@ -11,6 +19,7 @@ class Registry:
     """
 
     def __init__(self) -> None:
+        """Create an empty registry."""
         self._tables_by_name: dict[str, DesiredTable] = {}
 
     def register(self, *tables: TableObject) -> None:

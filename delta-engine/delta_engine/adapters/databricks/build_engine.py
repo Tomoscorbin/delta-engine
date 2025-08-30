@@ -1,3 +1,5 @@
+"""Factory for constructing an `Engine` wired to Databricks/Spark adapters."""
+
 from pyspark.sql import SparkSession
 
 from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor

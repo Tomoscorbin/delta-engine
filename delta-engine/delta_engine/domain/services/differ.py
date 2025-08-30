@@ -8,7 +8,8 @@ from delta_engine.domain.services.column_diff import diff_columns
 
 
 def diff_tables(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
-    """Compute the actions required to reach the desired schema.
+    """
+    Compute the actions required to reach the desired schema.
 
     Args:
         observed: Current table definition or ``None`` if the table is missing.

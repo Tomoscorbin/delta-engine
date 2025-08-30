@@ -14,7 +14,7 @@ def test_qualified_name_normalizes_and_stringifies() -> None:
 def test_qualified_name_is_frozen() -> None:
     qn = QualifiedName("dev", "silver", "test")
     with pytest.raises(FrozenInstanceError):
-        qn.schema = "x"
+        qn.schema = "x"  # type: ignore[misc]
 
 
 @pytest.mark.parametrize(

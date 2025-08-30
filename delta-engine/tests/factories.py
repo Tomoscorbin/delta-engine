@@ -9,7 +9,7 @@ from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
 
 
-def make_qualified_name(catalog: str | None, schema: str | None, name: str) -> QualifiedName:
+def make_qualified_name(catalog: str, schema: str, name: str) -> QualifiedName:
     return QualifiedName(catalog=catalog, schema=schema, name=name)
 
 

@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
 
 from delta_engine.application.results import ValidationFailure
 from delta_engine.application.validation import (
     NonNullableColumnAdd,
+    PlanContext,
     PlanValidator,
 )
 from delta_engine.domain.model.column import Column
@@ -14,10 +16,9 @@ from tests.factories import make_qualified_name
 _QN = make_qualified_name("dev", "silver", "people")
 
 
-def _ctx(observed, actions) -> SimpleNamespace:
-    """Build a duck-typed PlanContext with just the attributes used by rules."""
+def _ctx(observed, actions) -> PlanContext:
     plan = ActionPlan(target=_QN, actions=tuple(actions))
-    return SimpleNamespace(observed=observed, plan=plan)
+    return cast(PlanContext, SimpleNamespace(observed=observed, plan=plan))
 
 
 def test_non_nullable_add_on_existing_table_returns_failure() -> None:

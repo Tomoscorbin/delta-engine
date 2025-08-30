@@ -1,3 +1,10 @@
+"""
+Deterministic ordering for action plans.
+
+Defines a sort key that orders actions by phase (create, add, drop), then by
+target name, then by subject name to yield stable, readable plans.
+"""
+
 from typing import Final
 
 from delta_engine.domain.plan import Action, AddColumn, CreateTable, DropColumn

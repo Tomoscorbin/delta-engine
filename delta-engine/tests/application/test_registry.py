@@ -1,7 +1,10 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
+from delta_engine.application.ports import ColumnObject
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable
@@ -9,19 +12,19 @@ from delta_engine.domain.model.table import DesiredTable
 # --- table/column specs (duck-typed to the ports) ----------------
 
 
-@dataclass(frozen=True)
+@dataclass
 class ColSpec:
     name: str
-    data_type: object
+    data_type: Any
     is_nullable: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass
 class TableSpec:
     catalog: str
     schema: str
     name: str
-    columns: tuple[ColSpec, ...]
+    columns: Iterable[ColumnObject]
 
 
 # --- Helpers -----------------------------------------------------------------

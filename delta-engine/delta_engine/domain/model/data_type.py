@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,17 +47,20 @@ class Timestamp:
 
 @dataclass(frozen=True, slots=True)
 class Decimal:
-    """Fixed-precision decimal type.
+    """
+    Fixed-precision decimal type.
 
     Attributes:
         precision: Total number of digits.
         scale: Digits to the right of the decimal point.
+
     """
 
     precision: int
     scale: int = 0
 
     def __post_init__(self) -> None:
+        """Validate that precision > 0 and 0 <= scale <= precision."""
         if self.precision <= 0 or not (0 <= self.scale <= self.precision):
             raise ValueError("invalid decimal(precision, scale)")
 
@@ -78,17 +80,6 @@ class Map:
     value: DataType
 
 
-# Public union for type annotations
-DataType = Union[
-    Integer,
-    Long,
-    Float,
-    Double,
-    Boolean,
-    String,
-    Date,
-    Timestamp,
-    Decimal,
-    Array,
-    Map,
-]
+type DataType = (
+    Integer | Long | Float | Double | Boolean | String | Date | Timestamp | Decimal | Array | Map
+)

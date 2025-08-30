@@ -15,7 +15,7 @@ def test_column_normalizes_name_and_defaults_nullable() -> None:
 def test_column_is_frozen() -> None:
     col = Column("id", Integer())
     with pytest.raises(FrozenInstanceError):
-        col.name = "x"
+        col.name = "x"  # type: ignore[misc]
 
 
 def test_column_equality_respects_normalization_and_type() -> None:

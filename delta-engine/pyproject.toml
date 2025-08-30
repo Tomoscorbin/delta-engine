@@ -41,6 +41,7 @@ ignore = [
   "D104",  # don't require package docstrings in __init__.py
   "D107",  # don't require docstrings on __init__ methods
   "D212",  # don't require multi-line docstring summary to start at the first line
+  "D203",  # no blank line before docstring
 ]
 
 # isort behavior for import sorting
@@ -55,7 +56,16 @@ ban-relative-imports = "all"  # enforce absolute imports (TID252)
 
 # Test file exceptions (short fixture names etc.)
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["N802", "N803", "N806"]
+"tests/**" = [
+  "N802",  # allow non-PEP8 function names
+  "N803",  # allow non-PEP8 argument names
+  "N806",  # allow non-PEP8 variable names
+  "D101",  # don't require docstring in public classes
+  "D103",  # don't require docstrings in public 
+  "D102",  # don't require docstrings in public methods 
+  "D100",  # don't require module docstrings
+  "N815",  # allow variables in class scope to be mixedCase
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

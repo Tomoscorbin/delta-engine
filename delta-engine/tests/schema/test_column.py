@@ -11,4 +11,4 @@ def test_user_column_defaults_and_frozen() -> None:
     assert c.is_nullable is True
     assert c.comment == "primary key"
     with pytest.raises(FrozenInstanceError):
-        c.name = "other"
+        c.name = "other"  # type: ignore[misc]

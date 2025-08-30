@@ -1,3 +1,5 @@
+"""User-facing column spec used when declaring schemas."""
+
 from dataclasses import dataclass
 
 from delta_engine.domain.model import DataType
