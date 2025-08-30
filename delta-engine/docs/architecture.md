@@ -6,58 +6,67 @@ This page shows the high-level design. It focuses on the main components, their 
 
 ```mermaid
 classDiagram
-    class Engine {
-      +sync(registry)
-    }
+    %% === Ports (interfaces the Engine talks to) ===
     class Registry {
       +register(*tables)
       +__iter__()
     }
     class CatalogStateReader {
-      <<protocol>>
       +fetch_state(qualified_name)
     }
-    class PlanExecutor {
-      <<protocol>>
-      +execute(plan)
+    class Differ {
+      +diff(desired: DesiredTable, observed: ObservedTable) ActionPlan
     }
     class PlanValidator {
-      +validate(context)
+      +validate(plan)
     }
-    class DatabricksReader {
-      +fetch_state(qualified_name)
-    }
-    class DatabricksExecutor {
+    class PlanExecutor {
       +execute(plan)
     }
-    class Column
+
+    %% === Adapters (implementations) ===
+    class DatabricksStateReader
+    class DatabricksExecutor
+
+    %% === Domain types ===
     class DesiredTable
     class ObservedTable
-    class Action
-    class CreateTable
-    class AddColumn
-    class DropColumn
     class ActionPlan {
       target
       actions
     }
+    class Action
+    class CreateTable
+    class AddColumn
+    class DropColumn
+    class Engine {
+      +sync(registry)
+    }
 
-    Engine --> Registry : iterate desired tables
-    Engine --> CatalogStateReader : read state
-    Engine --> PlanValidator : validate plan
-    Engine --> PlanExecutor : execute actions
+    %% Engine depends on ports (dotted = lightweight dependency)
+    Engine ..> Registry : iterates
+    Engine ..> CatalogStateReader : reads state
+    Engine ..> Differ : builds plan
+    Engine ..> PlanValidator : validates
+    Engine ..> PlanExecutor : executes
 
-    CatalogStateReader <|.. DatabricksReader : implements
-    PlanExecutor <|.. DatabricksExecutor : implements
+    %% Port -> Adapter realizations
+    CatalogStateReader <|.. DatabricksStateReader
+    PlanExecutor <|.. DatabricksExecutor
 
-    Registry o--> DesiredTable : contains
-    DesiredTable o--> Column : columns
-    ObservedTable o--> Column : columns
+    %% Data/model relations
+    Registry o-- DesiredTable : contains
 
+    %% Differ inputs/outputs (as deps to avoid heavy graph)
+    Differ ..> DesiredTable : input
+    Differ ..> ObservedTable : input
+    Differ --> ActionPlan : output
+
+    %% Plan structure
+    ActionPlan o-- Action : 0..*
     Action <|-- CreateTable
     Action <|-- AddColumn
     Action <|-- DropColumn
-    ActionPlan o--> Action : 0..*
 ```
 
 ```mermaid
