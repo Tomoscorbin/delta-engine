@@ -4,7 +4,7 @@ This page shows the high-level design. It focuses on the main components, their 
 
 ## Component/Class Diagram
 
-<div class="mermaid">
+```mermaid
 classDiagram
     class Engine {
       +sync(registry)
@@ -89,7 +89,7 @@ sequenceDiagram
         end
     end
     E-->>U: report or SyncFailedError
-</div>
+```
 
 Notes:
 - The engine is backend-agnostic via small ports (`CatalogStateReader`, `PlanExecutor`).

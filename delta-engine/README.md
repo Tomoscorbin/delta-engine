@@ -17,14 +17,14 @@ High‑level flow:
 User Table Specs  ──>  Registry  ─────────────────────────────────────┐
                                   │                                   │
                                   ▼                                   │
-                              Engine (orchestrator)                   │
+                                      Engine                          │
                        ┌───────────┬───────────┬───────────┐          │
                        │   Read    │  Plan     │ Validate  │          │
                        └─────┬─────┴────┬──────┴────┬──────┘          │
                              │          │           │                 │
                              ▼          ▼           ▼                 │
                     Catalog Reader   ActionPlan   Rules               │
-                      (Databricks)   (create/     (fail fast)         │
+                      (Databricks)   (create/                         │
                                       add/drop
                                       ordered)
                              │                                    Report
