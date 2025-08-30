@@ -36,7 +36,11 @@ jobs:
           cache-dependency-path: delta-engine/poetry.lock
 
       - name: Install dependencies
-        run: poetry install --no-interaction --no-ansi
+        run: poetry install --with dev --no-interaction --no-ansi
 
+      - name: Prepare report directory
+        run: mkdir -p reports
+        
       - name: Test
         run: poetry run pytest -q
+        
