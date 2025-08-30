@@ -77,7 +77,7 @@ sequenceDiagram
         CR-->>E: ReadResult
         E->>V: ActionPlan  -> validate(plan)
         E->>X: execute(plan)
-        X-->>E: ExecutionResults
+        X-->>U: ExecutionResults
     end
 ```
 
