@@ -59,8 +59,9 @@ classDiagram
     Action <|-- AddColumn
     Action <|-- DropColumn
     ActionPlan o--> Action : 0..*
+```
 
-
+```mermaid
 sequenceDiagram
     autonumber
     participant U as User code
@@ -86,7 +87,7 @@ sequenceDiagram
         end
     end
     E-->>U: report or SyncFailedError
-
+```
 
 
 Notes:
