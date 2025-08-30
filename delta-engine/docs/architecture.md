@@ -60,35 +60,6 @@ classDiagram
     Action <|-- DropColumn
     ActionPlan o--> Action : 0..*
 
-## Sync Flow (Sequence)
-
-<div class="mermaid">
-sequenceDiagram
-    autonumber
-    participant U as User code
-    participant R as Registry
-    participant E as Engine
-    participant CR as CatalogStateReader
-    participant V as PlanValidator
-    participant X as PlanExecutor
-
-    U->>R: register(DeltaTable)
-    E->>R: iterate desired tables
-    loop per table
-        E->>CR: fetch_state(qualified_name)
-        CR-->>E: ReadResult (present/absent/failure)
-        E->>E: diff + order → ActionPlan
-        E->>V: validate(plan)
-        V-->>E: failures?
-        alt plan valid
-            E->>X: execute(plan)
-            X-->>E: ExecutionResults
-        else validation failed
-            E-->>E: skip execution
-        end
-    end
-    E-->>U: report or SyncFailedError
-```
 
 Notes:
 - The engine is backend-agnostic via small ports (`CatalogStateReader`, `PlanExecutor`).
