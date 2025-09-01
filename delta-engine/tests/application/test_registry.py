@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.data_type import Integer, String
@@ -107,3 +108,32 @@ def test_duplicate_column_names_bubble_up_from_desired_table() -> None:
     with pytest.raises(ValueError) as exc:
         reg.register(dup)
     assert "Duplicate column name" in str(exc.value)
+
+
+def test_register_preserves_properties_from_spec() -> None:
+    reg = Registry()
+    spec = make_table_spec(
+        "dev",
+        "silver",
+        "with_props",
+        (ColumnSpec("id", Integer()),),
+        properties={"foo": "bar"},
+    )
+    reg.register(spec)
+    dt = next(iter(reg))
+    assert dt.properties == {"foo": "bar"}
+
+
+def test_effective_properties_override_properties() -> None:
+    spec = SimpleNamespace(
+        catalog="dev",
+        schema="silver",
+        name="override",
+        columns=(ColumnSpec("id", Integer()),),
+        properties={"foo": "bar"},
+        effective_properties={"foo": "baz"},
+    )
+    reg = Registry()
+    reg.register(spec)
+    dt = next(iter(reg))
+    assert dt.properties == {"foo": "baz"}

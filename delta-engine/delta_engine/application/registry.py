@@ -51,7 +51,9 @@ class Registry:
         """Convert a table-like object into a :class:`DesiredTable`."""
         qualified_name = QualifiedName(spec.catalog, spec.schema, spec.name)
         columns = tuple(self._to_domain_column(c) for c in spec.columns)
-        properties = getattr(spec, "effective_properties", {})
+        properties = getattr(spec, "effective_properties", None)
+        if properties is None:
+            properties = getattr(spec, "properties", None) or {}
         return DesiredTable(
             qualified_name=qualified_name,
             columns=columns,
