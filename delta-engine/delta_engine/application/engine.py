@@ -85,7 +85,7 @@ class Engine:
             raise SyncFailedError(report)
 
         logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
-        print(format_sync_report(report))
+        print(format_sync_report(report))  # TODO: figure out why some logging is printed after this
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
         """Synchronize a single table to its desired state."""
@@ -161,4 +161,3 @@ class Engine:
             validation=ValidationResult(failures=()),
             execution_results=executions,
         )
-

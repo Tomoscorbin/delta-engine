@@ -8,6 +8,8 @@ from enum import StrEnum
 
 
 class Property(StrEnum):
+    """Supported Delta Lake table properties."""
+
     ENABLE_DELETION_VECTORS = "delta.enableDeletionVectors"
     COLUMN_MAPPING_MODE = "delta.columnMapping.mode"
     # MIN_READER_VERSION              =    "delta.minReaderVersion"
