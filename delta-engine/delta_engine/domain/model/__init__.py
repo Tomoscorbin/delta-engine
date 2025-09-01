@@ -1,5 +1,3 @@
-"""Convenience exports for key domain model classes and factories."""
-
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import (
     Array,

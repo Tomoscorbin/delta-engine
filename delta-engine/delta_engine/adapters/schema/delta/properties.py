@@ -1,4 +1,7 @@
-"""Available Delta Properties: https://docs.delta.io/latest/table-properties.html$0."""
+"""Delta Lake table properties.
+
+Reference: https://docs.delta.io/latest/table-properties.html
+"""
 
 from enum import StrEnum
 

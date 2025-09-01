@@ -1,3 +1,5 @@
+"""SQL builders for reading catalog metadata in Databricks (Spark SQL)."""
+
 from delta_engine.adapters.databricks.sql.dialect import (
     quote_identifier,
     quote_literal,
