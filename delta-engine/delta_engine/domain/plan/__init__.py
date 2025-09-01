@@ -4,6 +4,7 @@ from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
+    SetColumnComment,
     SetProperty,
     UnsetProperty,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "AddColumn",
     "CreateTable",
     "DropColumn",
+    "SetColumnComment",
     "SetProperty",
     "UnsetProperty",
 ]

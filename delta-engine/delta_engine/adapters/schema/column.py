@@ -12,4 +12,4 @@ class Column:
     name: str
     data_type: DataType
     is_nullable: bool = True
-    comment: str | None = None
+    comment: str = ""

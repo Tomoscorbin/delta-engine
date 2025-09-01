@@ -12,6 +12,7 @@ from delta_engine.domain.plan import (
     AddColumn,
     CreateTable,
     DropColumn,
+    SetColumnComment,
     SetProperty,
     UnsetProperty,
 )
@@ -27,6 +28,8 @@ def subject_name(action: Action) -> str:
         return action.name.casefold()
     if isinstance(action, UnsetProperty):
         return action.name.casefold()
+    if isinstance(action, SetColumnComment):
+        return action.column_name.casefold()
     return getattr(action, "name", "")
 
 
@@ -36,6 +39,7 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
     AddColumn,
     DropColumn,
     UnsetProperty,
+    SetColumnComment,
 )
 
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}

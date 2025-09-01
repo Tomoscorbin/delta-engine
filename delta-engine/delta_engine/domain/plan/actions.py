@@ -13,7 +13,9 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """Create a new table with the specified columns."""
+    """
+    Create a new table with the specified columns.
+    """
 
     columns: tuple[Column, ...]
 
@@ -45,6 +47,14 @@ class UnsetProperty(Action):
     """Unset a table property."""
 
     name: str
+
+
+@dataclass(frozen=True, slots=True)
+class SetColumnComment(Action):
+    """Set a column's comment."""
+
+    column_name: str
+    comment: str
 
 
 @dataclass(frozen=True, slots=True)
