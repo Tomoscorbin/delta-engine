@@ -18,6 +18,7 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
 
     Returns:
         Action plan describing the necessary changes.
+
     """
     # TODO: come up with better way to do this
     if observed is None:

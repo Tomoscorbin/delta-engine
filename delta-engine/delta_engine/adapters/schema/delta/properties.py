@@ -1,4 +1,5 @@
-"""Delta Lake table properties.
+"""
+Delta Lake table properties.
 
 Reference: https://docs.delta.io/latest/table-properties.html
 """

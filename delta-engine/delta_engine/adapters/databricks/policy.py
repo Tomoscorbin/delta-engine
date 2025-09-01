@@ -33,5 +33,6 @@ def enforce_property_policy(properties: Mapping[str, str]) -> MappingProxyType[s
 
     Returns:
         Read-only mapping containing only allowed properties.
+
     """
     return MappingProxyType({k: v for k, v in properties.items() if k in _PROPERTY_ALLOWLIST})
