@@ -14,21 +14,14 @@ Domain-driven library for describing Delta tables, planning safe schema changes,
 High‑level flow:
 
 ```
-User defined table  ──>  Registry  ─────────────────────────────┐
-                                  │                             │
-                                  ▼                             │
-                                Engine                          │
-                 ┌───────────┬───────────┬───────────┐          │
-                 │   Read    │  Plan     │ Validate  │          │
-                 └─────┬─────┴────┬──────┴────┬──────┘          │
-                       │          │           │                 │
-                       ▼          ▼           ▼                 │
-              Catalog Reader   ActionPlan   Rules               │
-                (Databricks)   (create/                         │
-                                add/drop)
-                                  │                           Report
-                                  ▼                             ▲
-                               Executor  ───────────────────────┘
+                                                      
+User defined table  ──▶  Registry  ──▶  Engine  ──▶     ──▶  Execute  ──▶  Report
+                                           │
+                                           ▼          
+                          ┌───────────┬───────────┬───────────┐
+                          │   Read    │   Plan    │  Validate │
+                          │  Catalog  │  Actions  │    Plan   │
+                          └───────────┴───────────┴───────────┘
 ```
 
 Key design choices:
