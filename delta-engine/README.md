@@ -15,13 +15,13 @@ High‑level flow:
 
 ```
                                                       
-User defined table  ──▶  Registry  ──▶  Engine  ──▶  Execute  ──▶  Report
+User defined table  ──▶  Registry  ──▶  Engine  ──▶  Report
                                            │
                                            ▼          
-                          ┌───────────┬───────────┬───────────┐
-                          │   Read    │   Plan    │  Validate │
-                          │  Catalog  │  Actions  │    Plan   │
-                          └───────────┴───────────┴───────────┘
+                   ┌───────────┬───────────┬───────────┬───────────┐
+                   │   Read    │   Plan    │  Validate │  Execute  │
+                   │  Catalog  │  Actions  │    Plan   │   Plan    │
+                   └───────────┴───────────┴───────────┴───────────┘
 ```
 
 Key design choices:
