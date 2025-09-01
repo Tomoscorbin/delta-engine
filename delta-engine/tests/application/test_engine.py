@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.application import engine as engine_mod
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
@@ -18,27 +19,25 @@ from delta_engine.application.results import (
     ValidationFailure,
 )
 from delta_engine.application.validation import PlanValidator
-from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.column import Column as DomainColumn
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn
 from tests.factories import (
-    ColumnSpec,
     make_desired_table,
     make_observed_table,
     make_qualified_name,
-    make_table_spec,
 )
 
 # ---- helpers ----------------------------------------------------------------
 
 
 _QN = make_qualified_name("dev", "silver", "people")
-_DESIRED = make_desired_table(_QN, (Column("id", Integer()),))
+_DESIRED = make_desired_table(_QN, (DomainColumn("id", Integer()),))
 
 
-_OBSERVED = make_observed_table(_QN, (Column("id", Integer()),))
+_OBSERVED = make_observed_table(_QN, (DomainColumn("id", Integer()),))
 
 
 def _fixed_times():
@@ -160,7 +159,7 @@ def test_sync_table_validation_failure_returns_validation_failed_no_execute(monk
         assert desired is desired
         assert observed is None or isinstance(observed, ObservedTable)
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("age", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(DomainColumn("age", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -185,7 +184,7 @@ def test_sync_table_success_executes_and_returns_execution_results(monkeypatch) 
         assert isinstance(observed, ObservedTable)
         assert desired is desired
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -209,7 +208,7 @@ def test_sync_table_execution_failure_marks_execution_failed(monkeypatch) -> Non
 
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -270,15 +269,15 @@ def test_engine_sync_success_prints_and_does_not_raise(monkeypatch, capsys) -> N
 
     reg = Registry()
     reg.register(
-        make_table_spec("dev", "silver", "t1", (ColumnSpec("id", Integer()),)),
-        make_table_spec("dev", "silver", "t2", (ColumnSpec("id", Integer()),)),
+        DeltaTable("dev", "silver", "t1", (DomainColumn("id", Integer()),)),
+        DeltaTable("dev", "silver", "t2", (DomainColumn("id", Integer()),)),
     )
 
     exec_stub = ExecutorOKButCounting()
 
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -297,12 +296,12 @@ def test_engine_sync_raises_sync_failed_error_when_any_table_fails(monkeypatch) 
     monkeypatch.setattr(engine_mod, "_utc_now", _fixed_now_seq())
 
     reg = Registry()
-    reg.register(make_table_spec("dev", "silver", "t1", (ColumnSpec("id", Integer()),)))
+    reg.register(DeltaTable("dev", "silver", "t1", (DomainColumn("id", Integer()),)))
 
     # fake plan context
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 

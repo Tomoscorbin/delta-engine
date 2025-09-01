@@ -6,6 +6,8 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, Long
 
 
+# TODO: remove all tests that test identifier normalisation.
+# It is already tested in test_normalise_identifiers.py
 def test_column_normalizes_name_and_defaults_nullable() -> None:
     col = Column("  ID  ", Integer())
     assert col.name == "id"
