@@ -67,4 +67,5 @@ class Registry:
             name=column.name,
             data_type=column.data_type,
             is_nullable=column.is_nullable,
+            comment=column.comment,
         )
