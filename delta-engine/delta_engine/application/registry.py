@@ -6,9 +6,6 @@ iterates in fully qualified name order to produce deterministic planning input
 for the engine.
 """
 
-from collections.abc import Mapping
-from types import MappingProxyType
-
 from delta_engine.application.ports import ColumnObject, TableObject
 from delta_engine.domain.model import Column as DomainColumn, DesiredTable, QualifiedName
 
@@ -41,7 +38,8 @@ class Registry:
             desired = self._to_desired_table(table)
             fully_qualified_name = str(desired.qualified_name)
             if fully_qualified_name in self._tables_by_name:
-                raise ValueError(f"Duplicate table registration: {fully_qualified_name}") # Move to a policy/registry validator
+                # Move to a policy/registry validator
+                raise ValueError(f"Duplicate table registration: {fully_qualified_name}")
             self._tables_by_name[fully_qualified_name] = desired
 
     def __iter__(self):

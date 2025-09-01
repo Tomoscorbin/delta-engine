@@ -2,8 +2,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from delta_engine.schema.column import Column as UserColumn
-from delta_engine.schema.types import Integer
+from delta_engine.adapters.schema.column import Column as UserColumn
+from delta_engine.adapters.schema.types import Integer
 
 
 def test_user_column_defaults_and_frozen() -> None:

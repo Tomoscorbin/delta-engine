@@ -1,11 +1,12 @@
-from typing import FrozenSet, Final, Mapping
+from collections.abc import Mapping
 from types import MappingProxyType
+from typing import Final
 
 from delta_engine.adapters.schema.delta.properties import Property
 
 #TODO: create a generic policy enforcment framework
 #TODO: try without .value
-_PROPERTY_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
+_PROPERTY_ALLOWLIST: Final[frozenset[str]] = frozenset({
     Property.CHANGE_DATA_FEED.value,
     Property.DELETED_FILE_RETENTION_DURATION.value,
     Property.LOG_RETENTION_DURATION.value,

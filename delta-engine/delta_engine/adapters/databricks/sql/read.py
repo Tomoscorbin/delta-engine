@@ -1,4 +1,8 @@
-from delta_engine.adapters.databricks.sql.dialect import quote_qualified_name, quote_identifier, quote_literal
+from delta_engine.adapters.databricks.sql.dialect import (
+    quote_identifier,
+    quote_literal,
+    quote_qualified_name,
+)
 from delta_engine.domain.model import QualifiedName
 
 

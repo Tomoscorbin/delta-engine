@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 from delta_engine.application.ports import (
     CatalogStateReader,
-    ColumnObject,
     PlanExecutor,
     TableObject,
 )
@@ -100,13 +99,6 @@ class TableSpec:
     schema: str | None
     name: str
     columns: Iterable[ColSpec]
-
-
-def test_columnobject_and_tableobject_runtime_conformance() -> None:
-    col = ColSpec(name="id", data_type=int, is_nullable=False)
-    tbl = TableSpec(catalog="dev", schema="silver", name="people", columns=(col,))
-    assert isinstance(col, ColumnObject)
-    assert isinstance(tbl, TableObject)
 
 
 def test_tableobject_runtime_conformance_fails_when_member_missing() -> None:

@@ -1,3 +1,4 @@
+from delta_engine.adapters.schema import types as schema_types
 from delta_engine.domain.model.data_type import (
     Boolean,
     Date,
@@ -8,7 +9,6 @@ from delta_engine.domain.model.data_type import (
     String,
     Timestamp,
 )
-from delta_engine.schema import types as schema_types
 
 
 def test_schema_type_singletons_present_and_types() -> None:

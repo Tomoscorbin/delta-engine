@@ -23,15 +23,14 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
         ValueError: If the qualified names of ``observed`` and ``desired`` differ.
 
     """
+    # TODO: come up with better way to do this
     if observed is None:
         actions = (
-            (CreateTable(columns=desired.columns),)
-            + diff_properties(desired.properties, {})
+            CreateTable(columns=desired.columns),
+            *diff_properties(desired.properties, {}),
         )
     else:
-        actions = (
-            diff_columns(desired.columns, observed.columns)
-            + diff_properties(desired.properties, observed.properties)
+        actions = diff_columns(desired.columns, observed.columns) + diff_properties(
+            desired.properties, observed.properties
         )
     return ActionPlan(desired.qualified_name, actions)
-

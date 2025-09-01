@@ -79,7 +79,7 @@ def test__compute_plan_sorts_and_preserves_target(monkeypatch) -> None:
     monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
     monkeypatch.setattr(plan_mod, "action_sort_key", fake_action_sort_key)
 
-    result = _compute_plan(observed, desired)
+    result = _compute_plan(desired, observed)
 
     # Adds come before drop
     kinds = tuple(type(a).__name__ for a in result.actions)
@@ -124,6 +124,6 @@ def test_iteration_and_len_of_sorted_plan(monkeypatch) -> None:
 
     monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
 
-    plan = _compute_plan(None, desired)
+    plan = _compute_plan(desired, None)
     assert len(plan) == 2
     assert [type(a).__name__ for a in list(plan)] == ["AddColumn", "DropColumn"]

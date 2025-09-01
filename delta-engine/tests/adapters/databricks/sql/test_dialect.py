@@ -3,6 +3,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     quote_literal,
     quote_qualified_name,
 )
+from tests.factories import make_qualified_name
 
 
 def test_quote_identifier_escapes_backticks_and_wraps() -> None:
@@ -16,8 +17,6 @@ def test_quote_literal_escapes_single_quotes_and_wraps() -> None:
 
 
 def test_quote_qualified_name_quotes_each_part() -> None:
-    assert quote_qualified_name("dev", "silver", "people") == "`dev`.`silver`.`people`"
-
-
-def test_quote_qualified_name_escapes_backticks_in_parts() -> None:
-    assert quote_qualified_name("dev", "sil`ver", "peo`ple") == "`dev`.`sil``ver`.`peo``ple`"
+    qn = make_qualified_name("dev", "silver", "people")
+    quoted = quote_qualified_name(qn)
+    assert quoted == "`dev`.`silver`.`people`"

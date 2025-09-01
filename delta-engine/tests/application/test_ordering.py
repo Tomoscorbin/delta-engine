@@ -3,7 +3,6 @@ import pytest
 from delta_engine.application.ordering import (
     action_sort_key,
     subject_name,
-    target_name,
 )
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, String
@@ -25,14 +24,7 @@ def _create(*cols: str) -> CreateTable:
     return CreateTable(columns=tuple(Column(c, String()) for c in cols))
 
 
-# --- target_name / subject_name behaviour ------------------------------------
-
-
-def test_target_name_is_empty_for_current_actions() -> None:
-    # None of the Action subclasses carry a `target` attribute.
-    assert target_name(_create("id")) == ""
-    assert target_name(_add("age")) == ""
-    assert target_name(_drop("nickname")) == ""
+# --- subject_name behaviour ------------------------------------
 
 
 def test_subject_name_for_addcolumn_is_column_name() -> None:
