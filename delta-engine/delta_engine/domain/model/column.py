@@ -22,7 +22,7 @@ class Column:
 
     name: str
     data_type: DataType
-    is_nullable: bool = True
+    is_nullable: bool = True  # TODO: rename to nullable
     comment: str = ""
 
     def __post_init__(self) -> None:

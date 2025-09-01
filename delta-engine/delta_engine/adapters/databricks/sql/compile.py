@@ -49,8 +49,8 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
 @_compile_action.register
 def _(action: AddColumn, quoted_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
-    column_sql = _column_def(action.column)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_sql}"
+    column_name = _column_def(action.column)
+    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_name}"
 
 
 @_compile_action.register
@@ -75,7 +75,8 @@ def _(action: UnsetProperty, quoted_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetColumnComment, quoted_table_name: str) -> str:
     column_name = quote_identifier(action.column_name)
-    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} COMMENT '{action.comment}'"
+    comment = quote_literal(action.comment)
+    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
 
 # ----------- helpers ------------

@@ -21,6 +21,8 @@ def diff_columns_for_drops(desired: tuple[Column], observed: tuple[Column]) -> t
 def diff_columns_for_comment_updates(
     desired: tuple[Column], observed: tuple[Column]
 ) -> tuple[SetColumnComment]:
+    # TODO: perhaps add comments with AddColumn and skip SetColumnComment if column is new
+
     observed_comment_by_name = {c.name: c.comment for c in observed}
     return tuple(
         SetColumnComment(c.name, c.comment)
