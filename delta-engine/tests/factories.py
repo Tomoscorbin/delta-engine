@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 
 from delta_engine.application.registry import Registry
+from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import DataType, Integer, String
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -50,7 +51,19 @@ def make_observed_default(name: str, columns: Iterable[Column]) -> ObservedTable
 
 
 def make_registry(names):
+    """Build a Registry from simple names using real table specs.
+
+    Uses `DeltaTable` with a minimal default schema (`id` INT) under
+    the `dev.silver` namespace to align with Registry expectations.
+    """
     r = Registry()
     for n in names:
-        r.register(DesiredTable(QualifiedName(catalog="c", schema="s", name=n)))
+        r.register(
+            DeltaTable(
+                "dev",
+                "silver",
+                n,
+                (make_column("id", Integer(), is_nullable=False),),
+            )
+        )
     return r
