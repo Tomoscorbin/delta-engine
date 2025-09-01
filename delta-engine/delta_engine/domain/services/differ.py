@@ -5,9 +5,10 @@ from __future__ import annotations
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import ActionPlan, CreateTable
 from delta_engine.domain.services.column_diff import diff_columns
+from delta_engine.domain.services.property_diff import diff_properties
 
 
-def diff_tables(observed: ObservedTable | None, desired: DesiredTable) -> ActionPlan:
+def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
     Compute the actions required to reach the desired schema.
 
@@ -23,10 +24,14 @@ def diff_tables(observed: ObservedTable | None, desired: DesiredTable) -> Action
 
     """
     if observed is None:
-        return ActionPlan(desired.qualified_name, (CreateTable(columns=desired.columns),))
-
-    if observed.qualified_name != desired.qualified_name:
-        raise ValueError("qualified_name must match between desired and observed")
-
-    actions = diff_columns(desired.columns, observed.columns)
+        actions = (
+            (CreateTable(columns=desired.columns),)
+            + diff_properties(desired.properties, {})
+        )
+    else:
+        actions = (
+            diff_columns(desired.columns, observed.columns)
+            + diff_properties(desired.properties, observed.properties)
+        )
     return ActionPlan(desired.qualified_name, actions)
+

@@ -8,6 +8,8 @@ from typing import Any, Protocol, runtime_checkable
 from delta_engine.application.results import ExecutionResult, ReadResult
 from delta_engine.domain.model import (
     QualifiedName,
+    DesiredTable,
+    ObservedTable
 )
 from delta_engine.domain.plan.actions import ActionPlan
 

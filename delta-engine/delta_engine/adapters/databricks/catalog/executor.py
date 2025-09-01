@@ -8,6 +8,7 @@ returns `ExecutionResult` entries including SQL previews and failure details.
 from __future__ import annotations
 
 from pyspark.sql import SparkSession
+import logging
 
 from delta_engine.adapters.databricks.preview import error_preview, sql_preview
 from delta_engine.adapters.databricks.sql.compile import compile_plan
@@ -17,7 +18,11 @@ from delta_engine.application.results import (
     ExecutionResult,
 )
 from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.log_config import configure_logging
 
+
+configure_logging(logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DatabricksExecutor:
     """Plan executor that runs compiled statements via a Spark session."""
@@ -56,6 +61,7 @@ class DatabricksExecutor:
         try:
             self.spark.sql(statement)
             status = ActionStatus.OK
+            logger.info("Successfully executed action %s", action_name)
         except Exception as exc:
             status = ActionStatus.FAILED
             failure = ExecutionFailure(
@@ -63,7 +69,7 @@ class DatabricksExecutor:
                 exception_type=type(exc).__name__,
                 message=error_preview(exc),
             )
-
+            logger.warning("Failed to executed action %s", action_name)
         return ExecutionResult(
             action=action_name,
             action_index=action_index,

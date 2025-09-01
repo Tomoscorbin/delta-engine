@@ -56,7 +56,7 @@ class Engine:
         Args:
             reader: Adapter that fetches the current catalog state.
             executor: Adapter that executes action plans.
-            validator: Validator that checks plans for policy violations.
+            validator: Validator that checks plans for plan violations.
 
         """
         self.reader = reader
@@ -84,8 +84,8 @@ class Engine:
         if report.any_failures:
             raise SyncFailedError(report)
 
-        print(format_sync_report(report))
         logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
+        print(format_sync_report(report))
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
         """Synchronize a single table to its desired state."""
@@ -96,7 +96,7 @@ class Engine:
         # --- Step 1: Read
         read_result = self.reader.fetch_state(desired.qualified_name)
         if read_result.failure:
-            logger.warning(
+            logger.error(
                 "Read failed for %s: %s - %s",
                 fully_qualified_name,
                 read_result.failure.exception_type,
@@ -128,7 +128,7 @@ class Engine:
         validation_failures = self.validator.validate(context)
         validation = ValidationResult(failures=validation_failures)
         if validation.failed:
-            logger.warning(
+            logger.error(
                 "Validation failed for %s (%d failure(s))",
                 fully_qualified_name,
                 len(validation.failures),
@@ -161,3 +161,4 @@ class Engine:
             validation=ValidationResult(failures=()),
             execution_results=executions,
         )
+

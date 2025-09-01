@@ -17,9 +17,4 @@ def quote_literal(raw: str) -> str:
 
 def quote_qualified_name(qualified_name: QualifiedName) -> str:
     """Render a fully qualified table name with dot separators and backticks."""
-    parts = [
-        qualified_name.catalog,
-        qualified_name.schema,
-        qualified_name.name,
-    ]
-    return ".".join(quote_identifier(p) for p in parts)
+    return ".".join(quote_identifier(p) for p in qualified_name.parts)

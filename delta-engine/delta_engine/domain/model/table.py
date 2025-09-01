@@ -37,6 +37,7 @@ class TableSnapshot:
             seen.add(n)
 
 
+#TODO: is there a better alternative than two empty dataclasses?
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
