@@ -41,7 +41,7 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}
 
 
-def action_sort_key(action: Action) -> tuple[int, str, str]:
+def action_sort_key(action: Action) -> tuple[int, str]:
     """
     Return a sortable key for action ordering.
 

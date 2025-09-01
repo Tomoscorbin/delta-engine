@@ -1,7 +1,4 @@
-from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import pytest
 
@@ -9,7 +6,6 @@ from delta_engine.application import engine as engine_mod
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.plan import PlanContext
-from delta_engine.application.ports import ColumnObject
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ActionStatus,
@@ -27,7 +23,13 @@ from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn
-from tests.factories import make_desired_table, make_observed_table, make_qualified_name
+from tests.factories import (
+    ColumnSpec,
+    make_desired_table,
+    make_observed_table,
+    make_qualified_name,
+    make_table_spec,
+)
 
 # ---- helpers ----------------------------------------------------------------
 
@@ -60,21 +62,6 @@ def _fixed_now_seq(n=4):
         return seq.pop(0)
 
     return _now
-
-
-@dataclass
-class ColSpec:
-    name: str
-    data_type: Any
-    is_nullable: bool = True
-
-
-@dataclass
-class TableSpec:
-    catalog: str
-    schema: str
-    name: str
-    columns: Iterable[ColumnObject]
 
 
 # ---- stubs ------------------------------------------------------------------
@@ -283,8 +270,8 @@ def test_engine_sync_success_prints_and_does_not_raise(monkeypatch, capsys) -> N
 
     reg = Registry()
     reg.register(
-        TableSpec("dev", "silver", "t1", (ColSpec("id", Integer()),)),
-        TableSpec("dev", "silver", "t2", (ColSpec("id", Integer()),)),
+        make_table_spec("dev", "silver", "t1", (ColumnSpec("id", Integer()),)),
+        make_table_spec("dev", "silver", "t2", (ColumnSpec("id", Integer()),)),
     )
 
     exec_stub = ExecutorOKButCounting()
@@ -310,7 +297,7 @@ def test_engine_sync_raises_sync_failed_error_when_any_table_fails(monkeypatch) 
     monkeypatch.setattr(engine_mod, "_utc_now", _fixed_now_seq())
 
     reg = Registry()
-    reg.register(TableSpec("dev", "silver", "t1", (ColSpec("id", Integer()),)))
+    reg.register(make_table_spec("dev", "silver", "t1", (ColumnSpec("id", Integer()),)))
 
     # fake plan context
     def fake_make_plan_context(desired, observed):

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from pyspark.sql import Column as SparkColumn, SparkSession
+from pyspark.sql import SparkSession
+from pyspark.sql.catalog import Column as SparkColumn
 
 from delta_engine.adapters.databricks.policy import enforce_property_policy
 from delta_engine.adapters.databricks.preview import error_preview
@@ -60,14 +61,15 @@ class DatabricksReader:
         query = query_describe_detail(qualified_name)
         df = self.spark.sql(query)
         row = df.first()
-        properties = row["properties"]
+        if not row:
+            return MappingProxyType({})
         return enforce_property_policy(
-            properties
+            row["properties"]
         )  # Should this be here or in a dedicated enforcement step/method?
 
     def _to_domain_column(self, spark_column: SparkColumn) -> Column:
         """Convert a pyspark.sql.Column object into a domain `Column`."""
-        spark_data_type = getattr(spark_column, "dataType", None)
+        spark_data_type = spark_column.dataType
         domain_data_type = domain_type_from_spark(spark_data_type)
         is_nullable = bool(getattr(spark_column, "nullable", True))
 

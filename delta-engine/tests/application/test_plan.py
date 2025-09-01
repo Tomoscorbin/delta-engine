@@ -102,7 +102,7 @@ def test__compute_plan_no_actions_returns_empty_tuple(monkeypatch) -> None:
 
     monkeypatch.setattr(plan_mod, "diff_tables", fake_diff_tables)
 
-    result = _compute_plan(observed, desired)
+    result = _compute_plan(desired, observed)
     assert result.actions == ()
     assert bool(result) is False  # ActionPlan.__bool__ delegates to actions
 

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
+from delta_engine.application.ports import ColumnObject
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import DataType, Integer, String
@@ -38,3 +41,44 @@ def make_registry(names):
     for n in names:
         r.register(DesiredTable(QualifiedName(catalog="c", schema="s", name=n)))
     return r
+
+
+def make_table_spec(
+    catalog: str,
+    schema: str,
+    name: str,
+    columns: Iterable[ColumnSpec],
+    properties: Mapping[str, str] | None = None,
+) -> TableSpec:
+    return TableSpec(
+        catalog=catalog,
+        schema=schema,
+        name=name,
+        columns=columns,
+        properties=properties,
+    )
+
+
+@dataclass
+class ColumnSpec:
+    """Column spec for testing (duck-types to ColumnObject)."""
+
+    name: str
+    data_type: Any
+    is_nullable: bool = True
+
+
+@dataclass
+class TableSpec:
+    """
+    Table spec for testing (duck-types to TableObject).
+
+    This class is not part of the production domain model. It exists only to
+    provide test doubles with the same shape as the TableObject protocol.
+    """
+
+    catalog: str
+    schema: str
+    name: str
+    columns: Iterable[ColumnObject]
+    properties: Mapping[str, str] | None = None
