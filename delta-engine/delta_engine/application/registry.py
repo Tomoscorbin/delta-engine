@@ -5,7 +5,7 @@ Accepts lightweight table/column specs, converts them to domain models, and
 iterates in fully qualified name order to produce deterministic planning input
 for the engine.
 """
-
+from dataclasses import asdict
 from delta_engine.application.ports import ColumnObject, TableObject
 from delta_engine.domain.model import Column as DomainColumn, DesiredTable, QualifiedName
 
@@ -63,9 +63,4 @@ class Registry:
     @staticmethod
     def _to_domain_column(column: ColumnObject) -> DomainColumn:
         """Convert a column-like object into a domain :class:`Column`."""
-        return DomainColumn(
-            name=column.name,
-            data_type=column.data_type,
-            is_nullable=column.is_nullable,
-            comment=column.comment,
-        )
+        return DomainColumn(**asdict(column))

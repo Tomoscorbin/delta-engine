@@ -22,7 +22,6 @@ def diff_columns_for_comment_updates(
     desired: tuple[Column], observed: tuple[Column]
 ) -> tuple[SetColumnComment]:
     observed_comment_by_name = {c.name: c.comment for c in observed}
-
     return tuple(
         SetColumnComment(c.name, c.comment)
         for c in desired

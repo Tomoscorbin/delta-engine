@@ -72,7 +72,7 @@ class DatabricksReader:
         spark_data_type = spark_column.dataType
         domain_data_type = domain_type_from_spark(spark_data_type)
         is_nullable = bool(getattr(spark_column, "nullable", True))
-        comment = getattr(spark_column, "comment", "")
+        comment = spark_column.description if spark_column.description else ""
 
         return Column(
             name=spark_column.name,
