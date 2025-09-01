@@ -15,7 +15,7 @@ High‑level flow:
 
 ```
                                                       
-User defined table  ──▶  Registry  ──▶  Engine  ──▶     ──▶  Execute  ──▶  Report
+User defined table  ──▶  Registry  ──▶  Engine  ──▶  Execute  ──▶  Report
                                            │
                                            ▼          
                           ┌───────────┬───────────┬───────────┐
