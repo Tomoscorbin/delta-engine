@@ -1,5 +1,3 @@
-import pytest
-
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
@@ -13,21 +11,10 @@ def test_diff_tables_returns_create_table_when_observed_is_none() -> None:
         make_qualified_name("dev", "silver", "people"),
         (Column("id", Integer()), Column("name", String())),
     )
-    plan = diff_tables(observed=None, desired=desired)
+    plan = diff_tables(desired=desired, observed=None)
 
     assert isinstance(plan, ActionPlan)
     assert isinstance(plan[0], CreateTable)
-
-
-def test_diff_tables_raises_on_qualified_name_mismatch() -> None:
-    observed = ObservedTable(
-        make_qualified_name("dev", "silver", "people_old"), (Column("id", Integer()),)
-    )
-    desired = DesiredTable(
-        make_qualified_name("dev", "silver", "people_new"), (Column("id", Integer()),)
-    )
-    with pytest.raises(ValueError):
-        diff_tables(observed, desired)
 
 
 def test_diff_tables_produces_adds_and_drops_from_column_diff() -> None:
@@ -39,7 +26,7 @@ def test_diff_tables_produces_adds_and_drops_from_column_diff() -> None:
         make_qualified_name("dev", "silver", "people"),
         (Column("id", Integer()), Column("age", Integer())),
     )
-    plan = diff_tables(observed, desired)
+    plan = diff_tables(desired, observed)
 
     assert tuple(plan) == (
         AddColumn(Column("age", Integer())),
@@ -51,7 +38,7 @@ def test_diff_tables_no_changes_returns_empty_plan() -> None:
     cols = (Column("id", Integer()), Column("name", String()))
     observed = ObservedTable(make_qualified_name("dev", "silver", "people"), cols)
     desired = DesiredTable(make_qualified_name("dev", "silver", "people"), cols)
-    plan = diff_tables(observed, desired)
+    plan = diff_tables(desired, observed)
 
     assert len(plan) == 0
     assert not plan

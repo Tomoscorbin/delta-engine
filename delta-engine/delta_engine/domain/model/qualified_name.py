@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from delta_engine.domain.normalise_identifier import normalise_identifier
 
-#TODO: 
+#TODO:
 
 @dataclass(frozen=True, slots=True)
 class QualifiedName:
@@ -38,7 +38,7 @@ class QualifiedName:
     def fully_qualified_name(self) -> str:
         """Return the string form of the qualified name."""
         return str(self)
-    
+
     @property
     def parts(self) -> tuple[str, str, str]:
         """Return the parts of the qualified name as a tuple."""

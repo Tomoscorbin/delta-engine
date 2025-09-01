@@ -5,17 +5,14 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from pyspark.sql import SparkSession
-from pyspark.sql import Column as SparkColumn
+from pyspark.sql.catalog import Column as SparkColumn
+
+from delta_engine.adapters.databricks.policy import enforce_property_policy
 from delta_engine.adapters.databricks.preview import error_preview
-from delta_engine.adapters.databricks.sql.read import (
-    query_describe_detail,
-    query_table_existence
-)
+from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
 from delta_engine.application.results import ReadFailure, ReadResult
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName
-from delta_engine.adapters.databricks.policy import enforce_property_policy
-
 
 
 class DatabricksReader:
@@ -39,7 +36,7 @@ class DatabricksReader:
         try:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
-        except Exception as exc:                                    #TODO: more accurate exception catching
+        except Exception as exc:  # TODO: more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
 
@@ -49,7 +46,7 @@ class DatabricksReader:
             properties,
         )
         return ReadResult.create_present(observed)
-    
+
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
         query = query_table_existence(qualified_name)
         return bool(self.spark.sql(query).head(1))
@@ -64,12 +61,15 @@ class DatabricksReader:
         query = query_describe_detail(qualified_name)
         df = self.spark.sql(query)
         row = df.first()
-        properties = row["properties"]
-        return enforce_property_policy(properties) # Should this be here or in a dedicated enforcement step/method?
+        if not row:
+            return MappingProxyType({})
+        return enforce_property_policy(
+            row["properties"]
+        )  # Should this be here or in a dedicated enforcement step/method?
 
     def _to_domain_column(self, spark_column: SparkColumn) -> Column:
         """Convert a pyspark.sql.Column object into a domain `Column`."""
-        spark_data_type = getattr(spark_column, "dataType", None)
+        spark_data_type = spark_column.dataType
         domain_data_type = domain_type_from_spark(spark_data_type)
         is_nullable = bool(getattr(spark_column, "nullable", True))
 

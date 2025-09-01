@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model.normalise_identifier import normalize_identifier
+from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
 @pytest.mark.parametrize(
@@ -12,10 +12,10 @@ from delta_engine.domain.model.normalise_identifier import normalize_identifier
         ("user1", "user1"),
     ],
 )
-def test_normalize_identifier_success_strips_and_lowercases_with_whitelist(
+def test_normalise_identifier_success_strips_and_lowercases_with_whitelist(
     raw: str, expected: str
 ) -> None:
-    assert normalize_identifier(raw) == expected
+    assert normalise_identifier(raw) == expected
 
 
 @pytest.mark.parametrize(
@@ -32,7 +32,7 @@ def test_normalize_identifier_success_strips_and_lowercases_with_whitelist(
         "naïve",  # non-ASCII
     ],
 )
-def test_normalize_identifier_rejects_anything_not_alnum_or_underscore(raw: str) -> None:
+def test_normalise_identifier_rejects_anything_not_alnum_or_underscore(raw: str) -> None:
     with pytest.raises(ValueError) as exc:
-        normalize_identifier(raw)
+        normalise_identifier(raw)
     assert "Invalid identifier:" in str(exc.value)

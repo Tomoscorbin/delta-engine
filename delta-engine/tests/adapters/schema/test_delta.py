@@ -1,8 +1,8 @@
 import pytest
 
+from delta_engine.adapters.schema.column import Column as UserColumn
+from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.domain.model.data_type import Integer, String
-from delta_engine.schema.column import Column as UserColumn
-from delta_engine.schema.delta import DeltaTable
 
 
 def test_delta_table_rejects_duplicate_column_names_case_insensitive() -> None:

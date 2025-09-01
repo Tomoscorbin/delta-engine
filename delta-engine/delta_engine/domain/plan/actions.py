@@ -37,7 +37,7 @@ class SetProperty(Action):
     """Set a table property."""
 
     name: str
-    value: object
+    value: str
 
 
 @dataclass(frozen=True, slots=True)

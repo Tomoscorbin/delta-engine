@@ -1,7 +1,8 @@
 """
 Deterministic ordering for action plans.
 
-Orders by phase (create → set-prop → add → drop → unset), then by target, then by subject.
+Orders by phase (create → set-prop → add → drop → unset), then by subject
+name. Target-level ordering is currently not part of the key.
 """
 
 from typing import Final
@@ -40,12 +41,11 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}
 
 
-def action_sort_key(action: Action) -> tuple[int, str, str]:
+def action_sort_key(action: Action) -> tuple[int, str]:
     """
     Return a sortable key for action ordering.
 
-    Orders by phase, then by target name, then by subject
-    name to achieve deterministic planning.
+    Orders by phase, then by subject name to achieve deterministic planning.
     """
     try:
         rank = _PHASE_RANK[type(action)]

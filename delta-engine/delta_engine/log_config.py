@@ -19,6 +19,7 @@ class LevelColorFormatter(logging.Formatter):
     """Formatter that colorizes log records based on the level."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Apply ANSI color codes to a formatted log message."""
         text = super().format(record)
         if record.levelno == logging.WARNING:
             return f"{YELLOW}{text}{RESET}"
@@ -37,6 +38,7 @@ class SafeStreamHandler(logging.StreamHandler):
     """
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record, swallowing ValueError if the stream is closed."""
         try:
             super().emit(record)
         except ValueError:

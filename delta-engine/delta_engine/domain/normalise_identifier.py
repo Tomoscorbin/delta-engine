@@ -1,8 +1,10 @@
 """Identifiers can only contain alphanumeric ASCII characters and underscores."""
 
-#TODO: give this a better home. maybe a policy/ folder?
+
+# TODO: give this a better home. maybe a policy/ folder?
 # we probably shouldnt be coercing names under the hood without the user knowing
 # the user should be alerted via exception if they entered an invalid name
+# maybe we need a dataclass representing valid identifiers?
 def normalise_identifier(value: str) -> str:
     """
     Return a normalized identifier: trimmed, ASCII, lowercase, [A-Za-z0-9_]+ only.

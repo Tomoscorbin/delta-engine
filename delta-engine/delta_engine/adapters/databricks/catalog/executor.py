@@ -7,8 +7,9 @@ returns `ExecutionResult` entries including SQL previews and failure details.
 
 from __future__ import annotations
 
-from pyspark.sql import SparkSession
 import logging
+
+from pyspark.sql import SparkSession
 
 from delta_engine.adapters.databricks.preview import error_preview, sql_preview
 from delta_engine.adapters.databricks.sql.compile import compile_plan
@@ -19,7 +20,6 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.plan.actions import ActionPlan
 from delta_engine.log_config import configure_logging
-
 
 configure_logging(logging.INFO)
 logger = logging.getLogger(__name__)

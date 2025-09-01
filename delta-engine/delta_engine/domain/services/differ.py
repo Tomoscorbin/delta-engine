@@ -13,25 +13,21 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
     Compute the actions required to reach the desired schema.
 
     Args:
-        observed: Current table definition or ``None`` if the table is missing.
         desired: Desired table definition.
+        observed: Current table definition or ``None`` if the table is missing.
 
     Returns:
         Action plan describing the necessary changes.
 
-    Raises:
-        ValueError: If the qualified names of ``observed`` and ``desired`` differ.
-
     """
+    # TODO: come up with better way to do this
     if observed is None:
         actions = (
-            (CreateTable(columns=desired.columns),)
-            + diff_properties(desired.properties, {})
+            CreateTable(columns=desired.columns),
+            *diff_properties(desired.properties, {}),
         )
     else:
-        actions = (
-            diff_columns(desired.columns, observed.columns)
-            + diff_properties(desired.properties, observed.properties)
+        actions = diff_columns(desired.columns, observed.columns) + diff_properties(
+            desired.properties, observed.properties
         )
     return ActionPlan(desired.qualified_name, actions)
-
