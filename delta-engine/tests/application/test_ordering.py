@@ -51,6 +51,7 @@ def test_action_sort_key_is_monotonic_by_phase_for_mixed_actions() -> None:
     """
     We don't assert the *specific* phase sequence, only that sorting
     groups by phase (monotonic rank).
+
     """
     qn = make_qualified_name("dev", "silver", "people")
     create = CreateTable(DesiredTable(qn, (Column("id", Integer()),)))

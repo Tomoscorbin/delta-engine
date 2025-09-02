@@ -68,9 +68,11 @@ ban-relative-imports = "all"  # enforce absolute imports (TID252)
   "N803",  # allow non-PEP8 argument names
   "N806",  # allow non-PEP8 variable names
   "D101",  # don't require docstring in public classes
-  "D103",  # don't require docstrings in public 
   "D102",  # don't require docstrings in public methods 
+  "D103",  # don't require docstrings in public
+  "D105",  # don't require docstrings in magig methods 
   "D100",  # don't require module docstrings
+  "D205",  # don't require 1 blank line between summary line and description
   "N815",  # allow variables in class scope to be mixedCase
 ]
 
