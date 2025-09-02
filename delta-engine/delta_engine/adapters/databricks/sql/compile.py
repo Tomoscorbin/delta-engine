@@ -69,7 +69,7 @@ def _(action: AddColumn, quoted_table_name: str) -> str:
     name = quote_identifier(action.column.name)
     type = sql_type_for_data_type(action.column.data_type)
     comment = quote_literal(action.column.comment)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {type} {comment} NOT NULL"
+    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {type} COMMENT {comment} NOT NULL"
 
 
 @_compile_action.register
