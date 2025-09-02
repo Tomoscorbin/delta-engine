@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from delta_engine.domain.model import DesiredTable, ObservedTable
-from delta_engine.domain.plan.actions import (
-    ActionPlan,
-    CreateTable,
-)
+from delta_engine.domain.plan.actions import Action, ActionPlan, CreateTable
 from delta_engine.domain.services.column_diff import diff_columns
 from delta_engine.domain.services.table_diff import diff_properties, diff_table_comments
 
@@ -24,8 +21,9 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
         Action plan describing the necessary changes.
 
     """
+    actions: tuple[Action, ...]
     if observed is None:
-        return ActionPlan(desired.qualified_name, (CreateTable(desired),))
+        actions = (CreateTable(desired),)
     else:
         actions = (
             diff_columns(desired.columns, observed.columns)
