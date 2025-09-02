@@ -11,8 +11,8 @@ import logging
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.preview import error_preview, sql_preview
 from delta_engine.adapters.databricks.sql.compile import compile_plan
+from delta_engine.adapters.databricks.sql.preview import error_preview, sql_preview
 from delta_engine.application.results import (
     ActionStatus,
     ExecutionFailure,
@@ -23,6 +23,7 @@ from delta_engine.log_config import configure_logging
 
 configure_logging(logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class DatabricksExecutor:
     """Plan executor that runs compiled statements via a Spark session."""

@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
 from delta_engine.adapters.databricks.policy import enforce_property_policy
-from delta_engine.adapters.databricks.preview import error_preview
+from delta_engine.adapters.databricks.sql.preview import error_preview
 from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
 from delta_engine.application.results import ReadFailure, ReadResult
