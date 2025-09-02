@@ -62,6 +62,7 @@ class DisallowPartitioningChange(Rule):
     """
 
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Flag the plan if it changes the an existing table's partition columns."""
         if ctx.observed is None:
             return None
         for action in ctx.plan.actions:
