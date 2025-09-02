@@ -37,6 +37,7 @@ class DatabricksReader:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
             table_comment = self._fetch_table_comment(str(qualified_name))
+            partition_columns = self._fetch_partition_columns(str(qualified_name))
         except Exception as exc:  # TODO: need more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
@@ -46,6 +47,7 @@ class DatabricksReader:
             columns=columns,
             comment=table_comment,
             properties=properties,
+            partitioned_by=partition_columns,
         )
         return ReadResult.create_present(observed)
 
@@ -57,6 +59,10 @@ class DatabricksReader:
         """List column definitions for the given table."""
         catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
         return tuple(self._to_domain_column(column) for column in catalog_columns)
+
+    def _fetch_partition_columns(self, fully_qualified_name: str) -> tuple[str, str]:
+        catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
+        return [c.name for c in catalog_columns if c.isPartition]
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return table properties as a dict[str, str]."""
