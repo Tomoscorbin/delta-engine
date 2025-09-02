@@ -22,7 +22,7 @@ def diff_columns_for_drops(
     return tuple(DropColumn(c.name) for c in observed if c.name not in desired_names)
 
 
-def diff_columns_for_comment_updates(
+def diff_column_comments(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[SetColumnComment, ...]:
     """
@@ -44,5 +44,5 @@ def diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> t
     """Return the column-level actions to transform `observed` into `desired`."""
     adds = diff_columns_for_adds(desired, observed)
     drops = diff_columns_for_drops(desired, observed)
-    comment_updates = diff_columns_for_comment_updates(desired, observed)
+    comment_updates = diff_column_comments(desired, observed)
     return adds + drops + comment_updates

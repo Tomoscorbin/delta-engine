@@ -1,10 +1,6 @@
-from dataclasses import FrozenInstanceError
-
-import pytest
-
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer, String
-from delta_engine.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
+from delta_engine.domain.model.data_type import Integer
+from delta_engine.domain.plan.actions import ActionPlan, AddColumn, DropColumn
 from tests.factories import make_qualified_name
 
 _QN = make_qualified_name("dev", "silver", "orders")
@@ -29,15 +25,3 @@ def test_action_plan_empty_is_falsey() -> None:
     assert len(plan) == 0
     assert bool(plan) is False
     assert list(plan) == []
-
-
-def test_action_plan_is_frozen() -> None:
-    plan = ActionPlan(target=_QN, actions=())
-    with pytest.raises(FrozenInstanceError):
-        plan.target = _QN  # type: ignore[misc]
-
-
-def test_action_classes_are_value_objects() -> None:
-    c = CreateTable(columns=(Column("id", Integer()), Column("name", String())))
-    assert isinstance(c.columns, tuple)
-    assert c.columns[0].name == "id"

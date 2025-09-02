@@ -36,14 +36,16 @@ class DatabricksReader:
         try:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
+            table_comment = self._fetch_table_comment(str(qualified_name))
         except Exception as exc:  # TODO: need more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
 
         observed = ObservedTable(
-            qualified_name,
-            columns,
-            properties,
+            qualified_name=qualified_name,
+            columns=columns,
+            comment=table_comment,
+            properties=properties,
         )
         return ReadResult.create_present(observed)
 
@@ -66,6 +68,10 @@ class DatabricksReader:
         return enforce_property_policy(
             row["properties"]
         )  # Should this be here or in a dedicated enforcement step/method?
+
+    def _fetch_table_comment(self, fully_qualified_name: str) -> str:
+        """Return the table comment (empty string when not set)."""
+        return self.spark.catalog.getTable(fully_qualified_name).description or ""
 
     def _to_domain_column(self, spark_column: SparkColumn) -> Column:
         """Convert a pyspark.sql.Column object into a domain `Column`."""

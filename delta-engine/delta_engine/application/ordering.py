@@ -1,8 +1,8 @@
 """
 Deterministic ordering for action plans.
 
-Orders by phase (create → set-prop → add → drop → unset), then by subject
-name. Target-level ordering is currently not part of the key.
+Orders by phase (create → set-prop → add → drop → set-col-comment → set-table-comment → unset),
+then by subject name. Target-level ordering is currently not part of the key.
 """
 
 from typing import Final
@@ -14,6 +14,7 @@ from delta_engine.domain.plan import (
     DropColumn,
     SetColumnComment,
     SetProperty,
+    SetTableComment,
     UnsetProperty,
 )
 
@@ -38,8 +39,9 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
     SetProperty,
     AddColumn,
     DropColumn,
-    UnsetProperty,
     SetColumnComment,
+    SetTableComment,
+    UnsetProperty,
 )
 
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}

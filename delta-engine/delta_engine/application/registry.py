@@ -51,11 +51,11 @@ class Registry:
         """Convert a table-like object into a :class:`DesiredTable`."""
         qualified_name = QualifiedName(spec.catalog, spec.schema, spec.name)
         columns = tuple(self._to_domain_column(c) for c in spec.columns)
-        properties = spec.effective_properties
         return DesiredTable(
             qualified_name=qualified_name,
             columns=columns,
-            properties=properties,
+            comment=spec.comment,
+            properties=spec.effective_properties,
         )
 
     @staticmethod

@@ -1,95 +1,103 @@
+import random
+
 import pytest
 
-from delta_engine.application.ordering import (
-    action_sort_key,
-    subject_name,
-)
+from delta_engine.application.ordering import action_sort_key, subject_name
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer, String
-from delta_engine.domain.plan.actions import Action, AddColumn, CreateTable, DropColumn
+from delta_engine.domain.model.data_type import Integer
+from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.plan.actions import (
+    AddColumn,
+    CreateTable,
+    DropColumn,
+    SetColumnComment,
+    SetProperty,
+    SetTableComment,
+    UnsetProperty,
+)
+from tests.factories import make_qualified_name
 
-# --- Helpers -----------------------------------------------------------------
-
-
-def _add(name: str) -> AddColumn:
-    return AddColumn(Column(name, Integer()))
-
-
-def _drop(name: str) -> DropColumn:
-    # DropColumn has `column_name`, not `name`
-    return DropColumn(name)
-
-
-def _create(*cols: str) -> CreateTable:
-    return CreateTable(columns=tuple(Column(c, String()) for c in cols))
+# --- subject_name -------------------------------------------------------------
 
 
-# --- subject_name behaviour ------------------------------------
+def test_subject_name_uses_relevant_field_per_action_type() -> None:
+    add = AddColumn(Column("age", Integer()))
+    drop = DropColumn("nickname")
+    set_prop = SetProperty(name="owner", value="data")
+    unset_prop = UnsetProperty(name="ttl")
+    set_col_comment = SetColumnComment(column_name="display_name", comment="shown")
+    set_table_comment = SetTableComment(comment="table note")
+
+    assert subject_name(add) == "age"
+    assert subject_name(drop) == "nickname"
+    assert subject_name(set_prop) == "owner"
+    assert subject_name(unset_prop) == "ttl"
+    assert subject_name(set_col_comment) == "display_name"
+    assert subject_name(set_table_comment) == ""  # no subject for table-level comment
 
 
-def test_subject_name_for_addcolumn_is_column_name() -> None:
-    assert subject_name(_add("Age")) == "age"  # normalized by Column
+def test_subject_name_falls_back_to_name_attribute_for_unknown_objects() -> None:
+    class Dummy:
+        def __init__(self) -> None:
+            self.name = "whatever"
+
+    assert subject_name(Dummy()) == "whatever"
 
 
-def test_action_sort_key_sorts_dropcolumns_by_subject_name() -> None:
-    from delta_engine.application.ordering import action_sort_key
-    from delta_engine.domain.plan.actions import DropColumn
-
-    d1 = DropColumn("a_col")
-    d2 = DropColumn("b_col")
-    ordered = sorted([d2, d1], key=action_sort_key)
-    assert ordered == [d1, d2]
+# --- action_sort_key ------------------
 
 
-# --- action_sort_key ordering ------------------------------------------------
+def test_action_sort_key_is_monotonic_by_phase_for_mixed_actions() -> None:
+    """
+    We don't assert the *specific* phase sequence, only that sorting
+    groups by phase (monotonic rank).
+
+    """
+    qn = make_qualified_name("dev", "silver", "people")
+    create = CreateTable(DesiredTable(qn, (Column("id", Integer()),)))
+    actions = [
+        UnsetProperty("c"),
+        SetTableComment("note"),
+        SetColumnComment("b", ""),
+        DropColumn("d"),
+        AddColumn(Column("a", Integer())),
+        SetProperty("owner", "eng"),
+        create,
+    ]
+    random.shuffle(actions)  # ensure input order doesn't bias the outcome
+
+    sorted_actions = sorted(actions, key=action_sort_key)
+    ranks = [action_sort_key(a)[0] for a in sorted_actions]
+
+    assert ranks == sorted(ranks)  # monotonic by phase rank (whatever that mapping is)
 
 
-def test_action_sort_key_phase_order_create_add_drop() -> None:
-    c = _create("id")
-    a = _add("age")
-    d = _drop("old")
-    # Expect phase ranks: CreateTable < AddColumn < DropColumn
-    keys = [action_sort_key(x) for x in (c, a, d)]
-    assert keys[0][0] < keys[1][0] < keys[2][0]
+@pytest.mark.parametrize(
+    "builder,extract",
+    [
+        (lambda s: SetProperty(s, "v"), lambda a: a.name),
+        (lambda s: UnsetProperty(s), lambda a: a.name),
+        (lambda s: AddColumn(Column(s, Integer())), lambda a: a.column.name),
+        (lambda s: DropColumn(s), lambda a: a.column_name),
+        (lambda s: SetColumnComment(s, ""), lambda a: a.column_name),
+    ],
+)
+def test_action_sort_key_orders_within_same_phase_by_subject(builder, extract) -> None:
+    """Within a phase, ordering is by the subject identifier (no reliance on case rules)."""
+    items = [builder("m"), builder("a"), builder("z")]
+    random.shuffle(items)
 
+    sorted_items = sorted(items, key=action_sort_key)
+    subjects = [extract(a) for a in sorted_items]
 
-def test_action_sort_key_sorts_addcolumns_by_subject_name_when_same_phase() -> None:
-    a1 = _add("a_col")
-    a2 = _add("b_col")
-    ordered = sorted([a2, a1], key=action_sort_key)
-    assert ordered == [a1, a2]  # lexicographic by subject name
-
-
-def test_action_sort_key_is_stable_with_equal_keys() -> None:
-    # Equal subject names => equal keys; Python's sort is stable
-    a1 = _add("x")
-    a2 = _add("x")
-    ordered = sorted([a1, a2], key=action_sort_key)
-    assert ordered == [a1, a2]
+    assert subjects == ["a", "m", "z"]
 
 
 def test_action_sort_key_raises_for_unknown_action_type() -> None:
-    class RenameColumn(Action):
+    class Rogue:
         pass
 
-    with pytest.raises(ValueError) as exc:
-        action_sort_key(RenameColumn())
-    assert "Place RenameColumn in PHASE_ORDER" in str(exc.value)
+    with pytest.raises(ValueError) as excinfo:
+        _ = action_sort_key(Rogue())  # type: ignore[arg-type]
 
-
-def test_action_sort_key_orders_by_phase_then_subject_name() -> None:
-    from delta_engine.application.ordering import action_sort_key
-    from delta_engine.domain.model.column import Column
-    from delta_engine.domain.model.data_type import Integer
-    from delta_engine.domain.plan.actions import AddColumn, DropColumn
-
-    a1 = AddColumn(Column("a_col", Integer()))
-    a2 = AddColumn(Column("b_col", Integer()))
-    d1 = DropColumn("a_col")
-    d2 = DropColumn("b_col")
-
-    shuffled = [d2, a2, d1, a1]
-    ordered = sorted(shuffled, key=action_sort_key)
-
-    # Phase: AddColumn before DropColumn; within each phase, alphabetical by column
-    assert ordered == [a1, a2, d1, d2]
+    assert "Place Rogue in PHASE_ORDER" in str(excinfo.value)

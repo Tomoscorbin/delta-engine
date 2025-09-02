@@ -26,13 +26,14 @@ class DeltaTable:
         schema: str,
         name: str,
         columns: Iterable[Column],
+        comment: str = "",
         properties: dict[str, str] | None = None,
     ) -> None:
         self.catalog = normalise_identifier(catalog)
         self.schema = normalise_identifier(schema)
         self.name = normalise_identifier(name)
-
         self.columns = columns
+        self.comment = comment
         self.properties = dict(properties or {})
 
     @property

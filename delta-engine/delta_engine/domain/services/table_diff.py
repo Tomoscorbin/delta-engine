@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from delta_engine.domain.plan.actions import Action, SetProperty, UnsetProperty
+from delta_engine.domain.model import DesiredTable, ObservedTable
+from delta_engine.domain.plan.actions import (
+    Action,
+    SetProperty,
+    SetTableComment,
+    UnsetProperty,
+)
 
 
-def diff_properties_for_sets(
+def _diff_properties_for_sets(
     desired: Mapping[str, str],
     observed: Mapping[str, str],
 ) -> tuple[SetProperty, ...]:
@@ -19,7 +25,7 @@ def diff_properties_for_sets(
     return tuple(actions)
 
 
-def diff_properties_for_unsets(
+def _diff_properties_for_unsets(
     desired: Mapping[str, str],
     observed: Mapping[str, str],
 ) -> tuple[UnsetProperty, ...]:
@@ -33,6 +39,23 @@ def diff_properties(
     observed: Mapping[str, str],
 ) -> tuple[Action, ...]:
     """Return property-level actions to transform `observed` into `desired`."""
-    sets = diff_properties_for_sets(desired, observed)
-    unsets = diff_properties_for_unsets(desired, observed)
+    sets = _diff_properties_for_sets(desired, observed)
+    unsets = _diff_properties_for_unsets(desired, observed)
     return sets + unsets
+
+
+# returning tuple even though there is only ever 1 table comment.
+# keeps it consistent with other actions
+def diff_table_comments(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[SetTableComment, ...]:
+    """
+    Return a comment update action when the desired table comment differs.
+
+    Returns an empty tuple when comments are equal to keep plan composition
+    consistent with other diff functions that return tuples of actions.
+    """
+    if desired.comment == observed.comment:
+        return ()
+    else:
+        return (SetTableComment(comment=desired.comment),)

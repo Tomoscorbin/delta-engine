@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from delta_engine.domain.model import Column, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
 class Action:
@@ -13,9 +13,14 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """Create a new table with the specified columns."""
+    """
+    Create a new table to match a desired definition.
 
-    columns: tuple[Column, ...]
+    Carries the full :class:`DesiredTable` (columns, properties, and comment)
+    so the SQL compiler can render a complete CREATE TABLE statement.
+    """
+
+    table: DesiredTable
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +57,13 @@ class SetColumnComment(Action):
     """Set a column's comment."""
 
     column_name: str
+    comment: str
+
+
+@dataclass(frozen=True, slots=True)
+class SetTableComment(Action):
+    """Set a table's comment."""
+
     comment: str
 
 
