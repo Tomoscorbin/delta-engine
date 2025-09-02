@@ -61,9 +61,9 @@ class DatabricksReader:
         catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
         return tuple(self._to_domain_column(column) for column in catalog_columns)
 
-    def _fetch_partition_columns(self, fully_qualified_name: str) -> tuple[str, str]:
+    def _fetch_partition_columns(self, fully_qualified_name: str) -> tuple[str, ...]:
         catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
-        return [c.name for c in catalog_columns if c.isPartition]
+        return tuple(c.name for c in catalog_columns if c.isPartition)
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return table properties as a dict[str, str]."""

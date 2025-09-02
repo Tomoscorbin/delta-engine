@@ -51,12 +51,13 @@ class Registry:
         """Convert a table-like object into a :class:`DesiredTable`."""
         qualified_name = QualifiedName(spec.catalog, spec.schema, spec.name)
         columns = tuple(self._to_domain_column(c) for c in spec.columns)
+        partition_columns = getattr(spec, "partitioned_by", ())
         return DesiredTable(
             qualified_name=qualified_name,
             columns=columns,
             comment=spec.comment,
             properties=spec.effective_properties,
-            partitioned_by=spec.partitioned_by,
+            partitioned_by=partition_columns,
         )
 
     @staticmethod

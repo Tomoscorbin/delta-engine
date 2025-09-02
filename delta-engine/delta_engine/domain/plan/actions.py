@@ -83,7 +83,7 @@ class PartitionBy(Action):  # consider replaceing with a RequireTableRecreate ac
     Partitioning is only allowed on create.
     """
 
-    column_names: tuple[str, str]
+    column_names: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
