@@ -67,6 +67,9 @@ class DatabricksReader:
             row["properties"]
         )  # Should this be here or in a dedicated enforcement step/method?
 
+    def _fetch_table_comment(self, fully_qualified_name: str) -> str:
+        return self.spark.catalog.getTable(fully_qualified_name).description or ""
+
     def _to_domain_column(self, spark_column: SparkColumn) -> Column:
         """Convert a pyspark.sql.Column object into a domain `Column`."""
         spark_data_type = spark_column.dataType

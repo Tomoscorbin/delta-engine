@@ -23,6 +23,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     SetColumnComment,
     SetProperty,
+    SetTableComment,
     UnsetProperty,
 )
 
@@ -78,6 +79,12 @@ def _(action: SetColumnComment, quoted_table_name: str) -> str:
     column_name = quote_identifier(action.column_name)
     comment = quote_literal(action.comment)
     return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
+
+
+@_compile_action.register
+def _(action: SetTableComment, quoted_table_name: str) -> str:
+    comment = quote_literal(action.comment)
+    return f"COMMENT ON TABLE {quoted_table_name} IS {comment}"
 
 
 # ----------- helpers ------------

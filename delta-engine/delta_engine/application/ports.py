@@ -42,6 +42,7 @@ class TableObject(Protocol):  # rename to UserTable?
     schema: str
     name: str
     columns: Iterable[Any]
+    comment: str
     properties: dict[str, str]
 
     @property

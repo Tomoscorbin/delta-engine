@@ -22,6 +22,7 @@ class TableSnapshot:
 
     qualified_name: QualifiedName
     columns: tuple[Column, ...]
+    comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -37,7 +38,7 @@ class TableSnapshot:
             seen.add(n)
 
 
-#TODO: is there a better alternative than two empty dataclasses?
+# TODO: is there a better alternative than two empty dataclasses?
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""

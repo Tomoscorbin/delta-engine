@@ -56,6 +56,13 @@ class SetColumnComment(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class SetTableComment(Action):
+    """Set a table's comment."""
+
+    comment: str
+
+
+@dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Collection of actions targeting a single qualified name."""
 
