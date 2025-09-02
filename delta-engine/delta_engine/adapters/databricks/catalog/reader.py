@@ -70,6 +70,7 @@ class DatabricksReader:
         )  # Should this be here or in a dedicated enforcement step/method?
 
     def _fetch_table_comment(self, fully_qualified_name: str) -> str:
+        """Return the table comment (empty string when not set)."""
         return self.spark.catalog.getTable(fully_qualified_name).description or ""
 
     def _to_domain_column(self, spark_column: SparkColumn) -> Column:

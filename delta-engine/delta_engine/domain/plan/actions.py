@@ -13,7 +13,12 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """Create a new table with the specified columns."""
+    """
+    Create a new table to match a desired definition.
+
+    Carries the full :class:`DesiredTable` (columns, properties, and comment)
+    so the SQL compiler can render a complete CREATE TABLE statement.
+    """
 
     table: DesiredTable
 

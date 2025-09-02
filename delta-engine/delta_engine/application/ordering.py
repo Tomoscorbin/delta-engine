@@ -1,8 +1,8 @@
 """
 Deterministic ordering for action plans.
 
-Orders by phase (create → set-prop → add → drop → unset), then by subject
-name. Target-level ordering is currently not part of the key.
+Orders by phase (create → set-prop → add → drop → set-col-comment → set-table-comment → unset),
+then by subject name. Target-level ordering is currently not part of the key.
 """
 
 from typing import Final

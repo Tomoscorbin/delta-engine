@@ -49,6 +49,11 @@ def diff_properties(
 def diff_table_comments(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[SetTableComment, ...]:
+    """Return a comment update action when the desired table comment differs.
+
+    Returns an empty tuple when comments are equal to keep plan composition
+    consistent with other diff functions that return tuples of actions.
+    """
     if desired.comment == observed.comment:
         return ()
     else:
