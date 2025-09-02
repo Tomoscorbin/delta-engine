@@ -23,6 +23,7 @@ from delta_engine.domain.plan.actions import (
     CreateTable,
     DropColumn,
     SetColumnComment,
+    SetColumnNullability,
     SetProperty,
     SetTableComment,
     UnsetProperty,
@@ -45,7 +46,7 @@ def _compile_action(action: Action, quoted_table_name: str) -> str:
 def _(action: CreateTable, quoted_table_name: str) -> str:
     """Compile a CREATE TABLE statement including columns, comment, and properties."""
     table = action.table
-    columns = ", ".join(_column_def(c) for c in table.columns)
+    columns = ", ".join(_column_definition(c) for c in table.columns)
     table_comment = _set_table_comment(table.comment)
     properties = _set_properties(table.properties)
 
@@ -60,10 +61,15 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: AddColumn, quoted_table_name: str) -> str:
-    """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
-    column_name = _column_def(action.column)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_name}"
-    # TODO: explicitly add new columns as nullable and then tighten in a nullability step
+    """
+    Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
+
+    New columns are added as nullable and then tightened later.
+    """
+    name = quote_identifier(action.column.name)
+    type = sql_type_for_data_type(action.column.data_type)
+    comment = quote_literal(action.column.comment)
+    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {type} {comment} NOT NULL"
 
 
 @_compile_action.register
@@ -98,15 +104,22 @@ def _(action: SetTableComment, quoted_table_name: str) -> str:
     return f"COMMENT ON TABLE {quoted_table_name} IS {comment}"
 
 
+@_compile_action.register
+def _(action: SetColumnNullability, quoted_table_name: str) -> str:
+    column_name = quote_identifier(action.column_name)
+    sign = "DROP" if action.nullable else "SET"
+    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
+
+
 # ----------- helpers ------------
 
 
-def _column_def(column) -> str:
+def _column_definition(column) -> str:
     """Render a single column definition fragment."""
-    name_sql = quote_identifier(column.name)
-    type_sql = sql_type_for_data_type(column.data_type)
-    nullable_sql = "" if column.is_nullable else "NOT NULL"
-    return f"{name_sql} {type_sql} {nullable_sql}".strip()
+    column_name = quote_identifier(column.name)
+    type = sql_type_for_data_type(column.data_type)
+    nullable = "" if column.is_nullable else "NOT NULL"  # TODO: or be explicit?
+    return f"{column_name} {type} {nullable}".strip()
 
 
 def _set_table_comment(comment: str) -> str:
