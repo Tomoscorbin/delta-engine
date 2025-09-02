@@ -25,7 +25,7 @@ class TableSnapshot:
     columns: tuple[Column, ...]
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
-    partitioned_by = tuple[str] | None
+    partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate non-empty column list and uniqueness by name (casefolded)."""

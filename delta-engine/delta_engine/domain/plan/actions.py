@@ -76,7 +76,7 @@ class SetColumnNullability(Action):
 
 
 @dataclass(frozen=True, slots=True)
-class PartitionBy(Action):
+class PartitionBy(Action):  # consider replaceing with a RequireTableRecreate action
     """
     Partition the table.
 

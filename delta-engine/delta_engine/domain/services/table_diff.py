@@ -68,9 +68,9 @@ def diff_partition_columns(
     """
     Return the desired parition columns if different from observed.
 
-    Note: This is operation is currently disallowed. We surfacet his action only to warn the user.
+    Note: This is operation is currently disallowed. We surface this action only to warn the user.
     """
-    if desired.partitioned_by != observed.partitioned_by:
+    if desired.partitioned_by == observed.partitioned_by:
         return ()
     else:
         return (PartitionBy(desired.partitioned_by),)
