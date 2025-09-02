@@ -17,7 +17,8 @@ def diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> t
     adds = _diff_columns_for_adds(desired, observed)
     drops = _diff_columns_for_drops(desired, observed)
     comment_updates = _diff_column_comments(desired, observed)
-    return adds + drops + comment_updates
+    nullability_changes = _diff_column_nullability(desired, observed)
+    return adds + drops + comment_updates + nullability_changes
 
 
 def _diff_columns_for_adds(
