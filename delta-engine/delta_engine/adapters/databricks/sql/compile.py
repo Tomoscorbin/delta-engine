@@ -21,6 +21,7 @@ from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
+    SetColumnComment,
     SetProperty,
     UnsetProperty,
 )
@@ -33,7 +34,7 @@ def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
 
 
 @singledispatch
-def _compile_action(action: Action, quoted_table_name: str) -> str:
+def _compile_action(action: Action, _) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
@@ -41,34 +42,41 @@ def _compile_action(action: Action, quoted_table_name: str) -> str:
 @_compile_action.register
 def _(action: CreateTable, quoted_table_name: str) -> str:
     """Compile a CREATE TABLE statement with the plan's column definitions."""
-    columns_sql = ", ".join(_column_def(c) for c in action.columns)
-    return f"CREATE TABLE IF NOT EXISTS {quoted_table_name} ({columns_sql})"
+    column_name = ", ".join(_column_def(c) for c in action.columns)
+    return f"CREATE TABLE IF NOT EXISTS {quoted_table_name} ({column_name})"
 
 
 @_compile_action.register
 def _(action: AddColumn, quoted_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
-    column_sql = _column_def(action.column)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_sql}"
+    column_name = _column_def(action.column)
+    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_name}"
 
 
 @_compile_action.register
 def _(action: DropColumn, quoted_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
-    column_ident = quote_identifier(action.column_name)
-    return f"ALTER TABLE {quoted_table_name} DROP COLUMN {column_ident}"
+    column_name = quote_identifier(action.column_name)
+    return f"ALTER TABLE {quoted_table_name} DROP COLUMN {column_name}"
 
 
 @_compile_action.register
-def _(action: SetProperty, table_sql: str) -> str:
+def _(action: SetProperty, quoted_table_name: str) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
-    return f"ALTER TABLE {table_sql} SET TBLPROPERTIES ({pair})"
+    return f"ALTER TABLE {quoted_table_name} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register
-def _(action: UnsetProperty, table_sql: str) -> str:
+def _(action: UnsetProperty, quoted_table_name: str) -> str:
     key = quote_literal(action.name)
-    return f"ALTER TABLE {table_sql} UNSET TBLPROPERTIES ({key})"
+    return f"ALTER TABLE {quoted_table_name} UNSET TBLPROPERTIES ({key})"
+
+
+@_compile_action.register
+def _(action: SetColumnComment, quoted_table_name: str) -> str:
+    column_name = quote_identifier(action.column_name)
+    comment = quote_literal(action.comment)
+    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
 
 # ----------- helpers ------------

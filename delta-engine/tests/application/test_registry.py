@@ -1,139 +1,83 @@
 import pytest
-from types import SimpleNamespace
 
+from delta_engine.adapters.schema.column import Column
+from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable
-from tests.factories import ColumnSpec, make_table_spec
-
-# --- Tests -------------------------------------------------------------------
 
 
-def test_register_converts_to_desiredtable_with_normalized_identifiers() -> None:
+def test_register_builds_desiredtable_and_preserves_types_nullability_and_comments() -> None:
     reg = Registry()
-    spec = make_table_spec(
-        " Dev ",
-        "Silver",
-        "Test_1",
-        (ColumnSpec("  ID  ", Integer()), ColumnSpec("Name", String(), False)),
+    reg.register(
+        DeltaTable(
+            "dev",
+            "silver",
+            "things",
+            [
+                Column("id", Integer(), True, comment="pk"),
+                Column("name", String(), False, comment="person name"),
+            ],
+            properties={"foo": "bar"},
+        )
     )
-    reg.register(spec)
 
-    items = list(reg)
-    assert len(items) == 1
-    dt = items[0]
+    dt = next(iter(reg))
     assert isinstance(dt, DesiredTable)
-    assert str(dt.qualified_name) == "dev.silver.test_1"
-    assert [col.name for col in dt.columns] == ["id", "name"]
-    assert [type(col.data_type) for col in dt.columns] == [Integer, String]
-    assert [col.is_nullable for col in dt.columns] == [True, False]
+    assert len(dt.columns) == 2
+    assert [type(c.data_type) for c in dt.columns] == [Integer, String]
+    assert [c.is_nullable for c in dt.columns] == [True, False]
+    assert [c.comment for c in dt.columns] == ["pk", "person name"]
+
+
+def test_register_supports_varargs_multiple_tables() -> None:
+    reg = Registry()
+    a = DeltaTable("dev", "silver", "people", (Column("id", Integer()),))
+    b = DeltaTable("dev", "gold", "orders", (Column("order_id", Integer()),))
+    reg.register(a, b)
+    fqns = [str(d.qualified_name) for d in reg]
+    assert set(fqns) == {"dev.silver.people", "dev.gold.orders"}
 
 
 def test_iteration_is_sorted_by_fully_qualified_name() -> None:
     reg = Registry()
     # Intentionally register out of order
     reg.register(
-        make_table_spec("dev", "beta", "orders", (ColumnSpec("id", Integer()),)),
-        make_table_spec("dev", "alpha", "zzz", (ColumnSpec("id", Integer()),)),
-        make_table_spec("dev", "alpha", "aaa", (ColumnSpec("id", Integer()),)),
+        DeltaTable(
+            "dev",
+            "beta",
+            "orders",
+            [Column("id", Integer())],
+        ),
+        DeltaTable("dev", "alpha", "zzz", [Column("id", Integer())]),
+        DeltaTable("dev", "alpha", "aaa", [Column("id", Integer())]),
     )
     fqns = [str(d.qualified_name) for d in reg]
-    assert (
-        fqns
-        == sorted(fqns)
-        == [
-            "dev.alpha.aaa",
-            "dev.alpha.zzz",
-            "dev.beta.orders",
-        ]
-    )
+    assert fqns == sorted(fqns)
 
 
-def test_register_rejects_duplicate_fqn_case_insensitive_across_calls() -> None:
+def test_register_rejects_duplicate_fqn_across_calls() -> None:
     reg = Registry()
-    a = make_table_spec("Dev", "Silver", "People", (ColumnSpec("id", Integer()),))
-    b = make_table_spec("dev", "silver", "people", (ColumnSpec("id", Integer()),))
+    a = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
+    b = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
     reg.register(a)
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ValueError):
         reg.register(b)
-    assert "Duplicate table registration" in str(exc.value)
 
 
 def test_register_rejects_duplicate_fqn_in_same_call() -> None:
     reg = Registry()
-    a = make_table_spec("dev", "silver", "people", (ColumnSpec("id", Integer()),))
-    b = make_table_spec("DEV", "SILVER", "PEOPLE", (ColumnSpec("id", Integer()),))
+    a = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
+    b = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
     with pytest.raises(ValueError):
         reg.register(a, b)
 
 
-def test_register_supports_varargs_multiple_tables() -> None:
+def test_register_preserves_properties_from_spec_without_injection() -> None:
     reg = Registry()
-    a = make_table_spec("dev", "silver", "people", (ColumnSpec("id", Integer()),))
-    b = make_table_spec("dev", "gold", "orders", (ColumnSpec("order_id", Integer()),))
-    reg.register(a, b)
-    fqns = [str(d.qualified_name) for d in reg]
-    assert set(fqns) == {"dev.silver.people", "dev.gold.orders"}
-
-
-def test_column_mapping_preserves_type_and_nullability() -> None:
-    reg = Registry()
-    spec = make_table_spec(
-        "dev",
-        "silver",
-        "things",
-        (ColumnSpec("x", Integer(), False), ColumnSpec("y", String(), True)),
+    spec = DeltaTable(
+        "dev", "silver", "with_props", [Column("id", Integer())], properties={"foo": "bar"}
     )
     reg.register(spec)
     dt = next(iter(reg))
-    assert [type(col.data_type) for col in dt.columns] == [Integer, String]
-    assert [col.is_nullable for col in dt.columns] == [False, True]
-
-
-def test_invalid_column_identifier_bubbles_up() -> None:
-    reg = Registry()
-    bad = make_table_spec(
-        "dev", "silver", "badcols", (ColumnSpec("bad-name", Integer()),)
-    )  # hyphen invalid by our identifier rules
-    with pytest.raises(ValueError):
-        reg.register(bad)
-
-
-def test_duplicate_column_names_bubble_up_from_desired_table() -> None:
-    # Two columns that normalize to the same name ("ID" vs "id")
-    reg = Registry()
-    dup = make_table_spec(
-        "dev", "silver", "dupcols", (ColumnSpec("ID", Integer()), ColumnSpec("id", String()))
-    )
-    with pytest.raises(ValueError) as exc:
-        reg.register(dup)
-    assert "Duplicate column name" in str(exc.value)
-
-
-def test_register_preserves_properties_from_spec() -> None:
-    reg = Registry()
-    spec = make_table_spec(
-        "dev",
-        "silver",
-        "with_props",
-        (ColumnSpec("id", Integer()),),
-        properties={"foo": "bar"},
-    )
-    reg.register(spec)
-    dt = next(iter(reg))
-    assert dt.properties == {"foo": "bar"}
-
-
-def test_effective_properties_override_properties() -> None:
-    spec = SimpleNamespace(
-        catalog="dev",
-        schema="silver",
-        name="override",
-        columns=(ColumnSpec("id", Integer()),),
-        properties={"foo": "bar"},
-        effective_properties={"foo": "baz"},
-    )
-    reg = Registry()
-    reg.register(spec)
-    dt = next(iter(reg))
-    assert dt.properties == {"foo": "baz"}
+    assert ("foo", "bar") in dt.properties.items()

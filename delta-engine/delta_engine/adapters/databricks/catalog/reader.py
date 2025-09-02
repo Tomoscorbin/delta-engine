@@ -36,7 +36,7 @@ class DatabricksReader:
         try:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
-        except Exception as exc:  # TODO: more accurate exception catching
+        except Exception as exc:  # TODO: need more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
 
@@ -72,9 +72,11 @@ class DatabricksReader:
         spark_data_type = spark_column.dataType
         domain_data_type = domain_type_from_spark(spark_data_type)
         is_nullable = bool(getattr(spark_column, "nullable", True))
+        comment = spark_column.description if spark_column.description else ""
 
         return Column(
             name=spark_column.name,
             data_type=domain_data_type,
             is_nullable=is_nullable,
+            comment=comment,
         )

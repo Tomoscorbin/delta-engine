@@ -1,7 +1,6 @@
 """Public schema container for describing a Delta table."""
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
@@ -10,9 +9,7 @@ from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
-# does user facing need to be frozen?
-# maybe this shouldnt ba dataclass at all
-@dataclass(frozen=True, slots=True)
+# TODO: add validation - allowed props, duplicate cols, etc
 class DeltaTable:
     """Defines a Delta table schema."""
 
@@ -23,30 +20,22 @@ class DeltaTable:
         }
     )
 
-    catalog: str
-    schema: str
-    name: str
-    columns: Sequence[Column]
-    properties: dict[str, str] = field(default_factory=dict)
+    def __init__(
+        self,
+        catalog: str,
+        schema: str,
+        name: str,
+        columns: Iterable[Column],
+        properties: dict[str, str] | None = None,
+    ) -> None:
+        self.catalog = normalise_identifier(catalog)
+        self.schema = normalise_identifier(schema)
+        self.name = normalise_identifier(name)
 
-    def __post_init__(self) -> None:
-        """Validate identifiers and ensure column names are unique (casefolded)."""
-        normalise_identifier(self.catalog)
-        normalise_identifier(self.schema)  # TODO: raise exception instead of coerce?
-        normalise_identifier(self.name)
-
-        # check for duplicate columns
-        seen: set[str] = set()
-        for c in self.columns:
-            normalise_identifier(c.name)  # same here - exception instead of coerce
-            n = c.name.casefold()
-            if n in seen:
-                raise ValueError(f"Duplicate column name: {c.name}")
-            seen.add(n)
-
-        # TODO: enforce allowed properties
+        self.columns = columns
+        self.properties = dict(properties or {})
 
     @property
-    def effective_properties(self) -> dict[str, str]:
+    def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
         return {**self.default_properties, **self.properties}

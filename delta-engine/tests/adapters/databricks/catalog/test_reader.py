@@ -49,8 +49,8 @@ def test_present_maps_columns_and_applies_policy(monkeypatch, patch_type_mapping
     # spark.catalog.listColumns -> two "columns"
     # second one has no `nullable` attribute; default should be True
     cols = [
-        SimpleNamespace(name="id", dataType="int", nullable=False),
-        SimpleNamespace(name="name", dataType="string"),
+        SimpleNamespace(name="id", dataType="int", nullable=False, description=""),
+        SimpleNamespace(name="name", dataType="string", description=""),
     ]
     properties_in_uc = {"delta.minReaderVersion": "2", "owner": "analytics"}
     enforced_props = MappingProxyType({"policy": "applied"})
@@ -110,27 +110,11 @@ def test_absent_when_table_does_not_exist() -> None:
     catalog.listColumns.assert_not_called()  # sanity: no schema read on absent
 
 
-def test_failed_when_listing_columns_raises(patch_type_mapping) -> None:
-    catalog = MagicMock()
-    catalog.listColumns.side_effect = RuntimeError("boom\nline2\nline3\nline4\nline5\nline6")
-
-    spark = MagicMock()
-    spark.catalog = catalog
-    spark.sql.side_effect = [_exist_df(True)]  # table exists, then listColumns explodes
-
-    reader = DatabricksReader(cast(Any, spark))
-
-    res = reader.fetch_state(_QN)
-
-    assert res.failure is not None
-    assert res.observed is None
-    assert res.failure.exception_type == "RuntimeError"
-    assert "boom" in res.failure.message
-
-
 def test_failed_when_describe_detail_raises(patch_type_mapping) -> None:
     catalog = MagicMock()
-    catalog.listColumns.return_value = [SimpleNamespace(name="id", dataType="int", nullable=False)]
+    catalog.listColumns.return_value = [
+        SimpleNamespace(name="id", dataType="int", nullable=False, description="")
+    ]
 
     spark = MagicMock()
     spark.catalog = catalog

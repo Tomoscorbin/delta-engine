@@ -1,23 +1,18 @@
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
-from delta_engine.domain.plan.actions import ActionPlan, AddColumn, CreateTable, DropColumn
+from delta_engine.domain.plan.actions import (
+    ActionPlan,
+    AddColumn,
+    CreateTable,
+    DropColumn,
+    SetColumnComment,
+)
 from delta_engine.domain.services.differ import diff_tables
 from tests.factories import make_qualified_name
 
 
-def test_diff_tables_returns_create_table_when_observed_is_none() -> None:
-    desired = DesiredTable(
-        make_qualified_name("dev", "silver", "people"),
-        (Column("id", Integer()), Column("name", String())),
-    )
-    plan = diff_tables(desired=desired, observed=None)
-
-    assert isinstance(plan, ActionPlan)
-    assert isinstance(plan[0], CreateTable)
-
-
-def test_diff_tables_produces_adds_and_drops_from_column_diff() -> None:
+def test_diff_tables_happy_path() -> None:
     observed = ObservedTable(
         make_qualified_name("dev", "silver", "people"),
         (Column("id", Integer()), Column("nickname", String())),
@@ -31,7 +26,19 @@ def test_diff_tables_produces_adds_and_drops_from_column_diff() -> None:
     assert tuple(plan) == (
         AddColumn(Column("age", Integer())),
         DropColumn("nickname"),
+        SetColumnComment(column_name="age", comment=""),
     )
+
+
+def test_diff_tables_returns_create_table_when_observed_is_none() -> None:
+    desired = DesiredTable(
+        make_qualified_name("dev", "silver", "people"),
+        (Column("id", Integer()), Column("name", String())),
+    )
+    plan = diff_tables(desired=desired, observed=None)
+
+    assert isinstance(plan, ActionPlan)
+    assert isinstance(plan[0], CreateTable)
 
 
 def test_diff_tables_no_changes_returns_empty_plan() -> None:

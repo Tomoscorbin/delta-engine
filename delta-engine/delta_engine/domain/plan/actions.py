@@ -48,6 +48,14 @@ class UnsetProperty(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class SetColumnComment(Action):
+    """Set a column's comment."""
+
+    column_name: str
+    comment: str
+
+
+@dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Collection of actions targeting a single qualified name."""
 

@@ -8,6 +8,7 @@ from delta_engine.domain.services.column_diff import diff_columns
 from delta_engine.domain.services.property_diff import diff_properties
 
 
+# TODO: can we come up with a generic table differ?
 def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
     Compute the actions required to reach the desired schema.

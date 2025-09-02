@@ -1,11 +1,22 @@
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, String
-from delta_engine.domain.plan.actions import AddColumn, DropColumn
+from delta_engine.domain.plan.actions import AddColumn, DropColumn, SetColumnComment
 from delta_engine.domain.services.column_diff import (
     diff_columns,
     diff_columns_for_adds,
     diff_columns_for_drops,
 )
+
+
+def test_diff_columns_happy_path() -> None:
+    desired = (Column("id", Integer()), Column("age", Integer()))
+    observed = (Column("id", Integer()), Column("nickname", String()))
+    actions = diff_columns(desired, observed)
+    assert actions == (
+        AddColumn(Column("age", Integer())),
+        DropColumn("nickname"),
+        SetColumnComment(column_name="age", comment=""),
+    )
 
 
 def test_diff_columns_for_adds_returns_missing_desired_columns() -> None:
@@ -20,17 +31,6 @@ def test_diff_columns_for_drops_returns_columns_missing_from_desired() -> None:
     observed = (Column("id", Integer()), Column("nickname", String()))
     drops = diff_columns_for_drops(desired, observed)
     assert drops == (DropColumn("nickname"),)
-
-
-def test_diff_columns_combines_adds_and_drops() -> None:
-    desired = (Column("id", Integer()), Column("age", Integer()))
-    observed = (Column("id", Integer()), Column("nickname", String()))
-    actions = diff_columns(desired, observed)
-    # Order: adds from desired order, then drops from observed order
-    assert actions == (
-        AddColumn(Column("age", Integer())),
-        DropColumn("nickname"),
-    )
 
 
 def test_diff_columns_is_case_insensitive_via_column_normalization() -> None:

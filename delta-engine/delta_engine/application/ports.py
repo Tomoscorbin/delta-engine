@@ -35,20 +35,26 @@ class PlanExecutor(Protocol):
 
 
 @runtime_checkable
-class TableObject(Protocol):
-    """Lightweight table specification accepted by the registry."""
+class TableObject(Protocol):  # rename to UserTable?
+    """User table specification accepted by the registry."""
 
     catalog: str
     schema: str
     name: str
-    columns: Iterable[ColumnObject]
-    properties: Mapping[str, str] | None
+    columns: Iterable[Any]
+    properties: dict[str, str]
+
+    @property
+    def effective_properties(self) -> Mapping[str, str]:
+        """Defaults table properties + user properties."""
+        ...
 
 
 @runtime_checkable
 class ColumnObject(Protocol):
-    """Lightweight column specification accepted by the registry."""
+    """User column specification accepted by the registry."""
 
     name: str
     data_type: Any
     is_nullable: bool
+    comment: str
