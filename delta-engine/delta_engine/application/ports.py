@@ -44,6 +44,7 @@ class TableObject(Protocol):  # rename to UserTable?
     columns: Iterable[Any]
     comment: str
     properties: dict[str, str]
+    partitioned_by: Iterable[str]
 
     @property
     def effective_properties(self) -> Mapping[str, str]:
