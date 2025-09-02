@@ -36,11 +36,12 @@ def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
 
 
 @singledispatch
-def _compile_action(action: Action, _) -> str:
+def _compile_action(action: Action, quoted_table_name: str) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
 
+@_compile_action.register
 def _(action: CreateTable, quoted_table_name: str) -> str:
     table = action.table
     columns = ", ".join(_column_def(c) for c in table.columns)

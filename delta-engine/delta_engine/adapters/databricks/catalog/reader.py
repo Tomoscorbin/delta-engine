@@ -36,6 +36,7 @@ class DatabricksReader:
         try:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
+            table_comment = self._fetch_table_comment(str(qualified_name))
         except Exception as exc:  # TODO: need more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
@@ -43,6 +44,7 @@ class DatabricksReader:
         observed = ObservedTable(
             qualified_name,
             columns,
+            table_comment,
             properties,
         )
         return ReadResult.create_present(observed)
