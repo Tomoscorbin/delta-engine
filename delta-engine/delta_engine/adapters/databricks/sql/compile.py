@@ -51,6 +51,7 @@ def _(action: AddColumn, quoted_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
     column_name = _column_def(action.column)
     return f"ALTER TABLE {quoted_table_name} ADD COLUMN {column_name}"
+    # TODO: explicitly add new columns as nullable and then tighten in a nullability step
 
 
 @_compile_action.register
