@@ -5,7 +5,11 @@ from __future__ import annotations
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import Action, ActionPlan, CreateTable
 from delta_engine.domain.services.column_diff import diff_columns
-from delta_engine.domain.services.table_diff import diff_properties, diff_table_comments
+from delta_engine.domain.services.table_diff import (
+    diff_partition_columns,
+    diff_properties,
+    diff_table_comments,
+)
 
 
 # TODO: can we come up with a generic table differ?
@@ -29,5 +33,6 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
             diff_columns(desired.columns, observed.columns)
             + diff_properties(desired.properties, observed.properties)
             + diff_table_comments(desired, observed)
+            + diff_partition_columns(desired, observed)
         )
     return ActionPlan(desired.qualified_name, actions)

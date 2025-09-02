@@ -12,6 +12,7 @@ from delta_engine.domain.plan import (
     AddColumn,
     CreateTable,
     DropColumn,
+    PartitionBy,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -46,6 +47,7 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
     SetTableComment,
     UnsetProperty,
     SetColumnNullability,
+    PartitionBy,
 )
 
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}

@@ -26,9 +26,10 @@ class DatabricksReader:
         """
         Fetch observed table schema or absence for a qualified name.
 
-        Returns a successful `ReadResult` with the current columns, an absent
-        result when the table doesn't exist, or a failed result if catalog
-        access raised an exception.
+        Returns a successful `ReadResult` with the current columns,
+        properties, and table comment; an absent result when the table
+        doesn't exist; or a failed result if catalog access raised an
+        exception.
         """
         if not self._table_exists(qualified_name):
             return ReadResult.create_absent()
@@ -37,6 +38,7 @@ class DatabricksReader:
             columns = self._fetch_columns(str(qualified_name))
             properties = self._fetch_properties(qualified_name)
             table_comment = self._fetch_table_comment(str(qualified_name))
+            partition_columns = self._fetch_partition_columns(str(qualified_name))
         except Exception as exc:  # TODO: need more accurate exception catching
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
@@ -46,6 +48,7 @@ class DatabricksReader:
             columns=columns,
             comment=table_comment,
             properties=properties,
+            partitioned_by=partition_columns,
         )
         return ReadResult.create_present(observed)
 
@@ -57,6 +60,10 @@ class DatabricksReader:
         """List column definitions for the given table."""
         catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
         return tuple(self._to_domain_column(column) for column in catalog_columns)
+
+    def _fetch_partition_columns(self, fully_qualified_name: str) -> tuple[str, ...]:
+        catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
+        return tuple(c.name for c in catalog_columns if c.isPartition)
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return table properties as a dict[str, str]."""

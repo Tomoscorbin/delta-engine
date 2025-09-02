@@ -9,6 +9,7 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
+# TODO: validate that partition cols exist in cols
 @dataclass(frozen=True, slots=True)
 class TableSnapshot:
     """
@@ -17,6 +18,8 @@ class TableSnapshot:
     Attributes:
         qualified_name: Fully qualified table name.
         columns: Ordered tuple of ``Column`` definitions.
+        comment: Optional table-level comment (empty string when unset).
+        properties: Read-only mapping of table properties.
 
     """
 
@@ -24,6 +27,7 @@ class TableSnapshot:
     columns: tuple[Column, ...]
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
+    partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate non-empty column list and uniqueness by name (casefolded)."""

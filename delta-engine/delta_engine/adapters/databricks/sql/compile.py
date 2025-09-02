@@ -49,12 +49,14 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
     columns = ", ".join(_column_definition(c) for c in table.columns)
     table_comment = _set_table_comment(table.comment)
     properties = _set_properties(table.properties)
+    partition_by = _set_partitioned_by(table.partitioned_by)
 
     parts = [
         f"CREATE TABLE IF NOT EXISTS {quoted_table_name}",
         f"({columns})",
         table_comment,
         properties,
+        partition_by,
     ]
     return " ".join(p for p in parts if p)
 
@@ -131,3 +133,11 @@ def _set_properties(props: Mapping[str, str] | None) -> str:
         return ""
     pairs = ", ".join(f"{quote_literal(k)}={quote_literal(v)}" for k, v in sorted(props.items()))
     return f"TBLPROPERTIES ({pairs})"
+
+
+def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
+    """Return PARTITIONED BY (...) or '' if unpartitioned."""
+    if not partitioned_by:
+        return ""
+    cols = ", ".join(quote_identifier(c) for c in partitioned_by)
+    return f"PARTITIONED BY ({cols})"
