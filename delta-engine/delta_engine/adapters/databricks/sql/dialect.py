@@ -1,4 +1,4 @@
-"""Spark/Databricks SQL quoting & name rendering (single dialect)."""
+"""Spark/Databricks SQL quoting & name rendering."""
 
 from __future__ import annotations
 
@@ -15,6 +15,6 @@ def quote_literal(raw: str) -> str:
     return "'" + raw.replace("'", "''") + "'"
 
 
-def quote_qualified_name(qualified_name: QualifiedName) -> str:
+def quote_qualified_name(qualified_name: QualifiedName) -> str:  # TODO: rename to backtick
     """Render a fully qualified table name with dot separators and backticks."""
     return ".".join(quote_identifier(p) for p in qualified_name.parts)

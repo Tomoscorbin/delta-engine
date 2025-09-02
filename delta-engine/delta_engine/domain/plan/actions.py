@@ -68,6 +68,14 @@ class SetTableComment(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class SetColumnNullability(Action):
+    """Set a column's nullability."""
+
+    column_name: str
+    nullable: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Collection of actions targeting a single qualified name."""
 

@@ -3,10 +3,25 @@
 from __future__ import annotations
 
 from delta_engine.domain.model import Column
-from delta_engine.domain.plan.actions import Action, AddColumn, DropColumn, SetColumnComment
+from delta_engine.domain.plan.actions import (
+    Action,
+    AddColumn,
+    DropColumn,
+    SetColumnComment,
+    SetColumnNullability,
+)
 
 
-def diff_columns_for_adds(
+def diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
+    """Return the column-level actions to transform `observed` into `desired`."""
+    adds = _diff_columns_for_adds(desired, observed)
+    drops = _diff_columns_for_drops(desired, observed)
+    comment_updates = _diff_column_comments(desired, observed)
+    nullability_changes = _diff_column_nullability(desired, observed)
+    return adds + drops + comment_updates + nullability_changes
+
+
+def _diff_columns_for_adds(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[AddColumn, ...]:
     """Return AddColumn actions for columns present in desired but missing in observed."""
@@ -14,7 +29,7 @@ def diff_columns_for_adds(
     return tuple(AddColumn(column=c) for c in desired if c.name not in observed_names)
 
 
-def diff_columns_for_drops(
+def _diff_columns_for_drops(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[DropColumn, ...]:
     """Return DropColumn actions for columns present in observed but missing in desired."""
@@ -22,7 +37,7 @@ def diff_columns_for_drops(
     return tuple(DropColumn(c.name) for c in observed if c.name not in desired_names)
 
 
-def diff_column_comments(
+def _diff_column_comments(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[SetColumnComment, ...]:
     """
@@ -30,8 +45,6 @@ def diff_column_comments(
 
     Note: Delta Engine sets column comments to '' by default.
     """
-    # TODO: perhaps add comments with AddColumn and skip SetColumnComment if column is new
-
     observed_comment_by_name = {c.name: c.comment for c in observed}
     return tuple(
         SetColumnComment(c.name, c.comment)
@@ -40,9 +53,13 @@ def diff_column_comments(
     )
 
 
-def diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
-    """Return the column-level actions to transform `observed` into `desired`."""
-    adds = diff_columns_for_adds(desired, observed)
-    drops = diff_columns_for_drops(desired, observed)
-    comment_updates = diff_column_comments(desired, observed)
-    return adds + drops + comment_updates
+def _diff_column_nullability(
+    desired: tuple[Column, ...], observed: tuple[Column, ...]
+) -> tuple[SetColumnNullability, ...]:
+    """Return `SetColumnNullability` actions for columns whose `nullable` flag differs."""
+    observed_nullability_by_name = {c.name: c.is_nullable for c in observed}
+    return tuple(
+        SetColumnNullability(column_name=c.name, nullable=c.is_nullable)
+        for c in desired
+        if observed_nullability_by_name.get(c.name) != c.is_nullable
+    )

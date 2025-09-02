@@ -7,6 +7,7 @@ from delta_engine.domain.plan.actions import (
     CreateTable,
     DropColumn,
     SetColumnComment,
+    SetColumnNullability,
 )
 from delta_engine.domain.services.differ import diff_tables
 from tests.factories import make_qualified_name
@@ -53,4 +54,5 @@ def test_happy_path_produces_expected_actions() -> None:
         AddColumn(Column("age", Integer())),
         DropColumn("nickname"),
         SetColumnComment(column_name="age", comment=""),
+        SetColumnNullability(column_name="age", nullable=True),
     )
