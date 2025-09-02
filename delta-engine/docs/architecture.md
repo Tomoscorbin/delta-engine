@@ -94,8 +94,23 @@ sequenceDiagram
 
 ```
 
+```mermaid
+flowchart BT
+  A["Domain"]
+  B["Application"]
+  C["Ports"]
+  D["Adapters"]
+
+  A --> B --> C --> D
+
+```
+
 
 Notes:
-- The engine is backend-agnostic via small ports (`CatalogStateReader`, `PlanExecutor`).
 - Plans are deterministic (create → adds → drops; subjects alphabetical).
 - Validation runs before execution to catch obvious mistakes early.
+- Hexagonal architecture: dependencies point inward from Adapters → Ports → Application → Domain.  
+  - The Domain layer is pure and independent
+  - Application orchestrates use cases without knowing about backends.
+  - Small ports (e.g. `CatalogStateReader`, `PlanExecutor`) keep the engine backend-agnostic.  
+
