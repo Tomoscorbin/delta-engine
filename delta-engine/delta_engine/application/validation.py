@@ -64,7 +64,7 @@ class DisallowPartitioningChange(Rule):
                     message=(
                         "Operation not allowed: partitioning changes are not supported."
                         f"Current partition columns: {ctx.observed.partitioned_by}"
-                        f" - Requested partition columns: {ctx.desired.partitioned_by.}"
+                        f" - Requested partition columns: {ctx.desired.partitioned_by}."
                         " Recreate the table with the desired partitioning."
                     ),
                 )
