@@ -76,6 +76,17 @@ class SetColumnNullability(Action):
 
 
 @dataclass(frozen=True, slots=True)
+class PartitionBy(Action):
+    """
+    Partition the table.
+
+    Partitioning is only allowed on create.
+    """
+
+    column_names: tuple[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Collection of actions targeting a single qualified name."""
 

@@ -9,7 +9,7 @@ from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
-# TODO: add validation - allowed props, duplicate cols, etc
+# TODO: add validation - allowed props, duplicate cols, partitioned cols exist in cols, etc
 class DeltaTable:
     """Defines a Delta table schema."""
 
@@ -28,6 +28,7 @@ class DeltaTable:
         columns: Iterable[Column],
         comment: str = "",
         properties: dict[str, str] | None = None,
+        partitioned_by: Iterable[str] | None = None,
     ) -> None:
         self.catalog = normalise_identifier(catalog)
         self.schema = normalise_identifier(schema)
@@ -35,6 +36,7 @@ class DeltaTable:
         self.columns = columns
         self.comment = comment
         self.properties = dict(properties or {})
+        self.partitioned_by = partitioned_by
 
     @property
     def effective_properties(self) -> Mapping[str, str]:

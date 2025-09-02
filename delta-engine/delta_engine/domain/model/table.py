@@ -9,6 +9,7 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
+# TODO: validate that partition cols exist in cols
 @dataclass(frozen=True, slots=True)
 class TableSnapshot:
     """
@@ -24,6 +25,7 @@ class TableSnapshot:
     columns: tuple[Column, ...]
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
+    partitioned_by = tuple[str] | None
 
     def __post_init__(self) -> None:
         """Validate non-empty column list and uniqueness by name (casefolded)."""
