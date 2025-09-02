@@ -64,12 +64,12 @@ def _(action: AddColumn, quoted_table_name: str) -> str:
     """
     Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
 
-    New columns are added as nullable and then tightened later.
+    Note: New columns are added as nullable and then tightened later.
     """
     name = quote_identifier(action.column.name)
-    type = sql_type_for_data_type(action.column.data_type)
+    dtype = sql_type_for_data_type(action.column.data_type)
     comment = quote_literal(action.column.comment)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {type} COMMENT {comment}"
+    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {dtype} COMMENT {comment}"
 
 
 @_compile_action.register

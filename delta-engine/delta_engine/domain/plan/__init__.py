@@ -18,6 +18,7 @@ __all__ = [
     "CreateTable",
     "DropColumn",
     "SetColumnComment",
+    "SetColumnNullability",
     "SetColumnNullability,",
     "SetProperty",
     "SetTableComment",

@@ -8,6 +8,9 @@ from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
 from delta_engine.domain.plan import AddColumn
 
+# TODO: Rules to add:
+# - no setting existing columns to NOT NULL if table is populated
+
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
