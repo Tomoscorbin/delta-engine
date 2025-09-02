@@ -41,7 +41,7 @@ class DatabricksReader:
             failure = ReadFailure(type(exc).__name__, error_preview(exc))
             return ReadResult.create_failed(failure)
 
-        observed = ObservedTable(
+        observed = ObservedTable(  # TODO: enforce keywords
             qualified_name,
             columns,
             table_comment,
