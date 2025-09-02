@@ -5,28 +5,10 @@ from delta_engine.domain.plan.actions import SetProperty, SetTableComment, Unset
 from delta_engine.domain.services.table_diff import (
     _diff_properties_for_sets,
     _diff_properties_for_unsets,
-    _properties_to_actions,
     diff_properties,
     diff_table_comments,
 )
 from tests.factories import make_qualified_name
-
-# --- _properties_to_actions ---------------------------------------------------
-
-
-def test_properties_to_actions_converts_all_pairs() -> None:
-    props = {"owner": "data-eng", "quality": "gold", "pii": "no"}
-
-    actions = _properties_to_actions(props)
-
-    assert len(actions) == 3
-    actual = {(a.name, a.value) for a in actions}
-    assert actual == {("owner", "data-eng"), ("quality", "gold"), ("pii", "no")}
-
-
-def test_properties_to_actions_empty_mapping_returns_empty_tuple() -> None:
-    assert _properties_to_actions({}) == ()
-
 
 # --- _diff_properties_for_sets ------------------------------------------------
 
@@ -77,7 +59,7 @@ def test_diff_properties_combines_sets_and_unsets() -> None:
     actions = diff_properties(desired, observed)
 
     # All actions are SetProperty or UnsetProperty.
-    assert all(isinstance(a, (SetProperty, UnsetProperty)) for a in actions)
+    assert all(isinstance(a, SetProperty | UnsetProperty) for a in actions)
 
     set_pairs = {(a.name, a.value) for a in actions if isinstance(a, SetProperty)}
     unset_names = {a.name for a in actions if isinstance(a, UnsetProperty)}

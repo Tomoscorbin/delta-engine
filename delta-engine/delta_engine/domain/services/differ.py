@@ -25,7 +25,7 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
 
     """
     if observed is None:
-        actions = (CreateTable(desired),)
+        return ActionPlan(desired.qualified_name, (CreateTable(desired),))
     else:
         actions = (
             diff_columns(desired.columns, observed.columns)

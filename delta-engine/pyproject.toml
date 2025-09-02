@@ -89,3 +89,13 @@ show_missing = true
 [tool.coverage.run]
 branch = true
 source = ["delta_engine"]
+
+
+# -------------------- MyPy --------------------
+
+[tool.mypy]
+python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+ignore_errors = true

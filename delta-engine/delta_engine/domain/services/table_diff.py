@@ -13,11 +13,6 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def _properties_to_actions(props: Mapping[str, str]) -> tuple[SetProperty, ...]:
-    """Convert a mapping of properties to SetProperty actions."""
-    return tuple(SetProperty(name=k, value=v) for k, v in props.items())
-
-
 def _diff_properties_for_sets(
     desired: Mapping[str, str],
     observed: Mapping[str, str],
