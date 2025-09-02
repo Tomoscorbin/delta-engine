@@ -9,17 +9,18 @@ from delta_engine.domain.model.table import DesiredTable
 
 def test_register_builds_desiredtable_and_preserves_types_nullability_and_comments() -> None:
     reg = Registry()
-    spec = DeltaTable(
-        catalog="dev",
-        schema="silver",
-        name="things",
-        columns=(
-            Column("id", Integer(), True, comment="pk"),
-            Column("name", String(), False, comment="person name"),
-        ),
-        properties={"foo": "bar"},
+    reg.register(
+        DeltaTable(
+            "dev",
+            "silver",
+            "things",
+            [
+                Column("id", Integer(), True, comment="pk"),
+                Column("name", String(), False, comment="person name"),
+            ],
+            properties={"foo": "bar"},
+        )
     )
-    reg.register(spec)
 
     dt = next(iter(reg))
     assert isinstance(dt, DesiredTable)
@@ -42,9 +43,14 @@ def test_iteration_is_sorted_by_fully_qualified_name() -> None:
     reg = Registry()
     # Intentionally register out of order
     reg.register(
-        DeltaTable("dev", "beta", "orders", (Column("id", Integer()),)),
-        DeltaTable("dev", "alpha", "zzz", (Column("id", Integer()),)),
-        DeltaTable("dev", "alpha", "aaa", (Column("id", Integer()),)),
+        DeltaTable(
+            "dev",
+            "beta",
+            "orders",
+            [Column("id", Integer())],
+        ),
+        DeltaTable("dev", "alpha", "zzz", [Column("id", Integer())]),
+        DeltaTable("dev", "alpha", "aaa", [Column("id", Integer())]),
     )
     fqns = [str(d.qualified_name) for d in reg]
     assert fqns == sorted(fqns)
@@ -52,8 +58,8 @@ def test_iteration_is_sorted_by_fully_qualified_name() -> None:
 
 def test_register_rejects_duplicate_fqn_across_calls() -> None:
     reg = Registry()
-    a = DeltaTable("dev", "silver", "people", (Column("id", Integer()),))
-    b = DeltaTable("dev", "silver", "people", (Column("id", Integer()),))
+    a = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
+    b = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
     reg.register(a)
     with pytest.raises(ValueError):
         reg.register(b)
@@ -61,8 +67,8 @@ def test_register_rejects_duplicate_fqn_across_calls() -> None:
 
 def test_register_rejects_duplicate_fqn_in_same_call() -> None:
     reg = Registry()
-    a = DeltaTable("dev", "silver", "people", (Column("id", Integer()),))
-    b = DeltaTable("dev", "silver", "people", (Column("id", Integer()),))
+    a = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
+    b = DeltaTable("dev", "silver", "people", [Column("id", Integer())])
     with pytest.raises(ValueError):
         reg.register(a, b)
 
@@ -70,7 +76,7 @@ def test_register_rejects_duplicate_fqn_in_same_call() -> None:
 def test_register_preserves_properties_from_spec_without_injection() -> None:
     reg = Registry()
     spec = DeltaTable(
-        "dev", "silver", "with_props", (Column("id", Integer()),), properties={"foo": "bar"}
+        "dev", "silver", "with_props", [Column("id", Integer())], properties={"foo": "bar"}
     )
     reg.register(spec)
     dt = next(iter(reg))

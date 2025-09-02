@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from delta_engine.adapters.schema.column import Column
 from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.application import engine as engine_mod
 from delta_engine.application.engine import Engine
@@ -19,10 +20,13 @@ from delta_engine.application.results import (
     ValidationFailure,
 )
 from delta_engine.application.validation import PlanValidator
-from delta_engine.domain.model.column import Column as DomainColumn
-from delta_engine.domain.model.data_type import Integer
-from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table import DesiredTable, ObservedTable
+from delta_engine.domain.model import (
+    Column as DomainColumn,
+    DesiredTable,
+    Integer,
+    ObservedTable,
+    QualifiedName,
+)
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn
 from tests.factories import (
     make_desired_table,
@@ -159,7 +163,7 @@ def test_sync_table_validation_failure_returns_validation_failed_no_execute(monk
         assert desired is desired
         assert observed is None or isinstance(observed, ObservedTable)
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(DomainColumn("age", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(Column("age", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -184,7 +188,7 @@ def test_sync_table_success_executes_and_returns_execution_results(monkeypatch) 
         assert isinstance(observed, ObservedTable)
         assert desired is desired
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -208,7 +212,7 @@ def test_sync_table_execution_failure_marks_execution_failed(monkeypatch) -> Non
 
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -269,15 +273,15 @@ def test_engine_sync_success_prints_and_does_not_raise(monkeypatch, capsys) -> N
 
     reg = Registry()
     reg.register(
-        DeltaTable("dev", "silver", "t1", (DomainColumn("id", Integer()),)),
-        DeltaTable("dev", "silver", "t2", (DomainColumn("id", Integer()),)),
+        DeltaTable("dev", "silver", "t1", (Column("id", Integer()),)),
+        DeltaTable("dev", "silver", "t2", (Column("id", Integer()),)),
     )
 
     exec_stub = ExecutorOKButCounting()
 
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 
@@ -296,12 +300,12 @@ def test_engine_sync_raises_sync_failed_error_when_any_table_fails(monkeypatch) 
     monkeypatch.setattr(engine_mod, "_utc_now", _fixed_now_seq())
 
     reg = Registry()
-    reg.register(DeltaTable("dev", "silver", "t1", (DomainColumn("id", Integer()),)))
+    reg.register(DeltaTable("dev", "silver", "t1", (Column("id", Integer()),)))
 
     # fake plan context
     def fake_make_plan_context(desired, observed):
         plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(DomainColumn("a", Integer())),)
+            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
         )
         return PlanContext(desired=desired, observed=observed, plan=plan)
 

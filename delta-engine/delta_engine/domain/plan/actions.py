@@ -13,9 +13,7 @@ class Action:
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """
-    Create a new table with the specified columns.
-    """
+    """Create a new table with the specified columns."""
 
     columns: tuple[Column, ...]
 

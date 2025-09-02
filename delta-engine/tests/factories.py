@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from delta_engine.application.registry import Registry
 from delta_engine.adapters.schema.delta.table import DeltaTable
+from delta_engine.application.registry import Registry
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import DataType, Integer, String
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -14,9 +14,7 @@ def make_qualified_name(catalog: str, schema: str, name: str) -> QualifiedName:
     return QualifiedName(catalog=catalog, schema=schema, name=name)
 
 
-def make_column(
-    name: str, dtype: DataType, *, is_nullable: bool = True, comment: str = ""
-) -> Column:
+def make_column(name: str, dtype: DataType, is_nullable: bool = True, comment: str = "") -> Column:
     return Column(name=name, data_type=dtype, is_nullable=is_nullable, comment=comment)
 
 
@@ -51,7 +49,8 @@ def make_observed_default(name: str, columns: Iterable[Column]) -> ObservedTable
 
 
 def make_registry(names):
-    """Build a Registry from simple names using real table specs.
+    """
+    Build a Registry from simple names using real table specs.
 
     Uses `DeltaTable` with a minimal default schema (`id` INT) under
     the `dev.silver` namespace to align with Registry expectations.
