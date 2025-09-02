@@ -26,9 +26,10 @@ class DatabricksReader:
         """
         Fetch observed table schema or absence for a qualified name.
 
-        Returns a successful `ReadResult` with the current columns, an absent
-        result when the table doesn't exist, or a failed result if catalog
-        access raised an exception.
+        Returns a successful `ReadResult` with the current columns,
+        properties, and table comment; an absent result when the table
+        doesn't exist; or a failed result if catalog access raised an
+        exception.
         """
         if not self._table_exists(qualified_name):
             return ReadResult.create_absent()

@@ -18,6 +18,8 @@ class TableSnapshot:
     Attributes:
         qualified_name: Fully qualified table name.
         columns: Ordered tuple of ``Column`` definitions.
+        comment: Optional table-level comment (empty string when unset).
+        properties: Read-only mapping of table properties.
 
     """
 

@@ -31,7 +31,11 @@ class Rule(ABC):
 
 
 class NonNullableColumnAdd(Rule):  # Are classes and ABCs the best approach?
-    """Disallow adding non-nullable columns to non-empty existing tables."""
+    """Disallow adding non-nullable columns to existing tables.
+
+    The rule flags any plan that adds a NOT NULL column when the table
+    already exists (it does not attempt to infer data emptiness).
+    """
 
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
         """Flag the plan if it adds a NOT NULL column to an existing table."""
