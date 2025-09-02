@@ -7,6 +7,7 @@ tuple of statements ready to execute against a Spark session.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql import (
@@ -40,11 +41,19 @@ def _compile_action(action: Action, _) -> str:
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
 
-@_compile_action.register
 def _(action: CreateTable, quoted_table_name: str) -> str:
-    """Compile a CREATE TABLE statement with the plan's column definitions."""
-    column_name = ", ".join(_column_def(c) for c in action.columns)
-    return f"CREATE TABLE IF NOT EXISTS {quoted_table_name} ({column_name})"
+    table = action.table
+    columns = ", ".join(_column_def(c) for c in table.columns)
+    table_comment = _set_table_comment(table.comment)
+    properties = _set_properties(table.properties)
+
+    parts = [
+        f"CREATE TABLE IF NOT EXISTS {quoted_table_name}",
+        f"({columns})",
+        table_comment,
+        properties,
+    ]
+    return " ".join(p for p in parts if p)
 
 
 @_compile_action.register
@@ -96,3 +105,14 @@ def _column_def(column) -> str:
     type_sql = sql_type_for_data_type(column.data_type)
     nullable_sql = "" if column.is_nullable else "NOT NULL"
     return f"{name_sql} {type_sql} {nullable_sql}".strip()
+
+
+def _set_table_comment(comment: str) -> str:
+    return f"COMMENT {quote_literal(comment)}"
+
+
+def _set_properties(props: Mapping[str, str] | None) -> str:
+    if not props:
+        return ""
+    pairs = ", ".join(f"{quote_literal(k)}={quote_literal(v)}" for k, v in sorted(props.items()))
+    return f"TBLPROPERTIES ({pairs})"

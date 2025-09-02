@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from delta_engine.domain.model import Column, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
 class Action:
@@ -15,7 +15,7 @@ class Action:
 class CreateTable(Action):
     """Create a new table with the specified columns."""
 
-    columns: tuple[Column, ...]
+    table: DesiredTable
 
 
 @dataclass(frozen=True, slots=True)
