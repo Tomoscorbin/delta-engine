@@ -7,7 +7,7 @@ tuple of statements ready to execute against a Spark session.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql import (
@@ -135,7 +135,7 @@ def _set_properties(props: Mapping[str, str] | None) -> str:
     return f"TBLPROPERTIES ({pairs})"
 
 
-def _set_partitioned_by(partitioned_by: Sequence[str] = ()) -> str:
+def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
