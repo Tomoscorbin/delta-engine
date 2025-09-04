@@ -1,8 +1,8 @@
 import pytest
 
 from delta_engine.adapters.schema.column import Column
-from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable
