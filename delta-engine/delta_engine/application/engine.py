@@ -71,9 +71,8 @@ class Engine:
         registry. Raises on validation or execution failures with rich context.
         """
         run_started = _utc_now()
-        tables = list(registry)
-        logger.info("Starting sync for %d table(s)", len(tables))
-        table_reports = [self._sync_table(t) for t in tables]
+        logger.info("Starting sync for %d table(s)", len(registry))
+        table_reports = [self._sync_table(t) for t in registry]
 
         report = SyncReport(
             started_at=run_started,

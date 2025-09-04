@@ -9,7 +9,7 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
-# TODO: validate that partition cols exist in cols
+# TODO: validate that there are no duplicate column comments?
 @dataclass(frozen=True, slots=True)
 class TableSnapshot:
     """
@@ -34,12 +34,19 @@ class TableSnapshot:
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
+        # validate that there are no duplicate columns
         seen: set[str] = set()
         for c in self.columns:
             n = c.name.casefold()
             if n in seen:
                 raise ValueError(f"Duplicate column name: {c.name}")
             seen.add(n)
+
+        # Validate that all partition columns exist among defined columns
+        if self.partitioned_by:
+            missing = [p for p in self.partitioned_by if p.casefold() not in seen]
+            if missing:
+                raise ValueError(f"Partition column not found: {missing[0]}")
 
 
 @dataclass(frozen=True, slots=True)

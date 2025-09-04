@@ -9,7 +9,6 @@ from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
-# TODO: add validation - allowed props, duplicate cols, partitioned cols exist in cols, etc
 class DeltaTable:
     """Defines a Delta table schema."""
 
@@ -19,6 +18,9 @@ class DeltaTable:
             Property.COLUMN_MAPPING_MODE.value: "name",
         }
     )
+
+    # Fast lookup set of supported property keys
+    _allowed_property_keys: ClassVar[frozenset[str]] = frozenset(p.value for p in Property)
 
     def __init__(
         self,
@@ -33,10 +35,24 @@ class DeltaTable:
         self.catalog = normalise_identifier(catalog)
         self.schema = normalise_identifier(schema)
         self.name = normalise_identifier(name)
-        self.columns = columns
+        # Materialize columns to allow safe repeated iteration
+        self.columns = tuple(columns)
         self.comment = comment
         self.properties = dict(properties or {})
         self.partitioned_by = partitioned_by
+
+        # Validate provided properties exist in the supported Property enum
+        if self.properties:
+            unknown = [k for k in self.properties.keys() if k not in self._allowed_property_keys]
+            if unknown:
+                raise ValueError(f"Unknown Delta table properties: {', '.join(sorted(unknown))}")
+
+        # Validate that partition columns exist among defined columns
+        if self.partitioned_by:
+            seen = {c.name.casefold() for c in self.columns}
+            for p in self.partitioned_by:
+                if p.casefold() not in seen:
+                    raise ValueError(f"Partition column not found: {p}")
 
     @property
     def effective_properties(self) -> Mapping[str, str]:
