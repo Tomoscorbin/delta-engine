@@ -39,3 +39,10 @@ def test_desired_and_observed_table_construct_like_snapshot() -> None:
     assert isinstance(ot, TableSnapshot)
     assert dt.columns == cols
     assert ot.columns == cols
+
+
+def test_partition_columns_must_exist_on_snapshot() -> None:
+    cols = (Column("id", Integer()),)
+    with pytest.raises(ValueError) as exc:
+        TableSnapshot(_QN, cols, partitioned_by=("created_at",))
+    assert "Partition column not found: created_at" in str(exc.value)

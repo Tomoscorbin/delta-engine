@@ -2,6 +2,7 @@ import pytest
 
 from delta_engine.adapters.schema.column import Column
 from delta_engine.adapters.schema.delta.table import DeltaTable
+from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model.data_type import Integer, String
 from delta_engine.domain.model.table import DesiredTable
@@ -18,7 +19,6 @@ def test_register_builds_desiredtable_and_preserves_types_nullability_and_commen
                 Column("id", Integer(), True, comment="pk"),
                 Column("name", String(), False, comment="person name"),
             ],
-            properties={"foo": "bar"},
         )
     )
 
@@ -76,8 +76,12 @@ def test_register_rejects_duplicate_fqn_in_same_call() -> None:
 def test_register_preserves_properties_from_spec_without_injection() -> None:
     reg = Registry()
     spec = DeltaTable(
-        "dev", "silver", "with_props", [Column("id", Integer())], properties={"foo": "bar"}
+        "dev",
+        "silver",
+        "with_props",
+        [Column("id", Integer())],
+        properties={Property.CHANGE_DATA_FEED.value: "true"},
     )
     reg.register(spec)
     dt = next(iter(reg))
-    assert ("foo", "bar") in dt.properties.items()
+    assert (Property.CHANGE_DATA_FEED.value, "true") in dt.properties.items()
