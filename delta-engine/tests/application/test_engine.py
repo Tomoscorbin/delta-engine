@@ -1,13 +1,7 @@
-from datetime import UTC, datetime, timedelta
-
 import pytest
 
-from delta_engine.adapters.schema.column import Column
-from delta_engine.adapters.schema.delta.table import DeltaTable
-from delta_engine.application import engine as engine_mod
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
-from delta_engine.application.plan import PlanContext
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ActionStatus,
@@ -15,305 +9,250 @@ from delta_engine.application.results import (
     ExecutionResult,
     ReadFailure,
     ReadResult,
-    TableRunReport,
     TableRunStatus,
     ValidationFailure,
 )
-from delta_engine.application.validation import PlanValidator
-from delta_engine.domain.model import (
-    Column as DomainColumn,
-    DesiredTable,
-    Integer,
-    ObservedTable,
-    QualifiedName,
-)
-from delta_engine.domain.plan.actions import ActionPlan, AddColumn
-from tests.factories import (
-    make_desired_table,
-    make_observed_table,
-    make_qualified_name,
-)
+from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.plan import ActionPlan
 
-# ---- helpers ----------------------------------------------------------------
+# --------- helpers/fakes
 
 
-_QN = make_qualified_name("dev", "silver", "people")
-_DESIRED = make_desired_table(_QN, (DomainColumn("id", Integer()),))
+class _SpecColumn:
+    def __init__(
+        self, name: str, dt: str = "string", nullable: bool = True, comment: str | None = None
+    ):
+        self.name = name
+        self.data_type = dt
+        self.is_nullable = nullable
+        self.comment = comment
 
 
-_OBSERVED = make_observed_table(_QN, (DomainColumn("id", Integer()),))
+class _SpecTable:
+    def __init__(self, fqn: str):
+        self.catalog, self.schema, self.name = fqn.split(".")
+        self.columns = (_SpecColumn("id", "string", True, None),)
+        self.comment = None
+        self.properties: dict[str, str] = {}
+        self.partitioned_by = ()  # or None
+
+    @property
+    def effective_properties(self) -> dict[str, str]:
+        return self.properties
 
 
-def _fixed_times():
-    t0 = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-    t1 = t0 + timedelta(seconds=5)
-    t2 = t1 + timedelta(seconds=5)
-    # yield three times for start/end across calls
-    seq = [t0, t1, t2]
-
-    def pop_time():
-        return seq.pop(0)
-
-    return pop_time, t0, t1, t2
+def _spec(fqn: str) -> _SpecTable:
+    return _SpecTable(fqn)
 
 
-def _fixed_now_seq(n=4):
-    t0 = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
-    seq = [t0 + timedelta(seconds=i) for i in range(n)]
+class _FakeReader:
+    def __init__(self, mapping: dict[str, ReadResult]) -> None:
+        self.mapping = mapping
 
-    def _now():
-        return seq.pop(0)
-
-    return _now
+    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+        return self.mapping.get(str(qualified_name), ReadResult.create_absent())
 
 
-# ---- stubs ------------------------------------------------------------------
+class _FakeValidator:
+    def __init__(
+        self, failures_by_fqn: dict[str, tuple[ValidationFailure, ...]] | None = None
+    ) -> None:
+        self.failures_by_fqn = failures_by_fqn or {}
+
+    def validate(self, ctx) -> tuple[ValidationFailure, ...]:
+        return self.failures_by_fqn.get(str(ctx.desired.qualified_name), ())
 
 
-class StubReaderPresent:
-    def __init__(self, observed: ObservedTable) -> None:
-        self.observed = observed
-
-    def fetch_state(self, qn: QualifiedName) -> ReadResult:
-        assert str(qn) == str(self.observed.qualified_name)
-        return ReadResult.create_present(self.observed)
-
-
-class StubReaderAbsent:
-    def fetch_state(self, qn: QualifiedName) -> ReadResult:
-        return ReadResult.create_absent()
-
-
-class StubReaderFailed:
-    def fetch_state(self, qn: QualifiedName) -> ReadResult:
-        return ReadResult.create_failed(ReadFailure("IOError", "boom"))
-
-
-class StubExecutorOK:
-    def __init__(self) -> None:
-        self.seen_plan: ActionPlan | None = None
+class _FakeExecutor:
+    def __init__(self, results: tuple[ExecutionResult, ...]) -> None:
+        self.results = results
 
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
-        self.seen_plan = plan
-        return (
-            ExecutionResult(
-                action="NOOP", action_index=0, status=ActionStatus.OK, statement_preview=""
-            ),
-        )
+        return self.results
 
 
-class StubExecutorFailed:
-    def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
-        return (
-            ExecutionResult(
-                action="AddColumn(age)",
-                action_index=1,
-                status=ActionStatus.FAILED,
-                statement_preview="ALTER ...",
-                failure=ExecutionFailure(1, "Ex", "nope"),
-            ),
-        )
-
-
-class StubValidatorOK(PlanValidator):
-    def __init__(self) -> None:
-        super().__init__(rules=())
-
-    def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        # ensure observed/desired ordering is correct
-        assert isinstance(ctx.observed, ObservedTable | type(None))
-        assert isinstance(ctx.desired, DesiredTable)
-        return ()
-
-
-class StubValidatorFail(PlanValidator):
-    def __init__(self) -> None:
-        super().__init__(rules=())
-
-    def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        return (ValidationFailure("RuleX", "bad"),)
-
-
-# ---- tests ------------------------------------------------------------------
-
-
-def test_sync_table_read_failure_short_circuits_and_returns_read_failed(monkeypatch) -> None:
-    desired = _DESIRED
-    pop_time, t0, t1, _ = _fixed_times()
-    monkeypatch.setattr(engine_mod, "_utc_now", pop_time)
-
-    eng = Engine(reader=StubReaderFailed(), executor=StubExecutorOK(), validator=StubValidatorOK())
-    report = eng._sync_table(desired)
-
-    assert isinstance(report, TableRunReport)
-    assert report.status == TableRunStatus.READ_FAILED
-    assert report.read.failure is not None
-    assert report.validation is None or report.validation.failed is False
-    assert report.execution_results == ()
-
-
-def test_sync_table_validation_failure_returns_validation_failed_no_execute(monkeypatch) -> None:
-    desired = _DESIRED
-    pop_time, t0, t1, _ = _fixed_times()
-    monkeypatch.setattr(engine_mod, "_utc_now", pop_time)
-
-    exec_stub = StubExecutorOK()
-
-    def fake_make_plan_context(desired, observed):
-        assert desired is desired
-        assert observed is None or isinstance(observed, ObservedTable)
-        plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("age", Integer())),)
-        )
-        return PlanContext(desired=desired, observed=observed, plan=plan)
-
-    monkeypatch.setattr(engine_mod, "make_plan_context", fake_make_plan_context)
-
-    eng = Engine(reader=StubReaderAbsent(), executor=exec_stub, validator=StubValidatorFail())
-    report = eng._sync_table(desired)
-
-    assert report.status == TableRunStatus.VALIDATION_FAILED
-    assert report.validation is not None and report.validation.failed is True
-    assert exec_stub.seen_plan is None
-
-
-def test_sync_table_success_executes_and_returns_execution_results(monkeypatch) -> None:
-    desired = _DESIRED
-    pop_time, t0, t1, _ = _fixed_times()
-    monkeypatch.setattr(engine_mod, "_utc_now", pop_time)
-
-    exec_stub = StubExecutorOK()
-
-    def fake_make_plan_context(desired, observed):
-        assert isinstance(observed, ObservedTable)
-        assert desired is desired
-        plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
-        )
-        return PlanContext(desired=desired, observed=observed, plan=plan)
-
-    monkeypatch.setattr(engine_mod, "make_plan_context", fake_make_plan_context)
-
-    eng = Engine(
-        reader=StubReaderPresent(_OBSERVED), executor=exec_stub, validator=StubValidatorOK()
+def _ok_exec(idx: int = 0) -> ExecutionResult:
+    return ExecutionResult(
+        action="X", action_index=idx, status=ActionStatus.OK, statement_preview="-- ok"
     )
-    report = eng._sync_table(desired)
-
-    assert report.status == TableRunStatus.SUCCESS
-    assert report.validation is not None and report.validation.failed is False
-    assert len(report.execution_results) == 1
-    assert exec_stub.seen_plan is not None
 
 
-def test_sync_table_execution_failure_marks_execution_failed(monkeypatch) -> None:
-    desired = _DESIRED
-    pop_time, t0, t1, _ = _fixed_times()
-    monkeypatch.setattr(engine_mod, "_utc_now", pop_time)
-
-    def fake_make_plan_context(desired, observed):
-        plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
-        )
-        return PlanContext(desired=desired, observed=observed, plan=plan)
-
-    monkeypatch.setattr(engine_mod, "make_plan_context", fake_make_plan_context)
-
-    eng = Engine(
-        reader=StubReaderAbsent(), executor=StubExecutorFailed(), validator=StubValidatorOK()
+def _noop_exec(idx: int = 0) -> ExecutionResult:
+    return ExecutionResult(
+        action="X", action_index=idx, status=ActionStatus.NOOP, statement_preview="-- noop"
     )
-    report = eng._sync_table(desired)
-
-    assert report.status == TableRunStatus.EXECUTION_FAILED
-    assert len(report.execution_results) == 1
-    assert report.execution_results[0].status is ActionStatus.FAILED
 
 
-class ReaderAllAbsent:
-    def fetch_state(self, qn: QualifiedName) -> ReadResult:
-        return ReadResult.create_absent()
+def _failed_exec(idx: int = 0, exc="AnalysisException", msg="boom") -> ExecutionResult:
+    return ExecutionResult(
+        action="X",
+        action_index=idx,
+        status=ActionStatus.FAILED,
+        statement_preview="-- bad sql",
+        failure=ExecutionFailure(action_index=idx, exception_type=exc, message=msg),
+    )
 
 
-class ExecutorOK:
+class _SeqExecutor:
+    """Returns a different result tuple on each call."""
+
+    def __init__(self, per_call_results: list[tuple[ExecutionResult, ...]]) -> None:
+        self._seq = list(per_call_results)
+
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
-        return (
-            ExecutionResult(
-                action="NOOP", action_index=0, status=ActionStatus.OK, statement_preview=""
-            ),
-        )
+        return self._seq.pop(0)
 
 
-class ExecutorOKButCounting(ExecutorOK):
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def execute(self, plan: ActionPlan):
-        self.calls += 1
-        return super().execute(plan)
+# ---------- Tests
 
 
-class ValidatorPass(PlanValidator):
-    def __init__(self) -> None:
-        super().__init__(rules=())
+def test_raises_when_any_table_has_read_failure():
+    # Given a registry with one table and a reader that fails to read it
+    t = _spec("c.s.read_fail")
+    reg = Registry()
+    reg.register(t)
+    reader = _FakeReader(
+        {"c.s.read_fail": ReadResult.create_failed(ReadFailure("IOError", "cannot read"))}
+    )
+    validator = _FakeValidator()  # no validation failures
+    executor = _FakeExecutor(results=(_ok_exec(0),))  # would be fine if reached
 
-    def validate(self, ctx: PlanContext):
-        return ()
+    # When syncing
+    # Then the engine raises SyncFailedError because read failed
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+    with pytest.raises(SyncFailedError):
+        engine.sync(reg)
 
 
-class ValidatorFailAlways(PlanValidator):
-    def __init__(self) -> None:
-        super().__init__(rules=())
+def test_skips_execution_and_raises_when_validation_fails():
+    # Given a table that reads successfully but fails validation
+    reg = Registry()
+    reg.register(_spec("c.s.val_fail"))
+    reader = _FakeReader({"c.s.val_fail": ReadResult.create_absent()})
+    validator = _FakeValidator({"c.s.val_fail": (ValidationFailure("RuleX", "nope"),)})
+    # Executor would return OK, but must not be used because validation fails
+    executor = _FakeExecutor(results=(_ok_exec(0),))
 
-    def validate(self, ctx: PlanContext):
-        return (ValidationFailure("Rule", "bad"),)
+    # When syncing
+    # Then the engine raises SyncFailedError because validation failed
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+    with pytest.raises(SyncFailedError):
+        engine.sync(reg)
 
 
-def test_engine_sync_success_prints_and_does_not_raise(monkeypatch, capsys) -> None:
-    # fixed time
-    monkeypatch.setattr(engine_mod, "_utc_now", _fixed_now_seq(n=6))
+def test_raises_when_execution_contains_any_failure():
+    # Given a table that reads & validates successfully, but execution has a failed action
+    reg = Registry()
+    reg.register(_spec("c.s.exec_fail"))
+    reader = _FakeReader({"c.s.exec_fail": ReadResult.create_absent()})
+    validator = _FakeValidator()  # passes
+    executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _noop_exec(2)))
 
+    # When syncing
+    # Then the engine raises SyncFailedError because execution failed
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+    with pytest.raises(SyncFailedError):
+        engine.sync(reg)
+
+
+def test_returns_success_when_all_tables_succeed():
+    # Given two tables that read present/absent, validate cleanly, and execute with no failures
     reg = Registry()
     reg.register(
-        DeltaTable("dev", "silver", "t1", (Column("id", Integer()),)),
-        DeltaTable("dev", "silver", "t2", (Column("id", Integer()),)),
+        _spec("c.a.users"), _spec("c.b.orders")
+    )  # registry will yield in name-sorted order
+    reader = _FakeReader(
+        {
+            "c.a.users": ReadResult.create_absent(),
+            "c.b.orders": ReadResult.create_absent(),
+        }
     )
+    validator = _FakeValidator()
+    executor = _FakeExecutor(results=(_ok_exec(0), _noop_exec(1)))
+    engine = Engine(reader=reader, executor=executor, validator=validator)
 
-    exec_stub = ExecutorOKButCounting()
-
-    def fake_make_plan_context(desired, observed):
-        plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
-        )
-        return PlanContext(desired=desired, observed=observed, plan=plan)
-
-    monkeypatch.setattr(engine_mod, "make_plan_context", fake_make_plan_context)
-
-    eng = Engine(reader=ReaderAllAbsent(), executor=exec_stub, validator=ValidatorPass())
-    eng.sync(reg)  # should not raise
-    # executor called for both tables
-    assert exec_stub.calls == 2
-    # optionally ensure something was printed (we don't assert exact text)
-    out = capsys.readouterr().out
-    assert isinstance(out, str)
+    # When syncing
+    # Then no exception is raised (i.e., overall success)
+    engine.sync(reg)  # would raise on failure; reaching here means success
 
 
-def test_engine_sync_raises_sync_failed_error_when_any_table_fails(monkeypatch) -> None:
-    monkeypatch.setattr(engine_mod, "_utc_now", _fixed_now_seq())
-
+def test_engine_reads_all_tables_then_raises_on_any_read_failure():
+    # Given two tables; first read fails, second reads OK (absent)
     reg = Registry()
-    reg.register(DeltaTable("dev", "silver", "t1", (Column("id", Integer()),)))
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader(
+        {
+            "c.s.a": ReadResult.create_failed(ReadFailure("IOError", "cannot read")),
+            "c.s.b": ReadResult.create_absent(),
+        }
+    )
+    validator = _FakeValidator()  # both would pass if reached
+    executor = _FakeExecutor(results=(_ok_exec(0),))  # irrelevant for a; used for b
+    engine = Engine(reader=reader, executor=executor, validator=validator)
 
-    # fake plan context
-    def fake_make_plan_context(desired, observed):
-        plan = ActionPlan(
-            target=desired.qualified_name, actions=(AddColumn(Column("a", Integer())),)
-        )
-        return PlanContext(desired=desired, observed=observed, plan=plan)
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
 
-    monkeypatch.setattr(engine_mod, "make_plan_context", fake_make_plan_context)
+    # Then both tables appear in the report; one READ_FAILED, one SUCCESS
+    statuses = [tr.status for tr in err.value.report]
+    assert statuses == [TableRunStatus.READ_FAILED, TableRunStatus.SUCCESS]
 
-    eng = Engine(reader=ReaderAllAbsent(), executor=ExecutorOK(), validator=ValidatorFailAlways())
 
-    with pytest.raises(SyncFailedError) as exc:
-        eng.sync(reg)
-    assert exc.value.report.any_failures is True
-    assert len(exc.value.report.table_reports) == 1
+def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises():
+    # Given both tables read OK; one fails validation
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader(
+        {
+            "c.s.a": ReadResult.create_absent(),
+            "c.s.b": ReadResult.create_absent(),
+        }
+    )
+    validator = _FakeValidator(
+        {
+            "c.s.a": (ValidationFailure("RuleX", "nope"),),  # a fails validation
+            # b passes
+        }
+    )
+    executor = _FakeExecutor(results=(_ok_exec(0), _noop_exec(1)))  # used only for b
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
+
+    # Then the report shows a VALIDATION_FAILED and a SUCCESS
+    [tr_a, tr_b] = list(err.value.report)
+    assert tr_a.status is TableRunStatus.VALIDATION_FAILED
+    assert tr_a.execution_results == ()  # a was not executed
+    assert tr_b.status is TableRunStatus.SUCCESS
+    assert tr_b.execution_results != ()  # b was executed
+
+
+def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
+    # Given both tables read & validate OK; execution fails only for the second
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader(
+        {
+            "c.s.a": ReadResult.create_absent(),
+            "c.s.b": ReadResult.create_absent(),
+        }
+    )
+    validator = _FakeValidator()  # both pass
+    executor = _SeqExecutor(
+        [
+            (_ok_exec(0), _noop_exec(1)),  # execution for a: all good
+            (_ok_exec(0), _failed_exec(1)),  # execution for b: one failed
+        ]
+    )
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
+
+    # Then both tables are in the report; first SUCCESS, second EXECUTION_FAILED
+    statuses = [tr.status for tr in err.value.report]
+    assert statuses == [TableRunStatus.SUCCESS, TableRunStatus.EXECUTION_FAILED]

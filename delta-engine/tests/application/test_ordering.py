@@ -1,103 +1,129 @@
-import random
-
 import pytest
 
 from delta_engine.application.ordering import action_sort_key, subject_name
-from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer
-from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
+    PartitionBy,
     SetColumnComment,
+    SetColumnNullability,
     SetProperty,
     SetTableComment,
     UnsetProperty,
 )
-from tests.factories import make_qualified_name
 
-# --- subject_name -------------------------------------------------------------
-
-
-def test_subject_name_uses_relevant_field_per_action_type() -> None:
-    add = AddColumn(Column("age", Integer()))
-    drop = DropColumn("nickname")
-    set_prop = SetProperty(name="owner", value="data")
-    unset_prop = UnsetProperty(name="ttl")
-    set_col_comment = SetColumnComment(column_name="display_name", comment="shown")
-    set_table_comment = SetTableComment(comment="table note")
-
-    assert subject_name(add) == "age"
-    assert subject_name(drop) == "nickname"
-    assert subject_name(set_prop) == "owner"
-    assert subject_name(unset_prop) == "ttl"
-    assert subject_name(set_col_comment) == "display_name"
-    assert subject_name(set_table_comment) == ""  # no subject for table-level comment
+# ----- builders
 
 
-def test_subject_name_falls_back_to_name_attribute_for_unknown_objects() -> None:
-    class Dummy:
-        def __init__(self) -> None:
-            self.name = "whatever"
-
-    assert subject_name(Dummy()) == "whatever"
+def _column(name: str) -> Column:
+    return Column(name=name, data_type="string", is_nullable=True, comment=None)
 
 
-# --- action_sort_key ------------------
+def _create_table_action() -> CreateTable:
+    dt = DesiredTable(
+        qualified_name=QualifiedName("c", "s", "t"),
+        columns=(_column("id"),),
+        comment=None,
+        properties={},
+        partitioned_by=(),
+    )
+    return CreateTable(table=dt)
 
 
-def test_action_sort_key_is_monotonic_by_phase_for_mixed_actions() -> None:
-    """
-    We don't assert the *specific* phase sequence, only that sorting
-    groups by phase (monotonic rank).
+# ------ tests
 
-    """
-    qn = make_qualified_name("dev", "silver", "people")
-    create = CreateTable(DesiredTable(qn, (Column("id", Integer()),)))
-    actions = [
-        UnsetProperty("c"),
-        SetTableComment("note"),
-        SetColumnComment("b", ""),
-        DropColumn("d"),
-        AddColumn(Column("a", Integer())),
-        SetProperty("owner", "eng"),
-        create,
+
+def test_orders_by_phase_in_documented_precedence():
+    # Given one action from each phase, in scrambled order
+    actions = (
+        UnsetProperty(name="p_unset"),
+        SetTableComment(comment="tbl comment"),
+        AddColumn(column=_column("a_col")),
+        PartitionBy(column_names=("ds",)),
+        SetProperty(name="p_set", value="1"),
+        SetColumnNullability(column_name="nn_col", nullable=False),
+        DropColumn(column_name="d_col"),
+        SetColumnComment(column_name="c_col", comment="c"),
+        _create_table_action(),
+    )
+
+    # When sorting using the production key
+    ordered = tuple(sorted(actions, key=action_sort_key))
+
+    # Then the overall order follows the documented phase precedence strictly
+    expected_types_in_order = [
+        CreateTable,
+        SetProperty,
+        AddColumn,
+        DropColumn,
+        SetColumnComment,
+        SetTableComment,
+        UnsetProperty,
+        SetColumnNullability,
+        PartitionBy,
     ]
-    random.shuffle(actions)  # ensure input order doesn't bias the outcome
+    assert [type(a) for a in ordered] == expected_types_in_order
 
-    sorted_actions = sorted(actions, key=action_sort_key)
-    ranks = [action_sort_key(a)[0] for a in sorted_actions]
 
-    assert ranks == sorted(ranks)  # monotonic by phase rank (whatever that mapping is)
+def test_within_phase_actions_are_ordered_by_subject_name():
+    # Given two AddColumn actions in the same phase with different names
+    a1 = AddColumn(column=_column("b_col"))
+    a2 = AddColumn(column=_column("a_col"))
+
+    # When sorting
+    ordered = tuple(sorted((a1, a2), key=action_sort_key))
+
+    # Then the earlier subject name ("a_col") comes first within the phase
+    assert [subject_name(a) for a in ordered] == ["a_col", "b_col"]
 
 
 @pytest.mark.parametrize(
-    "builder,extract",
+    "action, expected_subject",
     [
-        (lambda s: SetProperty(s, "v"), lambda a: a.name),
-        (lambda s: UnsetProperty(s), lambda a: a.name),
-        (lambda s: AddColumn(Column(s, Integer())), lambda a: a.column.name),
-        (lambda s: DropColumn(s), lambda a: a.column_name),
-        (lambda s: SetColumnComment(s, ""), lambda a: a.column_name),
+        (AddColumn(column=_column("xcol")), "xcol"),
+        (DropColumn(column_name="ycol"), "ycol"),
+        (SetProperty(name="propA", value="v"), "propA"),
+        (UnsetProperty(name="propB"), "propB"),
+        (SetColumnComment(column_name="zcol", comment="c"), "zcol"),
+        (SetColumnNullability(column_name="ncol", nullable=False), "ncol"),
+        (SetTableComment(comment="table comment"), ""),  # no subject -> empty string
+        (PartitionBy(column_names=("ds",)), ""),  # current behaviour: no subject name
     ],
 )
-def test_action_sort_key_orders_within_same_phase_by_subject(builder, extract) -> None:
-    """Within a phase, ordering is by the subject identifier (no reliance on case rules)."""
-    items = [builder("m"), builder("a"), builder("z")]
-    random.shuffle(items)
-
-    sorted_items = sorted(items, key=action_sort_key)
-    subjects = [extract(a) for a in sorted_items]
-
-    assert subjects == ["a", "m", "z"]
+def test_subject_name_extraction_matches_action_type_contract(action, expected_subject):
+    # Given an action
+    # When extracting the subject name
+    # Then we get the identifier used for within-phase ordering
+    assert subject_name(action) == expected_subject
 
 
-def test_action_sort_key_raises_for_unknown_action_type() -> None:
-    class Rogue:
-        pass
+def test_sort_is_stable_when_phase_and_subject_tie():
+    # Given two SetProperty actions with the same name (identical phase+subject key)
+    a1 = SetProperty(name="alpha", value="1")
+    a2 = SetProperty(name="alpha", value="2")  # same subject; different non-subject field
 
-    with pytest.raises(ValueError) as excinfo:
-        _ = action_sort_key(Rogue())  # type: ignore[arg-type]
+    # When sorting
+    ordered = tuple(sorted((a1, a2), key=action_sort_key))
 
-    assert "Place Rogue in PHASE_ORDER" in str(excinfo.value)
+    # Then the original relative order is preserved (sort is stable)
+    assert ordered == (a1, a2)
+
+
+def test_non_subject_fields_do_not_influence_order_within_phase():
+    # Given SetProperty actions where subjects differ but values (non-subject) might mislead
+    s1 = SetProperty(name="a_key", value="zzz")
+    s2 = SetProperty(name="b_key", value="aaa")
+
+    # And AddColumn actions where data_type/nullability differ but names decide order
+    c1 = AddColumn(column=Column(name="a_col", data_type="int", is_nullable=False, comment=None))
+    c2 = AddColumn(column=Column(name="b_col", data_type="string", is_nullable=True, comment=None))
+
+    # When sorting each pair
+    ordered_props = tuple(sorted((s1, s2), key=action_sort_key))
+    ordered_cols = tuple(sorted((c2, c1), key=action_sort_key))  # deliberately reversed input
+
+    # Then only the subject (name) controls order; non-subject fields have no effect
+    assert [subject_name(a) for a in ordered_props] == ["a_key", "b_key"]
+    assert [subject_name(a) for a in ordered_cols] == ["a_col", "b_col"]

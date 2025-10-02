@@ -38,6 +38,19 @@ def subject_name(action: Action) -> str:
     return getattr(action, "name", "")
 
 
+def action_sort_key(action: Action) -> tuple[int, str]:
+    """
+    Return a sortable key for action ordering.
+
+    Orders by phase, then by subject name to achieve deterministic planning.
+    """
+    try:
+        rank = _PHASE_RANK[type(action)]
+    except KeyError as exc:
+        raise ValueError(f"Place {type(action).__name__} in PHASE_ORDER.") from exc
+    return (rank, subject_name(action))
+
+
 _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
     CreateTable,
     SetProperty,
@@ -51,16 +64,3 @@ _PHASE_ORDER: Final[tuple[type[Action], ...]] = (
 )
 
 _PHASE_RANK: Final[dict[type[Action], int]] = {cls: i for i, cls in enumerate(_PHASE_ORDER)}
-
-
-def action_sort_key(action: Action) -> tuple[int, str]:
-    """
-    Return a sortable key for action ordering.
-
-    Orders by phase, then by subject name to achieve deterministic planning.
-    """
-    try:
-        rank = _PHASE_RANK[type(action)]
-    except KeyError as exc:
-        raise ValueError(f"Place {type(action).__name__} in PHASE_ORDER.") from exc
-    return (rank, subject_name(action))
