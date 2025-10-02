@@ -256,3 +256,33 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
     # Then both tables are in the report; first SUCCESS, second EXECUTION_FAILED
     statuses = [tr.status for tr in err.value.report]
     assert statuses == [TableRunStatus.SUCCESS, TableRunStatus.EXECUTION_FAILED]
+
+
+def test_engine_executes_remaining_tables_even_if_first_execution_fails():
+    # Given both tables read & validate OK; execution fails for the FIRST table
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader(
+        {
+            "c.s.a": ReadResult.create_absent(),
+            "c.s.b": ReadResult.create_absent(),
+        }
+    )
+    validator = _FakeValidator()  # both pass
+    executor = _SeqExecutor(
+        [
+            (_failed_exec(0),),  # execution for 'a' fails
+            (_ok_exec(0), _noop_exec(1)),  # execution for 'b' succeeds
+        ]
+    )
+    engine = Engine(reader=reader, executor=executor, validator=validator)
+
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
+
+    # Then both tables appear; first is EXECUTION_FAILED, second is SUCCESS (i.e. it still executed)
+    [tr_a, tr_b] = list(err.value.report)
+    assert tr_a.status is TableRunStatus.EXECUTION_FAILED
+    assert tr_b.status is TableRunStatus.SUCCESS
+    assert tr_b.execution_results != ()  # proves 'b' actually executed
