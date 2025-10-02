@@ -7,6 +7,7 @@ return an `ActionPlan` with actions sorted for deterministic execution.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from delta_engine.application.ordering import action_sort_key
@@ -32,18 +33,17 @@ class PlanContext:
     plan: ActionPlan
 
 
-def make_plan_context(desired: DesiredTable, observed: ObservedTable | None) -> PlanContext:
+def make_plan_context(
+    desired: DesiredTable,
+    observed: ObservedTable | None,
+    sort_key: Callable[[object], object] = action_sort_key,
+) -> PlanContext:
     """Create a :class:`PlanContext` for a pair of tables and its plan."""
-    plan = _compute_plan(desired, observed)
-    return PlanContext(
-        desired=desired,
-        observed=observed,
-        plan=plan,
-    )
-
-
-def _compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
-    """Create a sorted :class:`ActionPlan` from observed and desired states."""
     unsorted_plan = diff_tables(desired=desired, observed=observed)
-    sorted_actions = tuple(sorted(unsorted_plan.actions, key=action_sort_key))
-    return replace(unsorted_plan, actions=sorted_actions)
+    plan = _order_actions(unsorted_plan, sort_key=sort_key)
+    return PlanContext(desired=desired, observed=observed, plan=plan)
+
+
+def _order_actions(plan: ActionPlan, sort_key: Callable[[object], object]) -> ActionPlan:
+    """Return a new ActionPlan whose actions are deterministically ordered by sort_key."""
+    return replace(plan, actions=tuple(sorted(plan.actions, key=sort_key)))

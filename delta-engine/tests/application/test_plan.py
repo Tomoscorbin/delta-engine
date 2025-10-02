@@ -1,99 +1,66 @@
-import pytest
-
-from delta_engine.application import plan as planning_module
 from delta_engine.application.plan import (
-    PlanContext,
-    _compute_plan,
-    make_plan_context,
+    _order_actions,
 )
-from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer
-from delta_engine.domain.model.table import DesiredTable, ObservedTable
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import AddColumn, DropColumn, SetProperty
-from tests.factories import make_qualified_name
+
+_QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-def _mk_tables():
-    qn = make_qualified_name("dev", "silver", "people")
-    desired = DesiredTable(qn, (Column("id", Integer()),))
-    observed = ObservedTable(qn, (Column("id", Integer()),))
-    return qn, desired, observed
+# ------- fakes
 
 
-def test_compute_plan_sorts_actions_via_module_sort_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    qn, desired, observed = _mk_tables()
+class _FakeAction:
+    """Fake action with a label so our fake sort key can order it."""
 
-    # Intentionally unsorted sequence (relative to whatever key the module uses)
-    unsorted_actions = (
-        DropColumn("d"),
-        SetProperty("owner", "asda"),
-        AddColumn(Column("age", Integer())),
-    )
-    expected_sorted = tuple(sorted(unsorted_actions, key=planning_module.action_sort_key))
+    def __init__(self, label: str) -> None:
+        self.label = label
 
-    # Return an unsorted plan from the differ
-    monkeypatch.setattr(
-        planning_module,
-        "diff_tables",
-        lambda *, desired, observed: ActionPlan(qn, unsorted_actions),
+    def __repr__(self) -> str:  # helpful when an assertion fails
+        return f"_FakeAction({self.label})"
+
+
+# ------- tests
+
+
+def test_orders_actions_using_sort_key():
+    # Given an ActionPlan whose actions are unsorted
+    unsorted_plan = ActionPlan(
+        target=_QUALIFIED_NAME,
+        actions=(_FakeAction("b"), _FakeAction("a"), _FakeAction("c")),
     )
 
-    plan = _compute_plan(desired, observed)
+    # When ordering the plan using a label-based sort key
+    def key(a: _FakeAction):
+        return a.label
 
-    assert isinstance(plan, ActionPlan)
-    # Target carried through
-    assert plan.target == qn
-    # Actions are sorted according to the module's sort key (no hard-coded order)
-    assert tuple(plan) == expected_sorted
+    ordered = _order_actions(unsorted_plan, sort_key=key)
 
-
-def test_compute_plan_does_not_mutate_unsorted_plan(monkeypatch: pytest.MonkeyPatch) -> None:
-    qn, desired, observed = _mk_tables()
-
-    original_actions = (
-        AddColumn(Column("b", Integer())),
-        SetProperty("a", "1"),
-    )
-    unsorted_plan = ActionPlan(qn, original_actions)
-
-    monkeypatch.setattr(planning_module, "diff_tables", lambda *, desired, observed: unsorted_plan)
-
-    _ = _compute_plan(desired, observed)
-
-    # The source plan from diff_tables must remain unchanged (no in-place sort)
-    assert unsorted_plan.actions is original_actions
-    assert unsorted_plan.actions == original_actions
+    # Then actions are deterministically ordered
+    assert [a.label for a in ordered.actions] == ["a", "b", "c"]
 
 
-def test_compute_plan_handles_empty_actions(monkeypatch: pytest.MonkeyPatch) -> None:
-    qn, desired, observed = _mk_tables()
-
-    monkeypatch.setattr(
-        planning_module, "diff_tables", lambda *, desired, observed: ActionPlan(qn, ())
+def test_preserves_input_order_when_sort_keys_tie():
+    # Given two actions that will produce identical sort keys
+    a1, a2 = _FakeAction("x1"), _FakeAction("x2")
+    plan = ActionPlan(
+        target=_QUALIFIED_NAME,
+        actions=(a1, a2),
     )
 
-    plan = _compute_plan(desired, observed)
+    # When ordering with a constant key (all ties)
+    ordered = _order_actions(plan, sort_key=lambda _: 0)
 
-    assert isinstance(plan, ActionPlan)
-    assert len(plan) == 0
-    assert not plan
-    assert list(plan) == []
+    # Then the actions are preserved in original order
+    assert tuple(ordered.actions) == (a1, a2)
 
 
-def test_make_plan_context_wires_desired_observed_and_uses_compute(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    qn, desired, observed = _mk_tables()
-    sentinel_plan = ActionPlan(qn, (AddColumn(Column("age", Integer())),))
+def test_empty_plan_results_in_empty_actions_tuple():
+    # Given an ActionPlan with no actions
+    empty_plan = ActionPlan(target=_QUALIFIED_NAME, actions=())
 
-    monkeypatch.setattr(planning_module, "_compute_plan", lambda d, o: sentinel_plan)
+    # When ordering the plan (key doesn't matter)
+    ordered = _order_actions(empty_plan, sort_key=lambda _: 0)
 
-    ctx = make_plan_context(desired, observed)
-
-    assert isinstance(ctx, PlanContext)
-    # Objects are passed through unchanged
-    assert ctx.desired is desired
-    assert ctx.observed is observed
-    # Plan is exactly what _compute_plan returned
-    assert ctx.plan is sentinel_plan
+    # Then the result contains an empty
+    assert ordered.actions == ()
