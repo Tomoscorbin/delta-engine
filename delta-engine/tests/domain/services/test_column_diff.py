@@ -1,101 +1,123 @@
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.data_type import Integer, String
-from delta_engine.domain.plan.actions import AddColumn, DropColumn, SetColumnComment
+from delta_engine.domain.plan.actions import (
+    AddColumn,
+    DropColumn,
+    SetColumnComment,
+    SetColumnNullability,
+)
 from delta_engine.domain.services.column_diff import (
-    _diff_column_comments,
-    _diff_columns_for_adds,
-    _diff_columns_for_drops,
     diff_columns,
 )
 
-# --- diff_columns (integration of adds + drops + comments) --------------------
 
+def test_no_actions_when_schemas_are_identical():
+    # Given: desired and observed have the same columns, comments, and nullability
+    cols = (Column("id", Integer()), Column("name", String(), comment="customer name"))
+    desired = cols
+    observed = cols
 
-def test_diff_columns_happy_path_add_drop_and_comment_update() -> None:
-    desired = (Column("id", Integer()), Column("age", Integer(), comment="years"))
-    observed = (Column("id", Integer()), Column("nickname", String()))
+    # When: diffing desired against observed
     actions = diff_columns(desired, observed)
 
-    adds = [a for a in actions if isinstance(a, AddColumn)]
-    drops = [a for a in actions if isinstance(a, DropColumn)]
-    comments = [a for a in actions if isinstance(a, SetColumnComment)]
-
-    assert {a.column.name for a in adds} == {"age"}
-    assert {d.column_name for d in drops} == {"nickname"}
-    assert {(c.column_name, c.comment) for c in comments} == {("age", "years")}
+    # Then: nothing to do
+    assert actions == ()
 
 
-def test_diff_columns_no_changes_returns_empty_tuple() -> None:
-    desired = (Column("id", Integer(), comment="primary key"),)
-    observed = (Column("id", Integer(), comment="primary key"),)
-
-    assert diff_columns(desired, observed) == ()
-
-
-def test_diff_columns_handles_empty_inputs() -> None:
-    desired = ()
+def test_adds_columns_present_only_in_desired():
+    # Given: desired has an extra column not present in observed
+    desired = (Column("id", Integer()), Column("age", Integer()))
     observed = (Column("id", Integer()),)
+
+    # When: diffing desired against observed
     actions = diff_columns(desired, observed)
 
-    assert {type(a) for a in actions} == {DropColumn}  # only drops
+    # Then: an AddColumn for "age" is produced
+    expected = AddColumn(column=Column("age", Integer()))
+    assert expected in actions
 
 
-def test_diff_columns_is_case_insensitive_via_column_normalization() -> None:
-    desired = (Column("ID", Integer()),)
+def test_drops_columns_present_only_in_observed():
+    # Given: observed has a legacy column not present in desired
+    desired = (Column("id", Integer()),)
+    observed = (Column("id", Integer()), Column("legacy", String()))
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: a DropColumn for "legacy" is produced
+    expected = (DropColumn("legacy"),)
+    assert actions == expected
+
+
+def test_sets_comment_when_desired_differs_from_observed():
+    # Given: same column exists; desired has a comment, observed has none
+    desired = (Column("name", String(), comment="customer"),)
+    observed = (Column("name", String(), comment=""),)
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: a SetColumnComment aligns the comment
+    expected = (SetColumnComment("name", "customer"),)
+    assert actions == expected
+
+
+def test_clears_comment_when_desired_is_empty_and_observed_is_not():
+    # Given: same column exists; desired clears the comment
+    desired = (Column("name", String(), comment=""),)
+    observed = (Column("name", String(), comment="customer"),)
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: a SetColumnComment clears it to empty
+    expected = (SetColumnComment("name", ""),)
+    assert actions == expected
+
+
+def test_sets_nullability_when_flag_differs():
+    # Given: same column exists; desired flips nullability to NOT NULL
+    desired = (Column("active", String(), is_nullable=False),)
+    observed = (Column("active", String(), is_nullable=True),)
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: a SetColumnNullability aligns the flag
+    expected = (SetColumnNullability(column_name="active", nullable=False),)
+    assert actions == expected
+
+
+def test_combines_add_drop_and_updates_without_duplicates():
+    # Given: need to add one, drop one, and update an existing column's comment/nullability
+    desired = (
+        Column("keep", Integer(), comment="k"),
+        Column("add_me", Integer(), is_nullable=False, comment="new"),
+    )
+    observed = (
+        Column("keep", Integer(), comment=""),
+        Column("drop_me", String()),
+    )
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: we see the three expected kinds of actions for the right columns
+    assert (
+        AddColumn(column=Column("add_me", Integer(), is_nullable=False, comment="new")) in actions
+    )
+    assert DropColumn("drop_me") in actions
+    assert SetColumnComment("keep", "k") in actions
+
+
+def test_ignores_type_changes_until_type_migrations_supported():
+    # Given: same column name exists but data type differs
+    desired = (Column("id", String()),)
     observed = (Column("id", Integer()),)
 
-    assert diff_columns(desired, observed) == ()
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
 
-
-# --- _diff_columns_for_adds ----------------------------------------------------
-
-
-def test__diff_columns_for_adds_returns_missing_desired_columns() -> None:
-    desired = (Column("id", Integer()), Column("name", String()), Column("age", Integer()))
-    observed = (Column("id", Integer()), Column("name", String()))
-    adds = _diff_columns_for_adds(desired, observed)
-
-    assert {a.column.name for a in adds} == {"age"}
-
-
-def test__diff_columns_for_adds_empty_when_all_present() -> None:
-    desired = (Column("id", Integer()),)
-    observed = (Column("id", Integer()),)
-
-    assert _diff_columns_for_adds(desired, observed) == ()
-
-
-# --- diff_columns_for_drops ---------------------------------------------------
-
-
-def test__diff_columns_for_drops_returns_columns_missing_from_desired() -> None:
-    desired = (Column("id", Integer()),)
-    observed = (Column("id", Integer()), Column("nickname", String()))
-    drops = _diff_columns_for_drops(desired, observed)
-
-    assert {d.column_name for d in drops} == {"nickname"}
-
-
-def test__diff_columns_for_drops_empty_when_no_extras() -> None:
-    desired = (Column("id", Integer()), Column("name", String()))
-    observed = (Column("id", Integer()), Column("name", String()))
-
-    assert _diff_columns_for_drops(desired, observed) == ()
-
-
-# --- _diff_column_comments -----------------------------------------------------
-
-
-def test__diff_column_comments_updates_when_comment_differs() -> None:
-    desired = (Column("id", Integer(), comment="primary"),)
-    observed = (Column("id", Integer(), comment=""),)
-
-    actions = _diff_column_comments(desired, observed)
-    assert {(a.column_name, a.comment) for a in actions} == {("id", "primary")}
-
-
-def test__diff_column_comments_noop_when_comments_match() -> None:
-    desired = (Column("age", Integer(), comment="years"),)
-    observed = (Column("age", Integer(), comment="years"),)
-
-    assert _diff_column_comments(desired, observed) == ()
+    # Then: no action emitted for type change (explicitly unsupported for now)
+    assert actions == ()

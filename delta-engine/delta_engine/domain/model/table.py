@@ -9,7 +9,6 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
-# TODO: validate that there are no duplicate column comments?
 @dataclass(frozen=True, slots=True)
 class TableSnapshot:
     """

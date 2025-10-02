@@ -1,28 +1,28 @@
-from dataclasses import FrozenInstanceError
-
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer, Long
+from delta_engine.domain.model.data_type import Integer
 
 
-# TODO: remove all tests that test identifier normalisation.
-# It is already tested in test_normalise_identifiers.py
-def test_column_normalizes_name_and_defaults_nullable() -> None:
-    col = Column("  ID  ", Integer())
-    assert col.name == "id"
-    assert col.is_nullable is True
+def test_canonicalizes_column_name_case_insensitively() -> None:
+    # Given: a column name with mixed case
+    # When: constructing a Column
+    col = Column("EventDate", Integer())
+    # Then: the name is canonicalized (e.g., lowercased per identifier rules)
+    assert col.name == "eventdate"
 
 
-def test_column_is_frozen() -> None:
+@pytest.mark.parametrize("invalid", ["", " ", "user-id", "order.item", "a/b", '"quoted"'])
+def test_rejects_invalid_column_identifier(invalid: str) -> None:
+    # Given: an invalid column identifier
+    # When / Then: construction fails with a validation error
+    with pytest.raises(ValueError):
+        Column(invalid, Integer())
+
+
+def test_defaults_to_nullable_true() -> None:
+    # Given: a column with no explicit nullability
+    # When: constructing a Column
     col = Column("id", Integer())
-    with pytest.raises(FrozenInstanceError):
-        col.name = "x"  # type: ignore[misc]
-
-
-def test_column_equality_respects_normalization_and_type() -> None:
-    a = Column("ID", Integer())
-    b = Column("id", Integer())
-    c = Column("id", Long())
-    assert a == b
-    assert a != c
+    # Then: it defaults to nullable=True
+    assert col.is_nullable is True

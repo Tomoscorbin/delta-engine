@@ -12,7 +12,6 @@ from delta_engine.domain.services.table_diff import (
 )
 
 
-# TODO: can we come up with a generic table differ?
 def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
     Compute the actions required to reach the desired schema.
