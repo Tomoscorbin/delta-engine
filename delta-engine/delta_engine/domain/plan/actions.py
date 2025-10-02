@@ -72,11 +72,11 @@ class SetColumnNullability(Action):
     """Set a column's nullability."""
 
     column_name: str
-    nullable: bool
+    nullable: bool  # TODO: make variable name consistent with Column
 
 
 @dataclass(frozen=True, slots=True)
-class PartitionBy(Action):  # consider replaceing with a RequireTableRecreate action
+class PartitionBy(Action):  # consider replacing with a RequireTableRecreate action
     """
     Partition the table.
 

@@ -1,124 +1,178 @@
-from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer
-from delta_engine.domain.model.table import DesiredTable, ObservedTable
-from delta_engine.domain.plan.actions import SetProperty, SetTableComment, UnsetProperty
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    ObservedTable,
+    QualifiedName,
+)
+from delta_engine.domain.plan.actions import (
+    SetProperty,
+    SetTableComment,
+    UnsetProperty,
+)
 from delta_engine.domain.services.table_diff import (
-    _diff_properties_for_sets,
-    _diff_properties_for_unsets,
+    diff_partition_columns,
     diff_properties,
     diff_table_comments,
 )
-from tests.factories import make_qualified_name
 
-# --- _diff_properties_for_sets ------------------------------------------------
-
-
-def test_diff_properties_for_sets_detects_missing_and_changed_values() -> None:
-    desired = {"a": "1", "b": "2", "c": "3"}
-    observed = {"a": "0", "b": "2"}
-
-    actions = _diff_properties_for_sets(desired, observed)
-
-    actual = {(a.name, a.value) for a in actions}
-    assert actual == {("a", "1"), ("c", "3")}
+_QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-def test_diff_properties_for_sets_no_changes_returns_empty_tuple() -> None:
-    desired = {"a": "1", "b": "2"}
-    observed = {"a": "1", "b": "2"}
+def test_no_property_actions_when_mappings_are_identical():
+    # Given: desired and observed have identical properties
+    props = {"delta.appendOnly": "true", "owner": "cdm"}
 
-    assert _diff_properties_for_sets(desired, observed) == ()
+    # When: diffing properties
+    actions = diff_properties(props, props)
 
-
-# --- _diff_properties_for_unsets ---------------------------------------------
-
-
-def test_diff_properties_for_unsets_returns_unsets_for_observed_extras() -> None:
-    desired = {"keep": "yes"}
-    observed = {"keep": "yes", "ttl": "7d", "owner": "ops"}
-
-    actions = _diff_properties_for_unsets(desired, observed)
-
-    assert {a.name for a in actions} == {"ttl", "owner"}
+    # Then: nothing to do
+    assert actions == ()
 
 
-def test_diff_properties_for_unsets_no_extras_returns_empty_tuple() -> None:
-    desired = {"a": "1", "b": "2"}
-    observed = {"a": "1"}
+def test_sets_property_when_missing_in_observed():
+    # Given: desired has a property missing from observed
+    desired_props = {"delta.appendOnly": "true"}
+    observed_props = {}
 
-    assert _diff_properties_for_unsets(desired, observed) == ()
+    # When: diffing properties
+    actions = diff_properties(desired_props, observed_props)
 
-
-# --- diff_properties (composition, order-agnostic) ----------------------------
-
-
-def test_diff_properties_combines_sets_and_unsets() -> None:
-    desired = {"a": "1", "b": "2"}  # set a (changed), set b (missing)
-    observed = {"a": "0", "c": "3"}  # unset c (extra)
-
-    actions = diff_properties(desired, observed)
-
-    # All actions are SetProperty or UnsetProperty.
-    assert all(isinstance(a, SetProperty | UnsetProperty) for a in actions)
-
-    set_pairs = {(a.name, a.value) for a in actions if isinstance(a, SetProperty)}
-    unset_names = {a.name for a in actions if isinstance(a, UnsetProperty)}
-
-    assert set_pairs == {("a", "1"), ("b", "2")}
-    assert unset_names == {"c"}
+    # Then: a SetProperty is emitted with the desired value
+    expected = (SetProperty(name="delta.appendOnly", value="true"),)
+    assert actions == expected
 
 
-def test_diff_properties_no_differences_returns_empty_tuple() -> None:
-    desired = {"x": "y"}
-    observed = {"x": "y"}
+def test_updates_property_when_value_differs():
+    # Given: key matches but value differs
+    desired_props = {"delta.appendOnly": "false"}
+    observed_props = {"delta.appendOnly": "true"}
 
-    assert diff_properties(desired, observed) == ()
+    # When
+    actions = diff_properties(desired_props, observed_props)
 
-
-def test_diff_properties_all_unsets_when_desired_is_empty() -> None:
-    desired = {}
-    observed = {"ttl": "7d", "owner": "ops"}
-
-    actions = diff_properties(desired, observed)
-
-    assert {(a.name, getattr(a, "value", None)) for a in actions} == {
-        ("ttl", None),
-        ("owner", None),
-    }
-    assert all(isinstance(a, UnsetProperty) for a in actions)
+    # Then: a single SetProperty updates the value
+    expected = (SetProperty(name="delta.appendOnly", value="false"),)
+    assert actions == expected
 
 
-def test_diff_properties_all_sets_when_observed_is_empty() -> None:
-    desired = {"a": "1", "b": "2"}
-    observed = {}
+def test_unsets_property_when_not_in_desired():
+    # Given: observed contains an extra property
+    desired_props = {"owner": "cdm"}
+    observed_props = {"owner": "cdm", "obsolete": "1"}
 
-    actions = diff_properties(desired, observed)
+    # When
+    actions = diff_properties(desired_props, observed_props)
 
-    assert {(a.name, a.value) for a in actions if isinstance(a, SetProperty)} == {
-        ("a", "1"),
-        ("b", "2"),
-    }
-    assert not [a for a in actions if isinstance(a, UnsetProperty)]
-
-
-# --- diff_table_comments ------------------------------------------------------
+    # Then: an UnsetProperty removes the extra key
+    expected = (UnsetProperty(name="obsolete"),)
+    assert actions == expected
 
 
-def test_diff_table_comments_noop_when_comments_match() -> None:
-    name = make_qualified_name("dev", "silver", "people")
-    cols = (Column("id", Integer()),)
-    desired = DesiredTable(name, cols, comment="team-owned")
-    observed = ObservedTable(name, cols, comment="team-owned")
+def test_combines_sets_and_unsets_without_extras():
+    # Given: one set and one unset needed
+    desired_props = {"owner": "cdm", "delta.appendOnly": "false"}
+    observed_props = {"owner": "cdm", "obsolete": "1"}
 
-    assert diff_table_comments(desired, observed) == ()
+    # When
+    actions = diff_properties(desired_props, observed_props)
+
+    # Then: exactly the expected operations are present (order not asserted)
+    assert SetProperty(name="delta.appendOnly", value="false") in actions
+    assert UnsetProperty(name="obsolete") in actions
 
 
-def test_diff_table_comments_sets_desired_comment_when_different() -> None:
-    name = make_qualified_name("dev", "silver", "people")
-    cols = (Column("id", Integer()),)
-    desired = DesiredTable(name, cols, comment="gold quality")
-    observed = ObservedTable(name, cols, comment="old comment")
+def test_no_comment_action_when_comments_match():
+    # Given: same comment on desired and observed
+    d = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="core table",
+        properties={},
+        partitioned_by=(),
+    )
+    o = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="core table",
+        properties={},
+        partitioned_by=(),
+    )
 
-    actions = diff_table_comments(desired, observed)
+    # When
+    actions = diff_table_comments(d, o)
 
-    assert actions == (SetTableComment(comment="gold quality"),)
+    # Then
+    assert actions == ()
+
+
+def test_sets_comment_when_comment_differs():
+    # Given: desired has a different comment than observed
+    d = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="core table",
+        properties={},
+        partitioned_by=(),
+    )
+    o = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="",
+        properties={},
+        partitioned_by=(),
+    )
+
+    # When
+    actions = diff_table_comments(d, o)
+
+    # Then: a single SetTableComment is emitted with the desired text
+    expected = (SetTableComment(comment="core table"),)
+    assert actions == expected
+
+
+def test_clears_comment_when_desired_is_empty():
+    # Given: observed has a comment; desired clears it
+    d = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="",
+        properties={},
+        partitioned_by=(),
+    )
+    o = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        comment="legacy",
+        properties={},
+        partitioned_by=(),
+    )
+
+    # When
+    actions = diff_table_comments(d, o)
+
+    # Then: a single SetTableComment clears to empty
+    expected = (SetTableComment(comment=""),)
+    assert actions == expected
+
+
+def test_no_partition_action_when_partition_columns_match():
+    # Given: same partition spec on desired and observed
+    d = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("event_date", Integer()),),
+        properties={},
+        partitioned_by=("event_date",),
+    )
+    o = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("event_date", Integer()),),
+        properties={},
+        partitioned_by=("event_date",),
+    )
+
+    # When
+    actions = diff_partition_columns(d, o)
+
+    # Then: no action
+    assert actions == ()
