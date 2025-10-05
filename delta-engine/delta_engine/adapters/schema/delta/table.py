@@ -19,7 +19,7 @@ class DeltaTable:
         }
     )
 
-    # Fast lookup set of supported property keys
+    # lookup set of supported property keys
     _allowed_property_keys: ClassVar[frozenset[str]] = frozenset(p.value for p in Property)
 
     def __init__(

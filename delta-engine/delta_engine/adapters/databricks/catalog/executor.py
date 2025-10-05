@@ -7,6 +7,8 @@ returns `ExecutionResult` entries including SQL previews and failure details.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 import logging
 
 from pyspark.sql import SparkSession
@@ -25,56 +27,99 @@ configure_logging(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _AppliedStep:
+    """Internal record of what happened when the statement is applied."""
+
+    action_name: str
+    action_index: int
+    statement: str
+    exception: Exception | None
+
+
 class DatabricksExecutor:
     """Plan executor that runs compiled statements via a Spark session."""
 
-    def __init__(self, spark: SparkSession) -> None:
-        """Initialize the executor with a `SparkSession`."""
+    def __init__(
+        self,
+        spark: SparkSession,
+        compiler: Callable[[ActionPlan], Iterable[str]] = compile_plan,
+    ) -> None:
         self.spark = spark
+        self._compiler = compiler
 
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
         """Execute all actions in the plan, returning per-action results."""
         if not plan:
             return ()
 
-        statements = compile_plan(plan)
+        steps = self._apply(plan)
+        return self._to_results(steps)
+
+    def _apply(self, plan: ActionPlan) -> tuple[_AppliedStep, ...]:
+        """
+        Execute all statements for the plan.
+
+        Raises:
+            RuntimeError: if any statement fails.
+            ValueError: if the compiler returns a mismatched count.
+
+        """
+        if not plan:
+            return
+
+        statements = self._compiler(plan)
+        applied: list[_AppliedStep] = []
+
+        for action_index, statement in enumerate(statements):
+            action_name = type(plan[action_index]).__name__
+            exception: Exception | None = None
+
+            try:
+                self.spark.sql(statement)
+                logger.info("Executed: %s", action_name)
+            except Exception as e:
+                exception = e
+                logger.warning(
+                    "%s failed: %s\nSQL: %s",
+                    action_name,
+                    error_preview(exception),
+                    sql_preview(statement),
+                )
+
+            applied.append(
+                _AppliedStep(
+                    action_name=action_name,
+                    action_index=action_index,
+                    statement=statement,
+                    exception=exception,
+                )
+            )
+
+        return tuple(applied)
+
+    def _to_results(self, steps: tuple[_AppliedStep, ...]) -> tuple[ExecutionResult, ...]:
         results: list[ExecutionResult] = []
-        for idx, (action, statement) in enumerate(
-            zip(plan, statements, strict=True)  # feels too complicated
-        ):
-            res = self._run_action(
-                action_name=type(action).__name__,
-                action_index=idx,
-                statement=statement,
-            )
-            results.append(res)
+        for step in steps:
+            preview = sql_preview(step.statement)
+            if step.exception is None:
+                status = ActionStatus.OK
+                failure = None
+            else:
+                status = ActionStatus.FAILED
+                failure = ExecutionFailure(
+                    action_index=step.action_index,
+                    exception_type=type(step.exception).__name__,
+                    message=error_preview(step.exception),
+                )
 
+            results.append(
+                ExecutionResult(
+                    action=step.action_name,
+                    action_index=step.action_index,
+                    status=status,
+                    statement_preview=preview,
+                    failure=failure,
+                )
+            )
         return tuple(results)
-
-    def _run_action(
-        self, *, action_name: str, action_index: int, statement: str
-    ) -> ExecutionResult:
-        """Execute a single statement and return its result."""
-        preview = sql_preview(statement)
-
-        status: ActionStatus
-        failure: ExecutionFailure | None = None
-        try:
-            self.spark.sql(statement)
-            status = ActionStatus.OK
-            logger.info("Successfully executed action %s", action_name)
-        except Exception as exc:
-            status = ActionStatus.FAILED
-            failure = ExecutionFailure(
-                action_index=action_index,
-                exception_type=type(exc).__name__,
-                message=error_preview(exc),
-            )
-            logger.warning("Failed to executed action %s", action_name)
-        return ExecutionResult(
-            action=action_name,
-            action_index=action_index,
-            status=status,
-            statement_preview=preview,
-            failure=failure,
-        )

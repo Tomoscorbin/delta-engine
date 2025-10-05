@@ -5,48 +5,81 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _format_datatype(data_type: DataType) -> str:
+    match data_type:
+        case Integer():
+            return "int"
+        case Long():
+            return "long"
+        case Float():
+            return "float"
+        case Double():
+            return "double"
+        case Boolean():
+            return "boolean"
+        case String():
+            return "string"
+        case Date():
+            return "date"
+        case Timestamp():
+            return "timestamp"
+        case Decimal(precision=p, scale=s):
+            return f"decimal({p},{s})"
+        case Array(element=e):
+            return f"array<{_format_datatype(e)}>"
+        case Map(key=k, value=v):
+            return f"map<{_format_datatype(k)},{_format_datatype(v)}>"
+
+
+class DataType:
+    """Base class for all data types."""
+
+    def __str__(self) -> str:
+        return _format_datatype(self)
+
+
 @dataclass(frozen=True, slots=True)
-class Integer:
+class Integer(DataType):
     """32-bit signed integer type."""
 
 
 @dataclass(frozen=True, slots=True)
-class Long:
+class Long(DataType):
     """64-bit signed integer type."""
 
 
 @dataclass(frozen=True, slots=True)
-class Float:
+class Float(DataType):
     """32-bit floating point type."""
 
 
 @dataclass(frozen=True, slots=True)
-class Double:
+class Double(DataType):
     """64-bit floating point type."""
 
 
 @dataclass(frozen=True, slots=True)
-class Boolean:
+class Boolean(DataType):
     """Boolean truth value type."""
 
 
 @dataclass(frozen=True, slots=True)
-class String:
+class String(DataType):
     """Unicode string type."""
 
 
 @dataclass(frozen=True, slots=True)
-class Date:
+class Date(DataType):
     """Calendar date without time or timezone."""
 
 
 @dataclass(frozen=True, slots=True)
-class Timestamp:
+class Timestamp(DataType):
     """Timestamp with date and time (timezone handling is engine-specific)."""
 
 
 @dataclass(frozen=True, slots=True)
-class Decimal:
+class Decimal(DataType):
     """
     Fixed-precision decimal type.
 
@@ -66,20 +99,15 @@ class Decimal:
 
 
 @dataclass(frozen=True, slots=True)
-class Array:
+class Array(DataType):
     """Array of homogeneous ``element`` values."""
 
     element: DataType
 
 
 @dataclass(frozen=True, slots=True)
-class Map:
+class Map(DataType):
     """Dictionary of ``key`` to ``value`` elements."""
 
     key: DataType
     value: DataType
-
-
-type DataType = (
-    Integer | Long | Float | Double | Boolean | String | Date | Timestamp | Decimal | Array | Map
-)
