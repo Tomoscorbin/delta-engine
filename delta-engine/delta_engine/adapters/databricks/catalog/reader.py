@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable
 
-from py4j.protocol import Py4JJavaError
+from py4j.protocol import Py4JJavaError  # type: ignore[import]
 from pyspark.sql import SparkSession
+from pyspark.sql.catalog import Column as SparkColumn
 import pyspark.sql.utils as sku
 
 from delta_engine.adapters.databricks.policy import DEFAULT_PROPERTY_POLICY, PropertyPolicy
@@ -14,7 +14,7 @@ from delta_engine.adapters.databricks.sql.preview import error_preview
 from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
 from delta_engine.application.results import ReadFailure, ReadResult
-from delta_engine.domain.model import Column, ObservedTable, QualifiedName
+from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 
 _SPARK_EXCEPTION = (
     *tuple(
@@ -45,24 +45,13 @@ def _exc_type_name(exc: Exception) -> str:
     return type(exc).__name__
 
 
-@runtime_checkable
-class SparkColumn(Protocol):
-    """Shape of Spark catalog columns we care about (duck-typed)."""
-
-    name: str
-    dataType: Any  # noqa: N815
-    nullable: bool | None
-    description: str | None
-    isPartition: bool | None  # noqa: N815
-
-
-def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -> Column:
+def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -> DomainColumn:
     """Convert a spark Column object into a domain `Column`."""
     domain_data_type = type_mapper(column.dataType)
     is_nullable = bool(getattr(column, "nullable", True))
     comment = column.description if column.description else ""
 
-    return Column(
+    return DomainColumn(
         name=column.name,
         data_type=domain_data_type,
         is_nullable=is_nullable,
@@ -100,7 +89,7 @@ class DatabricksReader:
             table_comment = self._fetch_table_comment(str(qualified_name))
             partition_columns = self._fetch_partition_columns(str(qualified_name))
         except _SPARK_EXCEPTION as exc:
-            failure = ReadFailure(type(exc).__name__, error_preview(exc))
+            failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
             return ReadResult.create_failed(failure)
 
         observed = ObservedTable(
@@ -117,7 +106,7 @@ class DatabricksReader:
         query = query_table_existence(qualified_name)
         return bool(self.spark.sql(query).head(1))
 
-    def _fetch_columns(self, fully_qualified_name: str) -> tuple[Column, ...]:
+    def _fetch_columns(self, fully_qualified_name: str) -> tuple[DomainColumn, ...]:
         """List column definitions for the given table."""
         catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
         return tuple(_to_domain_column(column) for column in catalog_columns)

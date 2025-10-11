@@ -75,6 +75,7 @@ ban-relative-imports = "all"  # enforce absolute imports (TID252)
   "D100",  # don't require module docstrings
   "D205",  # don't require 1 blank line between summary line and description
   "N815",  # allow variables in class scope to be mixedCase
+  "N812",  # allow uppercase variable names
 ]
 
 [tool.pytest.ini_options]

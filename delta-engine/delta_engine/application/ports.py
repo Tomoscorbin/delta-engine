@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from delta_engine.application.results import ExecutionResult, ReadResult
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import QualifiedName, TableFormat
 from delta_engine.domain.plan.actions import ActionPlan
 
 
@@ -45,7 +45,7 @@ class TableObject(Protocol):  # rename to UserTable?
     comment: str
     properties: dict[str, str]
     partitioned_by: Iterable[str]
-    format: str
+    format: TableFormat
 
     @property
     def effective_properties(self) -> Mapping[str, str]:

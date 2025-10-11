@@ -66,7 +66,7 @@ class DatabricksExecutor:
 
         """
         if not plan:
-            return
+            return tuple()
 
         statements = self._compiler(plan)
         applied: list[_AppliedStep] = []

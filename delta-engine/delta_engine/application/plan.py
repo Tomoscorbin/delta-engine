@@ -12,8 +12,10 @@ from dataclasses import dataclass, replace
 
 from delta_engine.application.ordering import action_sort_key
 from delta_engine.domain.model import DesiredTable, ObservedTable
-from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan import Action, ActionPlan
 from delta_engine.domain.services.differ import diff_tables
+
+SortKey = Callable[[Action], tuple[int, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +38,7 @@ class PlanContext:
 def make_plan_context(
     desired: DesiredTable,
     observed: ObservedTable | None,
-    sort_key: Callable[[object], object] = action_sort_key,
+    sort_key: SortKey = action_sort_key,
 ) -> PlanContext:
     """Create a :class:`PlanContext` for a pair of tables and its plan."""
     unsorted_plan = diff_tables(desired=desired, observed=observed)
@@ -44,6 +46,6 @@ def make_plan_context(
     return PlanContext(desired=desired, observed=observed, plan=plan)
 
 
-def _order_actions(plan: ActionPlan, sort_key: Callable[[object], object]) -> ActionPlan:
+def _order_actions(plan: ActionPlan, sort_key: SortKey) -> ActionPlan:
     """Return a new ActionPlan whose actions are deterministically ordered by sort_key."""
     return replace(plan, actions=tuple(sorted(plan.actions, key=sort_key)))
