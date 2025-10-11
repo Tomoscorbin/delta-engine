@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.application.registry import Registry
-from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model import Column as DomainColumn, TableFormat
 
 # --------- fakes
 
@@ -33,6 +33,7 @@ class _FakeTable:
         self.comment = comment
         self.effective_properties = effective_properties or {}
         self.partitioned_by = partitioned_by
+        self.format = TableFormat.DELTA
 
 
 def _col(

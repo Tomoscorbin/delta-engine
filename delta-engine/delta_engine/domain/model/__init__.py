@@ -14,7 +14,7 @@ from delta_engine.domain.model.data_type import (
     Timestamp,
 )
 from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
+from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableFormat, TableSnapshot
 
 __all__ = [
     "Array",
@@ -32,6 +32,7 @@ __all__ = [
     "ObservedTable",
     "QualifiedName",
     "String",
+    "TableFormat",
     "TableSnapshot",
     "Timestamp",
 ]

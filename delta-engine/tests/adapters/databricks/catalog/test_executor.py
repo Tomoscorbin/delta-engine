@@ -3,7 +3,7 @@ import pytest
 
 from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
 from delta_engine.application.results import ActionStatus
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
     ActionPlan,
@@ -124,6 +124,7 @@ def test_createtable_action_creates_table_with_correct_schema(spark, test_table)
     desired = DesiredTable(
         qualified_name=QualifiedName(TEST_CATALOG, TEST_SCHEMA, "customers"),
         columns=(Column(name="id", data_type=Integer()),),
+        format=TableFormat.DELTA,
     )
     plan = ActionPlan(target=desired.qualified_name, actions=(CreateTable(table=desired),))
     executor = DatabricksExecutor(spark)

@@ -12,7 +12,7 @@ from delta_engine.application.results import (
     TableRunStatus,
     ValidationFailure,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import QualifiedName, TableFormat
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
@@ -34,7 +34,8 @@ class _SpecTable:
         self.columns = (_SpecColumn("id", "string", True, None),)
         self.comment = None
         self.properties: dict[str, str] = {}
-        self.partitioned_by = ()  # or None
+        self.partitioned_by = ()
+        self.format = TableFormat.DELTA
 
     @property
     def effective_properties(self) -> dict[str, str]:

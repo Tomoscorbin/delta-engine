@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.qualified_name import QualifiedName
+
+
+class TableFormat(StrEnum):
+    """Supported table formats."""
+
+    DELTA = "delta"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +58,12 @@ class TableSnapshot:
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
+
+    format: TableFormat = field(kw_only=True)
+
+    # TODO(format): We only carry `format` on DesiredTable for creation.
+    # We currently assume table format is *immutable* after creation and do not
+    # detect or plan format changes.
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,6 +6,7 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     String,
+    TableFormat,
 )
 from delta_engine.domain.plan.actions import (
     ActionPlan,
@@ -28,6 +29,7 @@ def test_creates_table_when_observed_is_missing():
         comment="core table",
         properties={"owner": "cdm"},
         partitioned_by=(),
+        format=TableFormat.DELTA,
     )
 
     # When: diffing desired vs None
@@ -50,6 +52,7 @@ def test_no_actions_when_desired_equals_observed():
         comment="core table",
         properties={"owner": "cdm"},
         partitioned_by=("event_date",),
+        format=TableFormat.DELTA,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -85,6 +88,7 @@ def test_combines_column_property_comment_and_partition_diffs():
         comment="core table",  # updated comment
         properties={"owner": "cdm", "delta.appendOnly": "false"},  # set/update
         partitioned_by=("event_date", "country"),  # partition spec differs
+        format=TableFormat.DELTA,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,

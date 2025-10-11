@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.application.ordering import action_sort_key, subject_name
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
 from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
@@ -28,6 +28,7 @@ def _create_table_action() -> CreateTable:
         comment=None,
         properties={},
         partitioned_by=(),
+        format=TableFormat.DELTA,
     )
     return CreateTable(table=dt)
 

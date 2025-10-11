@@ -54,6 +54,7 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
     parts = [
         f"CREATE TABLE IF NOT EXISTS {quoted_table_name}",
         f"({columns})",
+        f"USING {table.format}",
         table_comment,
         properties,
         partition_by,

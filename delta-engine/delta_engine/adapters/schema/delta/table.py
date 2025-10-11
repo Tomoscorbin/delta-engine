@@ -6,12 +6,14 @@ from typing import ClassVar
 
 from delta_engine.adapters.schema import Column
 from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.domain.model import TableFormat
 from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
 class DeltaTable:
     """Defines a Delta table schema."""
 
+    format: ClassVar[TableFormat] = TableFormat.DELTA
     default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
         {
             Property.ENABLE_DELETION_VECTORS.value: "true",

@@ -71,6 +71,7 @@ class Registry:
             comment=spec.comment,
             properties=spec.effective_properties,
             partitioned_by=partition_columns,
+            format=spec.format,
         )
 
     @staticmethod
