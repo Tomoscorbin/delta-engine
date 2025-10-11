@@ -21,18 +21,28 @@ _PROPERTY_ALLOWLIST: Final[frozenset[str]] = frozenset(
 )
 
 
-def enforce_property_policy(properties: Mapping[str, str]) -> MappingProxyType[str, str]:
-    """
-    Return a read-only mapping of allowed Delta table properties.
+class PropertyPolicy:
+    """Policy that keeps only keys in `allowed_keys` and returns a read-only map."""
 
-    Filters the input mapping to the subset of keys permitted by the policy
-    and wraps the result in a ``MappingProxyType`` to prevent modification.
+    def __init__(self, allowed_keys: frozenset[str]) -> None:
+        self._allowed_keys = allowed_keys
 
-    Args:
-        properties: Arbitrary property mapping as read from the catalog.
+    def enforce(self, properties: Mapping[str, str]) -> MappingProxyType[str, str]:
+        """
+        Return a read-only mapping of allowed Delta table properties.
 
-    Returns:
-        Read-only mapping containing only allowed properties.
+        Filters the input mapping to the subset of keys permitted by the policy
+        and wraps the result in a ``MappingProxyType`` to prevent modification.
 
-    """
-    return MappingProxyType({k: v for k, v in properties.items() if k in _PROPERTY_ALLOWLIST})
+        Args:
+            properties: Arbitrary property mapping as read from the catalog.
+
+        Returns:
+            Read-only mapping containing only allowed properties.
+
+        """
+        filtered = {k: v for k, v in properties.items() if k in self._allowed_keys}
+        return MappingProxyType(filtered)
+
+
+DEFAULT_PROPERTY_POLICY = PropertyPolicy(_PROPERTY_ALLOWLIST)

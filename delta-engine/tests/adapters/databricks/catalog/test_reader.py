@@ -1,241 +1,398 @@
-# tests/adapters/databricks/catalog/test_reader.py
 from __future__ import annotations
 
 from types import MappingProxyType, SimpleNamespace
 
+import pyspark.sql.types as T
+from pyspark.sql.utils import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
-from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer
-from delta_engine.domain.model.table import ObservedTable
-from tests.factories import make_qualified_name
+from delta_engine.domain.model import QualifiedName
 
-# ---------- tiny spark stubs (robust defaults) --------------------------------
+# ---------- fakes & helpers ----------
 
 
-class StubRow:
-    def __init__(self, properties: dict[str, str] | None):
-        self._properties = properties
+class FakeDataFrame:
+    def __init__(self, rows):
+        self._rows = rows
 
-    def __getitem__(self, key: str):
-        if key == "properties":
-            return self._properties
-        raise KeyError(key)
-
-
-class StubDF:
-    def __init__(self, head_values: list | None = None, first_row: StubRow | None = None):
-        self._head_values = head_values or []
-        self._first_row = first_row
-
-    def head(self, n: int):
-        return list(self._head_values)[:n]
+    def head(self, n):
+        return self._rows[:n]
 
     def first(self):
-        return self._first_row
+        return self._rows[0] if self._rows else None
 
 
-class StubCatalog:
-    def __init__(
-        self,
-        columns: list,
-        table_description: str | None = None,
-        raise_on_list: Exception | None = None,
-    ):
-        self._columns = columns
-        self._table_description = table_description
-        self._raise_on_list = raise_on_list
+class FakeCatalog:
+    def __init__(self, *, columns_by_table=None, table_comments=None):
+        self._columns_by_table = columns_by_table or {}
+        self._table_comments = table_comments or {}
 
     def listColumns(self, fully_qualified_name: str):
-        if self._raise_on_list:
-            raise self._raise_on_list
-        return list(self._columns)
+        return self._columns_by_table.get(fully_qualified_name, [])
 
     def getTable(self, fully_qualified_name: str):
-        return SimpleNamespace(description=self._table_description)
+        # Only `description` is read by the code under test
+        return SimpleNamespace(description=self._table_comments.get(fully_qualified_name, ""))
 
 
-class StubSpark:
-    def __init__(self, sql_map: dict[str, StubDF], catalog: StubCatalog):
-        self._sql_map = sql_map
-        self.catalog = catalog
+class FakeSpark:
+    """
+    Spark fake for existence checks and catalog lookups.
 
-    def sql(self, query: str):
-        return self._sql_map[query]
+    - sql(query) -> head(1) truthiness driven by `target_exists`
+    - catalog.* calls are delegated to the provided FakeCatalog
+    """
+
+    def __init__(self, *, target_exists: bool, catalog: FakeCatalog | None = None):
+        self.target_exists = target_exists
+        self.catalog = catalog or FakeCatalog()
+
+    def sql(self, _query: str):
+        return FakeDataFrame([1] if self.target_exists else [])
 
 
-class SparkCol:
-    """Minimal shape compatible with pyspark.sql.catalog.Column for our converter."""
+class FakeSparkProps:
+    """
+    Spark fake for _fetch_properties() unit tests.
+
+    - sql(query) returns a dataframe built from `rows`
+    """
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.catalog = SimpleNamespace()  # not used in these tests
+
+    def sql(self, _query: str):
+        return FakeDataFrame(self._rows)
+
+
+class FakeSparkForFetchState:
+    """
+    Spark fake for fetch_state().
+
+      1st sql() -> existence probe
+      2nd sql() -> DESCRIBE DETAIL (returns rows or raises)
+    """
 
     def __init__(
         self,
-        name: str,
-        data_type: object,
         *,
-        nullable: bool = True,
-        description: str | None = None,
-        isPartition: bool = False,
+        exists: bool,
+        catalog: FakeCatalog,
+        describe_rows=None,
+        describe_exc: Exception | None = None,
     ):
-        self.name = name
-        self.dataType = data_type
-        self.nullable = nullable
-        self.description = description
-        self.isPartition = isPartition  # <- default False for stability
+        self._exists = exists
+        self._catalog = catalog
+        self._describe_rows = describe_rows
+        self._describe_exc = describe_exc
+        self._sql_calls = 0
+
+    @property
+    def catalog(self):
+        return self._catalog
+
+    def sql(self, _query: str):
+        self._sql_calls += 1
+        if self._sql_calls == 1:
+            return FakeDataFrame([1] if self._exists else [])
+        if self._describe_exc is not None:
+            raise self._describe_exc
+        return FakeDataFrame(self._describe_rows or [])
 
 
-# ---------- fixtures -----------------------------------------------------------
+def make_catalog_col(
+    name: str,
+    *,
+    dataType="string",
+    nullable: bool = True,
+    description: str = "",
+    isPartition: bool = False,
+):
+    """Build a duck-typed SparkColumn for the reader."""
+    return SimpleNamespace(
+        name=name,
+        dataType=dataType,
+        nullable=nullable,
+        description=description,
+        isPartition=isPartition,
+    )
+
+
+# ---------- shared fixtures ----------
 
 
 @pytest.fixture
-def qn():
-    return make_qualified_name("dev", "silver", "people")
+def qn() -> QualifiedName:
+    return QualifiedName("c", "s", "t")
 
 
-# ---------- decoupled result fakes --------------------------------------------
+# ---------- tests: existence ----------
 
 
-class FakeReadResult:
-    def __init__(self, kind: str, payload=None):
-        self.kind = kind
-        self.payload = payload
+def test_table_exists_returns_true_when_head_has_rows(qn):
+    # Given a reader whose existence probe should be truthy
+    reader = DatabricksReader(FakeSpark(target_exists=True))
 
-    @classmethod
-    def create_absent(cls):
-        return cls("absent")
+    # When we check whether the table exists
+    result = reader._table_exists(qn)
 
-    @classmethod
-    def create_present(cls, observed):
-        return cls("present", observed)
-
-    @classmethod
-    def create_failed(cls, failure):
-        return cls("failed", failure)
+    # Then the table is reported as existing
+    assert result is True
 
 
-class FakeReadFailure:
-    def __init__(self, error_type: str, preview: str):
-        self.error_type = error_type
-        self.preview = preview
+def test_table_exists_returns_false_when_head_is_empty(qn):
+    # Given a reader whose existence probe should be empty
+    reader = DatabricksReader(FakeSpark(target_exists=False))
+
+    # When we check whether the table exists
+    result = reader._table_exists(qn)
+
+    # Then the table is reported as missing
+    assert result is False
 
 
-# ---------- small, focused tests ----------------------------------------------
+# ---------- tests: columns & partitions ----------
 
 
-def test_absent_returns_absent(monkeypatch: pytest.MonkeyPatch, qn) -> None:
-    # existence query returns no rows -> absent
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.query_table_existence",
-        lambda _qn: "EXISTS",
+def test_fetch_columns_maps_name_nullability_and_comment():
+    # Given a catalog exposing two columns
+    fq = "c.s.t"
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [
+                make_catalog_col(
+                    "id", dataType=T.IntegerType(), nullable=False, description="identifier"
+                ),
+                make_catalog_col("p_date", dataType=T.DateType(), nullable=True, description=""),
+            ]
+        }
     )
-    spark = StubSpark(sql_map={"EXISTS": StubDF(head_values=[])}, catalog=StubCatalog(columns=[]))
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.ReadResult", FakeReadResult
-    )
+    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
 
-    result = DatabricksReader(spark).fetch_state(qn)
-    assert result.kind == "absent"
+    # When we fetch columns for the table
+    cols = reader._fetch_columns(fq)
 
-
-def test_present_maps_columns_properties_and_defaults_partitioning(
-    monkeypatch: pytest.MonkeyPatch, qn
-) -> None:
-    # minimal happy path with 2 columns and properties; no partitions by default
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.query_table_existence",
-        lambda _qn: "EXISTS",
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.query_describe_detail",
-        lambda _qn: "DETAIL",
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.domain_type_from_spark",
-        lambda _dt: Integer(),
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.enforce_property_policy",
-        lambda props: MappingProxyType(dict(props)),
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.ReadResult", FakeReadResult
-    )
-
-    df_exists = StubDF(head_values=[1])
-    df_detail = StubDF(first_row=StubRow({"owner": "asda", "quality": "gold"}))
-    spark_cols = [
-        SparkCol("id", data_type=object(), nullable=True, description=None),
-        SparkCol("age", data_type=object(), nullable=False, description="years"),
-    ]
-    spark = StubSpark(
-        sql_map={"EXISTS": df_exists, "DETAIL": df_detail}, catalog=StubCatalog(columns=spark_cols)
-    )
-
-    result = DatabricksReader(spark).fetch_state(qn)
-    assert result.kind == "present"
-    observed = result.payload
-    assert isinstance(observed, ObservedTable)
-    assert {c.name for c in observed.columns} == {"id", "age"}
-    assert next(c for c in observed.columns if c.name == "age").comment == "years"
-    assert dict(observed.properties) == {"owner": "asda", "quality": "gold"}
-    assert observed.partitioned_by == ()  # default: unpartitioned
+    # Then names, nullability, and comments are mapped correctly
+    assert [c.name for c in cols] == ["id", "p_date"]
+    assert [c.is_nullable for c in cols] == [False, True]
+    assert [c.comment for c in cols] == ["identifier", ""]
 
 
-def test_failure_wraps_exception_with_preview(monkeypatch: pytest.MonkeyPatch, qn) -> None:
-    # listColumns raises -> failed with error preview
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.query_table_existence",
-        lambda _qn: "EXISTS",
+def test_fetch_partition_columns_returns_only_partition_names_in_order():
+    # Given a mix of regular and partition columns
+    fq = "c.s.t"
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [
+                make_catalog_col("id", isPartition=False),
+                make_catalog_col("p_store", isPartition=True),
+                make_catalog_col("p_date", isPartition=True),
+            ]
+        }
     )
-    spark = StubSpark(
-        sql_map={"EXISTS": StubDF(head_values=[1])},
-        catalog=StubCatalog(columns=[], raise_on_list=ValueError("boom")),
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.error_preview", lambda exc: "PREVIEW"
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.ReadResult", FakeReadResult
-    )
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.ReadFailure", FakeReadFailure
-    )
+    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
 
-    result = DatabricksReader(spark).fetch_state(qn)
-    assert result.kind == "failed"
-    failure = result.payload
-    assert isinstance(failure, FakeReadFailure)
-    assert (failure.error_type, failure.preview) == ("ValueError", "PREVIEW")
+    # When we fetch partition columns
+    partitions = reader._fetch_partition_columns(fq)
+
+    # Then only partition columns are returned and ordering is preserved
+    assert partitions == ("p_store", "p_date")
 
 
-def test_fetch_properties_empty_when_describe_detail_has_no_rows(
-    monkeypatch: pytest.MonkeyPatch, qn
-) -> None:
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.query_describe_detail",
-        lambda _qn: "DETAIL",
+def test_fetch_partition_columns_ignores_missing_or_false_flags():
+    # Given columns lacking isPartition and with isPartition=False
+    class NoIsPartition(SimpleNamespace):
+        pass
+
+    fq = "c.s.u"
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [
+                NoIsPartition(name="a", dataType="string", nullable=True, description=""),
+                make_catalog_col("b", isPartition=False),
+            ]
+        }
     )
-    spark = StubSpark(sql_map={"DETAIL": StubDF(first_row=None)}, catalog=StubCatalog(columns=[]))
-    props = DatabricksReader(spark)._fetch_properties(qn)
-    assert isinstance(props, MappingProxyType)
+    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+
+    # When we fetch partition columns
+    partitions = reader._fetch_partition_columns(fq)
+
+    # Then no partitions are reported
+    assert partitions == ()
+
+
+# ---------- tests: properties ----------
+
+
+def test_fetch_properties_returns_empty_readonly_when_describe_has_no_rows(qn):
+    # Given DESCRIBE DETAIL yields no rows
+    reader = DatabricksReader(FakeSparkProps(rows=[]))
+
+    # When we fetch properties
+    props = reader._fetch_properties(qn)
+
+    # Then we get an empty mapping
     assert dict(props) == {}
+    with pytest.raises(TypeError):
+        props["x"] = "y"  # type: ignore[index]
 
 
-def test_to_domain_column_basic_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "delta_engine.adapters.databricks.catalog.reader.domain_type_from_spark",
-        lambda _dt: Integer(),
-    )
-    reader = DatabricksReader(StubSpark(sql_map={}, catalog=StubCatalog(columns=[])))
+def test_fetch_properties_applies_injected_policy(qn):
+    # Given DESCRIBE DETAIL returns a properties dict and a policy that filters keys
+    rows = [
+        {
+            "properties": {
+                "delta.columnMapping.mode": "name",
+                "delta.deletedFileRetentionDuration": "interval 1 day",
+                "custom.unlisted": "keep-me-out",
+            }
+        }
+    ]
 
-    c1 = reader._to_domain_column(
-        SparkCol("col1", data_type=object(), nullable=True, description=None)
+    class AllowOnly:
+        def __init__(self, keys):
+            self._keys = set(keys)
+
+        def enforce(self, props):
+            return MappingProxyType({k: v for k, v in props.items() if k in self._keys})
+
+    policy = AllowOnly({"delta.columnMapping.mode", "delta.deletedFileRetentionDuration"})
+    reader = DatabricksReader(FakeSparkProps(rows=rows), property_policy=policy)
+
+    # When we fetch properties
+    props = reader._fetch_properties(qn)
+
+    # Then only allowed keys are returned
+    assert dict(props) == {
+        "delta.columnMapping.mode": "name",
+        "delta.deletedFileRetentionDuration": "interval 1 day",
+    }
+    with pytest.raises(TypeError):
+        props["x"] = "y"
+
+
+# ---------- tests: table comment ----------
+
+
+@pytest.mark.parametrize(
+    "desc_value, expected", [("orders table", "orders table"), (None, ""), ("", "")]
+)
+def test_fetch_table_comment_returns_description_or_empty(desc_value, expected):
+    # Given a catalog that may or may not have a description
+    fq = "c.s.t"
+    catalog = FakeCatalog(table_comments={fq: desc_value})
+    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+
+    # When we fetch the table comment
+    comment = reader._fetch_table_comment(fq)
+
+    # Then we get the description or an empty string
+    assert comment == expected
+
+
+def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
+    # Given a reader whose existence probe returns empty
+    reader = DatabricksReader(FakeSparkForFetchState(exists=False, catalog=FakeCatalog()))
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the result encodes absence (no observed, no failure)
+    assert result.observed is None
+    assert result.failure is None
+
+
+def test_fetch_state_returns_present_with_columns_partitions_comment_and_properties():
+    # Given a table that exists with two columns (one partition), a comment, and properties
+    qn = QualifiedName("c", "s", "t")
+    fq = str(qn)
+
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [
+                make_catalog_col(
+                    "id", dataType=T.IntegerType(), nullable=False, description="identifier"
+                ),
+                make_catalog_col("p_date", dataType=T.DateType(), isPartition=True),
+            ]
+        },
+        table_comments={fq: "orders table"},
     )
-    c2 = reader._to_domain_column(
-        SparkCol("col2", data_type=object(), nullable=False, description="hello")
+    describe_rows = [
+        {
+            "properties": {
+                "delta.columnMapping.mode": "name",
+                "delta.deletedFileRetentionDuration": "interval 1 day",
+            }
+        }
+    ]
+
+    class IdentityPolicy:
+        def enforce(self, props):
+            return MappingProxyType(dict(props))
+
+    reader = DatabricksReader(
+        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=describe_rows),
+        property_policy=IdentityPolicy(),
     )
 
-    assert (
-        isinstance(c1, Column) and c1.name == "col1" and c1.comment == "" and c1.is_nullable is True
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the observed payload contains correct columns, partitions, comment, and properties
+    assert result.failure is None
+    assert result.observed is not None
+    observed = result.observed
+    assert [c.name for c in observed.columns] == ["id", "p_date"]
+    assert observed.partitioned_by == ("p_date",)
+    assert observed.comment == "orders table"
+    assert dict(observed.properties) == {
+        "delta.columnMapping.mode": "name",
+        "delta.deletedFileRetentionDuration": "interval 1 day",
+    }
+
+
+def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_rows():
+    # Given a table that exists but DESCRIBE DETAIL returns no rows
+    qn = QualifiedName("c", "s", "no_props")
+    fq = str(qn)
+
+    catalog = FakeCatalog(
+        columns_by_table={fq: [make_catalog_col("id", dataType=T.IntegerType(), nullable=False)]},
+        table_comments={fq: ""},
     )
-    assert c2.name == "col2" and c2.comment == "hello" and c2.is_nullable is False
+    reader = DatabricksReader(
+        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[]),
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the table is present with empty properties and the expected comment
+    assert result.failure is None
+    assert result.observed is not None
+    assert dict(result.observed.properties) == {}
+    assert result.observed.comment == ""
+
+
+def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
+    # Given a table that exists but DESCRIBE DETAIL raises AnalysisException
+    qn = QualifiedName("c", "s", "boom")
+    fq = str(qn)
+    catalog = FakeCatalog(columns_by_table={fq: []}, table_comments={fq: ""})
+    reader = DatabricksReader(
+        FakeSparkForFetchState(
+            exists=True, catalog=catalog, describe_exc=AnalysisException("kaboom")
+        )
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the result encodes failure with the Spark exception type
+    assert result.observed is None
+    assert result.failure is not None
+    assert result.failure.exception_type == "AnalysisException"
