@@ -4,6 +4,7 @@ Logging helpers with ANSI-colored level output.
 Provides a `LevelColorFormatter` and `configure_logging` to install a colored
 stderr handler on the root logger for consistent, readable logs across the
 package.
+
 """
 
 import logging
