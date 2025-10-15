@@ -78,8 +78,8 @@ def test_clears_comment_when_desired_is_empty_and_observed_is_not():
 
 def test_sets_nullability_when_flag_differs():
     # Given: same column exists; desired flips nullability to NOT NULL
-    desired = (Column("active", String(), is_nullable=False),)
-    observed = (Column("active", String(), is_nullable=True),)
+    desired = (Column("active", String(), nullable=False),)
+    observed = (Column("active", String(), nullable=True),)
 
     # When: diffing desired against observed
     actions = diff_columns(desired, observed)
@@ -93,7 +93,7 @@ def test_combines_add_drop_and_updates_without_duplicates():
     # Given: need to add one, drop one, and update an existing column's comment/nullability
     desired = (
         Column("keep", Integer(), comment="k"),
-        Column("add_me", Integer(), is_nullable=False, comment="new"),
+        Column("add_me", Integer(), nullable=False, comment="new"),
     )
     observed = (
         Column("keep", Integer(), comment=""),
@@ -104,9 +104,7 @@ def test_combines_add_drop_and_updates_without_duplicates():
     actions = diff_columns(desired, observed)
 
     # Then: we see the three expected kinds of actions for the right columns
-    assert (
-        AddColumn(column=Column("add_me", Integer(), is_nullable=False, comment="new")) in actions
-    )
+    assert AddColumn(column=Column("add_me", Integer(), nullable=False, comment="new")) in actions
     assert DropColumn("drop_me") in actions
     assert SetColumnComment("keep", "k") in actions
 

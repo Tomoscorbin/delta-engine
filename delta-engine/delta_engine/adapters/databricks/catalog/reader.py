@@ -48,13 +48,13 @@ def _exc_type_name(exc: Exception) -> str:
 def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -> DomainColumn:
     """Convert a spark Column object into a domain `Column`."""
     domain_data_type = type_mapper(column.dataType)
-    is_nullable = bool(getattr(column, "nullable", True))
+    nullable = bool(getattr(column, "nullable", True))
     comment = column.description if column.description else ""
 
     return DomainColumn(
         name=column.name,
         data_type=domain_data_type,
-        is_nullable=is_nullable,
+        nullable=nullable,
         comment=comment,
     )
 

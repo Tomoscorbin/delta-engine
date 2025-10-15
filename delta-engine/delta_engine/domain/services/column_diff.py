@@ -57,9 +57,9 @@ def _diff_column_nullability(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[SetColumnNullability, ...]:
     """Return `SetColumnNullability` actions for columns whose `nullable` flag differs."""
-    observed_nullability_by_name = {c.name: c.is_nullable for c in observed}
+    observed_nullability_by_name = {c.name: c.nullable for c in observed}
     return tuple(
-        SetColumnNullability(column_name=c.name, nullable=c.is_nullable)
+        SetColumnNullability(column_name=c.name, nullable=c.nullable)
         for c in desired
-        if observed_nullability_by_name.get(c.name) != c.is_nullable
+        if observed_nullability_by_name.get(c.name) != c.nullable
     )

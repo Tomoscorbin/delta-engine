@@ -15,11 +15,11 @@ class Column:
     Attributes:
         name: Column name (normalized to lowercase).
         data_type: Logical data type of the column.
-        is_nullable: Whether the column accepts ``NULL`` values.
+        nullable: Whether the column accepts ``NULL`` values.
 
     """
 
     name: str
     data_type: DataType
-    is_nullable: bool = True  # TODO: rename to nullable
+    nullable: bool = True
     comment: str = ""

@@ -9,9 +9,9 @@ from delta_engine.domain.plan.actions import AddColumn, PartitionBy
 
 
 class _FakeColumn:
-    def __init__(self, name: str, is_nullable: bool) -> None:
+    def __init__(self, name: str, nullable: bool) -> None:
         self.name = name
-        self.is_nullable = is_nullable
+        self.nullable = nullable
 
 
 class _FakePlan:
@@ -61,7 +61,7 @@ def _ctx_for_create(actions: tuple, desired_parts: tuple[str, ...] = ()):
 def test_rejects_add_of_non_nullable_column_on_existing_table():
     # Given an existing table
     ctx = _ctx_with_existing_table(
-        actions=(AddColumn(column=_FakeColumn(name="order_id", is_nullable=False)),)
+        actions=(AddColumn(column=_FakeColumn(name="order_id", nullable=False)),)
     )
     rule = NonNullableColumnAdd()
 
@@ -75,7 +75,7 @@ def test_rejects_add_of_non_nullable_column_on_existing_table():
 def test_allows_add_of_nullable_column_on_existing_table():
     # Given an existing table
     ctx = _ctx_with_existing_table(
-        actions=(AddColumn(column=_FakeColumn(name="notes", is_nullable=True)),)
+        actions=(AddColumn(column=_FakeColumn(name="notes", nullable=True)),)
     )
     rule = NonNullableColumnAdd()
 
@@ -88,7 +88,7 @@ def test_allows_add_of_nullable_column_on_existing_table():
 
 def test_allows_non_nullable_column_when_creating_new_table():
     # Given a new table creation (no observed table)
-    ctx = _ctx_for_create(actions=(AddColumn(column=_FakeColumn(name="id", is_nullable=False)),))
+    ctx = _ctx_for_create(actions=(AddColumn(column=_FakeColumn(name="id", nullable=False)),))
     rule = NonNullableColumnAdd()
 
     # When evaluating the plan

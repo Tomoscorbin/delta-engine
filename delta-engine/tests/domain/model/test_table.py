@@ -1,9 +1,8 @@
 import pytest
 
-from delta_engine.domain.model import Column, Date, Integer, String, TableSnapshot
-from tests.factories import make_qualified_name
+from delta_engine.domain.model import Column, Date, Integer, QualifiedName, String, TableSnapshot
 
-_QUALIFIED_NAME = make_qualified_name("dev", "silver", "orders")
+_QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 
 
 def test_fails_when_no_columns_defined():
@@ -11,7 +10,7 @@ def test_fails_when_no_columns_defined():
     # When: constructing a table snapshot with an empty column list
     # Then: validation fails because a table requires at least one column
     with pytest.raises(ValueError):
-        TableSnapshot(_QUALIFIED_NAME, [])
+        TableSnapshot(_QUALIFIED_NAME, ())
 
 
 def test_fails_when_column_names_duplicate_ignoring_case():

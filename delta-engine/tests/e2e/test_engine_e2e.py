@@ -68,7 +68,7 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
             temp_schema,
             table_name,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
             ),
             comment="E2E happy path table",
@@ -116,9 +116,9 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypat
             temp_schema,
             table_name,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
-                Column("age", Integer(), is_nullable=True),  # new column, nullable (valid)
+                Column("age", Integer(), nullable=True),  # new column, nullable (valid)
             ),
             comment="unchanged",
         )
@@ -173,9 +173,9 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
             temp_schema,
             table_name,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
-                Column("age", Integer(), is_nullable=False),  # non-nullable add -> invalid
+                Column("age", Integer(), nullable=False),  # non-nullable add -> invalid
             ),
             comment="unchanged",
         )
@@ -209,7 +209,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
             TEST_CATALOG,
             temp_schema,
             table_name,
-            columns=(Column("id", Integer(), is_nullable=False), Column("name", String())),
+            columns=(Column("id", Integer(), nullable=False), Column("name", String())),
             comment="idempotency test",
         )
     )
@@ -242,7 +242,7 @@ def test_engine_loosen_nullability_sets_column_nullable(
             TEST_CATALOG,
             temp_schema,
             fq.split(".")[-1],
-            columns=(Column("id", Integer(), is_nullable=True), Column("name", String())),
+            columns=(Column("id", Integer(), nullable=True), Column("name", String())),
             comment="unchanged",
         )
     )
@@ -267,7 +267,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
             temp_schema,
             table_name,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("p_date", Date()),
                 Column("store", String()),
             ),
@@ -317,9 +317,9 @@ def test_engine_isolates_failures_and_applies_successful_tables(
             temp_schema,
             ok,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
-                Column("age", Integer(), is_nullable=True),
+                Column("age", Integer(), nullable=True),
             ),
         ),
         DeltaTable(
@@ -327,9 +327,9 @@ def test_engine_isolates_failures_and_applies_successful_tables(
             temp_schema,
             bad,
             columns=(
-                Column("id", Integer(), is_nullable=False),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
-                Column("age", Integer(), is_nullable=False),
+                Column("age", Integer(), nullable=False),
             ),
         ),  # invalid add
     )

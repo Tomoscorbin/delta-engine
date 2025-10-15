@@ -7,4 +7,4 @@ def test_defaults_to_nullable_true() -> None:
     # When: constructing a Column
     col = Column("id", Integer())
     # Then: it defaults to nullable=True
-    assert col.is_nullable is True
+    assert col.nullable is True

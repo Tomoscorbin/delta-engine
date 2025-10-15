@@ -72,7 +72,7 @@ class SetColumnNullability(Action):
     """Set a column's nullability."""
 
     column_name: str
-    nullable: bool  # TODO: make variable name consistent with Column
+    nullable: bool
 
 
 @dataclass(frozen=True, slots=True)

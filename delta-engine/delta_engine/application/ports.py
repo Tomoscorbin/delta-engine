@@ -59,5 +59,5 @@ class ColumnObject(Protocol):
 
     name: str
     data_type: Any
-    is_nullable: bool
+    nullable: bool
     comment: str
