@@ -37,7 +37,7 @@ Key design choices:
 
 Module outline:
 
-- `delta_engine/schema`: user‑facing `DeltaTable`, `Column`, and data types.
+- `delta_engine/adapters/schema`: user‑facing `DeltaTable`, `Column`, and data types.
 - `delta_engine/application`: `Engine`, `Registry`, planning/ordering, validation, results/reporting.
 - `delta_engine/adapters/databricks`: Databricks reader/executor, SQL compiler, and small helpers.
 - `delta_engine/domain`: core models and diffing logic used by the application layer.
