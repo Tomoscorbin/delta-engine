@@ -61,7 +61,7 @@ class DesiredTable(TableSnapshot):
 
     format: TableFormat = field(kw_only=True)
 
-    # TODO(format): We only carry `format` on DesiredTable for creation.
+    # We only carry `format` on DesiredTable for creation.
     # We currently assume table format is *immutable* after creation and do not
     # detect or plan format changes.
 

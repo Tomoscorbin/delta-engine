@@ -7,7 +7,6 @@ from typing import ClassVar
 from delta_engine.adapters.schema import Column
 from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.domain.model import TableFormat
-from delta_engine.domain.normalise_identifier import normalise_identifier
 
 
 class DeltaTable:
@@ -34,9 +33,9 @@ class DeltaTable:
         properties: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
     ) -> None:
-        self.catalog = normalise_identifier(catalog)
-        self.schema = normalise_identifier(schema)
-        self.name = normalise_identifier(name)
+        self.catalog = catalog
+        self.schema = schema
+        self.name = name
         # Materialize columns to allow safe repeated iteration
         self.columns = tuple(columns)
         self.comment = comment
