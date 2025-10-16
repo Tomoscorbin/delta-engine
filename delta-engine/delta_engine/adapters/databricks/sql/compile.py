@@ -11,9 +11,9 @@ from collections.abc import Mapping
 from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql import (
-    quote_identifier,
+    backtick,
+    backtick_qualified_name,
     quote_literal,
-    quote_qualified_name,
     sql_type_for_data_type,
 )
 from delta_engine.domain.plan.actions import (
@@ -32,18 +32,20 @@ from delta_engine.domain.plan.actions import (
 
 def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
     """Compile an :class:`ActionPlan` into Spark SQL statements."""
-    quoted_table_name = quote_qualified_name(plan.target)
-    return tuple(_compile_action(action, quoted_table_name) for action in plan)
+    backticked_table_name = backtick_qualified_name(plan.target)
+    return tuple(_compile_action(action, backticked_table_name) for action in plan)
 
 
 @singledispatch
-def _compile_action(action: Action, quoted_table_name: str) -> str:
+def _compile_action(
+    action: Action, backticked_table_name: str
+) -> str:  # TODO: fix unaccessed backticked_table_name
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
 
 @_compile_action.register
-def _(action: CreateTable, quoted_table_name: str) -> str:
+def _(action: CreateTable, backticked_table_name: str) -> str:
     """Compile a CREATE TABLE statement including columns, comment, and properties."""
     table = action.table
     columns = ", ".join(_column_definition(c) for c in table.columns)
@@ -52,7 +54,7 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
     partition_by = _set_partitioned_by(table.partitioned_by)
 
     parts = [
-        f"CREATE TABLE IF NOT EXISTS {quoted_table_name}",
+        f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
         f"({columns})",
         f"USING {table.format}",
         table_comment,
@@ -63,55 +65,55 @@ def _(action: CreateTable, quoted_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: AddColumn, quoted_table_name: str) -> str:
+def _(action: AddColumn, backticked_table_name: str) -> str:
     """
     Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
 
     Note: New columns are added as nullable and then tightened later.
     """
-    name = quote_identifier(action.column.name)
+    name = backtick(action.column.name)
     dtype = sql_type_for_data_type(action.column.data_type)
     comment = quote_literal(action.column.comment)
-    return f"ALTER TABLE {quoted_table_name} ADD COLUMN {name} {dtype} COMMENT {comment}"
+    return f"ALTER TABLE {backticked_table_name} ADD COLUMN {name} {dtype} COMMENT {comment}"
 
 
 @_compile_action.register
-def _(action: DropColumn, quoted_table_name: str) -> str:
+def _(action: DropColumn, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
-    column_name = quote_identifier(action.column_name)
-    return f"ALTER TABLE {quoted_table_name} DROP COLUMN {column_name}"
+    column_name = backtick(action.column_name)
+    return f"ALTER TABLE {backticked_table_name} DROP COLUMN {column_name}"
 
 
 @_compile_action.register
-def _(action: SetProperty, quoted_table_name: str) -> str:
+def _(action: SetProperty, backticked_table_name: str) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
-    return f"ALTER TABLE {quoted_table_name} SET TBLPROPERTIES ({pair})"
+    return f"ALTER TABLE {backticked_table_name} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register
-def _(action: UnsetProperty, quoted_table_name: str) -> str:
+def _(action: UnsetProperty, backticked_table_name: str) -> str:
     key = quote_literal(action.name)
-    return f"ALTER TABLE {quoted_table_name} UNSET TBLPROPERTIES ({key})"
+    return f"ALTER TABLE {backticked_table_name} UNSET TBLPROPERTIES ({key})"
 
 
 @_compile_action.register
-def _(action: SetColumnComment, quoted_table_name: str) -> str:
-    column_name = quote_identifier(action.column_name)
+def _(action: SetColumnComment, backticked_table_name: str) -> str:
+    column_name = backtick(action.column_name)
     comment = quote_literal(action.comment)
-    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
+    return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
 
 @_compile_action.register
-def _(action: SetTableComment, quoted_table_name: str) -> str:
+def _(action: SetTableComment, backticked_table_name: str) -> str:
     comment = quote_literal(action.comment)
-    return f"COMMENT ON TABLE {quoted_table_name} IS {comment}"
+    return f"COMMENT ON TABLE {backticked_table_name} IS {comment}"
 
 
 @_compile_action.register
-def _(action: SetColumnNullability, quoted_table_name: str) -> str:
-    column_name = quote_identifier(action.column_name)
+def _(action: SetColumnNullability, backticked_table_name: str) -> str:
+    column_name = backtick(action.column_name)
     sign = "DROP" if action.nullable else "SET"
-    return f"ALTER TABLE {quoted_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
+    return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
 
 
 # ----------- helpers ------------
@@ -119,9 +121,9 @@ def _(action: SetColumnNullability, quoted_table_name: str) -> str:
 
 def _column_definition(column) -> str:
     """Render a single column definition fragment."""
-    column_name = quote_identifier(column.name)
+    column_name = backtick(column.name)
     type = sql_type_for_data_type(column.data_type)
-    nullable = "" if column.is_nullable else "NOT NULL"  # TODO: or be explicit?
+    nullable = "" if column.nullable else "NOT NULL"  # TODO: or be explicit?
     return f"{column_name} {type} {nullable}".strip()
 
 
@@ -140,5 +142,5 @@ def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
-    cols = ", ".join(quote_identifier(c) for c in partitioned_by)
+    cols = ", ".join(backtick(c) for c in partitioned_by)
     return f"PARTITIONED BY ({cols})"

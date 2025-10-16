@@ -18,7 +18,7 @@ from delta_engine.domain.plan.actions import (
 
 
 def _column(name: str) -> Column:
-    return Column(name=name, data_type="string", is_nullable=True, comment=None)
+    return Column(name=name, data_type="string", nullable=True, comment=None)
 
 
 def _create_table_action() -> CreateTable:
@@ -118,8 +118,8 @@ def test_non_subject_fields_do_not_influence_order_within_phase():
     s2 = SetProperty(name="b_key", value="aaa")
 
     # And AddColumn actions where data_type/nullability differ but names decide order
-    c1 = AddColumn(column=Column(name="a_col", data_type="int", is_nullable=False, comment=None))
-    c2 = AddColumn(column=Column(name="b_col", data_type="string", is_nullable=True, comment=None))
+    c1 = AddColumn(column=Column(name="a_col", data_type="int", nullable=False, comment=None))
+    c2 = AddColumn(column=Column(name="b_col", data_type="string", nullable=True, comment=None))
 
     # When sorting each pair
     ordered_props = tuple(sorted((s1, s2), key=action_sort_key))

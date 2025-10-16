@@ -24,7 +24,7 @@ class _SpecColumn:
     ):
         self.name = name
         self.data_type = dt
-        self.is_nullable = nullable
+        self.nullable = nullable
         self.comment = comment
 
 

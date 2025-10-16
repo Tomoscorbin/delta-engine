@@ -7,10 +7,10 @@ from delta_engine.domain.model import Column as DomainColumn, TableFormat
 
 
 class _FakeColumn:
-    def __init__(self, name: str, data_type: str, is_nullable: bool, comment: str | None = None):
+    def __init__(self, name: str, data_type: str, nullable: bool, comment: str | None = None):
         self.name = name
         self.data_type = data_type
-        self.is_nullable = is_nullable
+        self.nullable = nullable
         self.comment = comment
 
 
@@ -39,7 +39,7 @@ class _FakeTable:
 def _col(
     name: str, dt: str = "string", nullable: bool = True, comment: str | None = None
 ) -> _FakeColumn:
-    return _FakeColumn(name=name, data_type=dt, is_nullable=nullable, comment=comment)
+    return _FakeColumn(name=name, data_type=dt, nullable=nullable, comment=comment)
 
 
 def _tbl(fqn: str, **kwargs) -> _FakeTable:
@@ -112,7 +112,7 @@ def test_columns_are_converted_to_domain_columns_with_attributes_preserved():
     assert all(isinstance(c, DomainColumn) for c in desired.columns)
     assert [c.name for c in desired.columns] == ["id", "name"]
     assert [str(c.data_type) for c in desired.columns] == ["int", "string"]
-    assert [c.is_nullable for c in desired.columns] == [False, True]
+    assert [c.nullable for c in desired.columns] == [False, True]
     assert [c.comment for c in desired.columns] == ["primary key", "customer name"]
 
 

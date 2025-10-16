@@ -80,6 +80,6 @@ class Registry:
         return DomainColumn(
             name=column.name,
             data_type=column.data_type,
-            is_nullable=column.is_nullable,
+            nullable=column.nullable,
             comment=column.comment,
         )

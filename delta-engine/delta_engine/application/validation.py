@@ -43,7 +43,7 @@ class NonNullableColumnAdd(Rule):  # Are classes and ABCs the best approach?
         if ctx.observed is None:
             return None
         for action in ctx.plan.actions:
-            if isinstance(action, AddColumn) and (not action.column.is_nullable):
+            if isinstance(action, AddColumn) and (not action.column.nullable):
                 return ValidationFailure(
                     rule_name=self.__class__.__name__,
                     message=(

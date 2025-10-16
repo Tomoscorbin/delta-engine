@@ -176,7 +176,7 @@ def test_fetch_columns_maps_name_nullability_and_comment():
 
     # Then names, nullability, and comments are mapped correctly
     assert [c.name for c in cols] == ["id", "p_date"]
-    assert [c.is_nullable for c in cols] == [False, True]
+    assert [c.nullable for c in cols] == [False, True]
     assert [c.comment for c in cols] == ["identifier", ""]
 
 
