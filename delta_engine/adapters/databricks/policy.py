@@ -7,16 +7,15 @@ from typing import Final
 from delta_engine.adapters.schema.delta.properties import Property
 
 # TODO: create a generic policy enforcement framework
-# TODO: try without .value
 _PROPERTY_ALLOWLIST: Final[frozenset[str]] = frozenset(
     {
-        Property.CHANGE_DATA_FEED.value,
-        Property.DELETED_FILE_RETENTION_DURATION.value,
-        Property.LOG_RETENTION_DURATION.value,
-        Property.DATA_SKIPPING_NUM_INDEXED_COLS.value,
-        Property.COLUMN_MAPPING_MODE.value,
-        Property.ENABLE_DELETION_VECTORS.value,
-        Property.ENABLE_DELETION_VECTORS.value,
+        Property.CHANGE_DATA_FEED,
+        Property.DELETED_FILE_RETENTION_DURATION,
+        Property.LOG_RETENTION_DURATION,
+        Property.DATA_SKIPPING_NUM_INDEXED_COLS,
+        Property.COLUMN_MAPPING_MODE,
+        Property.ENABLE_DELETION_VECTORS,
+        Property.ENABLE_DELETION_VECTORS,
     }
 )
 
