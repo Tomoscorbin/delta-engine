@@ -18,5 +18,5 @@ def test_quote_literal_escapes_single_quotes_and_wraps() -> None:
 
 def test_backtick_qualified_name_quotes_each_part() -> None:
     qn = QualifiedName("dev", "silver", "people")
-    quoted = backtick_qualified_name(qn)
-    assert quoted == "`dev`.`silver`.`people`"
+    backticked = backtick_qualified_name(qn)
+    assert backticked == "`dev`.`silver`.`people`"
