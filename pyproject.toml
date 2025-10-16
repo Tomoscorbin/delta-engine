@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "delta-engine"
 version = "0.1.0"
-description = "Domain-driven library for managing data tables and schema evolution."
+description = "Framework for defining, validating, and evolving tables in a consistent, safe, and controlled way."
 authors = ["Tomos Corbin <tom_corbin1@hotmail.com>"]
 readme = "README.md"
 
