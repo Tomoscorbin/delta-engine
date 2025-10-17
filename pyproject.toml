@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Framework for defining, validating, and evolving tables in a consistent, safe, and controlled way."
 authors = ["Tomos Corbin <tom_corbin1@hotmail.com>"]
 readme = "README.md"
+packages = [{ include = "delta_engine", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -20,18 +21,25 @@ delta-spark = "^4.0.0"
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
 mkdocs-material = "^9.6.18"
-mkdocstrings = {extras = ["python"], version = "^0.30.0"}
+mkdocstrings = { extras = ["python"], version = "^0.30.0" }
 mkdocs-autorefs = "^1.4.3"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
-# -------------------- Ruff (global) --------------------
+# -------------------- Ruff  --------------------
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = [".venv", ".tox", "dist", "build", ".mypy_cache", ".ruff_cache"]
+extend-exclude = [
+  ".venv",
+  ".tox",
+  "dist",
+  "build",
+  ".mypy_cache",
+  ".ruff_cache",
+]
 fix = true
 unsafe-fixes = false
 
@@ -44,12 +52,12 @@ docstring-code-format = true
 # E,F: pyflakes/pycodestyle; N: pep8-naming; I: isort; UP: pyupgrade; B: bugbear; RUF: extras; TID: tidy-imports
 select = ["E", "W", "F", "N", "I", "UP", "B", "RUF", "TID", "D"]
 ignore = [
-  "E203",  # slice spacing (compatible with ruff-format/black)
-  "E266",  # allow long inline comments
-  "D104",  # don't require package docstrings in __init__.py
-  "D107",  # don't require docstrings on __init__ methods
-  "D212",  # don't require multi-line docstring summary to start at the first line
-  "D203",  # no blank line before docstring
+  "E203", # slice spacing (compatible with ruff-format/black)
+  "E266", # allow long inline comments
+  "D104", # don't require package docstrings in __init__.py
+  "D107", # don't require docstrings on __init__ methods
+  "D212", # don't require multi-line docstring summary to start at the first line
+  "D203", # no blank line before docstring
 ]
 
 # isort behavior for import sorting
@@ -60,22 +68,22 @@ combine-as-imports = true
 
 # Tidy imports
 [tool.ruff.lint.flake8-tidy-imports]
-ban-relative-imports = "all"  # enforce absolute imports (TID252)
+ban-relative-imports = "all" # enforce absolute imports (TID252)
 
 # Test file exceptions (short fixture names etc.)
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
-  "N802",  # allow non-PEP8 function names
-  "N803",  # allow non-PEP8 argument names
-  "N806",  # allow non-PEP8 variable names
-  "D101",  # don't require docstring in public classes
-  "D102",  # don't require docstrings in public methods 
-  "D103",  # don't require docstrings in public
-  "D105",  # don't require docstrings in magig methods 
-  "D100",  # don't require module docstrings
-  "D205",  # don't require 1 blank line between summary line and description
-  "N815",  # allow variables in class scope to be mixedCase
-  "N812",  # allow uppercase variable names
+  "N802", # allow non-PEP8 function names
+  "N803", # allow non-PEP8 argument names
+  "N806", # allow non-PEP8 variable names
+  "D101", # don't require docstring in public classes
+  "D102", # don't require docstrings in public methods 
+  "D103", # don't require docstrings in public
+  "D105", # don't require docstrings in magig methods 
+  "D100", # don't require module docstrings
+  "D205", # don't require 1 blank line between summary line and description
+  "N815", # allow variables in class scope to be mixedCase
+  "N812", # allow uppercase variable names
 ]
 
 [tool.pytest.ini_options]
