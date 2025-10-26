@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
+# TODO: this might be better inside each data type class
 def _format_datatype(data_type: DataType) -> str:
     match data_type:
         case Integer():
