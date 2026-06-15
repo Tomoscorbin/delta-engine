@@ -21,9 +21,7 @@ from delta_engine.application.results import (
     ExecutionResult,
 )
 from delta_engine.domain.plan.actions import ActionPlan
-from delta_engine.log_config import configure_logging
 
-configure_logging(logging.INFO)
 logger = logging.getLogger(__name__)
 
 

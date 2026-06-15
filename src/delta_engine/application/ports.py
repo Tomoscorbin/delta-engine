@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from delta_engine.application.results import ExecutionResult, ReadResult
-from delta_engine.domain.model import QualifiedName, TableFormat
+from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
 
@@ -35,29 +34,9 @@ class PlanExecutor(Protocol):
 
 
 @runtime_checkable
-class TableObject(Protocol):  # rename to UserTable?
-    """User table specification accepted by the registry."""
+class DesiredTableSource(Protocol):
+    """A user-facing table specification that can produce a domain table."""
 
-    catalog: str
-    schema: str
-    name: str
-    columns: Iterable[Any]
-    comment: str
-    properties: dict[str, str]
-    partitioned_by: Iterable[str]
-    format: TableFormat
-
-    @property
-    def effective_properties(self) -> Mapping[str, str]:
-        """Defaults table properties + user properties."""
+    def to_desired_table(self) -> DesiredTable:
+        """Return the domain :class:`DesiredTable` for this specification."""
         ...
-
-
-@runtime_checkable
-class ColumnObject(Protocol):
-    """User column specification accepted by the registry."""
-
-    name: str
-    data_type: Any
-    nullable: bool
-    comment: str

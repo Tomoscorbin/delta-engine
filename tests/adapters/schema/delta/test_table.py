@@ -1,7 +1,8 @@
 import pytest
 
-from delta_engine.adapters.schema import DeltaTable
+from delta_engine.adapters.schema import Column, DeltaTable, Integer, String
 from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.domain.model import Column as DomainColumn
 
 
 class _Column:
@@ -91,28 +92,93 @@ def test_accepts_only_enum_property_keys():
 
 
 def test_partition_columns_must_exist_case_insensitive():
-    # Given columns include 'event_date', partition spec uses different case
+    # Given columns include 'event_date' and the partition spec uses different case
     table = DeltaTable(
         catalog="CoreDev",
         schema="Medallia",
         name="Responses",
-        columns=[_Column("id"), _Column("event_date")],
+        columns=[Column("id", Integer()), Column("event_date", String())],
         partitioned_by=["EVENT_DATE"],
     )
 
-    # When table is constructed
-    # Then no error because matching is case-insensitive
-    assert table.partitioned_by == ["EVENT_DATE"]
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then conversion succeeds because partition matching is case-insensitive
+    assert desired.partitioned_by == ("EVENT_DATE",)
 
 
 def test_missing_partition_column_raises_error():
-    # Given partition spec references a column that does not exist
-    # When/Then: construction fails
+    # Given a partition spec referencing a column that does not exist
+    table = DeltaTable(
+        catalog="CoreDev",
+        schema="Medallia",
+        name="Responses",
+        columns=[Column("id", Integer()), Column("event_date", String())],
+        partitioned_by=["store_id"],  # not present
+    )
+
+    # When/Then converting to the domain table fails on the domain invariant
     with pytest.raises(ValueError):
-        DeltaTable(
-            catalog="CoreDev",
-            schema="Medallia",
-            name="Responses",
-            columns=[_Column("id"), _Column("event_date")],
-            partitioned_by=["store_id"],  # not present
-        )
+        table.to_desired_table()
+
+
+def test_to_desired_table_preserves_columns_and_metadata():
+    # Given a table with explicit column metadata, comment, and partitioning
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="fact_orders",
+        columns=[
+            Column("id", Integer(), nullable=False, comment="primary key"),
+            Column("ds", String(), comment="partition date"),
+        ],
+        comment="Daily aggregated orders",
+        partitioned_by=["ds"],
+    )
+
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then the qualified name, columns, comment, and partitioning carry through
+    assert str(desired.qualified_name) == "cat.sales.fact_orders"
+    assert all(isinstance(c, DomainColumn) for c in desired.columns)
+    assert [c.name for c in desired.columns] == ["id", "ds"]
+    assert [c.nullable for c in desired.columns] == [False, True]
+    assert [c.comment for c in desired.columns] == ["primary key", "partition date"]
+    assert desired.comment == "Daily aggregated orders"
+    assert desired.partitioned_by == ("ds",)
+
+
+def test_to_desired_table_carries_effective_properties_with_defaults():
+    # Given a table where the user overrides one default property
+    table = DeltaTable(
+        catalog="cat",
+        schema="core",
+        name="dim_date",
+        columns=[Column("id", Integer())],
+        properties={Property.ENABLE_DELETION_VECTORS.value: "false"},
+    )
+
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then effective properties (defaults overlaid by user values) are carried through
+    assert desired.properties[Property.ENABLE_DELETION_VECTORS.value] == "false"
+    assert desired.properties[Property.COLUMN_MAPPING_MODE.value] == "name"
+
+
+def test_to_desired_table_defaults_partitioning_to_empty_tuple():
+    # Given a table with no partition spec
+    table = DeltaTable(
+        catalog="cat",
+        schema="core",
+        name="dim_date",
+        columns=[Column("id", Integer())],
+    )
+
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then partitioned_by is a stable empty tuple, never None
+    assert desired.partitioned_by == ()

@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.application.ordering import action_sort_key, subject_name
+from delta_engine.application.ordering import action_sort_key
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
 from delta_engine.domain.plan.actions import (
     AddColumn,
@@ -77,7 +77,7 @@ def test_within_phase_actions_are_ordered_by_subject_name():
     ordered = tuple(sorted((a1, a2), key=action_sort_key))
 
     # Then the earlier subject name ("a_col") comes first within the phase
-    assert [subject_name(a) for a in ordered] == ["a_col", "b_col"]
+    assert [a.subject for a in ordered] == ["a_col", "b_col"]
 
 
 @pytest.mark.parametrize(
@@ -89,15 +89,23 @@ def test_within_phase_actions_are_ordered_by_subject_name():
         (UnsetProperty(name="propB"), "propB"),
         (SetColumnComment(column_name="zcol", comment="c"), "zcol"),
         (SetColumnNullability(column_name="ncol", nullable=False), "ncol"),
-        (SetTableComment(comment="table comment"), ""),  # no subject -> empty string
-        (PartitionBy(column_names=("ds",)), ""),  # current behaviour: no subject name
+        (SetTableComment(comment="table comment"), ""),  # whole-table action: no subject
+        (PartitionBy(column_names=("ds",)), ""),  # whole-table action: no subject
     ],
 )
-def test_subject_name_extraction_matches_action_type_contract(action, expected_subject):
+def test_subject_identifies_within_phase_target(action, expected_subject):
     # Given an action
-    # When extracting the subject name
+    # When reading its subject
     # Then we get the identifier used for within-phase ordering
-    assert subject_name(action) == expected_subject
+    assert action.subject == expected_subject
+
+
+def test_create_table_action_subject_is_empty():
+    # Given a CreateTable action (targets the table as a whole)
+    action = _create_table_action()
+
+    # Then it has no within-phase subject
+    assert action.subject == ""
 
 
 def test_sort_is_stable_when_phase_and_subject_tie():
@@ -126,5 +134,5 @@ def test_non_subject_fields_do_not_influence_order_within_phase():
     ordered_cols = tuple(sorted((c2, c1), key=action_sort_key))  # deliberately reversed input
 
     # Then only the subject (name) controls order; non-subject fields have no effect
-    assert [subject_name(a) for a in ordered_props] == ["a_key", "b_key"]
-    assert [subject_name(a) for a in ordered_cols] == ["a_col", "b_col"]
+    assert [a.subject for a in ordered_props] == ["a_key", "b_key"]
+    assert [a.subject for a in ordered_cols] == ["a_col", "b_col"]

@@ -6,7 +6,7 @@ from typing import ClassVar
 
 from delta_engine.adapters.schema import Column
 from delta_engine.adapters.schema.delta.properties import Property
-from delta_engine.domain.model import TableFormat
+from delta_engine.domain.model import DesiredTable, QualifiedName, TableFormat
 
 
 class DeltaTable:
@@ -48,14 +48,30 @@ class DeltaTable:
             if unknown:
                 raise ValueError(f"Unknown Delta table properties: {', '.join(sorted(unknown))}")
 
-        # Validate that partition columns exist among defined columns
-        if self.partitioned_by:
-            seen = {c.name.casefold() for c in self.columns}
-            for p in self.partitioned_by:
-                if p.casefold() not in seen:
-                    raise ValueError(f"Partition column not found: {p}")
-
     @property
     def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
         return {**self.default_properties, **self.properties}
+
+    def to_desired_table(self) -> DesiredTable:
+        """
+        Convert this user-facing definition into a domain :class:`DesiredTable`.
+
+        Column, comment, property, and partition data are mapped onto the
+        domain model. The domain model owns structural invariants (non-empty
+        columns, unique names, partition columns must exist), so those are
+        enforced here rather than duplicated on this user-facing type.
+
+        Raises:
+            ValueError: If the resulting table violates a domain invariant
+                (e.g. a partition column not among the defined columns).
+
+        """
+        return DesiredTable(
+            qualified_name=QualifiedName(self.catalog, self.schema, self.name),
+            columns=tuple(column.to_domain_column() for column in self.columns),
+            comment=self.comment,
+            properties=self.effective_properties,
+            partitioned_by=tuple(self.partitioned_by) if self.partitioned_by else (),
+            format=self.format,
+        )

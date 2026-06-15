@@ -1,5 +1,6 @@
 import pytest
 
+from delta_engine.adapters.schema import Column, DeltaTable, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
@@ -9,41 +10,20 @@ from delta_engine.application.results import (
     ExecutionResult,
     ReadFailure,
     ReadResult,
+    SyncReport,
     TableRunStatus,
     ValidationFailure,
 )
-from delta_engine.domain.model import QualifiedName, TableFormat
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
 
 
-class _SpecColumn:
-    def __init__(
-        self, name: str, dt: str = "string", nullable: bool = True, comment: str | None = None
-    ):
-        self.name = name
-        self.data_type = dt
-        self.nullable = nullable
-        self.comment = comment
-
-
-class _SpecTable:
-    def __init__(self, fqn: str):
-        self.catalog, self.schema, self.name = fqn.split(".")
-        self.columns = (_SpecColumn("id", "string", True, None),)
-        self.comment = None
-        self.properties: dict[str, str] = {}
-        self.partitioned_by = ()
-        self.format = TableFormat.DELTA
-
-    @property
-    def effective_properties(self) -> dict[str, str]:
-        return self.properties
-
-
-def _spec(fqn: str) -> _SpecTable:
-    return _SpecTable(fqn)
+def _spec(fqn: str) -> DeltaTable:
+    """Build a minimal real table definition from a 'catalog.schema.name' string."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
 
 class _FakeReader:
@@ -156,7 +136,7 @@ def test_raises_when_execution_contains_any_failure():
         engine.sync(reg)
 
 
-def test_returns_success_when_all_tables_succeed():
+def test_returns_report_when_all_tables_succeed():
     # Given two tables that read present/absent, validate cleanly, and execute with no failures
     reg = Registry()
     reg.register(
@@ -173,8 +153,15 @@ def test_returns_success_when_all_tables_succeed():
     engine = Engine(reader=reader, executor=executor, validator=validator)
 
     # When syncing
-    # Then no exception is raised (i.e., overall success)
-    engine.sync(reg)  # would raise on failure; reaching here means success
+    report = engine.sync(reg)
+
+    # Then the successful run is returned as a SyncReport for programmatic use
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is False
+    assert [tr.status for tr in report] == [
+        TableRunStatus.SUCCESS,
+        TableRunStatus.SUCCESS,
+    ]
 
 
 def test_engine_reads_all_tables_then_raises_on_any_read_failure():

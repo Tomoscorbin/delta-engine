@@ -127,9 +127,7 @@ class ExecutionResult:  # do we want an ActionResult and then an aggregate Execu
 
     def __post_init__(self) -> None:
         """Enforce consistency between status and presence of `failure`."""
-        if (
-            self.status is ActionStatus.FAILED and self.failure is None
-        ):  # are these really necessary?
+        if self.status is ActionStatus.FAILED and self.failure is None:
             raise ValueError("FAILED ExecutionResult must include an ExecutionFailure.")
         if self.status is not ActionStatus.FAILED and self.failure is not None:
             raise ValueError("Only FAILED results may include an ExecutionFailure.")

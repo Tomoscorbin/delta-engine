@@ -1,5 +1,6 @@
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPhase,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -14,6 +15,7 @@ from delta_engine.domain.plan.actions import (
 
 __all__ = [
     "Action",
+    "ActionPhase",
     "ActionPlan",
     "AddColumn",
     "CreateTable",
@@ -21,7 +23,6 @@ __all__ = [
     "PartitionBy",
     "SetColumnComment",
     "SetColumnNullability",
-    "SetColumnNullability,",
     "SetProperty",
     "SetTableComment",
     "UnsetProperty",

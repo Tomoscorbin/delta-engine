@@ -78,9 +78,12 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
     engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
 
     # When we sync
-    engine.sync(registry)
+    report = engine.sync(registry)
 
-    # Then table exists with expected schema and comment
+    # Then the run is reported as a successful SyncReport for the caller
+    assert report.any_failures is False
+
+    # And the table exists with expected schema and comment
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     df = spark.table(fq).limit(0)
     fields = {f.name: f for f in df.schema.fields}
