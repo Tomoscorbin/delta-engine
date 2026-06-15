@@ -1,5 +1,6 @@
 import pytest
 
+from delta_engine.adapters.schema import Column, DeltaTable, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
@@ -12,38 +13,16 @@ from delta_engine.application.results import (
     TableRunStatus,
     ValidationFailure,
 )
-from delta_engine.domain.model import QualifiedName, TableFormat
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
 
 
-class _SpecColumn:
-    def __init__(
-        self, name: str, dt: str = "string", nullable: bool = True, comment: str | None = None
-    ):
-        self.name = name
-        self.data_type = dt
-        self.nullable = nullable
-        self.comment = comment
-
-
-class _SpecTable:
-    def __init__(self, fqn: str):
-        self.catalog, self.schema, self.name = fqn.split(".")
-        self.columns = (_SpecColumn("id", "string", True, None),)
-        self.comment = None
-        self.properties: dict[str, str] = {}
-        self.partitioned_by = ()
-        self.format = TableFormat.DELTA
-
-    @property
-    def effective_properties(self) -> dict[str, str]:
-        return self.properties
-
-
-def _spec(fqn: str) -> _SpecTable:
-    return _SpecTable(fqn)
+def _spec(fqn: str) -> DeltaTable:
+    """Build a minimal real table definition from a 'catalog.schema.name' string."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
 
 class _FakeReader:

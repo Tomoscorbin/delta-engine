@@ -1,13 +1,13 @@
 """
 In-memory registry of desired table definitions for planning.
 
-Accepts lightweight table/column specs, converts them to domain models, and
-iterates in fully qualified name order to produce deterministic planning input
-for the engine.
+Accepts table specifications that convert themselves to domain models, rejects
+duplicate names, and iterates in fully qualified name order to produce
+deterministic planning input for the engine.
 """
 
-from delta_engine.application.ports import ColumnObject, TableObject
-from delta_engine.domain.model import Column as DomainColumn, DesiredTable, QualifiedName
+from delta_engine.application.ports import DesiredTableSource
+from delta_engine.domain.model import DesiredTable
 
 
 class Registry:
@@ -24,13 +24,13 @@ class Registry:
         self._tables: list[DesiredTable] = []
         self._names: set[str] = set()
 
-    def register(self, *tables: TableObject) -> None:
+    def register(self, *tables: DesiredTableSource) -> None:
         """
         Register one or more table specifications.
 
         Args:
-            *tables: Table-like objects providing ``catalog``, ``schema``,
-                ``name``, and ``columns`` attributes.
+            *tables: Table specifications that can convert themselves into a
+                domain :class:`DesiredTable` via ``to_desired_table()``.
 
         Raises:
             ValueError: If the same fully qualified name is registered twice
@@ -41,7 +41,7 @@ class Registry:
         new_desired: list[DesiredTable] = []
         seen_in_call: set[str] = set()
         for table in tables:
-            desired = self._to_desired_table(table)
+            desired = table.to_desired_table()
             fqn = str(desired.qualified_name)
             if fqn in self._names or fqn in seen_in_call:
                 raise ValueError(f"Duplicate table registration: {fqn}")
@@ -59,27 +59,3 @@ class Registry:
     def __len__(self):
         """Return the number of registered tables."""
         return len(self._tables)
-
-    def _to_desired_table(self, spec: TableObject) -> DesiredTable:
-        """Convert a table-like object into a :class:`DesiredTable`."""
-        qualified_name = QualifiedName(spec.catalog, spec.schema, spec.name)
-        columns = tuple(self._to_domain_column(c) for c in spec.columns)
-        partition_columns = tuple(spec.partitioned_by) if spec.partitioned_by else ()
-        return DesiredTable(
-            qualified_name=qualified_name,
-            columns=columns,
-            comment=spec.comment,
-            properties=spec.effective_properties,
-            partitioned_by=partition_columns,
-            format=spec.format,
-        )
-
-    @staticmethod
-    def _to_domain_column(column: ColumnObject) -> DomainColumn:
-        """Convert a column-like object into a domain :class:`Column`."""
-        return DomainColumn(
-            name=column.name,
-            data_type=column.data_type,
-            nullable=column.nullable,
-            comment=column.comment,
-        )
