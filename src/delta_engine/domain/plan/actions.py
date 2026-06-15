@@ -3,12 +3,52 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum, auto
+from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
+class ActionPhase(IntEnum):
+    """
+    Relative execution order of plan actions.
+
+    Members are declared in execution order (lower runs first); the order
+    encodes dependencies between operations -- e.g. a table must be created
+    before columns are added, and tightened nullability is applied last.
+    Centralising the order here keeps the full precedence readable in one
+    place while each action declares its own phase by name.
+    """
+
+    CREATE_TABLE = auto()
+    SET_PROPERTY = auto()
+    ADD_COLUMN = auto()
+    DROP_COLUMN = auto()
+    SET_COLUMN_COMMENT = auto()
+    SET_TABLE_COMMENT = auto()
+    UNSET_PROPERTY = auto()
+    SET_COLUMN_NULLABILITY = auto()
+    PARTITION_BY = auto()
+
+
 class Action:
-    """Base class for all plan actions."""
+    """
+    Base class for all plan actions.
+
+    Subclasses declare their deterministic-ordering contract:
+
+    - ``phase``: the execution phase this action belongs to (:class:`ActionPhase`).
+    - ``subject``: the identifier the action targets within its phase (a column
+      or property name), used to order actions that share a phase. Actions that
+      target the table as a whole return the empty string.
+    """
+
+    phase: ClassVar[ActionPhase]
+
+    @property
+    def subject(self) -> str:
+        """Identifier targeted within the phase; subclasses must override."""
+        raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +62,13 @@ class CreateTable(Action):
 
     table: DesiredTable
 
+    phase: ClassVar[ActionPhase] = ActionPhase.CREATE_TABLE
+
+    @property
+    def subject(self) -> str:
+        """Targets the table as a whole."""
+        return ""
+
 
 @dataclass(frozen=True, slots=True)
 class AddColumn(Action):
@@ -29,12 +76,26 @@ class AddColumn(Action):
 
     column: Column
 
+    phase: ClassVar[ActionPhase] = ActionPhase.ADD_COLUMN
+
+    @property
+    def subject(self) -> str:
+        """The added column's name."""
+        return self.column.name
+
 
 @dataclass(frozen=True, slots=True)
 class DropColumn(Action):
     """Remove a column from a table."""
 
     column_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.DROP_COLUMN
+
+    @property
+    def subject(self) -> str:
+        """The dropped column's name."""
+        return self.column_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,12 +105,26 @@ class SetProperty(Action):
     name: str
     value: str
 
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_PROPERTY
+
+    @property
+    def subject(self) -> str:
+        """The property name being set."""
+        return self.name
+
 
 @dataclass(frozen=True, slots=True)
 class UnsetProperty(Action):
     """Unset a table property."""
 
     name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.UNSET_PROPERTY
+
+    @property
+    def subject(self) -> str:
+        """The property name being unset."""
+        return self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +134,26 @@ class SetColumnComment(Action):
     column_name: str
     comment: str
 
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_COMMENT
+
+    @property
+    def subject(self) -> str:
+        """The commented column's name."""
+        return self.column_name
+
 
 @dataclass(frozen=True, slots=True)
 class SetTableComment(Action):
     """Set a table's comment."""
 
     comment: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_TABLE_COMMENT
+
+    @property
+    def subject(self) -> str:
+        """Targets the table as a whole."""
+        return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +162,13 @@ class SetColumnNullability(Action):
 
     column_name: str
     nullable: bool
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_NULLABILITY
+
+    @property
+    def subject(self) -> str:
+        """The column whose nullability changes."""
+        return self.column_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +180,13 @@ class PartitionBy(Action):  # consider replacing with a RequireTableRecreate act
     """
 
     column_names: tuple[str, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.PARTITION_BY
+
+    @property
+    def subject(self) -> str:
+        """Targets the table as a whole."""
+        return ""
 
 
 @dataclass(frozen=True, slots=True)
