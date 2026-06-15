@@ -41,16 +41,18 @@ class TableSnapshot:
             raise ValueError("Table requires at least one column")
 
         # validate that there are no duplicate columns
-        seen: set[str] = set()
-        for c in self.columns:
-            n = c.name.casefold()
-            if n in seen:
-                raise ValueError(f"Duplicate column name: {c.name}")
-            seen.add(n)
+        seen_names: set[str] = set()
+        for column in self.columns:
+            normalized_name = column.name.casefold()
+            if normalized_name in seen_names:
+                raise ValueError(f"Duplicate column name: {column.name}")
+            seen_names.add(normalized_name)
 
         # Validate that all partition columns exist among defined columns
         if self.partitioned_by:
-            missing = [p for p in self.partitioned_by if p.casefold() not in seen]
+            missing = [
+                name for name in self.partitioned_by if name.casefold() not in seen_names
+            ]
             if missing:
                 raise ValueError(f"Partition column not found: {missing[0]}")
 

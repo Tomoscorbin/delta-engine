@@ -4,41 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# TODO: this might be better inside each data type class
-def _format_datatype(data_type: DataType) -> str:
-    match data_type:
-        case Integer():
-            return "int"
-        case Long():
-            return "long"
-        case Float():
-            return "float"
-        case Double():
-            return "double"
-        case Boolean():
-            return "boolean"
-        case String():
-            return "string"
-        case Date():
-            return "date"
-        case Timestamp():
-            return "timestamp"
-        case Decimal(precision=p, scale=s):
-            return f"decimal({p},{s})"
-        case Array(element=e):
-            return f"array<{_format_datatype(e)}>"
-        case Map(key=k, value=v):
-            return f"map<{_format_datatype(k)},{_format_datatype(v)}>"
-        case _:
-            raise TypeError(f"Unsupported DataType: {type(data_type).__name__}")
-
 
 class DataType:
     """Base class for all data types."""
-
-    def __str__(self) -> str:
-        """Return a user-friendly string representation of the data type."""
-        return _format_datatype(self)
 
 
 @dataclass(frozen=True, slots=True)

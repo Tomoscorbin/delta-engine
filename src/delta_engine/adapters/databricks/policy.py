@@ -15,7 +15,6 @@ _PROPERTY_ALLOWLIST: Final[frozenset[str]] = frozenset(
         Property.DATA_SKIPPING_NUM_INDEXED_COLS,
         Property.COLUMN_MAPPING_MODE,
         Property.ENABLE_DELETION_VECTORS,
-        Property.ENABLE_DELETION_VECTORS,
     }
 )
 
