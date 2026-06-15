@@ -15,7 +15,6 @@ import logging
 from delta_engine.application.errors import (
     SyncFailedError,
 )
-from delta_engine.application.format_report import format_sync_report
 from delta_engine.application.plan import (
     PlanContext,
     make_plan_context,
@@ -31,10 +30,8 @@ from delta_engine.application.results import (
 )
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
 from delta_engine.domain.model.table import DesiredTable, ObservedTable
-from delta_engine.log_config import configure_logging
 
-configure_logging(logging.INFO)
-logger = logging.getLogger(__name__)  # do we need to DI the logger?
+logger = logging.getLogger(__name__)
 
 
 def _utc_now():
@@ -70,12 +67,20 @@ class Engine:
         self.executor = executor
         self.validator = validator
 
-    def sync(self, registry: Registry) -> None:
+    def sync(self, registry: Registry) -> SyncReport:
         """
         Synchronize all registered tables to their desired state.
 
         Computes, validates, and executes plans for each table in the supplied
-        registry. Raises on validation or execution failures with rich context.
+        registry.
+
+        Returns:
+            The aggregate :class:`SyncReport` for the run.
+
+        Raises:
+            SyncFailedError: If any table fails to read, validate, or execute.
+                The report is available on the exception's ``report`` attribute.
+
         """
         run_started = _utc_now()
         logger.info("Starting sync for %d table(s)", len(registry))
@@ -91,7 +96,7 @@ class Engine:
             raise SyncFailedError(report)
 
         logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
-        print(format_sync_report(report))  # TODO: figure out why some logging is printed after this
+        return report
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
         """

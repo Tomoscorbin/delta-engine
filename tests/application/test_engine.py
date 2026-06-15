@@ -10,6 +10,7 @@ from delta_engine.application.results import (
     ExecutionResult,
     ReadFailure,
     ReadResult,
+    SyncReport,
     TableRunStatus,
     ValidationFailure,
 )
@@ -135,7 +136,7 @@ def test_raises_when_execution_contains_any_failure():
         engine.sync(reg)
 
 
-def test_returns_success_when_all_tables_succeed():
+def test_returns_report_when_all_tables_succeed():
     # Given two tables that read present/absent, validate cleanly, and execute with no failures
     reg = Registry()
     reg.register(
@@ -152,8 +153,15 @@ def test_returns_success_when_all_tables_succeed():
     engine = Engine(reader=reader, executor=executor, validator=validator)
 
     # When syncing
-    # Then no exception is raised (i.e., overall success)
-    engine.sync(reg)  # would raise on failure; reaching here means success
+    report = engine.sync(reg)
+
+    # Then the successful run is returned as a SyncReport for programmatic use
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is False
+    assert [tr.status for tr in report] == [
+        TableRunStatus.SUCCESS,
+        TableRunStatus.SUCCESS,
+    ]
 
 
 def test_engine_reads_all_tables_then_raises_on_any_read_failure():
