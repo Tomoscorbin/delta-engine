@@ -17,13 +17,20 @@ from delta_engine.application.errors import (
 )
 from delta_engine.application.format_report import format_sync_report
 from delta_engine.application.plan import (
+    PlanContext,
     make_plan_context,
 )
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import SyncReport, TableRunReport, ValidationResult
+from delta_engine.application.results import (
+    ExecutionResult,
+    ReadResult,
+    SyncReport,
+    TableRunReport,
+    ValidationResult,
+)
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
-from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.model.table import DesiredTable, ObservedTable
 from delta_engine.log_config import configure_logging
 
 configure_logging(logging.INFO)
@@ -87,12 +94,39 @@ class Engine:
         print(format_sync_report(report))  # TODO: figure out why some logging is printed after this
 
     def _sync_table(self, desired: DesiredTable) -> TableRunReport:
-        """Synchronize a single table to its desired state."""
+        """
+        Synchronize a single table to its desired state.
+
+        Runs the read -> plan -> validate -> execute pipeline, short-circuiting
+        when a phase fails. Later phases leave their results at the empty
+        default, so the report is assembled once from whatever each phase
+        produced.
+        """
         started = _utc_now()
         fully_qualified_name = str(desired.qualified_name)
         logger.info("Processing table %s", fully_qualified_name)
 
-        # --- Step 1: Read
+        validation = ValidationResult()
+        executions: tuple[ExecutionResult, ...] = ()
+
+        read_result = self._read(desired, fully_qualified_name)
+        if not read_result.failure:
+            context = self._plan(desired, read_result.observed, fully_qualified_name)
+            validation = self._validate(context, fully_qualified_name)
+            if not validation.failed:
+                executions = self._execute(context, fully_qualified_name)
+
+        return TableRunReport(
+            fully_qualified_name=fully_qualified_name,
+            started_at=started,
+            ended_at=_utc_now(),
+            read=read_result,
+            validation=validation,
+            execution_results=executions,
+        )
+
+    def _read(self, desired: DesiredTable, fully_qualified_name: str) -> ReadResult:
+        """Read current catalog state, logging the outcome."""
         read_result = self.reader.fetch_state(desired.qualified_name)
         if read_result.failure:
             logger.error(
@@ -101,62 +135,49 @@ class Engine:
                 read_result.failure.exception_type,
                 read_result.failure.message,
             )
-            return TableRunReport(
-                fully_qualified_name=fully_qualified_name,
-                started_at=started,
-                ended_at=_utc_now(),
-                read=read_result,
-                validation=ValidationResult(failures=()),
-                execution_results=(),
+        else:
+            logger.info(
+                "Read state for %s: %s",
+                fully_qualified_name,
+                "present" if read_result.observed is not None else "absent",
             )
+        return read_result
 
-        observed = read_result.observed  # may be None if absent
-        logger.info(
-            "Read state for %s: %s",
-            fully_qualified_name,
-            "present" if observed is not None else "absent",
-        )
-
-        # --- Step 2: Plan
+    def _plan(
+        self,
+        desired: DesiredTable,
+        observed: ObservedTable | None,
+        fully_qualified_name: str,
+    ) -> PlanContext:
+        """Compute the ordered action plan to reach the desired state."""
         context = make_plan_context(desired, observed)
-        num_actions = len(context.plan)
-        logger.info("Planned %d action(s) for %s", num_actions, fully_qualified_name)
+        logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
+        return context
 
-        # --- Step 3: Validate
+    def _validate(self, context: PlanContext, fully_qualified_name: str) -> ValidationResult:
+        """Validate the planned actions, logging the outcome."""
         logger.info("Validating plan for %s", fully_qualified_name)
-        validation_failures = self.validator.validate(context)
-        validation = ValidationResult(failures=validation_failures)
+        validation = ValidationResult(failures=self.validator.validate(context))
         if validation.failed:
             logger.error(
                 "Validation failed for %s (%d failure(s))",
                 fully_qualified_name,
                 len(validation.failures),
             )
-            return TableRunReport(
-                fully_qualified_name=fully_qualified_name,
-                started_at=started,
-                ended_at=_utc_now(),
-                read=read_result,
-                validation=validation,
-                execution_results=(),
-            )
+        else:
+            logger.info("Validation passed for %s", fully_qualified_name)
+        return validation
 
-        logger.info("Validation passed for %s", fully_qualified_name)
-        # --- Step 4: Execute
+    def _execute(
+        self, context: PlanContext, fully_qualified_name: str
+    ) -> tuple[ExecutionResult, ...]:
+        """Execute the planned actions, logging how many failed."""
         executions = self.executor.execute(context.plan)
-        failed_execs = sum(1 for e in executions if e.failure is not None)
+        failed_executions = sum(1 for execution in executions if execution.failure is not None)
         logger.info(
             "Executed %d action(s) for %s (%d failed)",
             len(executions),
             fully_qualified_name,
-            failed_execs,
+            failed_executions,
         )
-
-        return TableRunReport(
-            fully_qualified_name=fully_qualified_name,
-            started_at=started,
-            ended_at=_utc_now(),
-            read=read_result,
-            validation=ValidationResult(failures=()),
-            execution_results=executions,
-        )
+        return executions
