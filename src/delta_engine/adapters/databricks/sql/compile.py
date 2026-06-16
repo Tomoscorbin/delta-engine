@@ -55,7 +55,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     parts = [
         f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
         f"({columns})",
-        f"USING {table.format}",
+        "USING delta",
         table_comment,
         properties,
         partition_by,

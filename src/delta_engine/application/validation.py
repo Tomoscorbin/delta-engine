@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
-from delta_engine.domain.plan import AddColumn, PartitionBy
+from delta_engine.domain.plan import AddColumn
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
@@ -58,20 +58,19 @@ class DisallowPartitioningChange(Rule):
     """
 
     def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Flag the plan if it changes the an existing table's partition columns."""
+        """Flag the plan if desired and observed partition columns differ."""
         if ctx.observed is None:
             return None
-        for action in ctx.plan.actions:
-            if isinstance(action, PartitionBy):
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: partitioning changes are not supported."
-                        f"Current partition columns: {ctx.observed.partitioned_by}"
-                        f" - Requested partition columns: {ctx.desired.partitioned_by}."
-                        " Recreate the table with the desired partitioning."
-                    ),
-                )
+        if ctx.desired.partitioned_by != ctx.observed.partitioned_by:
+            return ValidationFailure(
+                rule_name=self.__class__.__name__,
+                message=(
+                    "Operation not allowed: partitioning changes are not supported."
+                    f" Current partition columns: {ctx.observed.partitioned_by}"
+                    f" - Requested partition columns: {ctx.desired.partitioned_by}."
+                    " Recreate the table with the desired partitioning."
+                ),
+            )
         return None
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from delta_engine.application.results import ExecutionResult, ReadResult
-from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
 
@@ -33,10 +33,3 @@ class PlanExecutor(Protocol):
         ...
 
 
-@runtime_checkable
-class DesiredTableSource(Protocol):
-    """A user-facing table specification that can produce a domain table."""
-
-    def to_desired_table(self) -> DesiredTable:
-        """Return the domain :class:`DesiredTable` for this specification."""
-        ...

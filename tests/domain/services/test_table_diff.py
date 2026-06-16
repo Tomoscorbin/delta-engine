@@ -4,14 +4,13 @@ from delta_engine.domain.model import (
     Integer,
     ObservedTable,
     QualifiedName,
-    TableFormat,
+
 )
 from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
 from delta_engine.domain.services.table_diff import (
-    diff_partition_columns,
     diff_properties,
     diff_table_comments,
 )
@@ -77,7 +76,6 @@ def test_no_comment_action_when_comments_match():
         comment="core table",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -102,7 +100,6 @@ def test_sets_comment_when_comment_differs():
         comment="core table",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -128,7 +125,6 @@ def test_clears_comment_when_desired_is_empty():
         comment="",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -146,24 +142,3 @@ def test_clears_comment_when_desired_is_empty():
     assert actions == expected
 
 
-def test_no_partition_action_when_partition_columns_match():
-    # Given: same partition spec on desired and observed
-    d = DesiredTable(
-        qualified_name=_QUALIFIED_NAME,
-        columns=(Column("event_date", Integer()),),
-        properties={},
-        partitioned_by=("event_date",),
-        format=TableFormat.DELTA,
-    )
-    o = ObservedTable(
-        qualified_name=_QUALIFIED_NAME,
-        columns=(Column("event_date", Integer()),),
-        properties={},
-        partitioned_by=("event_date",),
-    )
-
-    # When
-    actions = diff_partition_columns(d, o)
-
-    # Then: no action
-    assert actions == ()

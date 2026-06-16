@@ -1,12 +1,11 @@
 import pytest
 
 from delta_engine.application.ordering import action_sort_key
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
-    PartitionBy,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -27,7 +26,6 @@ def _create_table_action() -> CreateTable:
         comment=None,
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     return CreateTable(table=dt)
 
@@ -40,7 +38,6 @@ def test_orders_by_phase_in_documented_precedence():
     actions = (
         SetTableComment(comment="tbl comment"),
         AddColumn(column=_column("a_col")),
-        PartitionBy(column_names=("ds",)),
         SetProperty(name="p_set", value="1"),
         SetColumnNullability(column_name="nn_col", nullable=False),
         DropColumn(column_name="d_col"),
@@ -60,7 +57,6 @@ def test_orders_by_phase_in_documented_precedence():
         SetColumnComment,
         SetTableComment,
         SetColumnNullability,
-        PartitionBy,
     ]
     assert [type(a) for a in ordered] == expected_types_in_order
 
@@ -86,7 +82,6 @@ def test_within_phase_actions_are_ordered_by_subject_name():
         (SetColumnComment(column_name="zcol", comment="c"), "zcol"),
         (SetColumnNullability(column_name="ncol", nullable=False), "ncol"),
         (SetTableComment(comment="table comment"), ""),  # whole-table action: no subject
-        (PartitionBy(column_names=("ds",)), ""),  # whole-table action: no subject
     ],
 )
 def test_subject_identifies_within_phase_target(action, expected_subject):

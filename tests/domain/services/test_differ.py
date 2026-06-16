@@ -6,13 +6,12 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     String,
-    TableFormat,
+
 )
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     CreateTable,
-    PartitionBy,
     SetProperty,
     SetTableComment,
 )
@@ -29,7 +28,6 @@ def test_creates_table_when_observed_is_missing():
         comment="core table",
         properties={"owner": "cdm"},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
 
     # When: diffing desired vs None
@@ -52,7 +50,6 @@ def test_no_actions_when_desired_equals_observed():
         comment="core table",
         properties={"owner": "cdm"},
         partitioned_by=("event_date",),
-        format=TableFormat.DELTA,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -88,7 +85,6 @@ def test_combines_column_property_comment_and_partition_diffs():
         comment="core table",  # updated comment
         properties={"owner": "cdm", "delta.appendOnly": "false"},  # set/update
         partitioned_by=("event_date", "country"),  # partition spec differs
-        format=TableFormat.DELTA,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -117,5 +113,4 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition warning surfaced
-    assert PartitionBy(("event_date", "country")) in plan.actions
+    # Partition change is detected by the validator (no PartitionBy action in plan)

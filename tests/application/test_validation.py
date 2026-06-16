@@ -3,7 +3,7 @@ from delta_engine.application.validation import (
     NonNullableColumnAdd,
     PlanValidator,
 )
-from delta_engine.domain.plan.actions import AddColumn, PartitionBy
+from delta_engine.domain.plan.actions import AddColumn
 
 # ---- Test fakes
 
@@ -99,13 +99,11 @@ def test_allows_non_nullable_column_when_creating_new_table():
 
 
 def test_rejects_partitioning_change_on_existing_table():
-    # Given an existing table with current partitioning
-    current_parts = ("ds",)
-    desired_parts = ("country",)
+    # Given an existing table where desired and observed partition specs differ
     ctx = _ctx_with_existing_table(
-        actions=(PartitionBy(column_names=desired_parts),),
-        current_parts=current_parts,
-        desired_parts=desired_parts,
+        actions=(),
+        current_parts=("ds",),
+        desired_parts=("country",),
     )
     rule = DisallowPartitioningChange()
 
@@ -116,9 +114,9 @@ def test_rejects_partitioning_change_on_existing_table():
     assert failure is not None
 
 
-def test_allows_partitioning_statement_during_create():
-    # Given a new table creation with desired partitioning
-    ctx = _ctx_for_create(actions=(PartitionBy(column_names=("ds",)),), desired_parts=("ds",))
+def test_allows_partitioning_on_new_table():
+    # Given a new table creation (no observed table)
+    ctx = _ctx_for_create(actions=(), desired_parts=("ds",))
     rule = DisallowPartitioningChange()
 
     # When evaluating the plan
@@ -128,9 +126,13 @@ def test_allows_partitioning_statement_during_create():
     assert failure is None
 
 
-def test_ignores_plans_that_do_not_touch_partitioning_on_existing_table():
-    # Given an existing table and a plan with no partitioning action
-    ctx = _ctx_with_existing_table(actions=(AddColumn(column=_FakeColumn("x", True)),))
+def test_allows_when_partition_spec_unchanged_on_existing_table():
+    # Given an existing table where desired and observed partition specs are identical
+    ctx = _ctx_with_existing_table(
+        actions=(AddColumn(column=_FakeColumn("x", True)),),
+        current_parts=("ds",),
+        desired_parts=("ds",),
+    )
     rule = DisallowPartitioningChange()
 
     # When evaluating the plan
