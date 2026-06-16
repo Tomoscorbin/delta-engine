@@ -6,7 +6,7 @@ from delta_engine.domain.model import QualifiedName
 
 
 def backtick(raw: str) -> str:
-    """Backtick-quote an identifier part, escaping backtick_qualified_names."""
+    """Backtick-quote an identifier part, doubling any embedded backtick."""
     return f"`{raw.replace('`', '``')}`"
 
 
@@ -16,5 +16,5 @@ def quote_literal(literal: str) -> str:
 
 
 def backtick_qualified_name(qualified_name: QualifiedName) -> str:
-    """Render a fully qualified table name with dot separators and backtick_qualified_names."""
+    """Render a QualifiedName as backtick-quoted, dot-separated parts."""
     return ".".join(backtick(p) for p in qualified_name.parts)
