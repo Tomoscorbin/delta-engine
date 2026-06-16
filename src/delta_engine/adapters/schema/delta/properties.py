@@ -18,3 +18,6 @@ class Property(StrEnum):
     DELETED_FILE_RETENTION_DURATION = "delta.deletedFileRetentionDuration"
     LOG_RETENTION_DURATION = "delta.logRetentionDuration"
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
+
+
+SUPPORTED_PROPERTIES: frozenset[str] = frozenset(p.value for p in Property)

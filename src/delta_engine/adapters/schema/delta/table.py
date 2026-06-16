@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from delta_engine.adapters.schema import Column
-from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.adapters.schema.delta.properties import SUPPORTED_PROPERTIES, Property
 from delta_engine.domain.model import DesiredTable, QualifiedName, TableFormat
 
 
@@ -20,8 +20,7 @@ class DeltaTable:
         }
     )
 
-    # lookup set of supported property keys
-    _allowed_property_keys: ClassVar[frozenset[str]] = frozenset(p.value for p in Property)
+    _allowed_property_keys: ClassVar[frozenset[str]] = SUPPORTED_PROPERTIES
 
     def __init__(
         self,

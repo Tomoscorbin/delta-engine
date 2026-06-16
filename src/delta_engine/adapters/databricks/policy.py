@@ -4,19 +4,9 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.adapters.schema.delta.properties import SUPPORTED_PROPERTIES
 
-# TODO: create a generic policy enforcement framework
-_PROPERTY_ALLOWLIST: Final[frozenset[str]] = frozenset(
-    {
-        Property.CHANGE_DATA_FEED,
-        Property.DELETED_FILE_RETENTION_DURATION,
-        Property.LOG_RETENTION_DURATION,
-        Property.DATA_SKIPPING_NUM_INDEXED_COLS,
-        Property.COLUMN_MAPPING_MODE,
-        Property.ENABLE_DELETION_VECTORS,
-    }
-)
+_PROPERTY_ALLOWLIST: Final[frozenset[str]] = SUPPORTED_PROPERTIES
 
 
 class PropertyPolicy:
