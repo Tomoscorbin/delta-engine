@@ -6,8 +6,18 @@ duplicate names, and iterates in fully qualified name order to produce
 deterministic planning input for the engine.
 """
 
-from delta_engine.application.ports import DesiredTableSource
+from typing import Protocol, runtime_checkable
+
 from delta_engine.domain.model import DesiredTable
+
+
+@runtime_checkable
+class DesiredTableSource(Protocol):
+    """A user-facing table specification that can produce a domain table."""
+
+    def to_desired_table(self) -> DesiredTable:
+        """Return the domain :class:`DesiredTable` for this specification."""
+        ...
 
 
 class Registry:
