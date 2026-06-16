@@ -123,7 +123,9 @@ def test_adding_column_to_existing_table_emits_only_add_column():
     actions = diff_columns(desired, observed)
 
     # Then: only one AddColumn; no redundant SetColumnComment or SetColumnNullability
-    assert actions == (AddColumn(column=Column("age", Integer(), comment="user age", nullable=False)),)
+    assert actions == (
+        AddColumn(column=Column("age", Integer(), comment="user age", nullable=False)),
+    )
 
 
 def test_ignores_type_changes_until_type_migrations_supported():
