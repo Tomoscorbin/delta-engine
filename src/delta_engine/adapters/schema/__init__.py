@@ -1,4 +1,3 @@
-from delta_engine.adapters.schema.column import Column
 from delta_engine.adapters.schema.delta.table import DeltaTable
 from delta_engine.adapters.schema.types import (
     Boolean,
@@ -10,6 +9,7 @@ from delta_engine.adapters.schema.types import (
     String,
     Timestamp,
 )
+from delta_engine.domain.model import Column
 
 __all__ = [
     "Boolean",

@@ -4,9 +4,8 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
-from delta_engine.adapters.schema import Column
 from delta_engine.adapters.schema.delta.properties import MANAGED_PROPERTY_KEYS, Property
-from delta_engine.domain.model import DesiredTable, QualifiedName, TableFormat
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
 
 
 class DeltaTable:
@@ -70,7 +69,7 @@ class DeltaTable:
         """
         return DesiredTable(
             qualified_name=QualifiedName(self.catalog, self.schema, self.name),
-            columns=tuple(column.to_domain_column() for column in self.columns),
+            columns=tuple(self.columns),
             comment=self.comment,
             properties=self.effective_properties,
             partitioned_by=tuple(self.partitioned_by) if self.partitioned_by else (),
