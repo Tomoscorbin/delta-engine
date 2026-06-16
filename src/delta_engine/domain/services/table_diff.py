@@ -6,7 +6,6 @@ from collections.abc import Mapping
 
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import (
-    PartitionBy,
     SetProperty,
     SetTableComment,
 )
@@ -42,11 +41,3 @@ def diff_table_comments(
         return (SetTableComment(comment=desired.comment),)
 
 
-def diff_partition_columns(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[PartitionBy, ...]:
-    """Return the desired partition columns if different from observed."""
-    if desired.partitioned_by == observed.partitioned_by:
-        return ()
-    else:
-        return (PartitionBy(desired.partitioned_by),)

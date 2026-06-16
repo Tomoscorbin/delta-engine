@@ -12,7 +12,6 @@ from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     CreateTable,
-    PartitionBy,
     SetProperty,
     SetTableComment,
 )
@@ -117,5 +116,4 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition warning surfaced
-    assert PartitionBy(("event_date", "country")) in plan.actions
+    # Partition change is detected by the validator (no PartitionBy action in plan)

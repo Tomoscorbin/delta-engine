@@ -27,7 +27,6 @@ class ActionPhase(IntEnum):
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
-    PARTITION_BY = auto()
 
 
 class Action:
@@ -154,24 +153,6 @@ class SetColumnNullability(Action):
     def subject(self) -> str:
         """The column whose nullability changes."""
         return self.column_name
-
-
-@dataclass(frozen=True, slots=True)
-class PartitionBy(Action):
-    """
-    Partition the table.
-
-    Partitioning is only allowed on create.
-    """
-
-    column_names: tuple[str, ...]
-
-    phase: ClassVar[ActionPhase] = ActionPhase.PARTITION_BY
-
-    @property
-    def subject(self) -> str:
-        """Targets the table as a whole."""
-        return ""
 
 
 @dataclass(frozen=True, slots=True)
