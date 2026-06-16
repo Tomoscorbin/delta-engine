@@ -156,12 +156,11 @@ def test_table_exists_returns_false_when_head_is_empty(qn):
 # ---------- tests: columns & partitions ----------
 
 
-def test_fetch_columns_maps_name_nullability_and_comment():
+def test_columns_maps_name_nullability_and_comment(qn):
     # Given a catalog exposing two columns
-    fq = "c.s.t"
     catalog = FakeCatalog(
         columns_by_table={
-            fq: [
+            str(qn): [
                 make_catalog_col(
                     "id", dataType=T.IntegerType(), nullable=False, description="identifier"
                 ),
@@ -169,59 +168,65 @@ def test_fetch_columns_maps_name_nullability_and_comment():
             ]
         }
     )
-    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+    spark = FakeSparkForFetchState(
+        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
+    )
 
-    # When we fetch columns for the table
-    cols = reader._fetch_columns(fq)
+    # When we fetch state for the table
+    result = DatabricksReader(spark).fetch_state(qn)
 
     # Then names, nullability, and comments are mapped correctly
+    cols = result.observed.columns
     assert [c.name for c in cols] == ["id", "p_date"]
     assert [c.nullable for c in cols] == [False, True]
     assert [c.comment for c in cols] == ["identifier", ""]
 
 
-def test_fetch_partition_columns_returns_only_partition_names_in_order():
+def test_partition_columns_returns_only_partition_names_in_order(qn):
     # Given a mix of regular and partition columns
-    fq = "c.s.t"
     catalog = FakeCatalog(
         columns_by_table={
-            fq: [
-                make_catalog_col("id", isPartition=False),
-                make_catalog_col("p_store", isPartition=True),
-                make_catalog_col("p_date", isPartition=True),
+            str(qn): [
+                make_catalog_col("id", dataType=T.IntegerType(), isPartition=False),
+                make_catalog_col("p_store", dataType=T.StringType(), isPartition=True),
+                make_catalog_col("p_date", dataType=T.DateType(), isPartition=True),
             ]
         }
     )
-    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+    spark = FakeSparkForFetchState(
+        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
+    )
 
-    # When we fetch partition columns
-    partitions = reader._fetch_partition_columns(fq)
+    # When we fetch state for the table
+    result = DatabricksReader(spark).fetch_state(qn)
 
     # Then only partition columns are returned and ordering is preserved
-    assert partitions == ("p_store", "p_date")
+    assert result.observed.partitioned_by == ("p_store", "p_date")
 
 
-def test_fetch_partition_columns_ignores_missing_or_false_flags():
-    # Given columns lacking isPartition and with isPartition=False
+def test_partition_columns_ignores_missing_or_false_flags():
+    # Given columns with isPartition absent or False
     class NoIsPartition(SimpleNamespace):
         pass
 
-    fq = "c.s.u"
+    qn = QualifiedName("c", "s", "u")
     catalog = FakeCatalog(
         columns_by_table={
-            fq: [
-                NoIsPartition(name="a", dataType="string", nullable=True, description=""),
-                make_catalog_col("b", isPartition=False),
+            str(qn): [
+                NoIsPartition(name="a", dataType=T.IntegerType(), nullable=True, description=""),
+                make_catalog_col("b", dataType=T.StringType(), isPartition=False),
             ]
         }
     )
-    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+    spark = FakeSparkForFetchState(
+        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
+    )
 
-    # When we fetch partition columns
-    partitions = reader._fetch_partition_columns(fq)
+    # When we fetch state for the table
+    result = DatabricksReader(spark).fetch_state(qn)
 
     # Then no partitions are reported
-    assert partitions == ()
+    assert result.observed.partitioned_by == ()
 
 
 # ---------- tests: properties ----------
