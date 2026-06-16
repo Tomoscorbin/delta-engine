@@ -8,6 +8,7 @@ table- and run-level reports that summarize status, failures, and timing.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,32 +39,53 @@ class TableRunStatus(StrEnum):
 # ---------- Failure value objects ----------
 
 
+class Failure(ABC):
+    """A failure that can render itself as a one-line display string."""
+
+    @abstractmethod
+    def format_line(self) -> str:
+        """Return a single human-readable line describing this failure."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
-class ReadFailure:
+class ReadFailure(Failure):
     """Failure reading current catalog state for a table."""
 
     exception_type: str
     message: str
 
+    def format_line(self) -> str:
+        """Render the read failure as a display line."""
+        return f"Read error: {self.exception_type} - {self.message}"
+
 
 @dataclass(frozen=True, slots=True)
-class ValidationFailure:
+class ValidationFailure(Failure):
     """Description of a validation rule failure."""
 
     rule_name: str
     message: str
 
+    def format_line(self) -> str:
+        """Render the validation failure as a display line."""
+        return f"Validation failed: {self.rule_name} - {self.message}"
+
 
 @dataclass(frozen=True, slots=True)
-class ExecutionFailure:
+class ExecutionFailure(Failure):
     """Details about a failed action execution."""
 
     action_index: int
     exception_type: str
     message: str
 
-
-Failure = ReadFailure | ValidationFailure | ExecutionFailure
+    def format_line(self) -> str:
+        """Render the execution failure as a display line, including the action index."""
+        return (
+            f"Execution failed at action {self.action_index}: "
+            f"{self.exception_type} - {self.message}"
+        )
 
 
 # ---------- ReadResult ----------

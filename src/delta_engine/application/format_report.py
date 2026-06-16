@@ -7,12 +7,7 @@ Turns a failed `TableRunReport` into the per-table detail lines shared by the
 
 from __future__ import annotations
 
-from delta_engine.application.results import (
-    ExecutionFailure,
-    ReadFailure,
-    TableRunReport,
-    ValidationFailure,
-)
+from delta_engine.application.results import TableRunReport
 
 
 def format_failure_detail(table_report: TableRunReport) -> list[str]:
@@ -25,15 +20,7 @@ def format_failure_detail(table_report: TableRunReport) -> list[str]:
     lines = [f"\n❌ {table_report.fully_qualified_name} [{table_report.status.value}]"]
 
     for failure in table_report.all_failures:
-        if isinstance(failure, ReadFailure):
-            lines.append(f"    Read error: {failure.exception_type} - {failure.message}")
-        elif isinstance(failure, ValidationFailure):
-            lines.append(f"    Validation failed: {failure.rule_name} - {failure.message}")
-        elif isinstance(failure, ExecutionFailure):
-            lines.append(
-                f"    Execution failed at action {failure.action_index}: "
-                f"{failure.exception_type} - {failure.message}"
-            )
+        lines.append(f"    {failure.format_line()}")
 
     for result in table_report.execution_results:
         if result.failure:

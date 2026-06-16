@@ -102,6 +102,35 @@ def test_read_failed_carries_the_failure():
     assert result.failure is failure
 
 
+def test_read_failure_formats_itself_as_a_display_line():
+    # Given a read failure
+    failure = ReadFailure(exception_type="AnalysisException", message="table not found")
+
+    # Then it renders its own one-line description
+    assert failure.format_line() == "Read error: AnalysisException - table not found"
+
+
+def test_validation_failure_formats_itself_as_a_display_line():
+    # Given a validation failure
+    failure = ValidationFailure(
+        rule_name="DisallowPartitioningChange", message="cannot repartition"
+    )
+
+    # Then it renders its own one-line description
+    assert (
+        failure.format_line()
+        == "Validation failed: DisallowPartitioningChange - cannot repartition"
+    )
+
+
+def test_execution_failure_formats_itself_as_a_display_line():
+    # Given an execution failure at a known action index
+    failure = ExecutionFailure(action_index=2, exception_type="SparkException", message="boom")
+
+    # Then it renders its own one-line description including the action index
+    assert failure.format_line() == "Execution failed at action 2: SparkException - boom"
+
+
 def test_validation_result_failed_property_reflects_presence_of_failures():
     # Given a result with failures
     vf = ValidationFailure(rule_name="SomeRule", message="nope")
