@@ -50,9 +50,7 @@ class TableSnapshot:
 
         # Validate that all partition columns exist among defined columns
         if self.partitioned_by:
-            missing = [
-                name for name in self.partitioned_by if name.casefold() not in seen_names
-            ]
+            missing = [name for name in self.partitioned_by if name.casefold() not in seen_names]
             if missing:
                 raise ValueError(f"Partition column not found: {missing[0]}")
 

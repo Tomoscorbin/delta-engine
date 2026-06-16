@@ -12,13 +12,16 @@ def query_describe_detail(qualified_name: QualifiedName) -> str:
     """Return SQL to read table details."""
     return f"DESCRIBE DETAIL {backtick_qualified_name(qualified_name)}".strip()
 
+
 def query_table_existence(qualified_name: QualifiedName) -> str:
     """Return SQL that checks if a table exists in the given catalog/schema."""
-    tables_fqn = ".".join([
-        backtick(qualified_name.catalog),
-        backtick("information_schema"),
-        backtick("tables"),
-    ])
+    tables_fqn = ".".join(
+        [
+            backtick(qualified_name.catalog),
+            backtick("information_schema"),
+            backtick("tables"),
+        ]
+    )
 
     return f"""
         SELECT 1

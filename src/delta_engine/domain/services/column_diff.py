@@ -36,9 +36,7 @@ def _diff_columns_for_drops(
 ) -> tuple[DropColumn, ...]:
     """Return DropColumn actions for columns present in observed but missing in desired."""
     desired_names = {column.name for column in desired}
-    return tuple(
-        DropColumn(column.name) for column in observed if column.name not in desired_names
-    )
+    return tuple(DropColumn(column.name) for column in observed if column.name not in desired_names)
 
 
 def _diff_column_comments(
