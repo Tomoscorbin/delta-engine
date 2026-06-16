@@ -22,9 +22,9 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "catalog", self.catalog.casefold())
-        object.__setattr__(self, "schema", self.schema.casefold())
-        object.__setattr__(self, "name", self.name.casefold())
+        for field_name, value in (("catalog", self.catalog), ("schema", self.schema), ("name", self.name)):
+            if value != value.casefold():
+                raise ValueError(f"QualifiedName {field_name} must be lowercase: {value!r}")
 
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""

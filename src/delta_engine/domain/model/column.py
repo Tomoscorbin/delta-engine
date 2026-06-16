@@ -25,4 +25,5 @@ class Column:
     comment: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "name", self.name.casefold())
+        if self.name != self.name.casefold():
+            raise ValueError(f"Column name must be lowercase: {self.name!r}")

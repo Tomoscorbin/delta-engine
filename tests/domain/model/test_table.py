@@ -13,9 +13,9 @@ def test_fails_when_no_columns_defined():
         TableSnapshot(_QUALIFIED_NAME, ())
 
 
-def test_fails_when_column_names_duplicate_ignoring_case():
-    # Given: two columns whose identifiers collide case-insensitively
-    cols = (Column("ID", Integer()), Column("id", String()))
+def test_fails_when_column_names_duplicate():
+    # Given: two columns with the same lowercase name
+    cols = (Column("id", Integer()), Column("id", String()))
     # When: constructing a table snapshot
     # Then: validation fails due to non-unique column identifiers
     with pytest.raises(ValueError):
