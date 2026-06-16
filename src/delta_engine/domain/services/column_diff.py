@@ -25,17 +25,16 @@ def diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> t
         if desired_column.name in observed_by_name
     )
 
-    return (
-        tuple(AddColumn(column=column) for column in added)
-        + tuple(DropColumn(column.name) for column in dropped)
-        + tuple(
-            SetColumnComment(desired_column.name, desired_column.comment)
-            for desired_column, observed_column in common
-            if desired_column.comment != observed_column.comment
-        )
-        + tuple(
-            SetColumnNullability(column_name=desired_column.name, nullable=desired_column.nullable)
-            for desired_column, observed_column in common
-            if desired_column.nullable != observed_column.nullable
-        )
+    add_actions = tuple(AddColumn(column=column) for column in added)
+    drop_actions = tuple(DropColumn(column.name) for column in dropped)
+    comment_actions = tuple(
+        SetColumnComment(desired_column.name, desired_column.comment)
+        for desired_column, observed_column in common
+        if desired_column.comment != observed_column.comment
     )
+    nullability_actions = tuple(
+        SetColumnNullability(column_name=desired_column.name, nullable=desired_column.nullable)
+        for desired_column, observed_column in common
+        if desired_column.nullable != observed_column.nullable
+    )
+    return add_actions + drop_actions + comment_actions + nullability_actions
