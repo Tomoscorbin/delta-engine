@@ -84,10 +84,13 @@ class DatabricksReader:
             return ReadResult.create_absent()
 
         try:
-            columns = self._fetch_columns(str(qualified_name))
+            catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
+            columns = tuple(_to_domain_column(c) for c in catalog_columns)
+            partition_columns = tuple(
+                c.name for c in catalog_columns if bool(getattr(c, "isPartition", False))
+            )
             properties = self._fetch_properties(qualified_name)
             table_comment = self._fetch_table_comment(str(qualified_name))
-            partition_columns = self._fetch_partition_columns(str(qualified_name))
         except _SPARK_EXCEPTION as exc:
             failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
             return ReadResult.create_failed(failure)
@@ -105,16 +108,6 @@ class DatabricksReader:
         """Return `True` if the table exists, else `False`."""
         query = query_table_existence(qualified_name)
         return bool(self.spark.sql(query).head(1))
-
-    def _fetch_columns(self, fully_qualified_name: str) -> tuple[DomainColumn, ...]:
-        """List column definitions for the given table."""
-        catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
-        return tuple(_to_domain_column(column) for column in catalog_columns)
-
-    def _fetch_partition_columns(self, fully_qualified_name: str) -> tuple[str, ...]:
-        """Return a tuple of partition columns."""
-        catalog_columns = self.spark.catalog.listColumns(fully_qualified_name)
-        return tuple(c.name for c in catalog_columns if bool(getattr(c, "isPartition", False)))
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return table properties as a read-only mapping."""
