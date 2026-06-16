@@ -168,6 +168,39 @@ inline), shrinking the public surface to one symbol. Re-home tests onto
   `__iter__` (`application/registry.py`) — a single `dict[str, DesiredTable]`
   does insertion, dedup, and ordering with no shadow index.
 
+### A7 — Encapsulation sweep: misused privates and reach-through access — *investigation, pending*
+
+A dedicated pass over the whole codebase for two related encapsulation smells,
+not yet enumerated as concrete findings:
+
+1. **Private members used where they shouldn't be.** A `_name`-prefixed
+   function, method, or attribute referenced from outside the class/module that
+   owns it. Either the access is illegitimate (a layering or boundary
+   violation), or the member is genuinely needed by others and should be
+   promoted to part of the public interface. The fix differs per case — tighten
+   the caller, or widen the interface — so each instance must be judged
+   individually.
+2. **Reach-through access (Law of Demeter).** Code that digs through several
+   layers of objects/attributes to get at something — `a.b.c.d`, or pulling a
+   nested field out of a returned object to reconstruct something the owner
+   could have handed over directly. Reaching deep into another object's
+   internals means the caller knows structure it shouldn't; that knowledge
+   belongs behind a method or property on the object that owns the data. This is
+   the same "pull complexity downward / information hiding" principle as the
+   `format_line` move in A3 and the `_fetch_table_comment` consistency fix in
+   A6, applied as a codebase-wide search rather than a single site.
+
+**Method:** grep for cross-module/cross-class `._private` access; scan for
+attribute chains of depth ≥ 3 and for callers that destructure a returned object
+only to rebuild a value the owner could expose. For each hit, decide: promote
+the member to the public interface, add an accessor/method on the owner, or fix
+the caller. Verify each candidate against the code before acting — a deep chain
+through a plain data record (e.g. a frozen dataclass that is *meant* to be read
+field-by-field) is not necessarily a violation.
+
+This is exploratory; findings it produces will be folded back into Part A with
+concrete locations and severities.
+
 ---
 
 ## B. Real-world fitness — what breaks in production
