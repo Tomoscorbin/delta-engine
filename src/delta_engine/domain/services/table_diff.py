@@ -45,11 +45,7 @@ def diff_table_comments(
 def diff_partition_columns(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[PartitionBy, ...]:
-    """
-    Return the desired parition columns if different from observed.
-
-    Note: This is operation is currently disallowed. We surface this action only to warn the user.
-    """
+    """Return the desired partition columns if different from observed."""
     if desired.partitioned_by == observed.partitioned_by:
         return ()
     else:

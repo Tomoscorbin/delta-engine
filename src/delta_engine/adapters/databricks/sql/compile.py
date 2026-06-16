@@ -38,7 +38,7 @@ def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
 @singledispatch
 def _compile_action(
     action: Action, backticked_table_name: str
-) -> str:  # TODO: fix unaccessed backticked_table_name
+) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
@@ -116,7 +116,7 @@ def _column_definition(column) -> str:
     """Render a single column definition fragment."""
     column_name = backtick(column.name)
     type = sql_type_for_data_type(column.data_type)
-    nullable = "" if column.nullable else "NOT NULL"  # TODO: or be explicit?
+    nullable = "" if column.nullable else "NOT NULL"
     return f"{column_name} {type} {nullable}".strip()
 
 

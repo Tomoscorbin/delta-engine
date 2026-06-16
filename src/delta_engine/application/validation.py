@@ -8,10 +8,6 @@ from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
 from delta_engine.domain.plan import AddColumn, PartitionBy
 
-# TODO: Rules to add:
-# - no setting existing columns to NOT NULL if table is populated
-
-
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
 
@@ -30,7 +26,7 @@ class Rule(ABC):
         ...
 
 
-class NonNullableColumnAdd(Rule):  # Are classes and ABCs the best approach?
+class NonNullableColumnAdd(Rule):
     """
     Disallow adding non-nullable columns to existing tables.
 

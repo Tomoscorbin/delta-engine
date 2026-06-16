@@ -116,7 +116,7 @@ class ValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionResult:  # do we want an ActionResult and then an aggregate ExecutionResult?
+class ExecutionResult:
     """Result of executing a single action in a plan."""
 
     action: str
