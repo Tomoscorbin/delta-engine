@@ -22,7 +22,12 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
-        for field_name, value in (("catalog", self.catalog), ("schema", self.schema), ("name", self.name)):
+        """Raise if any part contains uppercase characters."""
+        for field_name, value in (
+            ("catalog", self.catalog),
+            ("schema", self.schema),
+            ("name", self.name),
+        ):
             if value != value.casefold():
                 raise ValueError(f"QualifiedName {field_name} must be lowercase: {value!r}")
 

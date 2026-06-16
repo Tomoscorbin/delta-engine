@@ -36,6 +36,7 @@ class TableSnapshot:
     partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """Validate columns are non-empty, unique, and partition references exist."""
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
