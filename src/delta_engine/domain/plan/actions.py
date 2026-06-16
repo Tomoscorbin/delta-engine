@@ -26,7 +26,6 @@ class ActionPhase(IntEnum):
     DROP_COLUMN = auto()
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
-    UNSET_PROPERTY = auto()
     SET_COLUMN_NULLABILITY = auto()
     PARTITION_BY = auto()
 
@@ -110,20 +109,6 @@ class SetProperty(Action):
     @property
     def subject(self) -> str:
         """The property name being set."""
-        return self.name
-
-
-@dataclass(frozen=True, slots=True)
-class UnsetProperty(Action):
-    """Unset a table property."""
-
-    name: str
-
-    phase: ClassVar[ActionPhase] = ActionPhase.UNSET_PROPERTY
-
-    @property
-    def subject(self) -> str:
-        """The property name being unset."""
         return self.name
 
 

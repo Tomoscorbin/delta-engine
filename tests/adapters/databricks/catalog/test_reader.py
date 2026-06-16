@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from types import MappingProxyType, SimpleNamespace
+from types import SimpleNamespace
 
 import pyspark.sql.types as T
 from pyspark.sql.utils import AnalysisException
@@ -245,35 +245,27 @@ def test_fetch_properties_returns_empty_readonly_when_describe_has_no_rows(qn):
         props["x"] = "y"  # type: ignore[index]
 
 
-def test_fetch_properties_applies_injected_policy(qn):
-    # Given DESCRIBE DETAIL returns a properties dict and a policy that filters keys
+def test_fetch_properties_returns_full_catalog_map_unfiltered(qn):
+    # Given DESCRIBE DETAIL returns properties including ones the engine does not manage
     rows = [
         {
             "properties": {
                 "delta.columnMapping.mode": "name",
-                "delta.deletedFileRetentionDuration": "interval 1 day",
-                "custom.unlisted": "keep-me-out",
+                "delta.minReaderVersion": "2",
+                "custom.unlisted": "kept",
             }
         }
     ]
-
-    class AllowOnly:
-        def __init__(self, keys):
-            self._keys = set(keys)
-
-        def enforce(self, props):
-            return MappingProxyType({k: v for k, v in props.items() if k in self._keys})
-
-    policy = AllowOnly({"delta.columnMapping.mode", "delta.deletedFileRetentionDuration"})
-    reader = DatabricksReader(FakeSparkProps(rows=rows), property_policy=policy)
+    reader = DatabricksReader(FakeSparkProps(rows=rows))
 
     # When we fetch properties
     props = reader._fetch_properties(qn)
 
-    # Then only allowed keys are returned
+    # Then the full catalog map passes through unfiltered, as a read-only mapping
     assert dict(props) == {
         "delta.columnMapping.mode": "name",
-        "delta.deletedFileRetentionDuration": "interval 1 day",
+        "delta.minReaderVersion": "2",
+        "custom.unlisted": "kept",
     }
     with pytest.raises(TypeError):
         props["x"] = "y"
@@ -335,13 +327,8 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
         }
     ]
 
-    class IdentityPolicy:
-        def enforce(self, props):
-            return MappingProxyType(dict(props))
-
     reader = DatabricksReader(
         FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=describe_rows),
-        property_policy=IdentityPolicy(),
     )
 
     # When we fetch state

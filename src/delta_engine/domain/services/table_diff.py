@@ -6,43 +6,28 @@ from collections.abc import Mapping
 
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import (
-    Action,
     PartitionBy,
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
-
-
-def _diff_properties_for_sets(
-    desired: Mapping[str, str],
-    observed: Mapping[str, str],
-) -> tuple[SetProperty, ...]:
-    """Set or update any property whose value differs or is missing."""
-    actions: list[SetProperty] = []
-    for name, desired_value in desired.items():
-        if observed.get(name) != desired_value:
-            actions.append(SetProperty(name=name, value=desired_value))
-    return tuple(actions)
-
-
-def _diff_properties_for_unsets(
-    desired: Mapping[str, str],
-    observed: Mapping[str, str],
-) -> tuple[UnsetProperty, ...]:
-    """Unset any property present in observed but not in desired."""
-    extras = set(observed) - set(desired)
-    return tuple(UnsetProperty(name=n) for n in extras)
 
 
 def diff_properties(
     desired: Mapping[str, str],
     observed: Mapping[str, str],
-) -> tuple[Action, ...]:
-    """Return property-level actions to transform `observed` into `desired`."""
-    sets = _diff_properties_for_sets(desired, observed)
-    unsets = _diff_properties_for_unsets(desired, observed)
-    return sets + unsets
+) -> tuple[SetProperty, ...]:
+    """
+    Return the `SetProperty` actions needed to align observed with desired.
+
+    Properties are a declared subset, not a complete desired state: the engine
+    only manages keys the user declared. Observed-only keys (e.g. properties
+    Databricks sets autonomously) are left untouched — they are never unset.
+    """
+    return tuple(
+        SetProperty(name=name, value=value)
+        for name, value in desired.items()
+        if observed.get(name) != value
+    )
 
 
 def diff_table_comments(

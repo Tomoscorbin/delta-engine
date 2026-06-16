@@ -10,7 +10,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnNullability,
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
 
 __all__ = [
@@ -25,5 +24,4 @@ __all__ = [
     "SetColumnNullability",
     "SetProperty",
     "SetTableComment",
-    "UnsetProperty",
 ]

@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from delta_engine.adapters.schema import Column
-from delta_engine.adapters.schema.delta.properties import Property
+from delta_engine.adapters.schema.delta.properties import MANAGED_PROPERTY_KEYS, Property
 from delta_engine.domain.model import DesiredTable, QualifiedName, TableFormat
 
 
@@ -20,8 +20,7 @@ class DeltaTable:
         }
     )
 
-    # lookup set of supported property keys
-    _allowed_property_keys: ClassVar[frozenset[str]] = frozenset(p.value for p in Property)
+    _managed_property_keys: ClassVar[frozenset[str]] = MANAGED_PROPERTY_KEYS
 
     def __init__(
         self,
@@ -42,11 +41,13 @@ class DeltaTable:
         self.properties = dict(properties or {})
         self.partitioned_by = partitioned_by
 
-        # Validate provided properties exist in the supported Property enum
+        # Fast-fail on property keys this engine does not manage (e.g. typos)
         if self.properties:
-            unknown = [k for k in self.properties.keys() if k not in self._allowed_property_keys]
-            if unknown:
-                raise ValueError(f"Unknown Delta table properties: {', '.join(sorted(unknown))}")
+            unmanaged = [k for k in self.properties if k not in self._managed_property_keys]
+            if unmanaged:
+                raise ValueError(
+                    f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
+                )
 
     @property
     def effective_properties(self) -> Mapping[str, str]:
