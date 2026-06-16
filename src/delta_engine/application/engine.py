@@ -114,25 +114,7 @@ class Engine:
         validation = ValidationResult()
         executions: tuple[ExecutionResult, ...] = ()
 
-        read_result = self._read(desired, fully_qualified_name)
-        if not read_result.failure:
-            context = self._plan(desired, read_result.observed, fully_qualified_name)
-            validation = self._validate(context, fully_qualified_name)
-            if not validation.failed:
-                executions = self._execute(context, fully_qualified_name)
-
-        return TableRunReport(
-            fully_qualified_name=fully_qualified_name,
-            started_at=started,
-            ended_at=_utc_now(),
-            read=read_result,
-            validation=validation,
-            execution_results=executions,
-        )
-
-    def _read(self, desired: DesiredTable, fully_qualified_name: str) -> ReadResult:
-        """Read current catalog state, logging the outcome."""
-        read_result = self.reader.fetch_state(desired.qualified_name)
+        read_result = self._read(desired)
         if read_result.failure:
             logger.error(
                 "Read failed for %s: %s - %s",
@@ -146,43 +128,49 @@ class Engine:
                 fully_qualified_name,
                 "present" if read_result.observed is not None else "absent",
             )
-        return read_result
+        if not read_result.failure:
+            context = self._plan(desired, read_result.observed)
+            logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
+            validation = self._validate(context)
+            if validation.failed:
+                logger.error(
+                    "Validation failed for %s (%d failure(s))",
+                    fully_qualified_name,
+                    len(validation.failures),
+                )
+            else:
+                logger.info("Validation passed for %s", fully_qualified_name)
+            if not validation.failed:
+                executions = self._execute(context)
+                failed_count = sum(1 for e in executions if e.failure is not None)
+                logger.info(
+                    "Executed %d action(s) for %s (%d failed)",
+                    len(executions),
+                    fully_qualified_name,
+                    failed_count,
+                )
 
-    def _plan(
-        self,
-        desired: DesiredTable,
-        observed: ObservedTable | None,
-        fully_qualified_name: str,
-    ) -> PlanContext:
-        """Compute the ordered action plan to reach the desired state."""
-        context = make_plan_context(desired, observed)
-        logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
-        return context
-
-    def _validate(self, context: PlanContext, fully_qualified_name: str) -> ValidationResult:
-        """Validate the planned actions, logging the outcome."""
-        logger.info("Validating plan for %s", fully_qualified_name)
-        validation = ValidationResult(failures=self.validator.validate(context))
-        if validation.failed:
-            logger.error(
-                "Validation failed for %s (%d failure(s))",
-                fully_qualified_name,
-                len(validation.failures),
-            )
-        else:
-            logger.info("Validation passed for %s", fully_qualified_name)
-        return validation
-
-    def _execute(
-        self, context: PlanContext, fully_qualified_name: str
-    ) -> tuple[ExecutionResult, ...]:
-        """Execute the planned actions, logging how many failed."""
-        executions = self.executor.execute(context.plan)
-        failed_executions = sum(1 for execution in executions if execution.failure is not None)
-        logger.info(
-            "Executed %d action(s) for %s (%d failed)",
-            len(executions),
-            fully_qualified_name,
-            failed_executions,
+        return TableRunReport(
+            fully_qualified_name=fully_qualified_name,
+            started_at=started,
+            ended_at=_utc_now(),
+            read=read_result,
+            validation=validation,
+            execution_results=executions,
         )
-        return executions
+
+    def _read(self, desired: DesiredTable) -> ReadResult:
+        """Read current catalog state."""
+        return self.reader.fetch_state(desired.qualified_name)
+
+    def _plan(self, desired: DesiredTable, observed: ObservedTable | None) -> PlanContext:
+        """Compute the ordered action plan to reach the desired state."""
+        return make_plan_context(desired, observed)
+
+    def _validate(self, context: PlanContext) -> ValidationResult:
+        """Validate the planned actions."""
+        return ValidationResult(failures=self.validator.validate(context))
+
+    def _execute(self, context: PlanContext) -> tuple[ExecutionResult, ...]:
+        """Execute the planned actions."""
+        return self.executor.execute(context.plan)
