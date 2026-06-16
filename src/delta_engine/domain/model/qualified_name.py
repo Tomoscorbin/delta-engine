@@ -21,6 +21,16 @@ class QualifiedName:
     schema: str
     name: str
 
+    def __post_init__(self) -> None:
+        """Raise if any part contains uppercase characters."""
+        for field_name, value in (
+            ("catalog", self.catalog),
+            ("schema", self.schema),
+            ("name", self.name),
+        ):
+            if value != value.casefold():
+                raise ValueError(f"QualifiedName {field_name} must be lowercase: {value!r}")
+
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""
         return f"{self.catalog}.{self.schema}.{self.name}"

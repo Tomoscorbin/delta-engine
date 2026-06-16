@@ -36,19 +36,16 @@ class TableSnapshot:
     partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Validate non-empty column list and uniqueness by name (casefolded)."""
+        """Validate columns are non-empty, unique, and partition references exist."""
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
-        # validate that there are no duplicate columns
         seen_names: set[str] = set()
         for column in self.columns:
-            normalized_name = column.name.casefold()
-            if normalized_name in seen_names:
+            if column.name in seen_names:
                 raise ValueError(f"Duplicate column name: {column.name}")
-            seen_names.add(normalized_name)
+            seen_names.add(column.name)
 
-        # Validate that all partition columns exist among defined columns
         if self.partitioned_by:
             missing = [name for name in self.partitioned_by if name.casefold() not in seen_names]
             if missing:

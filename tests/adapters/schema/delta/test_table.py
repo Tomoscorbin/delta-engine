@@ -16,9 +16,9 @@ def test_user_overrides_take_precedence_over_defaults():
         Property.ENABLE_DELETION_VECTORS.value: "false",  # user wants to disable
     }
     table = DeltaTable(
-        catalog="CoreDev",
-        schema="Medallia",
-        name="Responses",
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
         columns=[_Column("id")],
         properties=user_properties,
     )
@@ -34,9 +34,9 @@ def test_user_overrides_take_precedence_over_defaults():
 def test_defaults_are_applied_when_no_user_properties_given():
     # Given a table with no explicit properties
     table = DeltaTable(
-        catalog="CoreDev",
-        schema="Medallia",
-        name="Responses",
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
         columns=[_Column("id")],
     )
 
@@ -62,9 +62,9 @@ def test_rejects_unknown_table_property_keys(bad_keys):
     # When/then construction fails
     with pytest.raises(ValueError):
         DeltaTable(
-            catalog="CoreDev",
-            schema="Medallia",
-            name="Responses",
+            catalog="coredev",
+            schema="medallia",
+            name="responses",
             columns=[_Column("id")],
             properties=user_properties,
         )
@@ -79,9 +79,9 @@ def test_accepts_only_enum_property_keys():
 
     # When constructing the table
     table = DeltaTable(
-        catalog="CoreDev",
-        schema="Medallia",
-        name="Responses",
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
         columns=[_Column("id")],
         properties=user_properties,
     )
@@ -91,29 +91,29 @@ def test_accepts_only_enum_property_keys():
     assert table.effective_properties[Property.COLUMN_MAPPING_MODE.value] == "name"
 
 
-def test_partition_columns_must_exist_case_insensitive():
-    # Given columns include 'event_date' and the partition spec uses different case
+def test_partition_columns_must_exist():
+    # Given columns include 'event_date' and the partition spec references it
     table = DeltaTable(
-        catalog="CoreDev",
-        schema="Medallia",
-        name="Responses",
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
         columns=[Column("id", Integer()), Column("event_date", String())],
-        partitioned_by=["EVENT_DATE"],
+        partitioned_by=["event_date"],
     )
 
     # When converting to the domain table
     desired = table.to_desired_table()
 
-    # Then conversion succeeds because partition matching is case-insensitive
-    assert desired.partitioned_by == ("EVENT_DATE",)
+    # Then conversion succeeds and partitioning is preserved
+    assert desired.partitioned_by == ("event_date",)
 
 
 def test_missing_partition_column_raises_error():
     # Given a partition spec referencing a column that does not exist
     table = DeltaTable(
-        catalog="CoreDev",
-        schema="Medallia",
-        name="Responses",
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
         columns=[Column("id", Integer()), Column("event_date", String())],
         partitioned_by=["store_id"],  # not present
     )
