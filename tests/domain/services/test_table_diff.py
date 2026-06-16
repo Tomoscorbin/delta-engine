@@ -4,7 +4,7 @@ from delta_engine.domain.model import (
     Integer,
     ObservedTable,
     QualifiedName,
-    TableFormat,
+
 )
 from delta_engine.domain.plan.actions import (
     SetProperty,
@@ -76,7 +76,6 @@ def test_no_comment_action_when_comments_match():
         comment="core table",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -101,7 +100,6 @@ def test_sets_comment_when_comment_differs():
         comment="core table",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -127,7 +125,6 @@ def test_clears_comment_when_desired_is_empty():
         comment="",
         properties={},
         partitioned_by=(),
-        format=TableFormat.DELTA,
     )
     o = ObservedTable(
         qualified_name=_QUALIFIED_NAME,

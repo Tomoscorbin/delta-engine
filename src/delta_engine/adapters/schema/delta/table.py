@@ -5,13 +5,12 @@ from types import MappingProxyType
 from typing import ClassVar
 
 from delta_engine.adapters.schema.delta.properties import MANAGED_PROPERTY_KEYS, Property
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableFormat
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
 class DeltaTable:
     """Defines a Delta table schema."""
 
-    format: ClassVar[TableFormat] = TableFormat.DELTA
     default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
         {
             Property.ENABLE_DELETION_VECTORS.value: "true",
@@ -73,5 +72,4 @@ class DeltaTable:
             comment=self.comment,
             properties=self.effective_properties,
             partitioned_by=tuple(self.partitioned_by) if self.partitioned_by else (),
-            format=self.format,
         )
