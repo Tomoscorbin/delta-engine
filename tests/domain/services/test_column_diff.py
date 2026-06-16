@@ -103,10 +103,27 @@ def test_combines_add_drop_and_updates_without_duplicates():
     # When: diffing desired against observed
     actions = diff_columns(desired, observed)
 
-    # Then: we see the three expected kinds of actions for the right columns
-    assert AddColumn(column=Column("add_me", Integer(), nullable=False, comment="new")) in actions
-    assert DropColumn("drop_me") in actions
-    assert SetColumnComment("keep", "k") in actions
+    # Then: exactly three actions — no redundant SetColumnComment/SetColumnNullability for the added column
+    assert actions == (
+        AddColumn(column=Column("add_me", Integer(), nullable=False, comment="new")),
+        DropColumn("drop_me"),
+        SetColumnComment("keep", "k"),
+    )
+
+
+def test_adding_column_to_existing_table_emits_only_add_column():
+    # Given: an existing table and a desired schema with one new column
+    desired = (
+        Column("id", Integer()),
+        Column("age", Integer(), comment="user age", nullable=False),
+    )
+    observed = (Column("id", Integer()),)
+
+    # When: diffing desired against observed
+    actions = diff_columns(desired, observed)
+
+    # Then: only one AddColumn; no redundant SetColumnComment or SetColumnNullability
+    assert actions == (AddColumn(column=Column("age", Integer(), comment="user age", nullable=False)),)
 
 
 def test_ignores_type_changes_until_type_migrations_supported():
