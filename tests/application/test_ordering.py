@@ -11,7 +11,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnNullability,
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
 
 # ----- builders
@@ -39,7 +38,6 @@ def _create_table_action() -> CreateTable:
 def test_orders_by_phase_in_documented_precedence():
     # Given one action from each phase, in scrambled order
     actions = (
-        UnsetProperty(name="p_unset"),
         SetTableComment(comment="tbl comment"),
         AddColumn(column=_column("a_col")),
         PartitionBy(column_names=("ds",)),
@@ -61,7 +59,6 @@ def test_orders_by_phase_in_documented_precedence():
         DropColumn,
         SetColumnComment,
         SetTableComment,
-        UnsetProperty,
         SetColumnNullability,
         PartitionBy,
     ]
@@ -86,7 +83,6 @@ def test_within_phase_actions_are_ordered_by_subject_name():
         (AddColumn(column=_column("xcol")), "xcol"),
         (DropColumn(column_name="ycol"), "ycol"),
         (SetProperty(name="propA", value="v"), "propA"),
-        (UnsetProperty(name="propB"), "propB"),
         (SetColumnComment(column_name="zcol", comment="c"), "zcol"),
         (SetColumnNullability(column_name="ncol", nullable=False), "ncol"),
         (SetTableComment(comment="table comment"), ""),  # whole-table action: no subject

@@ -26,7 +26,6 @@ from delta_engine.domain.plan.actions import (
     SetColumnNullability,
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
 
 
@@ -88,12 +87,6 @@ def _(action: DropColumn, backticked_table_name: str) -> str:
 def _(action: SetProperty, backticked_table_name: str) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
     return f"ALTER TABLE {backticked_table_name} SET TBLPROPERTIES ({pair})"
-
-
-@_compile_action.register
-def _(action: UnsetProperty, backticked_table_name: str) -> str:
-    key = quote_literal(action.name)
-    return f"ALTER TABLE {backticked_table_name} UNSET TBLPROPERTIES ({key})"
 
 
 @_compile_action.register

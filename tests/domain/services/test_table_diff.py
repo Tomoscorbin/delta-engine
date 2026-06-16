@@ -9,7 +9,6 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
 from delta_engine.domain.services.table_diff import (
     diff_partition_columns,
@@ -57,30 +56,17 @@ def test_updates_property_when_value_differs():
     assert actions == expected
 
 
-def test_unsets_property_when_not_in_desired():
-    # Given: observed contains an extra property
+def test_ignores_observed_only_properties():
+    # Given: observed contains a property the user never declared
+    #        (e.g. one Databricks set autonomously)
     desired_props = {"owner": "cdm"}
-    observed_props = {"owner": "cdm", "obsolete": "1"}
+    observed_props = {"owner": "cdm", "delta.minReaderVersion": "2"}
 
     # When
     actions = diff_properties(desired_props, observed_props)
 
-    # Then: an UnsetProperty removes the extra key
-    expected = (UnsetProperty(name="obsolete"),)
-    assert actions == expected
-
-
-def test_combines_sets_and_unsets_without_extras():
-    # Given: one set and one unset needed
-    desired_props = {"owner": "cdm", "delta.appendOnly": "false"}
-    observed_props = {"owner": "cdm", "obsolete": "1"}
-
-    # When
-    actions = diff_properties(desired_props, observed_props)
-
-    # Then: exactly the expected operations are present (order not asserted)
-    assert SetProperty(name="delta.appendOnly", value="false") in actions
-    assert UnsetProperty(name="obsolete") in actions
+    # Then: the undeclared property is left untouched — no unset is emitted
+    assert actions == ()
 
 
 def test_no_comment_action_when_comments_match():

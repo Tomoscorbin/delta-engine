@@ -9,7 +9,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 import pyspark.sql.utils as sku
 
-from delta_engine.adapters.databricks.policy import DEFAULT_PROPERTY_POLICY, PropertyPolicy
 from delta_engine.adapters.databricks.sql.preview import error_preview
 from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
@@ -62,14 +61,9 @@ def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -
 class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
-    def __init__(
-        self,
-        spark: SparkSession,
-        property_policy: PropertyPolicy = DEFAULT_PROPERTY_POLICY,
-    ) -> None:
+    def __init__(self, spark: SparkSession) -> None:
         """Initialize the reader with a `SparkSession`."""
         self.spark = spark
-        self._property_policy = property_policy
 
     def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
         """
@@ -117,13 +111,13 @@ class DatabricksReader:
         return tuple(c.name for c in catalog_columns if bool(getattr(c, "isPartition", False)))
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
-        """Return table properties as a read-only mapping."""
+        """Return all catalog table properties as a read-only mapping."""
         query = query_describe_detail(qualified_name)
         df = self.spark.sql(query)
         row = df.first()
         if not row:
             return MappingProxyType({})
-        return self._property_policy.enforce(row["properties"])
+        return MappingProxyType(dict(row["properties"]))
 
     def _fetch_table_comment(self, fully_qualified_name: str) -> str:
         """Return the table comment (empty string when not set)."""

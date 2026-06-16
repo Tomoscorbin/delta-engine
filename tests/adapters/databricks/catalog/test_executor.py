@@ -14,7 +14,6 @@ from delta_engine.domain.plan import (
     SetColumnNullability,
     SetProperty,
     SetTableComment,
-    UnsetProperty,
 )
 from tests.config import TEST_CATALOG, TEST_SCHEMA
 
@@ -194,33 +193,6 @@ def test_setproperty_action_sets_table_property(spark, test_table):
     # Then the property exists with the expected value
     props = _get_table_props(spark, str(test_table))
     assert props.get(prop) == val
-
-
-def test_unsetproperty_action_removes_existing_property(spark, test_table):
-    # Given a table with a property set
-    # And a plan that unsets a property
-    prop = "delta.columnMapping.mode"
-    plan = ActionPlan(target=test_table, actions=(UnsetProperty(name=prop),))
-
-    # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark)._apply(plan)
-
-    # Then the property is gone
-    props = _get_table_props(spark, str(test_table))
-    assert prop not in props
-
-
-def test_unsetproperty_action_is_idempotent_when_missing(spark, test_table):
-    # Given a property is not set
-    prop = "engine.test.missing"
-    plan = ActionPlan(test_table, (UnsetProperty(name=prop),))
-
-    # When we unset a non-existent property
-    DatabricksExecutor(spark)._apply(plan)
-
-    # Then still not present, and no exception was raised
-    props = _get_table_props(spark, str(test_table))
-    assert prop not in props
 
 
 def test_setcolumncomment_sets_comment_on_column(spark, test_table):

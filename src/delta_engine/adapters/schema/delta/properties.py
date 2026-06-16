@@ -20,4 +20,7 @@ class Property(StrEnum):
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
 
 
-SUPPORTED_PROPERTIES: frozenset[str] = frozenset(p.value for p in Property)
+# Keys a user may declare on a DeltaTable. Used only for construction-time
+# validation (fast-fail on typo'd keys), never to filter properties read back
+# from the catalog — the engine reconciles only the properties a user declares.
+MANAGED_PROPERTY_KEYS: frozenset[str] = frozenset(p.value for p in Property)
