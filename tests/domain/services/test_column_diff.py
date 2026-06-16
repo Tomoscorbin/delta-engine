@@ -103,7 +103,8 @@ def test_combines_add_drop_and_updates_without_duplicates():
     # When: diffing desired against observed
     actions = diff_columns(desired, observed)
 
-    # Then: exactly three actions — no redundant SetColumnComment/SetColumnNullability for the added column
+    # Then: exactly three actions — no redundant SetColumnComment/SetColumnNullability
+    # for the added column
     assert actions == (
         AddColumn(column=Column("add_me", Integer(), nullable=False, comment="new")),
         DropColumn("drop_me"),
