@@ -20,6 +20,7 @@ from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ExecutionResult,
+    ReadFailed,
     SyncReport,
     TableRunReport,
     ValidationResult,
@@ -111,7 +112,7 @@ class Engine:
         executions: tuple[ExecutionResult, ...] = ()
 
         read_result = self.reader.fetch_state(desired.qualified_name)
-        if read_result.failure:
+        if isinstance(read_result, ReadFailed):
             logger.error(
                 "Read failed for %s: %s - %s",
                 fully_qualified_name,
@@ -124,7 +125,6 @@ class Engine:
                 fully_qualified_name,
                 "present" if read_result.observed is not None else "absent",
             )
-        if not read_result.failure:
             context = make_plan_context(desired, read_result.observed)
             logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
             validation = ValidationResult(failures=self.validator.validate(context))
@@ -136,7 +136,6 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
-            if not validation.failed:
                 executions = self.executor.execute(context.plan)
                 failed_count = sum(1 for e in executions if e.failure is not None)
                 logger.info(

@@ -5,8 +5,10 @@ from delta_engine.application.results import (
     ActionStatus,
     ExecutionFailure,
     ExecutionResult,
+    ReadFailed,
     ReadFailure,
     ReadResult,
+    ReadSucceeded,
     TableRunReport,
     ValidationFailure,
     ValidationResult,
@@ -35,7 +37,7 @@ def _table_report(
 def test_renders_read_failure_detail():
     # Given: a table whose read phase failed
     report = _table_report(
-        read=ReadResult.create_failed(ReadFailure("AnalysisException", "table not found"))
+        read=ReadFailed(ReadFailure("AnalysisException", "table not found"))
     )
 
     # When: rendering its failure detail
@@ -49,7 +51,7 @@ def test_renders_read_failure_detail():
 def test_renders_validation_failure_detail():
     # Given: a table whose validation phase failed
     report = _table_report(
-        read=ReadResult.create_absent(),
+        read=ReadSucceeded(observed=None),
         validation=ValidationResult(
             failures=(ValidationFailure("DisallowPartitioningChange", "cannot repartition"),)
         ),
@@ -72,7 +74,7 @@ def test_renders_execution_failure_detail_with_sql_preview():
         statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         failure=ExecutionFailure(action_index=2, exception_type="SparkException", message="boom"),
     )
-    report = _table_report(read=ReadResult.create_absent(), execution_results=(failed_result,))
+    report = _table_report(read=ReadSucceeded(observed=None), execution_results=(failed_result,))
 
     # When: rendering its failure detail
     lines = format_failure_detail(report)

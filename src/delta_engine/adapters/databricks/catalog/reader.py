@@ -12,7 +12,7 @@ import pyspark.sql.utils as sku
 from delta_engine.adapters.databricks.sql.preview import error_preview
 from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
-from delta_engine.application.results import ReadFailure, ReadResult
+from delta_engine.application.results import ReadFailed, ReadFailure, ReadResult, ReadSucceeded
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 
 _SPARK_EXCEPTION = (
@@ -69,13 +69,12 @@ class DatabricksReader:
         """
         Fetch observed table schema or absence for a qualified name.
 
-        Returns a successful `ReadResult` with the current columns,
-        properties, and table comment; an absent result when the table
-        doesn't exist; or a failed result if catalog access raised an
-        exception.
+        Returns ``ReadSucceeded`` carrying the current columns, properties, and
+        table comment; ``ReadSucceeded`` with ``observed=None`` when the table
+        doesn't exist; or ``ReadFailed`` if catalog access raised an exception.
         """
         if not self._table_exists(qualified_name):
-            return ReadResult.create_absent()
+            return ReadSucceeded(observed=None)
 
         try:
             catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
@@ -87,7 +86,7 @@ class DatabricksReader:
             table_comment = self._fetch_table_comment(str(qualified_name))
         except _SPARK_EXCEPTION as exc:
             failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
-            return ReadResult.create_failed(failure)
+            return ReadFailed(failure=failure)
 
         observed = ObservedTable(
             qualified_name=qualified_name,
@@ -96,7 +95,7 @@ class DatabricksReader:
             properties=properties,
             partitioned_by=partition_columns,
         )
-        return ReadResult.create_present(observed)
+        return ReadSucceeded(observed=observed)
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
         """Return `True` if the table exists, else `False`."""

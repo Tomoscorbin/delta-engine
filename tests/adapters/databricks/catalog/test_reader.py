@@ -7,6 +7,7 @@ from pyspark.sql.utils import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
+from delta_engine.application.results import ReadFailed, ReadSucceeded
 from delta_engine.domain.model import QualifiedName
 
 # ---------- fakes & helpers ----------
@@ -297,9 +298,9 @@ def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
     # When we fetch state
     result = reader.fetch_state(qn)
 
-    # Then the result encodes absence (no observed, no failure)
+    # Then the read succeeded with no observed table (absence)
+    assert isinstance(result, ReadSucceeded)
     assert result.observed is None
-    assert result.failure is None
 
 
 def test_fetch_state_returns_present_with_columns_partitions_comment_and_properties():
@@ -335,7 +336,7 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     result = reader.fetch_state(qn)
 
     # Then the observed payload contains correct columns, partitions, comment, and properties
-    assert result.failure is None
+    assert isinstance(result, ReadSucceeded)
     assert result.observed is not None
     observed = result.observed
     assert [c.name for c in observed.columns] == ["id", "p_date"]
@@ -364,7 +365,7 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
     result = reader.fetch_state(qn)
 
     # Then the table is present with empty properties and the expected comment
-    assert result.failure is None
+    assert isinstance(result, ReadSucceeded)
     assert result.observed is not None
     assert dict(result.observed.properties) == {}
     assert result.observed.comment == ""
@@ -385,6 +386,5 @@ def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
     result = reader.fetch_state(qn)
 
     # Then the result encodes failure with the Spark exception type
-    assert result.observed is None
-    assert result.failure is not None
+    assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"

@@ -73,7 +73,33 @@ encoding manually (`engine.py:118` tests `.failure`, then `:129` tests
 
 This is Ousterhout's "define errors out of existence." Replace with a real sum
 type and the illegal state, the classmethods, and the two-step decode all
-vanish (the project targets 3.12, so `match` is idiomatic):
+vanish (the project targets 3.12, so `match` is idiomatic).
+
+**Decision (deviation from the original three-variant sketch below):** the
+implemented shape is **two variants** — `ReadSucceeded(observed: ObservedTable |
+None) | ReadFailed(failure)`. Rationale: the engine treats *present* and
+*absent* identically — both flow into `make_plan_context(desired, observed)`
+(the differ already reads `observed is None` as "create the table"), and the
+only place that distinguishes them is a log string. A three-way split would
+force the engine to re-derive `observed | None` for the shared planning path,
+re-introducing a decode step. Two variants eliminate the illegal
+`(observed=X, failure=X)` state — the whole point of the finding — while
+collapsing the engine to a clean 2-way `match`. Present/absent remains an
+`observed is not None` check at the one log site that cares.
+
+```python
+@dataclass(frozen=True, slots=True)
+class ReadSucceeded:
+    observed: ObservedTable | None   # None = table absent
+
+@dataclass(frozen=True, slots=True)
+class ReadFailed:
+    failure: ReadFailure
+
+ReadResult = ReadSucceeded | ReadFailed
+```
+
+Original three-variant sketch (superseded by the decision above):
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -86,8 +112,7 @@ class ReadFailed:   failure: ReadFailure
 ReadResult = ReadPresent | ReadAbsent | ReadFailed
 ```
 
-Inside a `ReadPresent` branch, `observed` is typed `ObservedTable`, not
-`| None` — the guard disappears. **`ExecutionResult.__post_init__`**
+**`ExecutionResult.__post_init__`**
 (`results.py:128-133`) is the same smell (`FAILED` requires a `failure`; the
 others forbid it) and splits the same way into
 `ExecutionOk | ExecutionNoop | ExecutionFailed` — lower priority since the
