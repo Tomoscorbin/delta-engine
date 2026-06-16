@@ -23,3 +23,6 @@ class Column:
     data_type: DataType
     nullable: bool = True
     comment: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", self.name.casefold())

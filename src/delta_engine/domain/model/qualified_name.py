@@ -21,6 +21,11 @@ class QualifiedName:
     schema: str
     name: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "catalog", self.catalog.casefold())
+        object.__setattr__(self, "schema", self.schema.casefold())
+        object.__setattr__(self, "name", self.name.casefold())
+
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""
         return f"{self.catalog}.{self.schema}.{self.name}"
