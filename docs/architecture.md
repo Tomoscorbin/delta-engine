@@ -14,9 +14,6 @@ classDiagram
     class CatalogStateReader {
       +fetch_state(qualified_name)
     }
-    class Differ {
-      +diff(desired: DesiredTable, observed: ObservedTable) ActionPlan
-    }
     class PlanValidator {
       +validate(plan)
     }
@@ -25,7 +22,7 @@ classDiagram
     }
 
     %% === Adapters (implementations) ===
-    class DatabricksStateReader
+    class DatabricksReader
     class DatabricksExecutor
 
     %% === Domain types ===
@@ -46,21 +43,15 @@ classDiagram
     %% Engine depends on ports (dotted = lightweight dependency)
     Engine ..> Registry : iterates
     Engine ..> CatalogStateReader : reads state
-    Engine ..> Differ : builds plan
     Engine ..> PlanValidator : validates
     Engine ..> PlanExecutor : executes
 
     %% Port -> Adapter realizations
-    CatalogStateReader <|.. DatabricksStateReader
+    CatalogStateReader <|.. DatabricksReader
     PlanExecutor <|.. DatabricksExecutor
 
     %% Data/model relations
     Registry o-- DesiredTable : contains
-
-    %% Differ inputs/outputs (as deps to avoid heavy graph)
-    Differ ..> DesiredTable : input
-    Differ ..> ObservedTable : input
-    Differ --> ActionPlan : output
 
     %% Plan structure
     ActionPlan o-- Action : 0..*
@@ -85,8 +76,10 @@ sequenceDiagram
     loop per table
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult
+        E->>E: diff(desired, observed) → ActionPlan
         E->>V: validate(ActionPlan)
-        E->>X: execute plan
+        V-->>E: ValidationResult
+        E->>X: execute(ActionPlan)
         X-->>E: ExecutionResults
     end
 
