@@ -56,12 +56,9 @@ class DatabricksExecutor:
 
     def _apply(self, plan: ActionPlan) -> tuple[_AppliedStep, ...]:
         """
-        Execute all statements for the plan.
+        Run every statement to completion.
 
-        Raises:
-            RuntimeError: if any statement fails.
-            ValueError: if the compiler returns a mismatched count.
-
+        Exceptions are captured in the corresponding _AppliedStep rather than re-raised.
         """
         if not plan:
             return tuple()
