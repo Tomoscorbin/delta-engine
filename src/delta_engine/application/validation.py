@@ -6,23 +6,43 @@ from abc import ABC, abstractmethod
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
+from delta_engine.domain.model import ObservedTable
 from delta_engine.domain.plan import AddColumn, SetColumnNullability
 
 
 class Rule(ABC):
-    """Abstract interface for plan validation rules."""
+    """
+    A safety constraint a plan must satisfy before it is executed.
+
+    Rules constrain *alterations* to an existing table, not table creation: a
+    fresh table can be created with any shape, so a rule has nothing to check
+    when there is no observed table. The base class encodes that precondition
+    once and names each failure after the rule's class, so a concrete rule only
+    has to answer one question -- :meth:`violated_by` -- and receives the
+    observed table directly, already known to exist.
+    """
+
+    def check(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Return the failure this rule raises against ``ctx``, or ``None``."""
+        if ctx.observed is None:
+            return None
+        reason = self.violated_by(ctx, ctx.observed)
+        if reason is None:
+            return None
+        return ValidationFailure(
+            rule_name=type(self).__name__,
+            message=f"Operation not allowed: {reason}",
+        )
 
     @abstractmethod
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
         """
-        Evaluate the rule against a planning context.
+        Return why the plan violates this rule, or ``None`` if it does not.
 
-        Args:
-            ctx: The plan context to validate.
-
-        Returns:
-            A failure description if the rule is violated, otherwise ``None``.
-
+        Called only when the table already exists; ``observed`` is that current
+        state, passed in so implementations need not re-check for creation. The
+        returned text explains the violation; the base class prefixes it and
+        attaches the rule's name.
         """
         ...
 
@@ -31,23 +51,15 @@ class NonNullableColumnAdd(Rule):
     """
     Disallow adding non-nullable columns to existing tables.
 
-    The rule flags any plan that adds a NOT NULL column when the table
-    already exists (it does not attempt to infer data emptiness).
+    Flags any plan that adds a NOT NULL column (it does not attempt to infer
+    whether the table holds rows).
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Flag the plan if it adds a NOT NULL column to an existing table."""
-        if ctx.observed is None:
-            return None
+    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+        """Flag the first NOT NULL column the plan adds."""
         for action in ctx.plan.actions:
-            if isinstance(action, AddColumn) and (not action.column.nullable):
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot add non-nullable"
-                        f" column '{action.column.name}'"
-                    ),
-                )
+            if isinstance(action, AddColumn) and not action.column.nullable:
+                return f"cannot add non-nullable column '{action.column.name}'"
         return None
 
 
@@ -63,19 +75,14 @@ class NullabilityTighteningOnExistingColumn(Rule):
     and is not flagged.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Flag the plan if it tightens any existing column to NOT NULL."""
-        if ctx.observed is None:
-            return None
+    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+        """Flag the first column the plan tightens to NOT NULL."""
         for action in ctx.plan.actions:
-            if isinstance(action, SetColumnNullability) and (not action.nullable):
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot tighten existing column"
-                        f" '{action.column_name}' to NOT NULL. Keep it nullable,"
-                        " backfill any NULLs in a separate step, then set NOT NULL."
-                    ),
+            if isinstance(action, SetColumnNullability) and not action.nullable:
+                return (
+                    f"cannot tighten existing column '{action.column_name}' to NOT NULL."
+                    " Keep it nullable, backfill any NULLs in a separate step,"
+                    " then set NOT NULL"
                 )
         return None
 
@@ -91,22 +98,17 @@ class UnsupportedColumnTypeChange(Rule):
     the drift as a validation failure instead of letting it vanish.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Flag any common column whose desired data type differs from observed."""
-        if ctx.observed is None:
-            return None
-        observed_types = {column.name: column.data_type for column in ctx.observed.columns}
+    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+        """Flag the first common column whose desired type differs from observed."""
+        observed_types = {column.name: column.data_type for column in observed.columns}
         for desired_column in ctx.desired.columns:
             observed_type = observed_types.get(desired_column.name)
             if observed_type is not None and observed_type != desired_column.data_type:
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot change the type of existing"
-                        f" column '{desired_column.name}' from {observed_type} to"
-                        f" {desired_column.data_type}. Type migrations are not supported;"
-                        " recreate the table to change a column's type."
-                    ),
+                return (
+                    f"cannot change the type of existing column '{desired_column.name}'"
+                    f" from {observed_type} to {desired_column.data_type}."
+                    " Type migrations are not supported; recreate the table to change a"
+                    " column's type"
                 )
         return None
 
@@ -118,21 +120,16 @@ class DisallowPartitioningChange(Rule):
     Partitioning can only occur during the creation of a table.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Flag the plan if desired and observed partition columns differ."""
-        if ctx.observed is None:
+    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+        """Flag a difference between desired and observed partition columns."""
+        if ctx.desired.partitioned_by == observed.partitioned_by:
             return None
-        if ctx.desired.partitioned_by != ctx.observed.partitioned_by:
-            return ValidationFailure(
-                rule_name=self.__class__.__name__,
-                message=(
-                    "Operation not allowed: partitioning changes are not supported."
-                    f" Current partition columns: {ctx.observed.partitioned_by}"
-                    f" - Requested partition columns: {ctx.desired.partitioned_by}."
-                    " Recreate the table with the desired partitioning."
-                ),
-            )
-        return None
+        return (
+            "partitioning changes are not supported."
+            f" Current partition columns: {observed.partitioned_by}"
+            f" - Requested partition columns: {ctx.desired.partitioned_by}."
+            " Recreate the table with the desired partitioning"
+        )
 
 
 class PlanValidator:
@@ -143,22 +140,10 @@ class PlanValidator:
         self.rules = rules
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        """
-        Evaluate all rules and collect any failures.
-
-        Args:
-            ctx: The plan context being validated.
-
-        Returns:
-            A tuple of failures in rule evaluation order (empty if none).
-
-        """
-        failures: list[ValidationFailure] = []
-        for rule in self.rules:
-            failure = rule.evaluate(ctx)
-            if failure is not None:
-                failures.append(failure)
-        return tuple(failures)
+        """Return one failure for each rule the plan breaks, in rule order."""
+        return tuple(
+            failure for rule in self.rules if (failure := rule.check(ctx)) is not None
+        )
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
