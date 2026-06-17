@@ -37,17 +37,22 @@ class DatabricksExecutor:
 
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
         """
-        Execute every action in the plan, returning a per-action result.
+        Execute the plan's actions in order, returning a per-action result.
 
-        Each statement runs to completion; a failure is captured in its own
-        `ExecutionResult` rather than re-raised, so one failing action does not
-        hide the outcome of the others.
+        Execution stops at the first failure: the actions form a dependency
+        chain, and the engine is not transactional, so continuing past a failure
+        risks compounding a half-migrated table. The returned results cover the
+        actions attempted, ending at the one that failed; actions after it are
+        left unattempted rather than run against an inconsistent table.
         """
         statements = self._compiler(plan)
-        return tuple(
-            self._run_statement(plan[action_index], action_index, statement)
-            for action_index, statement in enumerate(statements)
-        )
+        results: list[ExecutionResult] = []
+        for action_index, statement in enumerate(statements):
+            result = self._run_statement(plan[action_index], action_index, statement)
+            results.append(result)
+            if result.status is ActionStatus.FAILED:
+                break
+        return tuple(results)
 
     def _run_statement(self, action, action_index: int, statement: str) -> ExecutionResult:
         """Run a single compiled statement and map its outcome to an `ExecutionResult`."""

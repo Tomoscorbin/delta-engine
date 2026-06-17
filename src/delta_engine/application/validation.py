@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
-from delta_engine.domain.plan import AddColumn
+from delta_engine.domain.plan import AddColumn, SetColumnNullability
+
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
@@ -45,6 +46,35 @@ class NonNullableColumnAdd(Rule):
                     message=(
                         "Operation not allowed: cannot add non-nullable"
                         f" column '{action.column.name}'"
+                    ),
+                )
+        return None
+
+
+class NullabilityTighteningOnExistingColumn(Rule):
+    """
+    Disallow tightening an existing column to NOT NULL.
+
+    Setting a previously-nullable column to NOT NULL fails at execution time if
+    the column already holds NULLs, and the failure surfaces only after earlier
+    actions have committed. The plan cannot know whether data is present, so --
+    like :class:`NonNullableColumnAdd` -- the rule conservatively blocks the
+    tightening and points to the safe path. Loosening to nullable is always safe
+    and is not flagged.
+    """
+
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Flag the plan if it tightens any existing column to NOT NULL."""
+        if ctx.observed is None:
+            return None
+        for action in ctx.plan.actions:
+            if isinstance(action, SetColumnNullability) and (not action.nullable):
+                return ValidationFailure(
+                    rule_name=self.__class__.__name__,
+                    message=(
+                        "Operation not allowed: cannot tighten existing column"
+                        f" '{action.column_name}' to NOT NULL. Keep it nullable,"
+                        " backfill any NULLs in a separate step, then set NOT NULL."
                     ),
                 )
         return None
@@ -102,6 +132,7 @@ class PlanValidator:
 
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
+    NullabilityTighteningOnExistingColumn(),
     DisallowPartitioningChange(),
 )
 DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)
