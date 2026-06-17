@@ -9,7 +9,15 @@ from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
 class DeltaTable:
-    """Defines a Delta table schema."""
+    """
+    Defines a Delta table schema.
+
+    Note on dropping columns: Delta only permits ``ALTER TABLE ... DROP COLUMN``
+    when ``delta.columnMapping.mode`` is ``name``, which is the default applied
+    here. If you override that property to ``none``, a sync that removes a column
+    will fail at execution time. Keep column mapping enabled on tables whose
+    columns may be dropped.
+    """
 
     default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
         {

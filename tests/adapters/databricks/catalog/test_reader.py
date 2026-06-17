@@ -83,11 +83,13 @@ class FakeSparkForFetchState:
         catalog: FakeCatalog,
         describe_rows=None,
         describe_exc: Exception | None = None,
+        exists_exc: Exception | None = None,
     ):
         self._exists = exists
         self._catalog = catalog
         self._describe_rows = describe_rows
         self._describe_exc = describe_exc
+        self._exists_exc = exists_exc
         self._sql_calls = 0
 
     @property
@@ -97,6 +99,8 @@ class FakeSparkForFetchState:
     def sql(self, _query: str):
         self._sql_calls += 1
         if self._sql_calls == 1:
+            if self._exists_exc is not None:
+                raise self._exists_exc
             return FakeDataFrame([1] if self._exists else [])
         if self._describe_exc is not None:
             raise self._describe_exc
@@ -388,3 +392,68 @@ def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
     # Then the result encodes failure with the Spark exception type
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"
+
+
+def test_fetch_state_returns_failed_when_existence_probe_raises():
+    # Given the existence probe itself raises (e.g. the namespace is missing)
+    qn = QualifiedName("c", "s", "missing_ns")
+    reader = DatabricksReader(
+        FakeSparkForFetchState(
+            exists=True,
+            catalog=FakeCatalog(),
+            exists_exc=AnalysisException("namespace not found"),
+        )
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the failure is isolated to this table rather than escaping the reader
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "AnalysisException"
+
+
+def test_fetch_state_returns_failed_when_column_type_is_unsupported():
+    # Given an existing table whose schema contains a type the engine cannot map
+    qn = QualifiedName("c", "s", "structy")
+    catalog = FakeCatalog(
+        columns_by_table={
+            str(qn): [make_catalog_col("payload", dataType=T.BinaryType())]
+        },
+        table_comments={str(qn): ""},
+    )
+    reader = DatabricksReader(
+        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the unsupported type fails this table instead of crashing the whole run
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "TypeError"
+
+
+def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
+    # Given a catalog (e.g. Hive Metastore) that preserves mixed-case column names
+    qn = QualifiedName("c", "s", "hms")
+    catalog = FakeCatalog(
+        columns_by_table={
+            str(qn): [
+                make_catalog_col("EventId", dataType=T.IntegerType()),
+                make_catalog_col("UserName", dataType=T.StringType(), isPartition=True),
+            ]
+        },
+        table_comments={str(qn): ""},
+    )
+    reader = DatabricksReader(
+        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then names are normalised to lowercase at the adapter boundary (no crash)
+    assert isinstance(result, ReadSucceeded)
+    assert [c.name for c in result.observed.columns] == ["eventid", "username"]
+    assert result.observed.partitioned_by == ("username",)

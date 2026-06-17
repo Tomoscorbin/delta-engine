@@ -62,9 +62,13 @@ def _dummy_target() -> QualifiedName:
 
 
 class _FakeSpark:
-    """Minimal stand-in for Spark that can 'execute' or fail on demand."""
+    """Minimal stand-in for Spark that records executed statements and fails on demand."""
+
+    def __init__(self) -> None:
+        self.executed: list[str] = []
 
     def sql(self, statement: str):
+        self.executed.append(statement)
         if "__nope__" in statement:
             raise Exception("boom: table not found")
         return None
@@ -73,8 +77,30 @@ class _FakeSpark:
 # ----------- Tests
 
 
-def test_execute_maps_success_and_failure_no_leakage(caplog):
-    # Given a 3-action plan and a compiler that yields OK → FAIL → OK
+def test_execute_maps_success_and_failure_without_leakage():
+    # Given a 2-action plan whose statements run OK → FAIL
+    plan = ActionPlan(
+        target=_dummy_target(),
+        actions=(AddColumn(Column("a", Integer())), DropColumn("b")),
+    )
+
+    def _fake_compiler(_plan):
+        return ["SELECT 1", "SELECT * FROM __nope__"]  # OK, then FAIL
+
+    # When we execute
+    results = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(plan)
+
+    # Then the success and failure are mapped with correct metadata and no leakage
+    assert [r.action for r in results] == ["AddColumn", "DropColumn"]
+    assert [r.action_index for r in results] == [0, 1]
+    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.FAILED]
+    assert results[0].failure is None
+    assert results[1].failure is not None
+
+
+def test_execute_stops_at_first_failure_to_avoid_half_migrating():
+    # Given a 3-action plan whose middle statement fails
+    spark = _FakeSpark()
     plan = ActionPlan(
         target=_dummy_target(),
         actions=(
@@ -87,24 +113,19 @@ def test_execute_maps_success_and_failure_no_leakage(caplog):
     def _fake_compiler(_plan):
         return [
             "SELECT 1",  # OK
-            "SELECT * FROM __nope__",  # FAIL (FakeSpark will raise)
-            "SELECT 2",  # OK
+            "SELECT * FROM __nope__",  # FAIL
+            "SELECT 2",  # must NOT run -- the plan stops at the failure
         ]
 
     # When we execute
-    results = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(plan)
+    results = DatabricksExecutor(spark, compiler=_fake_compiler).execute(plan)
 
-    # Then statuses are OK, FAILED, OK and action metadata is correct
-    assert [r.action for r in results] == ["AddColumn", "DropColumn", "AddColumn"]
-    assert [r.action_index for r in results] == [0, 1, 2]
-    assert [r.status for r in results] == [
-        ActionStatus.OK,
-        ActionStatus.FAILED,
-        ActionStatus.OK,
-    ]
-    assert results[0].failure is None
-    assert results[1].failure is not None
-    assert results[2].failure is None
+    # Then execution stops at the failure: the third statement never runs
+    assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
+
+    # And the report covers only the attempted actions, ending at the failure
+    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.FAILED]
+    assert [r.action_index for r in results] == [0, 1]
 
 
 def test_execute_returns_empty_tuple_for_empty_plan():

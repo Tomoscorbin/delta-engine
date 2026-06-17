@@ -6,7 +6,8 @@ from abc import ABC, abstractmethod
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
-from delta_engine.domain.plan import AddColumn
+from delta_engine.domain.plan import AddColumn, SetColumnNullability
+
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
@@ -45,6 +46,66 @@ class NonNullableColumnAdd(Rule):
                     message=(
                         "Operation not allowed: cannot add non-nullable"
                         f" column '{action.column.name}'"
+                    ),
+                )
+        return None
+
+
+class NullabilityTighteningOnExistingColumn(Rule):
+    """
+    Disallow tightening an existing column to NOT NULL.
+
+    Setting a previously-nullable column to NOT NULL fails at execution time if
+    the column already holds NULLs, and the failure surfaces only after earlier
+    actions have committed. The plan cannot know whether data is present, so --
+    like :class:`NonNullableColumnAdd` -- the rule conservatively blocks the
+    tightening and points to the safe path. Loosening to nullable is always safe
+    and is not flagged.
+    """
+
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Flag the plan if it tightens any existing column to NOT NULL."""
+        if ctx.observed is None:
+            return None
+        for action in ctx.plan.actions:
+            if isinstance(action, SetColumnNullability) and (not action.nullable):
+                return ValidationFailure(
+                    rule_name=self.__class__.__name__,
+                    message=(
+                        "Operation not allowed: cannot tighten existing column"
+                        f" '{action.column_name}' to NOT NULL. Keep it nullable,"
+                        " backfill any NULLs in a separate step, then set NOT NULL."
+                    ),
+                )
+        return None
+
+
+class UnsupportedColumnTypeChange(Rule):
+    """
+    Disallow changing the data type of an existing column.
+
+    The differ matches columns by name and has no type-change action, so a
+    changed type (e.g. ``Integer`` -> ``Long``) would otherwise produce no
+    action at all and the schema would silently drift from the declared spec
+    while the run reports success. Until type migrations are supported, surface
+    the drift as a validation failure instead of letting it vanish.
+    """
+
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Flag any common column whose desired data type differs from observed."""
+        if ctx.observed is None:
+            return None
+        observed_types = {column.name: column.data_type for column in ctx.observed.columns}
+        for desired_column in ctx.desired.columns:
+            observed_type = observed_types.get(desired_column.name)
+            if observed_type is not None and observed_type != desired_column.data_type:
+                return ValidationFailure(
+                    rule_name=self.__class__.__name__,
+                    message=(
+                        "Operation not allowed: cannot change the type of existing"
+                        f" column '{desired_column.name}' from {observed_type} to"
+                        f" {desired_column.data_type}. Type migrations are not supported;"
+                        " recreate the table to change a column's type."
                     ),
                 )
         return None
@@ -102,6 +163,8 @@ class PlanValidator:
 
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
+    NullabilityTighteningOnExistingColumn(),
+    UnsupportedColumnTypeChange(),
     DisallowPartitioningChange(),
 )
 DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)
