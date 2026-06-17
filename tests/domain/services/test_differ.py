@@ -72,7 +72,6 @@ def test_creates_table_when_observed_is_missing():
     plan = diff_tables(desired, observed=None)
 
     # Then: we get a CreateTable wrapped in an ActionPlan
-    assert plan.target == desired.qualified_name
     assert plan.actions == (CreateTable(desired),)
 
 
@@ -100,7 +99,6 @@ def test_no_actions_when_desired_equals_observed():
     plan = diff_tables(desired, observed)
 
     # Then: nothing to do
-    assert plan.target == desired.qualified_name
     assert plan.actions == ()
 
 
@@ -135,7 +133,6 @@ def test_combines_column_property_comment_and_partition_diffs():
 
     # Then: the plan contains the expected representative actions
     assert isinstance(plan, ActionPlan)
-    assert plan.target == desired.qualified_name
 
     # Column add
     assert AddColumn(column=Column("age", Integer())) in plan.actions

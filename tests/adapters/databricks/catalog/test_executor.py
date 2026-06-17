@@ -79,16 +79,15 @@ class _FakeSpark:
 
 def test_execute_maps_success_and_failure_without_leakage():
     # Given a 2-action plan whose statements run OK → FAIL
-    plan = ActionPlan(
-        target=_dummy_target(),
-        actions=(AddColumn(Column("a", Integer())), DropColumn("b")),
-    )
+    plan = ActionPlan(actions=(AddColumn(Column("a", Integer())), DropColumn("b")))
 
-    def _fake_compiler(_plan):
+    def _fake_compiler(_target, _plan):
         return ["SELECT 1", "SELECT * FROM __nope__"]  # OK, then FAIL
 
     # When we execute
-    results = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(plan)
+    results = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(
+        _dummy_target(), plan
+    )
 
     # Then the success and failure are mapped with correct metadata and no leakage
     assert [r.action for r in results] == ["AddColumn", "DropColumn"]
@@ -102,7 +101,6 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     # Given a 3-action plan whose middle statement fails
     spark = _FakeSpark()
     plan = ActionPlan(
-        target=_dummy_target(),
         actions=(
             AddColumn(Column("a", Integer())),
             DropColumn("b"),
@@ -110,7 +108,7 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
         ),
     )
 
-    def _fake_compiler(_plan):
+    def _fake_compiler(_target, _plan):
         return [
             "SELECT 1",  # OK
             "SELECT * FROM __nope__",  # FAIL
@@ -118,7 +116,7 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
         ]
 
     # When we execute
-    results = DatabricksExecutor(spark, compiler=_fake_compiler).execute(plan)
+    results = DatabricksExecutor(spark, compiler=_fake_compiler).execute(_dummy_target(), plan)
 
     # Then execution stops at the failure: the third statement never runs
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
@@ -130,10 +128,10 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
 
 def test_execute_returns_empty_tuple_for_empty_plan():
     # Given an empty plan
-    plan = ActionPlan(target=_dummy_target(), actions=())
+    plan = ActionPlan(actions=())
 
     # When we execute the plan
-    results = DatabricksExecutor(_FakeSpark()).execute(plan)
+    results = DatabricksExecutor(_FakeSpark()).execute(_dummy_target(), plan)
 
     # Then no results are returned
     assert results == ()
@@ -145,11 +143,11 @@ def test_createtable_action_creates_table_with_correct_schema(spark, test_table)
         qualified_name=QualifiedName(TEST_CATALOG, TEST_SCHEMA, "customers"),
         columns=(Column(name="id", data_type=Integer()),),
     )
-    plan = ActionPlan(target=desired.qualified_name, actions=(CreateTable(table=desired),))
+    plan = ActionPlan(actions=(CreateTable(table=desired),))
     executor = DatabricksExecutor(spark)
 
     # When we apply the plan (compile → execute)
-    executor.execute(plan)
+    executor.execute(desired.qualified_name, plan)
 
     # Then the table exists and its schema matches exactly
     assert spark.catalog.tableExists(str(desired.qualified_name))
@@ -164,13 +162,10 @@ def test_addcolumn_action_adds_column_to_existing_table(spark, test_table):
     column_name = "age"
     data_type = Integer()
     actions = (AddColumn(column=Column(name=column_name, data_type=data_type)),)
-    plan = ActionPlan(
-        target=test_table,
-        actions=actions,
-    )
+    plan = ActionPlan(actions=actions)
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(plan)
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the new column exists
     actual_schema = spark.table(str(test_table)).schema
@@ -187,13 +182,10 @@ def test_dropcolumn_action_removes_column_from_existing_table(spark, test_table)
     # Given an existing table (test_table)
     # And a plan that drops the 'name' column
     actions = (DropColumn(column_name="column_to_drop"),)
-    plan = ActionPlan(
-        target=test_table,
-        actions=actions,
-    )
+    plan = ActionPlan(actions=actions)
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(plan)
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the 'name' column no longer exists
     actual_columns = spark.table(str(test_table)).columns
@@ -205,10 +197,10 @@ def test_setproperty_action_sets_table_property(spark, test_table):
     # And a plan that sets a custom property
     prop = "engine.test.setproperty"
     val = "yes"
-    plan = ActionPlan(target=test_table, actions=(SetProperty(name=prop, value=val),))
+    plan = ActionPlan(actions=(SetProperty(name=prop, value=val),))
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(plan)
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the property exists with the expected value
     props = _get_table_props(spark, str(test_table))
@@ -221,11 +213,8 @@ def test_setcolumncomment_sets_comment_on_column(spark, test_table):
 
     # When we apply a plan to set the column comment
     new_comment = "customer name"
-    plan = ActionPlan(
-        target=test_table,
-        actions=(SetColumnComment(column_name=column, comment=new_comment),),
-    )
-    DatabricksExecutor(spark).execute(plan)
+    plan = ActionPlan(actions=(SetColumnComment(column_name=column, comment=new_comment),))
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the column metadata contains the new comment
     after_field = next(f for f in spark.table(str(test_table)).schema if f.name == column)
@@ -236,8 +225,8 @@ def test_settablecomment_sets_comment_on_table(spark, test_table):
     # Given an existing Delta table
     # When we set the table comment
     comment = "customers staging table"
-    plan = ActionPlan(target=test_table, actions=(SetTableComment(comment=comment),))
-    DatabricksExecutor(spark).execute(plan)
+    plan = ActionPlan(actions=(SetTableComment(comment=comment),))
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the comment is set on the table
     after = _get_table_comment(spark, str(test_table))
@@ -248,8 +237,8 @@ def test_setcolumnnullability_sets_nullable(spark, test_table):
     # Given an existing table with a non-nullable 'id' column
     # When we set NULL on 'id'
     full = str(test_table)
-    plan = ActionPlan(test_table, (SetColumnNullability("id", True),))
-    DatabricksExecutor(spark).execute(plan)
+    plan = ActionPlan((SetColumnNullability("id", True),))
+    DatabricksExecutor(spark).execute(test_table, plan)
 
     # Then the column becomes NULLABLE
     field = _get_field(spark, full, "id")

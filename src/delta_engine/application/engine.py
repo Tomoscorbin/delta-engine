@@ -137,7 +137,7 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
-                executions = self.executor.execute(context.plan)
+                executions = self.executor.execute(desired.qualified_name, context.plan)
                 failed_count = sum(1 for e in executions if isinstance(e, ExecutionFailed))
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",

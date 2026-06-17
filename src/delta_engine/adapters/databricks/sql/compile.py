@@ -16,6 +16,7 @@ from delta_engine.adapters.databricks.sql import (
     quote_literal,
     sql_type_for_data_type,
 )
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -29,9 +30,9 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
-    """Compile an :class:`ActionPlan` into Spark SQL statements."""
-    backticked_table_name = backtick_qualified_name(plan.target)
+def compile_plan(target: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    """Compile an :class:`ActionPlan` for ``target`` into Spark SQL statements."""
+    backticked_table_name = backtick_qualified_name(target)
     return tuple(_compile_action(action, backticked_table_name) for action in plan)
 
 
