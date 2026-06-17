@@ -77,12 +77,12 @@ sequenceDiagram
 
     loop per table
         E->>CR: fetch_state(qualified_name)
-        CR-->>E: ReadResult
+        CR-->>E: CatalogState
         E->>E: diff(desired, observed) → ActionPlan
         E->>V: validate_plan(desired, observed, plan)
         V-->>E: ValidationResult
         E->>X: execute(ActionPlan)
-        X-->>E: ExecutionResults
+        X-->>E: ExecutionSummary
     end
 
     E-->>U: Final report

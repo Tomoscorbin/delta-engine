@@ -75,48 +75,47 @@ This is Ousterhout's "define errors out of existence." Replace with a real sum
 type and the illegal state, the classmethods, and the two-step decode all
 vanish (the project targets 3.12, so `match` is idiomatic).
 
-**Decision (deviation from the original three-variant sketch below):** the
-implemented shape is **two variants** — `ReadSucceeded(observed: ObservedTable |
-None) | ReadFailed(failure)`. Rationale: the engine treats *present* and
-*absent* identically — both flow into `make_plan_context(desired, observed)`
-(the differ already reads `observed is None` as "create the table"), and the
-only place that distinguishes them is a log string. A three-way split would
-force the engine to re-derive `observed | None` for the shared planning path,
-re-introducing a decode step. Two variants eliminate the illegal
-`(observed=X, failure=X)` state — the whole point of the finding — while
-collapsing the engine to a clean 2-way `match`. Present/absent remains an
-`observed is not None` check at the one log site that cares.
+**Decision — RESOLVED (PR phase-result-types).** First shipped as **two
+variants** (`ReadSucceeded(observed: ObservedTable | None) | ReadFailed`),
+reasoning that the engine treats present and absent identically so a third arm
+would only force it to re-derive `observed | None`. That held until the owner
+revisited the engine and found the surviving `observed is None` sentinel still
+unintuitive: `ReadSucceeded(observed=None)` reads as "a successful read of
+nothing," and every construction site had to spell out the `None`. The
+**three-variant** shape originally sketched below was adopted after all, renamed
+to read like the question it answers — *what is the catalog's state for this
+table?*
 
 ```python
 @dataclass(frozen=True, slots=True)
-class ReadSucceeded:
-    observed: ObservedTable | None   # None = table absent
-
+class TablePresent:
+    table: ObservedTable
+@dataclass(frozen=True, slots=True)
+class TableAbsent:
+    pass
 @dataclass(frozen=True, slots=True)
 class ReadFailed:
-    failure: ReadFailure
+    failure: ReadFailure   # unchanged; consistent with ReadFailure / READ_FAILED
 
-ReadResult = ReadSucceeded | ReadFailed
+CatalogState = TablePresent | TableAbsent | ReadFailed
 ```
 
-Original three-variant sketch (superseded by the decision above):
+The earlier worry (re-deriving `observed | None`) was answered by collapsing the
+present/absent distinction in **one** line at the engine's read branch —
+`observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None`
+— so the shared planning body still runs once. `ReadFailed` was kept untouched,
+so every `isinstance(self.read, ReadFailed)` in `TableRunReport`/`errors.py`
+needed no edit. Net: the illegal `(observed=X, failure=X)` state *and* the
+`observed is None` sentinel are both gone.
 
-```python
-@dataclass(frozen=True, slots=True)
-class ReadPresent:  observed: ObservedTable
-@dataclass(frozen=True, slots=True)
-class ReadAbsent:   pass
-@dataclass(frozen=True, slots=True)
-class ReadFailed:   failure: ReadFailure
-
-ReadResult = ReadPresent | ReadAbsent | ReadFailed
-```
-
-**`ExecutionResult.__post_init__`**
-(`results.py:128-133`) is the same smell (`FAILED` requires a `failure`; the
-others forbid it) and splits the same way into
-`ExecutionOk | ExecutionNoop | ExecutionFailed` — lower priority since the
-runtime guard at least prevents silent misuse.
+**`ExecutionResult` — RESOLVED.** Was the same smell (a `__post_init__` guard:
+`FAILED` requires a `failure`, the others forbid it). Now a sum type
+`ExecutionSucceeded | ExecutionFailed`, so the illegal combinations are
+unrepresentable and the guard is gone. The per-plan aggregate later gained a
+home too: `ExecutionSummary` wraps `tuple[ExecutionResult, ...]` and owns the
+`failed` / `failures` / `failed_count` queries (mirroring `ValidationResult`),
+collapsing the `isinstance(..., ExecutionFailed)` filter that had been
+duplicated across the engine and the report.
 
 ### A3 — Push failure formatting onto the failure types — *medium*
 
@@ -472,14 +471,19 @@ missing `fetch_state`-level test for the null-comment case. No production
 behaviour changes; this is a tests + naming pass. Worth doing opportunistically,
 not urgent.
 
-**Rejected (recorded so they're not re-litigated):** `TableRunReport._any_action_failed`
-(same-object); `engine` reading `read_result.failure.{exception_type,message}` for
-logging (frozen data record; and `format_line()` would double-prefix the log line);
+**Rejected (recorded so they're not re-litigated):** `engine` reading
+`catalog_state.failure.{exception_type,message}` for logging (frozen data record;
+and `format_line()` would double-prefix the log line);
 `spark.catalog.getTable(...).description` (external API); `compile.py`
 `action.column.name`/`data_type` (data records); `errors._format_failure_detail`
-(uses public surface correctly); `errors` reading `execution_results` for SQL
-previews (public field of a data record; a `failed_execution_previews` accessor
-would be a shallow wrapper coupling a result value object to error-formatting).
+(uses public surface correctly); `errors` reading `execution.results` for SQL
+previews (public field of a result aggregate; the one surviving
+`isinstance(..., ExecutionFailed)` there is structural — `statement_preview`
+lives on the result arm, not on `ExecutionFailure`, so it cannot be reached
+through `execution.failures`).
+
+*Note: `TableRunReport._any_action_failed` (previously listed here) no longer
+exists — `ExecutionSummary.failed` subsumed it.*
 
 ### C2 — Deep-simplification pass: question the core abstractions — *complete*
 

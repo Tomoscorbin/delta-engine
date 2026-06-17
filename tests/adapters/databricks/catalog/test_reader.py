@@ -7,7 +7,7 @@ from pyspark.sql.utils import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
-from delta_engine.application.results import ReadFailed, ReadSucceeded
+from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 
 # ---------- fakes & helpers ----------
@@ -179,7 +179,8 @@ def test_columns_maps_name_nullability_and_comment(qn):
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then names, nullability, and comments are mapped correctly
-    cols = result.observed.columns
+    assert isinstance(result, TablePresent)
+    cols = result.table.columns
     assert [c.name for c in cols] == ["id", "p_date"]
     assert [c.nullable for c in cols] == [False, True]
     assert [c.comment for c in cols] == ["identifier", ""]
@@ -202,7 +203,8 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then only partition columns are returned and ordering is preserved
-    assert result.observed.partitioned_by == ("p_store", "p_date")
+    assert isinstance(result, TablePresent)
+    assert result.table.partitioned_by == ("p_store", "p_date")
 
 
 def test_partition_columns_ignores_missing_or_false_flags():
@@ -225,7 +227,8 @@ def test_partition_columns_ignores_missing_or_false_flags():
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then no partitions are reported
-    assert result.observed.partitioned_by == ()
+    assert isinstance(result, TablePresent)
+    assert result.table.partitioned_by == ()
 
 
 # ---------- tests: properties ----------
@@ -296,9 +299,8 @@ def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
     # When we fetch state
     result = reader.fetch_state(qn)
 
-    # Then the read succeeded with no observed table (absence)
-    assert isinstance(result, ReadSucceeded)
-    assert result.observed is None
+    # Then the catalog reports the table as absent
+    assert isinstance(result, TableAbsent)
 
 
 def test_fetch_state_returns_present_with_columns_partitions_comment_and_properties():
@@ -334,9 +336,8 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     result = reader.fetch_state(qn)
 
     # Then the observed payload contains correct columns, partitions, comment, and properties
-    assert isinstance(result, ReadSucceeded)
-    assert result.observed is not None
-    observed = result.observed
+    assert isinstance(result, TablePresent)
+    observed = result.table
     assert [c.name for c in observed.columns] == ["id", "p_date"]
     assert observed.partitioned_by == ("p_date",)
     assert observed.comment == "orders table"
@@ -363,10 +364,9 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
     result = reader.fetch_state(qn)
 
     # Then the table is present with empty properties and the expected comment
-    assert isinstance(result, ReadSucceeded)
-    assert result.observed is not None
-    assert dict(result.observed.properties) == {}
-    assert result.observed.comment == ""
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.properties) == {}
+    assert result.table.comment == ""
 
 
 def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
@@ -446,6 +446,6 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
     result = reader.fetch_state(qn)
 
     # Then names are normalised to lowercase at the adapter boundary (no crash)
-    assert isinstance(result, ReadSucceeded)
-    assert [c.name for c in result.observed.columns] == ["eventid", "username"]
-    assert result.observed.partitioned_by == ("username",)
+    assert isinstance(result, TablePresent)
+    assert [c.name for c in result.table.columns] == ["eventid", "username"]
+    assert result.table.partitioned_by == ("username",)
