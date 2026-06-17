@@ -2,8 +2,8 @@ from delta_engine.application.validation import (
     DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
-    PlanValidator,
     UnsupportedColumnTypeChange,
+    validate_plan,
 )
 from delta_engine.domain.model import (
     Column,
@@ -218,40 +218,41 @@ def test_allows_type_specification_when_creating_a_new_table():
     assert failure is None
 
 
-# ---- PlanValidator
+# ---- validate_plan
 
 
-def test_validator_returns_empty_tuple_when_no_rules_fail():
+def test_validation_passes_when_no_rule_is_broken():
     # Given a creation plan that violates no rule
-    validator = PlanValidator((NonNullableColumnAdd(), DisallowPartitioningChange()))
+    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
 
     # When validating
-    failures = validator.validate(
-        _desired(), None, _plan(AddColumn(Column("x", String(), nullable=True)))
+    result = validate_plan(
+        _desired(), None, _plan(AddColumn(Column("x", String(), nullable=True))), rules=rules
     )
 
-    # Then no failures are returned
-    assert failures == ()
+    # Then the verdict is a passing ValidationResult
+    assert not result.failed
+    assert result.failures == ()
 
 
-def test_validator_collects_a_failure_from_every_broken_rule():
+def test_validation_collects_a_failure_from_every_broken_rule():
     # Given an existing table whose plan breaks two rules at once
-    validator = PlanValidator(
-        (NonNullableColumnAdd(), NullabilityTighteningOnExistingColumn())
-    )
+    rules = (NonNullableColumnAdd(), NullabilityTighteningOnExistingColumn())
 
     # When validating
-    failures = validator.validate(
+    result = validate_plan(
         _desired(),
         _observed(),
         _plan(
             AddColumn(Column("order_id", Integer(), nullable=False)),
             SetColumnNullability(column_name="id", nullable=False),
         ),
+        rules=rules,
     )
 
-    # Then both broken rules contribute a failure, named after the rule classes
-    assert {f.rule_name for f in failures} == {
+    # Then the verdict fails, carrying a failure from each broken rule
+    assert result.failed
+    assert {f.rule_name for f in result.failures} == {
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
     }
@@ -259,10 +260,25 @@ def test_validator_collects_a_failure_from_every_broken_rule():
 
 def test_empty_plan_produces_no_failures():
     # Given an existing table with an empty plan
-    validator = PlanValidator((NonNullableColumnAdd(), DisallowPartitioningChange()))
+    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
 
     # When validating
-    failures = validator.validate(_desired(), _observed(), _plan())
+    result = validate_plan(_desired(), _observed(), _plan(), rules=rules)
 
-    # Then nothing fails because there is nothing to validate
-    assert failures == ()
+    # Then the verdict passes with no failures
+    assert not result.failed
+    assert result.failures == ()
+
+
+def test_validation_uses_the_default_rules_when_none_are_supplied():
+    # Given an existing table whose plan adds a non-nullable column
+    # (no rules argument -> the engine's real default rule set applies)
+    result = validate_plan(
+        _desired(),
+        _observed(),
+        _plan(AddColumn(Column("order_id", Integer(), nullable=False))),
+    )
+
+    # Then the default NonNullableColumnAdd rule rejects it
+    assert result.failed
+    assert {f.rule_name for f in result.failures} == {"NonNullableColumnAdd"}

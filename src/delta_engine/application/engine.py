@@ -26,7 +26,7 @@ from delta_engine.application.results import (
     TableRunReport,
     ValidationResult,
 )
-from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
+from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model.table import DesiredTable
 
 logger = logging.getLogger(__name__)
@@ -50,20 +50,17 @@ class Engine:
         self,
         reader: CatalogStateReader,
         executor: PlanExecutor,
-        validator: PlanValidator = DEFAULT_VALIDATOR,
     ) -> None:
         """
-        Initialize the engine with adapters and a validator.
+        Initialize the engine with its catalog adapters.
 
         Args:
             reader: Adapter that fetches the current catalog state.
             executor: Adapter that executes action plans.
-            validator: Validator that checks plans for plan violations.
 
         """
         self.reader = reader
         self.executor = executor
-        self.validator = validator
 
     def sync(self, registry: Registry) -> SyncReport:
         """
@@ -129,9 +126,7 @@ class Engine:
             observed = read_result.observed
             plan = plan_table(desired, observed)
             logger.info("Planned %d action(s) for %s", len(plan), fully_qualified_name)
-            validation = ValidationResult(
-                failures=self.validator.validate(desired, observed, plan)
-            )
+            validation = validate_plan(desired, observed, plan)
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",

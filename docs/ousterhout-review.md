@@ -551,23 +551,30 @@ prerequisite question (`NOOP`) that must be answered before a tempting change.
   `UnsupportedColumnTypeChange` builds that lookup; single-consumer derived state
   belongs in a local variable.
 
-#### Q3 — Validation: the `Rule` ABC + `PlanValidator` are shallow; consider functions in a future clean-up
+#### Q3 — Validation: `PlanValidator` was shallow ceremony — RESOLVED (PR #44)
 
-- **The `Rule(ABC)` + `PlanValidator` pairing is shallow ceremony.** No concrete
-  rule holds state; `evaluate`'s `self` is never used; `PlanValidator.validate` is
-  a four-line for-loop whose interface is as wide as its implementation. Tellingly,
-  `_FakeValidator` in `test_engine.py` does **not** subclass `PlanValidator` — the
-  nominal type enforces nothing today. Plain predicate functions
-  (`Callable[[PlanContext], ValidationFailure | None]`) collected in a tuple, with
-  `validate_plan` a module function and `DEFAULT_VALIDATOR` a `functools.partial`,
-  would lose nothing and remove the instantiation/`self`-dispatch theatre. Keep
-  `PlanValidator` as a `Callable` type alias so the engine signature is untouched;
-  give `rule_name` explicit string literals (not `__class__.__name__`, which would
-  flip PascalCase→snake_case and break any downstream parsing). *Low severity,
-  purely structural, no behaviour change — batch into a future tightening pass.*
-  - *Dissent:* the ABC is a visible, greppable extension point; a team with many
-    contributors may prefer that explicitness over the (real) Ousterhout win. An
-    ergonomic preference, not a correctness one.
+- **The `PlanValidator` class was shallow ceremony.** No concrete rule holds
+  state and `validate` was a four-line for-loop whose interface was as wide as its
+  implementation. The class existed only to be constructor-injected into the
+  engine, and `_FakeValidator` in `test_engine.py` did **not** subclass it — so the
+  nominal type enforced nothing while letting the engine tests mock an *internal*
+  collaborator (against the project's classical-testing rule).
+- **Resolution (PR #44): dissolved `PlanValidator` into a module function**
+  `validate_plan(desired, observed, plan, rules=DEFAULT_RULES) -> ValidationResult`.
+  The engine now calls it directly, exactly as it calls `plan_table` — two pure
+  phases, one shape. The validator injection is gone from `Engine.__init__` (which
+  now takes only its two genuine ports, reader and executor), the engine tests
+  drive validation through the *real* default rules, and `_FakeValidator` is
+  deleted. The `rules=` default keeps the rule set swappable for scoped tests
+  without a class.
+- **Deliberately kept the `Rule` ABC + subclasses.** The dissent below won on the
+  rules themselves: the ABC is a visible, greppable extension point, and rules-as-
+  classes is the chosen idiom for this codebase. We dissolved only the redundant
+  *aggregator* class, not the rules. `rule_name` still derives from
+  `__class__.__name__`; no downstream parser depends on its case today.
+  - *Dissent (now the accepted position for `Rule`):* the ABC is a visible,
+    greppable extension point; explicitness here is worth more than the marginal
+    Ousterhout win of collapsing rules to bare callables.
 - **Altitude — keep "diff proposes, validator disposes."** The rule mechanism as
   the home for "what is unsafe/unsupported" is the right seam (it absorbed B1/B3/B5
   cleanly). Folding safety checks into the differ, or scattering them as domain

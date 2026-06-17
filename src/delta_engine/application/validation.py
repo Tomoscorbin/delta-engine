@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from delta_engine.application.results import ValidationFailure
+from delta_engine.application.results import ValidationFailure, ValidationResult
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import ActionPlan, AddColumn, SetColumnNullability
 
@@ -148,40 +148,41 @@ class DisallowPartitioningChange(Rule):
         return None
 
 
-class PlanValidator:
-    """Run a sequence of validation rules against a planned change."""
-
-    def __init__(self, rules: tuple[Rule, ...]) -> None:
-        """Create a validator configured with an ordered set of rules."""
-        self.rules = rules
-
-    def validate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
-        """
-        Evaluate all rules and collect any failures, in rule order.
-
-        Args:
-            desired: The user-authored target definition.
-            observed: The current catalog state, or ``None`` when creating.
-            plan: The action plan to reach ``desired``.
-
-        Returns:
-            A tuple of failures in rule evaluation order (empty if none).
-
-        """
-        failures: list[ValidationFailure] = []
-        for rule in self.rules:
-            failure = rule.evaluate(desired, observed, plan)
-            if failure is not None:
-                failures.append(failure)
-        return tuple(failures)
-
-
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     UnsupportedColumnTypeChange(),
     DisallowPartitioningChange(),
 )
-DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)
+
+
+def validate_plan(
+    desired: DesiredTable,
+    observed: ObservedTable | None,
+    plan: ActionPlan,
+    rules: tuple[Rule, ...] = DEFAULT_RULES,
+) -> ValidationResult:
+    """
+    Evaluate every rule against a planned change and return the verdict.
+
+    A pure phase alongside :func:`plan_table`: the same inputs always yield the
+    same result. The caller reads ``ValidationResult.failed`` to gate execution;
+    it does not assemble the verdict.
+
+    Args:
+        desired: The user-authored target definition.
+        observed: The current catalog state, or ``None`` when creating.
+        plan: The action plan to reach ``desired``.
+        rules: The rules to apply, in evaluation order. Defaults to the full
+            production set; override only to scope a check (e.g. in tests).
+
+    Returns:
+        A :class:`ValidationResult` carrying a failure from each broken rule.
+
+    """
+    failures = tuple(
+        failure
+        for rule in rules
+        if (failure := rule.evaluate(desired, observed, plan)) is not None
+    )
+    return ValidationResult(failures=failures)
