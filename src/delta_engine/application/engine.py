@@ -15,21 +15,18 @@ import logging
 from delta_engine.application.errors import (
     SyncFailedError,
 )
-from delta_engine.application.plan import (
-    PlanContext,
-    make_plan_context,
-)
+from delta_engine.application.plan import make_plan_context
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ExecutionResult,
-    ReadResult,
+    ReadFailed,
     SyncReport,
     TableRunReport,
     ValidationResult,
 )
 from delta_engine.application.validation import DEFAULT_VALIDATOR, PlanValidator
-from delta_engine.domain.model.table import DesiredTable, ObservedTable
+from delta_engine.domain.model.table import DesiredTable
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +111,8 @@ class Engine:
         validation = ValidationResult()
         executions: tuple[ExecutionResult, ...] = ()
 
-        read_result = self._read(desired)
-        if read_result.failure:
+        read_result = self.reader.fetch_state(desired.qualified_name)
+        if isinstance(read_result, ReadFailed):
             logger.error(
                 "Read failed for %s: %s - %s",
                 fully_qualified_name,
@@ -128,10 +125,9 @@ class Engine:
                 fully_qualified_name,
                 "present" if read_result.observed is not None else "absent",
             )
-        if not read_result.failure:
-            context = self._plan(desired, read_result.observed)
+            context = make_plan_context(desired, read_result.observed)
             logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
-            validation = self._validate(context)
+            validation = ValidationResult(failures=self.validator.validate(context))
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
@@ -140,8 +136,7 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
-            if not validation.failed:
-                executions = self._execute(context)
+                executions = self.executor.execute(context.plan)
                 failed_count = sum(1 for e in executions if e.failure is not None)
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",
@@ -158,19 +153,3 @@ class Engine:
             validation=validation,
             execution_results=executions,
         )
-
-    def _read(self, desired: DesiredTable) -> ReadResult:
-        """Read current catalog state."""
-        return self.reader.fetch_state(desired.qualified_name)
-
-    def _plan(self, desired: DesiredTable, observed: ObservedTable | None) -> PlanContext:
-        """Compute the ordered action plan to reach the desired state."""
-        return make_plan_context(desired, observed)
-
-    def _validate(self, context: PlanContext) -> ValidationResult:
-        """Validate the planned actions."""
-        return ValidationResult(failures=self.validator.validate(context))
-
-    def _execute(self, context: PlanContext) -> tuple[ExecutionResult, ...]:
-        """Execute the planned actions."""
-        return self.executor.execute(context.plan)

@@ -8,6 +8,7 @@ table- and run-level reports that summarize status, failures, and timing.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,63 +39,81 @@ class TableRunStatus(StrEnum):
 # ---------- Failure value objects ----------
 
 
+class Failure(ABC):
+    """A failure that can render itself as a one-line display string."""
+
+    @abstractmethod
+    def format_line(self) -> str:
+        """Return a single human-readable line describing this failure."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
-class ReadFailure:
+class ReadFailure(Failure):
     """Failure reading current catalog state for a table."""
 
     exception_type: str
     message: str
 
+    def format_line(self) -> str:
+        """Render the read failure as a display line."""
+        return f"Read error: {self.exception_type} - {self.message}"
+
 
 @dataclass(frozen=True, slots=True)
-class ValidationFailure:
+class ValidationFailure(Failure):
     """Description of a validation rule failure."""
 
     rule_name: str
     message: str
 
+    def format_line(self) -> str:
+        """Render the validation failure as a display line."""
+        return f"Validation failed: {self.rule_name} - {self.message}"
+
 
 @dataclass(frozen=True, slots=True)
-class ExecutionFailure:
+class ExecutionFailure(Failure):
     """Details about a failed action execution."""
 
     action_index: int
     exception_type: str
     message: str
 
-
-Failure = ReadFailure | ValidationFailure | ExecutionFailure
+    def format_line(self) -> str:
+        """Render the execution failure as a display line, including the action index."""
+        return (
+            f"Execution failed at action {self.action_index}: "
+            f"{self.exception_type} - {self.message}"
+        )
 
 
 # ---------- ReadResult ----------
 
 
 @dataclass(frozen=True, slots=True)
-class ReadResult:
+class ReadSucceeded:
     """
-    Outcome of reading current state for a table.
+    A catalog read that completed without error.
 
-    Encodes one of three states: present with an observed schema; absent when
-    the table does not exist; or failed with exception details.
+    ``observed`` carries the table's current schema, or ``None`` when the table
+    does not exist. Both outcomes are successful reads: the engine plans against
+    either, treating a missing table as "create it".
     """
 
-    observed: ObservedTable | None = None
-    failure: ReadFailure | None = None
+    observed: ObservedTable | None
 
-    @classmethod
-    def create_present(cls, observed: ObservedTable) -> ReadResult:
-        """Construct a successful read result with an observed table."""
-        return cls(observed=observed)
 
-    @classmethod
-    def create_absent(cls) -> ReadResult:
-        """Construct a successful read result indicating the object is missing."""
-        return cls()
+@dataclass(frozen=True, slots=True)
+class ReadFailed:
+    """A catalog read that raised before any state could be determined."""
 
-    @classmethod
-    def create_failed(cls, failure: ReadFailure) -> ReadResult:
-        """Construct a failed read result with failure details."""
-        return cls(failure=failure)
+    failure: ReadFailure
+
+
+# A read either succeeds (with or without an existing table) or fails. The split
+# makes the "succeeded but errored" state unrepresentable.
+ReadResult = ReadSucceeded | ReadFailed
 
 
 # ---------- ValidationResult ----------
@@ -155,7 +174,7 @@ class TableRunReport:
     @property
     def status(self) -> TableRunStatus:
         """Aggregate table status across read, validation, and execution phases."""
-        if self.read.failure:
+        if isinstance(self.read, ReadFailed):
             return TableRunStatus.READ_FAILED
         if self.validation.failed:
             return TableRunStatus.VALIDATION_FAILED
@@ -177,7 +196,7 @@ class TableRunReport:
     def all_failures(self) -> tuple[Failure, ...]:
         """All failures for this table (read, validation, execution)."""
         out: list[Failure] = []
-        if self.read.failure:
+        if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
         if self.validation.failed:
             out.extend(self.validation.failures)

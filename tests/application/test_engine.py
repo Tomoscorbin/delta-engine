@@ -8,8 +8,10 @@ from delta_engine.application.results import (
     ActionStatus,
     ExecutionFailure,
     ExecutionResult,
+    ReadFailed,
     ReadFailure,
     ReadResult,
+    ReadSucceeded,
     SyncReport,
     TableRunStatus,
     ValidationFailure,
@@ -31,7 +33,7 @@ class _FakeReader:
         self.mapping = mapping
 
     def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
-        return self.mapping.get(str(qualified_name), ReadResult.create_absent())
+        return self.mapping.get(str(qualified_name), ReadSucceeded(observed=None))
 
 
 class _FakeValidator:
@@ -93,7 +95,7 @@ def test_raises_when_any_table_has_read_failure():
     reg = Registry()
     reg.register(t)
     reader = _FakeReader(
-        {"c.s.read_fail": ReadResult.create_failed(ReadFailure("IOError", "cannot read"))}
+        {"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))}
     )
     validator = _FakeValidator()  # no validation failures
     executor = _FakeExecutor(results=(_ok_exec(0),))  # would be fine if reached
@@ -109,7 +111,7 @@ def test_skips_execution_and_raises_when_validation_fails():
     # Given a table that reads successfully but fails validation
     reg = Registry()
     reg.register(_spec("c.s.val_fail"))
-    reader = _FakeReader({"c.s.val_fail": ReadResult.create_absent()})
+    reader = _FakeReader({"c.s.val_fail": ReadSucceeded(observed=None)})
     validator = _FakeValidator({"c.s.val_fail": (ValidationFailure("RuleX", "nope"),)})
     # Executor would return OK, but must not be used because validation fails
     executor = _FakeExecutor(results=(_ok_exec(0),))
@@ -125,7 +127,7 @@ def test_raises_when_execution_contains_any_failure():
     # Given a table that reads & validates successfully, but execution has a failed action
     reg = Registry()
     reg.register(_spec("c.s.exec_fail"))
-    reader = _FakeReader({"c.s.exec_fail": ReadResult.create_absent()})
+    reader = _FakeReader({"c.s.exec_fail": ReadSucceeded(observed=None)})
     validator = _FakeValidator()  # passes
     executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _noop_exec(2)))
 
@@ -144,8 +146,8 @@ def test_returns_report_when_all_tables_succeed():
     )  # registry will yield in name-sorted order
     reader = _FakeReader(
         {
-            "c.a.users": ReadResult.create_absent(),
-            "c.b.orders": ReadResult.create_absent(),
+            "c.a.users": ReadSucceeded(observed=None),
+            "c.b.orders": ReadSucceeded(observed=None),
         }
     )
     validator = _FakeValidator()
@@ -170,8 +172,8 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadResult.create_failed(ReadFailure("IOError", "cannot read")),
-            "c.s.b": ReadResult.create_absent(),
+            "c.s.a": ReadFailed(ReadFailure("IOError", "cannot read")),
+            "c.s.b": ReadSucceeded(observed=None),
         }
     )
     validator = _FakeValidator()  # both would pass if reached
@@ -193,8 +195,8 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadResult.create_absent(),
-            "c.s.b": ReadResult.create_absent(),
+            "c.s.a": ReadSucceeded(observed=None),
+            "c.s.b": ReadSucceeded(observed=None),
         }
     )
     validator = _FakeValidator(
@@ -224,8 +226,8 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadResult.create_absent(),
-            "c.s.b": ReadResult.create_absent(),
+            "c.s.a": ReadSucceeded(observed=None),
+            "c.s.b": ReadSucceeded(observed=None),
         }
     )
     validator = _FakeValidator()  # both pass
@@ -252,8 +254,8 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadResult.create_absent(),
-            "c.s.b": ReadResult.create_absent(),
+            "c.s.a": ReadSucceeded(observed=None),
+            "c.s.b": ReadSucceeded(observed=None),
         }
     )
     validator = _FakeValidator()  # both pass

@@ -1,66 +1,73 @@
-from delta_engine.application.plan import (
-    _order_actions,
+from delta_engine.application.plan import make_plan_context
+from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.plan.actions import (
+    ActionPhase,
+    CreateTable,
 )
-from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.plan import ActionPlan
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-# ------- fakes
+def test_context_carries_desired_and_observed():
+    # Given a desired and an observed definition
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
+    observed = ObservedTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
+
+    # When building the plan context
+    context = make_plan_context(desired, observed)
+
+    # Then it exposes both states it was built from
+    assert context.desired is desired
+    assert context.observed is observed
 
 
-class _FakeAction:
-    """Fake action with a label so our fake sort key can order it."""
+def test_missing_observed_plans_a_create_table():
+    # Given a desired table and no observed table
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
 
-    def __init__(self, label: str) -> None:
-        self.label = label
+    # When building the plan context
+    context = make_plan_context(desired, observed=None)
 
-    def __repr__(self) -> str:  # helpful when an assertion fails
-        return f"_FakeAction({self.label})"
-
-
-# ------- tests
+    # Then the plan creates the table
+    assert context.plan.actions == (CreateTable(desired),)
 
 
-def test_orders_actions_using_sort_key():
-    # Given an ActionPlan whose actions are unsorted
-    unsorted_plan = ActionPlan(
-        target=_QUALIFIED_NAME,
-        actions=(_FakeAction("b"), _FakeAction("a"), _FakeAction("c")),
+def test_plan_actions_are_ordered_by_execution_phase():
+    # Given an existing table whose diff produces actions across several phases:
+    # a new column to add, a legacy column to drop, and a table comment to set
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()), Column("age", Integer())),
+        comment="core table",
+    )
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()), Column("legacy", Integer())),
+        comment="",
     )
 
-    # When ordering the plan using a label-based sort key
-    def key(a: _FakeAction):
-        return a.label
+    # When building the plan context
+    context = make_plan_context(desired, observed)
 
-    ordered = _order_actions(unsorted_plan, sort_key=key)
-
-    # Then actions are deterministically ordered
-    assert [a.label for a in ordered.actions] == ["a", "b", "c"]
-
-
-def test_preserves_input_order_when_sort_keys_tie():
-    # Given two actions that will produce identical sort keys
-    a1, a2 = _FakeAction("x1"), _FakeAction("x2")
-    plan = ActionPlan(
-        target=_QUALIFIED_NAME,
-        actions=(a1, a2),
-    )
-
-    # When ordering with a constant key (all ties)
-    ordered = _order_actions(plan, sort_key=lambda _: 0)
-
-    # Then the actions are preserved in original order
-    assert tuple(ordered.actions) == (a1, a2)
+    # Then actions come out in non-decreasing execution-phase order
+    phases = [action.phase for action in context.plan.actions]
+    assert phases == sorted(phases)
+    # And the phases present are exactly those the diff produced
+    assert set(phases) == {
+        ActionPhase.ADD_COLUMN,
+        ActionPhase.DROP_COLUMN,
+        ActionPhase.SET_TABLE_COMMENT,
+    }
 
 
-def test_empty_plan_results_in_empty_actions_tuple():
-    # Given an ActionPlan with no actions
-    empty_plan = ActionPlan(target=_QUALIFIED_NAME, actions=())
+def test_empty_diff_produces_an_empty_plan():
+    # Given identical desired and observed definitions
+    columns = (Column("id", Integer()),)
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=columns)
+    observed = ObservedTable(qualified_name=_QUALIFIED_NAME, columns=columns)
 
-    # When ordering the plan (key doesn't matter)
-    ordered = _order_actions(empty_plan, sort_key=lambda _: 0)
+    # When building the plan context
+    context = make_plan_context(desired, observed)
 
-    # Then the result contains an empty
-    assert ordered.actions == ()
+    # Then there is nothing to do
+    assert context.plan.actions == ()

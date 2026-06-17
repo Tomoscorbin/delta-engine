@@ -6,8 +6,9 @@ from delta_engine.application.results import (
     ActionStatus,
     ExecutionFailure,
     ExecutionResult,
+    ReadFailed,
     ReadFailure,
-    ReadResult,
+    ReadSucceeded,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -67,39 +68,67 @@ def _failed_exec(
 # ---------- Tests
 
 
-def test_read_result_present_constructs_with_observed_only():
-    # Given an observed table read
+def test_read_succeeded_present_holds_the_observed_table():
+    # Given a table that was read and exists
     observed = _FakeObservedTable()
 
-    # When creating a present result
-    rr = ReadResult.create_present(observed)
+    # When recording a successful read
+    result = ReadSucceeded(observed=observed)
 
-    # Then it holds the observed table and no failure
-    assert rr.observed is observed
-    assert rr.failure is None
-
-
-def test_read_result_absent_constructs_with_neither_observed_nor_failure():
-    # Given a missing table
-
-    # When creating an absent result
-    rr = ReadResult.create_absent()
-
-    # Then both observed and failure are None
-    assert rr.observed is None
-    assert rr.failure is None
+    # Then it carries the observed table and is not a failure
+    assert result.observed is observed
+    assert not isinstance(result, ReadFailed)
 
 
-def test_read_result_failed_constructs_with_failure_only():
-    # Given a read failure
+def test_read_succeeded_absent_carries_no_observed_table():
+    # Given a table that was read but does not exist
+
+    # When recording a successful read with no table
+    result = ReadSucceeded(observed=None)
+
+    # Then absence is represented by a null observed table, still not a failure
+    assert result.observed is None
+    assert not isinstance(result, ReadFailed)
+
+
+def test_read_failed_carries_the_failure():
+    # Given a read that raised
     failure = ReadFailure(exception_type="RuntimeError", message="catalog unreachable")
 
-    # When creating a failed result
-    rr = ReadResult.create_failed(failure)
+    # When recording a failed read
+    result = ReadFailed(failure=failure)
 
-    # Then it records the failure and no observed table
-    assert rr.failure is failure
-    assert rr.observed is None
+    # Then it records the failure
+    assert result.failure is failure
+
+
+def test_read_failure_formats_itself_as_a_display_line():
+    # Given a read failure
+    failure = ReadFailure(exception_type="AnalysisException", message="table not found")
+
+    # Then it renders its own one-line description
+    assert failure.format_line() == "Read error: AnalysisException - table not found"
+
+
+def test_validation_failure_formats_itself_as_a_display_line():
+    # Given a validation failure
+    failure = ValidationFailure(
+        rule_name="DisallowPartitioningChange", message="cannot repartition"
+    )
+
+    # Then it renders its own one-line description
+    assert (
+        failure.format_line()
+        == "Validation failed: DisallowPartitioningChange - cannot repartition"
+    )
+
+
+def test_execution_failure_formats_itself_as_a_display_line():
+    # Given an execution failure at a known action index
+    failure = ExecutionFailure(action_index=2, exception_type="SparkException", message="boom")
+
+    # Then it renders its own one-line description including the action index
+    assert failure.format_line() == "Execution failed at action 2: SparkException - boom"
 
 
 def test_validation_result_failed_property_reflects_presence_of_failures():
@@ -143,7 +172,7 @@ def test_execution_result_forbids_failure_on_non_failed_status():
 
 def test_table_status_success_when_all_phases_ok():
     # Given successful read, no validation failures, and OK/NOOP actions only
-    read = ReadResult.create_present(_FakeObservedTable())
+    read = ReadSucceeded(observed=_FakeObservedTable())
     validation = ValidationResult()
     execution_results = (_ok_exec(0), _noop_exec(1))
 
@@ -169,7 +198,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         fully_qualified_name="a",
         started_at=_t0(),
         ended_at=_t1(),
-        read=ReadResult.create_present(_FakeObservedTable()),
+        read=ReadSucceeded(observed=_FakeObservedTable()),
         validation=ValidationResult(),
         execution_results=(_ok_exec(0),),
     )
@@ -177,7 +206,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         fully_qualified_name="b",
         started_at=_t0(),
         ended_at=_t1(),
-        read=ReadResult.create_present(_FakeObservedTable()),
+        read=ReadSucceeded(observed=_FakeObservedTable()),
         validation=ValidationResult(),
         execution_results=(_failed_exec(0),),
     )
@@ -195,7 +224,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         fully_qualified_name="x",
         started_at=_t0(),
         ended_at=_t1(),
-        read=ReadResult.create_present(_FakeObservedTable()),
+        read=ReadSucceeded(observed=_FakeObservedTable()),
         validation=ValidationResult(),
         execution_results=(_ok_exec(0),),
     )
@@ -203,7 +232,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         fully_qualified_name="y",
         started_at=_t0(),
         ended_at=_t1(),
-        read=ReadResult.create_present(_FakeObservedTable()),
+        read=ReadSucceeded(observed=_FakeObservedTable()),
         validation=ValidationResult(failures=(ValidationFailure("R", "v"),)),
         execution_results=(),
     )
