@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
@@ -11,73 +10,33 @@ from delta_engine.domain.model import ObservedTable
 from delta_engine.domain.plan import AddColumn, SetColumnNullability
 
 
-@dataclass(frozen=True, slots=True)
-class RuleResult:
-    """
-    The outcome of checking one rule against a plan.
-
-    Build it through :meth:`satisfied` or :meth:`violated` rather than
-    constructing it directly -- those name the two outcomes so call sites read
-    plainly. ``is_satisfied`` answers the yes/no question; ``failures`` exposes
-    the (zero or one) failures so a caller can aggregate them without testing
-    for a sentinel.
-    """
-
-    failures: tuple[ValidationFailure, ...]
-
-    @classmethod
-    def satisfied(cls) -> RuleResult:
-        """Build the result for a plan that satisfies the rule."""
-        return cls(failures=())
-
-    @classmethod
-    def violated(cls, failure: ValidationFailure) -> RuleResult:
-        """Build the result for a plan that violates the rule, described by ``failure``."""
-        return cls(failures=(failure,))
-
-    @property
-    def is_satisfied(self) -> bool:
-        """True when the plan satisfies the rule."""
-        return not self.failures
-
-
 class Rule(ABC):
     """
     A safety constraint a plan must satisfy before it is executed.
 
-    Rules constrain *alterations* to an existing table, not table creation: a
-    fresh table can be created with any shape, so a rule has nothing to check
-    when there is no observed table. The base class encodes that precondition
-    once and names each failure after the rule's class, so a concrete rule only
-    has to answer one question -- :meth:`violated_by` -- and receives the
-    observed table directly, already known to exist.
+    A rule reads the plan (and the table it alters) and reports the failures it
+    finds -- an empty tuple means the plan satisfies it. Subclasses implement
+    :meth:`check` top to bottom and build each failure with :meth:`_violation`,
+    which attaches the rule's class name and the shared prefix.
+
+    Rules run only against *alterations*: the validator skips them entirely when
+    there is no observed table, so :meth:`check` always receives the existing
+    table and never has to consider creation.
     """
 
-    def check(self, ctx: PlanContext) -> RuleResult:
-        """Return whether the plan satisfies this rule, with any failure."""
-        if ctx.observed is None:
-            return RuleResult.satisfied()
-        reason = self.violated_by(ctx, ctx.observed)
-        if reason is None:
-            return RuleResult.satisfied()
-        return RuleResult.violated(
-            ValidationFailure(
-                rule_name=type(self).__name__,
-                message=f"Operation not allowed: {reason}",
-            )
-        )
-
     @abstractmethod
-    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
-        """
-        Return why the plan violates this rule, or ``None`` if it does not.
-
-        Called only when the table already exists; ``observed`` is that current
-        state, passed in so implementations need not re-check for creation. The
-        returned text explains the violation; the base class prefixes it and
-        attaches the rule's name.
-        """
+    def check(
+        self, ctx: PlanContext, observed: ObservedTable
+    ) -> tuple[ValidationFailure, ...]:
+        """Return the failures this rule finds in the plan; empty means satisfied."""
         ...
+
+    def _violation(self, reason: str) -> ValidationFailure:
+        """Build a failure attributed to this rule, with the shared prefix."""
+        return ValidationFailure(
+            rule_name=type(self).__name__,
+            message=f"Operation not allowed: {reason}",
+        )
 
 
 class NonNullableColumnAdd(Rule):
@@ -88,12 +47,14 @@ class NonNullableColumnAdd(Rule):
     whether the table holds rows).
     """
 
-    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+    def check(
+        self, ctx: PlanContext, observed: ObservedTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag the first NOT NULL column the plan adds."""
         for action in ctx.plan.actions:
             if isinstance(action, AddColumn) and not action.column.nullable:
-                return f"cannot add non-nullable column '{action.column.name}'"
-        return None
+                return (self._violation(f"cannot add non-nullable column '{action.column.name}'"),)
+        return ()
 
 
 class NullabilityTighteningOnExistingColumn(Rule):
@@ -108,16 +69,20 @@ class NullabilityTighteningOnExistingColumn(Rule):
     and is not flagged.
     """
 
-    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+    def check(
+        self, ctx: PlanContext, observed: ObservedTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag the first column the plan tightens to NOT NULL."""
         for action in ctx.plan.actions:
             if isinstance(action, SetColumnNullability) and not action.nullable:
                 return (
-                    f"cannot tighten existing column '{action.column_name}' to NOT NULL."
-                    " Keep it nullable, backfill any NULLs in a separate step,"
-                    " then set NOT NULL"
+                    self._violation(
+                        f"cannot tighten existing column '{action.column_name}' to NOT NULL."
+                        " Keep it nullable, backfill any NULLs in a separate step,"
+                        " then set NOT NULL"
+                    ),
                 )
-        return None
+        return ()
 
 
 class UnsupportedColumnTypeChange(Rule):
@@ -131,19 +96,23 @@ class UnsupportedColumnTypeChange(Rule):
     the drift as a validation failure instead of letting it vanish.
     """
 
-    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+    def check(
+        self, ctx: PlanContext, observed: ObservedTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag the first common column whose desired type differs from observed."""
         observed_types = {column.name: column.data_type for column in observed.columns}
         for desired_column in ctx.desired.columns:
             observed_type = observed_types.get(desired_column.name)
             if observed_type is not None and observed_type != desired_column.data_type:
                 return (
-                    f"cannot change the type of existing column '{desired_column.name}'"
-                    f" from {observed_type} to {desired_column.data_type}."
-                    " Type migrations are not supported; recreate the table to change a"
-                    " column's type"
+                    self._violation(
+                        f"cannot change the type of existing column '{desired_column.name}'"
+                        f" from {observed_type} to {desired_column.data_type}."
+                        " Type migrations are not supported; recreate the table to change a"
+                        " column's type"
+                    ),
                 )
-        return None
+        return ()
 
 
 class DisallowPartitioningChange(Rule):
@@ -153,15 +122,19 @@ class DisallowPartitioningChange(Rule):
     Partitioning can only occur during the creation of a table.
     """
 
-    def violated_by(self, ctx: PlanContext, observed: ObservedTable) -> str | None:
+    def check(
+        self, ctx: PlanContext, observed: ObservedTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag a difference between desired and observed partition columns."""
         if ctx.desired.partitioned_by == observed.partitioned_by:
-            return None
+            return ()
         return (
-            "partitioning changes are not supported."
-            f" Current partition columns: {observed.partitioned_by}"
-            f" - Requested partition columns: {ctx.desired.partitioned_by}."
-            " Recreate the table with the desired partitioning"
+            self._violation(
+                "partitioning changes are not supported."
+                f" Current partition columns: {observed.partitioned_by}"
+                f" - Requested partition columns: {ctx.desired.partitioned_by}."
+                " Recreate the table with the desired partitioning"
+            ),
         )
 
 
@@ -173,10 +146,17 @@ class PlanValidator:
         self.rules = rules
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
-        """Return one failure for each rule the plan breaks, in rule order."""
+        """
+        Return one failure for each rule the plan breaks, in rule order.
+
+        Rules constrain alterations, not creation: a table being created has no
+        observed state to violate, so when it is absent no rule runs.
+        """
+        if ctx.observed is None:
+            return ()
         failures: list[ValidationFailure] = []
         for rule in self.rules:
-            failures.extend(rule.check(ctx).failures)
+            failures.extend(rule.check(ctx, ctx.observed))
         return tuple(failures)
 
 
