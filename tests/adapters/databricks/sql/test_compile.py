@@ -39,9 +39,7 @@ def test_add_column_with_comment_includes_comment_clause():
     statement = _compile_single(action)
 
     # Then the ADD COLUMN carries the comment
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT COMMENT 'user age'"
-    )
+    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT COMMENT 'user age'")
 
 
 def test_add_column_without_comment_omits_comment_clause():

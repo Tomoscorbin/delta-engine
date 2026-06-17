@@ -36,9 +36,7 @@ def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
 
 
 @singledispatch
-def _compile_action(
-    action: Action, backticked_table_name: str
-) -> str:
+def _compile_action(action: Action, backticked_table_name: str) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.results import (
-    ActionStatus,
+    ExecutionFailed,
     ExecutionFailure,
     ExecutionResult,
     ReadFailed,
@@ -83,10 +83,9 @@ def test_message_renders_validation_failure_detail():
 
 def test_message_renders_execution_failure_detail_with_sql_preview():
     # Given a table whose execution phase failed on one action
-    failed_result = ExecutionResult(
+    failed_result = ExecutionFailed(
         action="AddColumn",
         action_index=2,
-        status=ActionStatus.FAILED,
         statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         failure=ExecutionFailure(action_index=2, exception_type="SparkException", message="boom"),
     )

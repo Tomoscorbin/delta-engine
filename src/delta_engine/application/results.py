@@ -19,14 +19,6 @@ from delta_engine.domain.model import ObservedTable
 # ---------- Status enums ----------
 
 
-class ActionStatus(StrEnum):
-    """Outcome status for an executed action."""
-
-    OK = "OK"
-    FAILED = "FAILED"
-    NOOP = "NOOP"
-
-
 class TableRunStatus(StrEnum):
     """High-level status of a table's sync run."""
 
@@ -135,21 +127,28 @@ class ValidationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionResult:
-    """Result of executing a single action in a plan."""
+class ExecutionSucceeded:
+    """A single plan action that executed without error."""
 
     action: str
     action_index: int
-    status: ActionStatus
     statement_preview: str
-    failure: ExecutionFailure | None = None
 
-    def __post_init__(self) -> None:
-        """Enforce consistency between status and presence of `failure`."""
-        if self.status is ActionStatus.FAILED and self.failure is None:
-            raise ValueError("FAILED ExecutionResult must include an ExecutionFailure.")
-        if self.status is not ActionStatus.FAILED and self.failure is not None:
-            raise ValueError("Only FAILED results may include an ExecutionFailure.")
+
+@dataclass(frozen=True, slots=True)
+class ExecutionFailed:
+    """A single plan action that raised while executing."""
+
+    action: str
+    action_index: int
+    statement_preview: str
+    failure: ExecutionFailure
+
+
+# An executed action either succeeds or fails. The split makes "succeeded but
+# carries a failure" (and "failed but carries none") unrepresentable, so no
+# runtime invariant guard is needed.
+ExecutionResult = ExecutionSucceeded | ExecutionFailed
 
 
 # ---------- Reports ----------
@@ -168,8 +167,8 @@ class TableRunReport:
 
     @property
     def _any_action_failed(self) -> bool:
-        """True if any execution result has status=FAILED."""
-        return any(e.status is ActionStatus.FAILED for e in self.execution_results)
+        """True if any executed action failed."""
+        return any(isinstance(e, ExecutionFailed) for e in self.execution_results)
 
     @property
     def status(self) -> TableRunStatus:
@@ -190,7 +189,7 @@ class TableRunReport:
     @property
     def action_failures(self) -> tuple[ExecutionFailure, ...]:
         """Failures captured from action execution results only."""
-        return tuple(e.failure for e in self.execution_results if e.failure is not None)
+        return tuple(e.failure for e in self.execution_results if isinstance(e, ExecutionFailed))
 
     @property
     def all_failures(self) -> tuple[Failure, ...]:

@@ -19,6 +19,7 @@ from delta_engine.application.plan import make_plan_context
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
+    ExecutionFailed,
     ExecutionResult,
     ReadFailed,
     SyncReport,
@@ -137,7 +138,7 @@ class Engine:
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
                 executions = self.executor.execute(context.plan)
-                failed_count = sum(1 for e in executions if e.failure is not None)
+                failed_count = sum(1 for e in executions if isinstance(e, ExecutionFailed))
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",
                     len(executions),

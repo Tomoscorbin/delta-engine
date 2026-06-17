@@ -84,11 +84,15 @@ def test_no_actions_when_desired_equals_observed():
         Column("event_date", Date()),
     )
     desired = _desired(
-        columns=columns, comment="core table", properties={"owner": "cdm"},
+        columns=columns,
+        comment="core table",
+        properties={"owner": "cdm"},
         partitioned_by=("event_date",),
     )
     observed = _observed(
-        columns=columns, comment="core table", properties={"owner": "cdm"},
+        columns=columns,
+        comment="core table",
+        properties={"owner": "cdm"},
         partitioned_by=("event_date",),
     )
 

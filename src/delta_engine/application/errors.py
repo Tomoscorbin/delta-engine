@@ -8,7 +8,7 @@ SQL previews for any failed actions.
 
 from __future__ import annotations
 
-from delta_engine.application.results import SyncReport, TableRunReport
+from delta_engine.application.results import ExecutionFailed, SyncReport, TableRunReport
 
 
 class SyncFailedError(Exception):
@@ -41,7 +41,7 @@ def _format_failure_detail(table_report: TableRunReport) -> list[str]:
         lines.append(f"    {failure.format_line()}")
 
     for result in table_report.execution_results:
-        if result.failure:
+        if isinstance(result, ExecutionFailed):
             lines.append(f"    Failed SQL preview (action {result.action_index}):")
             lines.append(f"        {result.statement_preview}")
 

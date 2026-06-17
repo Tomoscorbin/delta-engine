@@ -1,32 +1,37 @@
-[tool.poetry]
+[project]
 name = "delta-engine"
 version = "0.1.0"
 description = "Framework for defining, validating, and evolving tables in a consistent, safe, and controlled way."
-authors = ["Tomos Corbin <tom_corbin1@hotmail.com>"]
+authors = [{ name = "Tomos Corbin", email = "tom_corbin1@hotmail.com" }]
 readme = "README.md"
-packages = [{ include = "delta_engine", from = "src" }]
+requires-python = ">=3.12"
+# Runtime dependencies are intentionally empty: the schema/planning surface is
+# pure Python. pyspark/delta-spark are dev-only (see [dependency-groups]) so the
+# library can be imported to define and plan tables without a Spark install.
+dependencies = []
 
-[tool.poetry.dependencies]
-python = "^3.12"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.4.1"
-pytest-cov = "^5.0"
-ruff = "^0.12.9"
-mypy = "^1.17.1"
-pyspark = "^4.0.0"
-delta-spark = "^4.0.0"
-
-
-[tool.poetry.group.docs.dependencies]
-mkdocs = "^1.6.1"
-mkdocs-material = "^9.6.18"
-mkdocstrings = { extras = ["python"], version = "^0.30.0" }
-mkdocs-autorefs = "^1.4.3"
+[dependency-groups]
+dev = [
+  "pytest>=8.4.1",
+  "pytest-cov>=5.0",
+  "ruff>=0.12.9",
+  "mypy>=1.17.1",
+  "pyspark>=4.0.0",
+  "delta-spark>=4.0.0",
+]
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-material>=9.6.18",
+  "mkdocstrings[python]>=0.30.0",
+  "mkdocs-autorefs>=1.4.3",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/delta_engine"]
 
 # -------------------- Ruff  --------------------
 [tool.ruff]

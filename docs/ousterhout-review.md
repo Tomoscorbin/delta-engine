@@ -385,139 +385,306 @@ findings worth acting on get folded back into a future A/B stage with concrete
 locations and severities. They are grouped here because they are exploratory and
 share that "investigate, argue, recommend — don't just change" character.
 
-### C1 — Encapsulation sweep: misused privates and reach-through access — *investigation, pending*
+### C1 — Encapsulation sweep: misused privates and reach-through access — *complete (re-run after C2)*
 
-A dedicated pass over the whole codebase for two related encapsulation smells,
-not yet enumerated as concrete findings:
+Swept the whole codebase for two encapsulation smells: (1) `_private` members
+used from outside their owning class/module, and (2) reach-through / Law of
+Demeter chains. Four scanners (cross-object privates in `src/`, tests reaching
+into production privates, reach-through into behavioural objects, and
+destructure-and-rebuild), each finding adversarially verified against the code
+with a default-to-reject skeptic. 13 candidates raised → **6 confirmed, 7
+rejected**.
 
-1. **Private members used where they shouldn't be.** A `_name`-prefixed
-   function, method, or attribute referenced from outside the class/module that
-   owns it. Either the access is illegitimate (a layering or boundary
-   violation), or the member is genuinely needed by others and should be
-   promoted to part of the public interface. The fix differs per case — tighten
-   the caller, or widen the interface — so each instance must be judged
-   individually.
-2. **Reach-through access (Law of Demeter).** Code that digs through several
-   layers of objects/attributes to get at something — `a.b.c.d`, or pulling a
-   nested field out of a returned object to reconstruct something the owner
-   could have handed over directly. Reaching deep into another object's
-   internals means the caller knows structure it shouldn't; that knowledge
-   belongs behind a method or property on the object that owns the data. This is
-   the same "pull complexity downward / information hiding" principle as the
-   `format_line` move in A3 and the `_fetch_table_comment` consistency fix in
-   A6, applied as a codebase-wide search rather than a single site.
+> **Re-run after C2 (verdict: stable, no new findings).** Re-swept against the
+> post-C2 code — the public-API declaration (Q1a), the `ExecutionResult` sum-type
+> split, and the new `isinstance` dispatch sites it introduced. The production
+> code is **still clean**: every C2-introduced construct that a scanner flagged
+> was rejected by the skeptic as a non-violation —
+> - `isinstance(x, ReadFailed)` / `isinstance(e, ExecutionFailed)` then reading the
+>   matched variant's fields is the **idiomatic way to consume a closed sum type**
+>   of frozen value objects, not a reach-through.
+> - The declared public API (`Engine`/`SyncFailedError`/`SyncReport`/`Failure`)
+>   with per-phase types reachable-but-undeclared via `SyncReport` is a deliberate,
+>   leak-free boundary.
+> - `ExecutionFailure.action_index` duplicating `ExecutionFailed.action_index` was
+>   raised as a duplication smell and **rejected**: the inner copy is genuinely read
+>   (via `format_line()` when failures travel through `action_failures` /
+>   `failures_by_table` detached from their wrapper), both are written from one
+>   source variable so they cannot diverge at construction, and dropping it would
+>   degrade the failure message. Worth a *note*, not a refactor, unless a second
+>   construction site for `ExecutionFailure` ever appears.
+> - A shared base class for the two `Execution*` variants was considered and
+>   rejected as a shallow abstraction (three fields, no behaviour).
+>
+> The six confirmed findings are **unchanged** — all the same test-private accesses
+> below; C2 neither touched nor needed to touch them.
 
-**Method:** grep for cross-module/cross-class `._private` access; scan for
-attribute chains of depth ≥ 3 and for callers that destructure a returned object
-only to rebuild a value the owner could expose. For each hit, decide: promote
-the member to the public interface, add an accessor/method on the owner, or fix
-the caller. Verify each candidate against the code before acting — a deep chain
-through a plain data record (e.g. a frozen dataclass that is *meant* to be read
-field-by-field) is not necessarily a violation.
+**Headline: production code (`src/`) has no encapsulation violations.** Every
+`src/`-level candidate was rejected — they were all either same-object `self._x`
+access (fine), reads of frozen data records that exist to be read field-by-field
+(`Column`, `ReadFailure`, `ExecutionResult` — explicitly exempt), or traversals
+of PySpark's external API (`spark.catalog.getTable(...).description`), which we
+don't own and can't redesign. The hexagonal layering and value-object discipline
+hold up.
 
-This is exploratory; findings it produces will be folded back into a future
-refactor stage with concrete locations and severities.
+**All 6 confirmed findings are tests reaching into production privates** — a
+test-hygiene issue, not an architectural one. They reduce to two fixes:
 
-### C2 — Deep-simplification pass: question the core abstractions — *investigation, pending*
+1. **`DatabricksReader` private read-helpers are tested directly** — *low*.
+   `tests/adapters/databricks/catalog/test_reader.py` calls `reader._table_exists`
+   (lines 144, 155), `reader._fetch_properties` (245, 267) and
+   `reader._fetch_table_comment` (292) from outside the class, and
+   `tests/e2e/test_engine_e2e.py:20` monkeypatches `_table_exists` with
+   `raising=False`. These are private helpers of `_read`, behind the public
+   `fetch_state`. Two viable fixes, judged per case:
+   - **Promote to public** (drop the underscores: `table_exists`,
+     `fetch_properties`, `fetch_table_comment`) — `DatabricksReader` is a concrete
+     adapter, not a domain type, so widening its surface costs nothing and turns
+     the e2e monkeypatch into a legitimate seam (drop `raising=False`). Do **not**
+     add them to the `CatalogStateReader` Protocol — they are adapter-internal,
+     not part of the port.
+   - **Or route through `fetch_state`** and assert on `result.observed.{properties,
+     comment}` — most of this coverage already exists at the `fetch_state` level
+     (e.g. the empty-properties path), so several of these tests are redundant and
+     could simply be deleted. One gap: the `None`-description→`""` coercion is only
+     tested via `_fetch_table_comment`, so it needs a replacement `fetch_state`
+     test before that one is removed.
 
-C2 is broader and more speculative than C1. Rather than hunting local smells, it
-steps back and asks whether the central abstractions are the *right* ones in
-Ousterhout's sense — deep modules with simple interfaces — or whether some exist
-mainly because the code grew that way. Each item below is a question to
-investigate and argue, not a decided change; some answers may well be "keep it as
-is, and here's why."
+   The e2e monkeypatch (medium) is the strongest case for the *promote* option —
+   the existence check is a genuine injection seam the local-Spark e2e suite
+   depends on, so the private name sends the wrong signal.
 
-Candidates to interrogate:
+2. **`test_compile.py` interrogates the private `_compile_action`** — *low*.
+   The B7 completeness guard imports `_compile_action` and reads its
+   `.dispatch(...)` registry (lines 3, 60, 67) to assert every `Action` has a
+   compiler. The intent is sound (the invariant can't be checked through
+   `compile_plan` without an `ActionPlan` per action type), but reaching into a
+   private singledispatch function is fragile. Fix: rename `_compile_action` →
+   `compile_action` in `compile.py` (update `compile_plan`, the seven
+   `@register` decorators, and the test import). It is already indirectly public
+   via `compile_plan`; the underscore is a false privacy signal.
 
-1. **Can the result types be merged — or should they stay separate (and
-   secret)?** There are several outcome types: `ReadResult` (`ReadSucceeded |
-   ReadFailed`), `ValidationResult`, `ExecutionResult`, plus the per-phase
-   `Failure` variants and the aggregating `TableRunReport` / `SyncReport`. Ask:
-   - Is there one underlying concept — "the outcome of a phase" — that a single
-     parameterised type could express, or do the three phases genuinely differ
-     enough that merging would conflate them (the A2/A3 verifiers warned against
-     exactly this)?
-   - Which of these are part of the library's *public* contract and which are
-     internal plumbing that should be hidden? `ReadResult` is produced by the
-     adapter port, so it is shared; but are `ExecutionResult`/`TableRunReport`
-     details that callers should depend on, or could the engine expose a single
-     narrow report type and keep the rest private?
-   - Does the still-deferred `ExecutionResult` sum-type split (OK / NOOP /
-     FAILED) belong here, decided together with the others rather than in
-     isolation?
-2. **Is there a better solution than `PlanContext`?** It bundles
-   `desired` + `observed` + `plan` purely so the validator can receive one
-   argument. Ask: is it a deep abstraction or just a parameter object? Would
-   rules reading `(desired, observed, plan)` directly be clearer? Could the plan
-   itself carry enough context that the separate `desired`/`observed` fields are
-   redundant? Conversely, is the parameter object actually the right call
-   because it gives one stable seam as more context accrues — and if so, should
-   *more* live on it rather than less?
-3. **Should the validation step's approach change?** Today validation is a
-   sequence of `Rule` objects each returning an optional `ValidationFailure`,
-   run after planning and before execution. Ask:
-   - Is "validate the computed plan" the right altitude, or should some checks be
-     invariants on the domain model (unrepresentable bad states) and others be
-     plan-time concerns? (Several Part B findings — B1 type drift, B3 nullability
-     tightening, B5 column-mapping — are proposed as new rules; do they all
-     really belong in the same mechanism, or are some better expressed
-     elsewhere?)
-   - Is the `Rule` ABC + `PlanValidator` pairing a deep module, or ceremony
-     around a list of functions? Would plain predicate functions be simpler with
-     no loss?
-   - Should validation and diffing be more unified — e.g. the differ refusing to
-     emit an action it knows is unsafe — or is the strict "diff proposes,
-     validator disposes" separation worth keeping for clarity?
+**Recommendation:** all findings are low/medium test hygiene. The cleanest single
+move is to **make the genuinely-needed seams public** — `DatabricksReader`'s
+read-helpers and `compile_action` — and **delete the now-redundant private-poking
+tests** in favour of the existing public-interface coverage, adding the one
+missing `fetch_state`-level test for the null-comment case. No production
+behaviour changes; this is a tests + naming pass. Worth doing opportunistically,
+not urgent.
 
-For each, write down the trade-off and a recommendation (including "leave it").
-The bar is Ousterhout's: does the change make the interface simpler and hide more
-complexity, or does it just move complexity around?
+**Rejected (recorded so they're not re-litigated):** `TableRunReport._any_action_failed`
+(same-object); `engine` reading `read_result.failure.{exception_type,message}` for
+logging (frozen data record; and `format_line()` would double-prefix the log line);
+`spark.catalog.getTable(...).description` (external API); `compile.py`
+`action.column.name`/`data_type` (data records); `errors._format_failure_detail`
+(uses public surface correctly); `errors` reading `execution_results` for SQL
+previews (public field of a data record; a `failed_execution_previews` accessor
+would be a shallow wrapper coupling a result value object to error-formatting).
 
-### C3 — File/folder structure and test-suite review — *investigation, pending*
+### C2 — Deep-simplification pass: question the core abstractions — *complete*
 
-Step back from individual modules and assess two things: the package layout and
-the test suite as wholes.
+Stepped back from the central abstractions and asked, for each, whether it is the
+right shape in Ousterhout's sense or an accidental one. Method: for each question,
+two opposing proposals (e.g. unify vs. keep-separate) were generated, each
+adversarially critiqued against the code, then synthesised into one recommendation
+— with "leave as is" treated as a first-class answer. The bar throughout: does a
+change *hide more* complexity, or just move it?
 
-**Package structure** — the layout is `domain/` → `application/` → `adapters/`,
-with `model/`, `plan/`, `services/` under domain and `databricks/`, `schema/`
-under adapters. Questions:
+**Bottom line: the three core abstractions are fundamentally sound.** No
+restructuring is warranted. The pass surfaced one genuinely free win, two
+structural clean-ups worth batching into a future tidy-up, and one real
+prerequisite question (`NOOP`) that must be answered before a tempting change.
 
-- Does the directory tree still match the architecture now that A4/A5 removed
-  several modules (`column_diff`, `table_diff`, `ordering`, `format_report`)? Are
-  any folders now thin enough that they should collapse (e.g. is
-  `domain/services/` justified holding only `differ.py`)?
-- Is each module in the layer its dependencies imply? Anything in `domain/` that
-  reaches toward `application/` or an adapter? Anything Databricks-specific
-  sitting outside `adapters/databricks/`?
-- Are the public entry points obvious from the structure? A new user should be
-  able to find "define a table" (`adapters/schema`) and "run a sync"
-  (`adapters/databricks/build_engine`) without spelunking. Do the package
-  `__init__.py` exports tell that story, or are they empty/inconsistent?
-- Naming and granularity: are any files too small to justify their own module,
-  or too large and doing two jobs? Do file names describe their single
-  responsibility?
+> **Status (implemented):** Q1a (declare public API) and Q1b (delete `NOOP`,
+> split `ExecutionResult`) have since been actioned on `docs/ousterhout-stage-c`.
+> The `NOOP` question below was resolved by **deleting** it (Option B): the
+> diff-based design never produces an already-satisfied action, so `NOOP` had no
+> production meaning. `ExecutionResult` is now `ExecutionSucceeded |
+> ExecutionFailed`, `ActionStatus` and the `__post_init__` guard are gone. Q2 and
+> Q3 below remain recommendations only.
 
-**Test suite** — assess the tests as a designed artefact, not just coverage:
+#### Q1 — Result/outcome types: keep separate; declare the public surface; the `ExecutionResult` split is blocked on `NOOP`
 
-- Does the `tests/` tree mirror `src/` cleanly after the A4/A5/A6 re-homing, and
-  are the unit vs. e2e boundaries clear and consistently applied?
-- Are tests written against behaviour and public interfaces (per the project's
-  Detroit-school stance), or are any still coupled to private helpers or
-  implementation detail? Flag any remaining `._private` calls from tests.
-- Fakes vs. mocks: are test doubles used only for genuine outgoing boundaries
-  (Spark), with real domain objects everywhere else? Any over-mocking?
-- Gaps: which behaviours are only covered transitively (e.g. the compiler before
-  A6 had no direct tests)? Are the Part B hazards untested because the suite runs
-  against clean local/Unity-Catalog Spark? What would a mixed-case-HMS or
-  struct-column fixture catch that the current suite cannot?
-- Redundancy and clarity: duplicated setup that wants a fixture/builder,
-  unclear test names, or Given/When/Then comments that have drifted from what
-  the test does.
-- Is the 90% coverage gate measuring the right things, or does it create
-  pressure to test trivia? Are there critical paths under-covered despite the
-  high number?
+- **Do not merge `ReadResult` / `ValidationResult` / `ExecutionResult`** into one
+  generic outcome type. They are genuinely distinct concepts (the A2/A3 verifiers
+  warned about this); a shared `Result[T]` would conflate them and the engine's
+  per-phase handling does not simplify. *Leave as is.*
+- **Free win — declare the public surface.** `application/__init__.py` is empty,
+  so `SyncReport` / `SyncFailedError` / `Failure` are reachable-but-undeclared
+  (callers get them via the engine return value / raised error). Export the
+  intended public contract (`Engine`, `SyncFailedError`, `SyncReport`, `Failure`)
+  from `application/__init__.py` — four import lines, zero structural change,
+  formalises what the type annotations already say (`all_failures` /
+  `failures_by_table` already return `tuple[Failure, ...]`). Keep
+  `ExecutionResult`/`TableRunReport` internals out of the declared surface unless a
+  user needs them. *Low severity; safe to do anytime.*
+  - *Dissent:* the empty `__init__` may be deliberate; dual import paths for the
+    same name are an occasional footgun. With no external users yet, "leave empty
+    until asked" is defensible.
+- **`ExecutionResult` OK/NOOP/FAILED split — deferred, blocked on a decision.**
+  The `__post_init__` invariant (`FAILED ⇔ failure present`, `results.py:147-152`)
+  is a real Ousterhout signal that a sum type would make structural. *But* the
+  `NOOP` variant is a phantom: `DatabricksExecutor` only ever emits `OK`/`FAILED`
+  (`executor.py:70-88`), yet the test suite constructs `NOOP` and relies on it for
+  `SUCCESS` status. Splitting now would promote a never-emitted state into the type
+  hierarchy — worse, not better. **Decide first:** either (A) give `NOOP` a real
+  emitter (e.g. executor marks already-satisfied actions as no-ops), or (B) delete
+  `NOOP`, collapse into `OK`, and split into `ExecutionSucceeded | ExecutionFailed`
+  (then `ActionStatus` becomes dead code). Both lead to a cleaner union; the split
+  is sound *after* the `NOOP` question is answered, not before.
 
-Deliverable: a short assessment of what (if anything) to restructure in both the
-package and the tests, weighed against churn cost — structure changes are cheap
-to propose and disruptive to land, so the recommendation should be explicit about
-whether it earns its keep.
+#### Q2 — `PlanContext`: keep it; optionally name the `is_create` guard later
+
+- **`PlanContext{desired, observed, plan}` is the right abstraction — leave the
+  structure unchanged.** It is a deep module: `make_plan_context(desired, observed)`
+  hides the diff-and-sort derivation and hands the validator one argument that
+  carries the type-level guarantee that `plan` was derived from that exact
+  desired/observed pair. Dissolving it into three positional args would widen every
+  rule signature and move complexity outward.
+- **Optional, deferred:** all four rules open with `if ctx.observed is None: return
+  None`. An `is_create` property on `PlanContext` would name that as a domain
+  concept ("creating, not altering"). Marginal — `observed is None` is already
+  transparent — and it carries a test cost (`_FakeContext` in `test_validation.py`
+  must gain the property too). Worth doing when a fifth rule is added (the naming
+  benefit compounds) or in a deliberate naming pass; not on its own today.
+- **Do not** promote `observed_columns_by_name` onto `PlanContext`: only
+  `UnsupportedColumnTypeChange` builds that lookup; single-consumer derived state
+  belongs in a local variable.
+
+#### Q3 — Validation: the `Rule` ABC + `PlanValidator` are shallow; consider functions in a future clean-up
+
+- **The `Rule(ABC)` + `PlanValidator` pairing is shallow ceremony.** No concrete
+  rule holds state; `evaluate`'s `self` is never used; `PlanValidator.validate` is
+  a four-line for-loop whose interface is as wide as its implementation. Tellingly,
+  `_FakeValidator` in `test_engine.py` does **not** subclass `PlanValidator` — the
+  nominal type enforces nothing today. Plain predicate functions
+  (`Callable[[PlanContext], ValidationFailure | None]`) collected in a tuple, with
+  `validate_plan` a module function and `DEFAULT_VALIDATOR` a `functools.partial`,
+  would lose nothing and remove the instantiation/`self`-dispatch theatre. Keep
+  `PlanValidator` as a `Callable` type alias so the engine signature is untouched;
+  give `rule_name` explicit string literals (not `__class__.__name__`, which would
+  flip PascalCase→snake_case and break any downstream parsing). *Low severity,
+  purely structural, no behaviour change — batch into a future tightening pass.*
+  - *Dissent:* the ABC is a visible, greppable extension point; a team with many
+    contributors may prefer that explicitness over the (real) Ousterhout win. An
+    ergonomic preference, not a correctness one.
+- **Altitude — keep "diff proposes, validator disposes."** The rule mechanism as
+  the home for "what is unsafe/unsupported" is the right seam (it absorbed B1/B3/B5
+  cleanly). Folding safety checks into the differ, or scattering them as domain
+  invariants, would couple concerns the current separation keeps clean. The rule
+  bag is not yet a dumping ground; revisit only if it grows large or the
+  unsupported-for-now vs. genuinely-dangerous distinction starts to matter.
+
+**Net recommendation:** do the one free win (declare the public API) opportunistically;
+hold the `ExecutionResult`/`NOOP` and `Rule`-as-functions changes for a future
+structural pass, with the `NOOP` decision as an explicit gate on the former. None of
+these are urgent and none change runtime behaviour.
+
+### C3 — File/folder structure and test-suite review — *complete*
+
+Assessed the package layout and the test suite as whole designed artefacts, plus
+the **consumer's import experience** (what a user actually has to type). Method:
+five assessors (layering/entry-points, folder granularity, user-import POV, test
+mirroring/coverage, test quality/doubles), each recommendation adversarially
+checked against an explicit "does it earn its churn?" bar (structure changes are
+cheap to propose, disruptive to land), then synthesised per area.
+
+**Bottom line: both the layout and the suite are fundamentally sound.** The
+hexagonal boundary is verified clean (domain imports no application/adapters;
+application imports no adapters; no Spark/Databricks names leak outside
+`adapters/databricks/`). No folder restructuring is warranted. What surfaced is a
+cluster of **low-churn polish** — mostly about the *consumer's* import experience
+and a few test-hygiene items.
+
+#### Package structure & the user's import experience
+
+> **Status (implemented):** the two re-export gaps below (`Registry`,
+> `Decimal`/`Array`/`Map`) and the missing-`__init__.py` test bug have been fixed
+> on `docs/ousterhout-stage-c`. The root `delta_engine/__init__.py` convenience
+> namespace has **also** been added: it eagerly re-exports the pyspark-free surface
+> (schema + application) and exposes `build_databricks_engine` / `configure_logging`
+> **lazily** via a PEP 562 `__getattr__`, so `import delta_engine` never forces
+> pyspark — preserving the deliberate "define tables without a Spark install"
+> capability (pyspark is a dev-only dependency). The README now imports everything
+> from `delta_engine` in one statement.
+
+The user's POV is where the real findings are. Today the README's minimal usage
+needs imports from **three different deep paths**, and the top-level
+`delta_engine/__init__.py` is empty — so a consumer must understand the internal
+hexagonal layering just to import the basics.
+
+- **`Registry` is unexported yet needed in every sync** — *medium, low churn*.
+  `Engine.sync` takes a `Registry` as its only argument, but `Registry` is absent
+  from `application/__init__.py`'s exports; every caller reaches the leaf
+  `delta_engine.application.registry`. Add it to `application/__init__.py` +
+  `__all__` (one line; no cycle — `registry.py` imports only from domain). Then
+  `from delta_engine.application import Engine, Registry` works.
+- **`Decimal`, `Array`, `Map` not re-exported from `adapters/schema`** — *low,
+  low churn*. The user-facing schema package exports the eight scalar type
+  classes but not the three parameterised ones, so defining a `Decimal(10, 2)`
+  column forces an import from the internal `domain.model` layer. Add the three
+  names to `adapters/schema/__init__.py`.
+- **Empty root `delta_engine/__init__.py` — the natural follow-on.** Once
+  `Registry` is exported, the remaining gap is a curated root surface that
+  collapses the three-deep README imports into one or two lines (e.g.
+  `from delta_engine import DeltaTable, Column, Integer, Registry,
+  build_databricks_engine`). This is a deliberate API-design choice — weigh a
+  flat top-level convenience namespace against keeping the adapter boundary
+  crisp / import-cycle risk — so it's flagged as the logical next step, not an
+  auto-apply. **Recommend deciding this explicitly.**
+
+**Deliberately left as-is** (churn not earned): `domain/plan/` and
+`domain/services/` single-file folders (meaningful DDD boundaries; `plan/`
+re-exports a clean surface); `adapters/schema/delta/` table/properties split
+(distinct axes of change); `results.py` at 228 lines (one tightly-coupled concept
+— splitting forces mutual imports); `log_config.py` at the package root (least-bad
+home for a cross-cutting stdlib helper; revisit if a second adapter lands);
+`adapters/schema/types.py` singletons (inert, no callers, but moving changes a
+public path).
+
+#### Test suite
+
+Sound: Detroit-school throughout, real domain objects in the domain/application
+layers, Spark fakes confined to adapter boundaries, clean Given/When/Then,
+coverage ~95%. Four low-churn improvements earn their keep:
+
+- **`test_ordering.py` is an orphan filename** — *low*. `ordering.py` was deleted
+  in A5 (`action_sort_key` moved into `plan.py`); the test still carries the ghost
+  module's name and sits separate from `test_plan.py`. Merge its 6 tests into
+  `test_plan.py` (zero topical overlap) to restore the mirror.
+- **`log_config.py` has untested logic** — *medium*. Three real contracts with no
+  test: `configure_logging` idempotency (the `root.handlers.clear()` guard — a
+  *public, README-documented* contract), `SafeStreamHandler.emit` swallowing
+  `ValueError` on teardown, and the formatter's level-colour branches. ~35-line
+  pure-stdlib `test_log_config.py` covers all three.
+- **SQL string composition in `read.py` is unpinned** — *low*. Every Spark fake
+  discards the query string, so a wrong column alias / dropped `LIMIT 1` / wrong
+  `DESCRIBE` verb would pass the whole suite and only fail against a live catalog.
+  A ~15-line `test_read.py` with substring assertions pins the one thing
+  `test_dialect.py` can't (the composition).
+- **`test_validation.py` fakes frozen domain objects** — *medium*. Its top half
+  defines five fakes (`_FakeColumn`/`_FakePlan`/`_FakeObserved`/`_FakeDesired`/
+  `_FakeContext`) standing in for frozen dataclasses that cost nothing to build —
+  a Detroit-school violation. The file's *lower* half already uses the real
+  `PlanContext`/`Column`/etc. via a `_context()` helper; converge on that. (One
+  wrinkle: partition tests need a real `Column("ds", …)` so `TableSnapshot`'s
+  partition-reference validation passes.)
+
+**Test items noted but not actioned:** the C1 test-private accesses
+(`reader._table_exists`/`_fetch_properties`/`_fetch_table_comment`, the e2e
+`_table_exists` monkeypatch, `test_compile`'s `_compile_action.dispatch`) — these
+are the C1 findings; the `_table_exists` pair is redundant and deletable, but the
+`_fetch_properties`/`_fetch_table_comment` tests carry two assertions
+(MappingProxyType immutability; `None`→`""` comment coercion) with no current
+public-interface equivalent, so they need those assertions migrated to
+`fetch_state`-level tests first. A `@pytest.mark.spark` scheme to give a fast
+`pytest -m "not spark"` loop is endorsed in principle but only pays off if
+documented in a Make target. `properties.py` / `ports.py` correctly need no
+dedicated tests.
+
+**One genuine bug surfaced, not just polish:** `tests/adapters/schema/delta/` is
+missing its `__init__.py` (every other populated leaf test dir has one). Two files
+named `test_table.py` exist in the tree, and with pytest's default *prepend*
+import mode and no `importmode` set, that is an import-collision hazard that
+happens to pass today only because the two files' names are disjoint. Add the
+empty `__init__.py` — *low churn, removes undefined behaviour*.

@@ -49,9 +49,7 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
     return ActionPlan(desired.qualified_name, actions)
 
 
-def _diff_columns(
-    desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> tuple[Action, ...]:
+def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
     """Return the column-level actions to transform `observed` into `desired`."""
     observed_by_name = {column.name: column for column in observed}
     desired_names = {column.name for column in desired}

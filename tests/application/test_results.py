@@ -1,11 +1,9 @@
 from datetime import datetime
 
-import pytest
-
 from delta_engine.application.results import (
-    ActionStatus,
+    ExecutionFailed,
     ExecutionFailure,
-    ExecutionResult,
+    ExecutionSucceeded,
     ReadFailed,
     ReadFailure,
     ReadSucceeded,
@@ -34,32 +32,15 @@ def _t1():
 
 
 def _ok_exec(idx=0, action="AddColumn", preview="ALTER TABLE ..."):
-    return ExecutionResult(
-        action=action,
-        action_index=idx,
-        status=ActionStatus.OK,
-        statement_preview=preview,
-        failure=None,
-    )
-
-
-def _noop_exec(idx=0, action="SetProperty", preview="-- NOOP"):
-    return ExecutionResult(
-        action=action,
-        action_index=idx,
-        status=ActionStatus.NOOP,
-        statement_preview=preview,
-        failure=None,
-    )
+    return ExecutionSucceeded(action=action, action_index=idx, statement_preview=preview)
 
 
 def _failed_exec(
     idx=0, action="AddColumn", preview="ALTER TABLE ...", exc="ValueError", msg="boom"
 ):
-    return ExecutionResult(
+    return ExecutionFailed(
         action=action,
         action_index=idx,
-        status=ActionStatus.FAILED,
         statement_preview=preview,
         failure=ExecutionFailure(action_index=idx, exception_type=exc, message=msg),
     )
@@ -144,37 +125,26 @@ def test_validation_result_failed_property_reflects_presence_of_failures():
     assert ok_result.failed is False
 
 
-def test_execution_result_enforces_failure_presence_for_failed_status():
-    # Given a FAILED status without a failure
-    # When/Then it raises a ValueError
-    with pytest.raises(ValueError):
-        ExecutionResult(
-            action="DoThing",
-            action_index=0,
-            status=ActionStatus.FAILED,
-            statement_preview="SQL",
-            failure=None,
-        )
+def test_execution_outcome_variants_carry_the_right_payload():
+    # Given the two execution outcomes
+    succeeded = ExecutionSucceeded(action="AddColumn", action_index=0, statement_preview="SQL")
+    failed = ExecutionFailed(
+        action="AddColumn",
+        action_index=1,
+        statement_preview="SQL",
+        failure=ExecutionFailure(action_index=1, exception_type="E", message="m"),
+    )
+
+    # Then a failure is only representable on the failed variant
+    assert failed.failure.exception_type == "E"
+    assert not hasattr(succeeded, "failure")
 
 
-def test_execution_result_forbids_failure_on_non_failed_status():
-    # Given an OK status with an attached failure
-    # When/Then it raises a ValueError
-    with pytest.raises(ValueError):
-        ExecutionResult(
-            action="DoThing",
-            action_index=0,
-            status=ActionStatus.OK,
-            statement_preview="SQL",
-            failure=ExecutionFailure(action_index=0, exception_type="E", message="m"),
-        )
-
-
-def test_table_status_success_when_all_phases_ok():
-    # Given successful read, no validation failures, and OK/NOOP actions only
+def test_table_status_success_when_all_actions_succeed():
+    # Given successful read, no validation failures, and only successful actions
     read = ReadSucceeded(observed=_FakeObservedTable())
     validation = ValidationResult()
-    execution_results = (_ok_exec(0), _noop_exec(1))
+    execution_results = (_ok_exec(0), _ok_exec(1))
 
     # When aggregating
     report = TableRunReport(
