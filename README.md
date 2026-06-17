@@ -45,10 +45,11 @@ See the full architecture diagrams here: [docs/architecture.md](docs/architectur
 Requires an active `SparkSession` on Databricks or local Spark.
 
 ```python
-from delta_engine.adapters.databricks import build_databricks_engine
+from delta_engine.adapters.databricks import build_databricks_engine, configure_logging
+from delta_engine.adapters.schema import DeltaTable, Column, Integer, String
 from delta_engine.application.registry import Registry
-from delta_engine.schema import DeltaTable, Column, Integer, String
 
+configure_logging()  # optional: install the package's coloured log handler
 engine = build_databricks_engine(spark)
 registry = Registry()
 
