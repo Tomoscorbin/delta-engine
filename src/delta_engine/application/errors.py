@@ -1,7 +1,14 @@
-"""Application-level exception types for sync operations."""
+"""
+Application-level exception types for sync operations.
 
-from delta_engine.application.format_report import format_failure_detail
-from delta_engine.application.results import SyncReport
+`SyncFailedError` owns how a failed run is communicated: it turns a
+`SyncReport` into a human-readable summary, including per-table detail lines and
+SQL previews for any failed actions.
+"""
+
+from __future__ import annotations
+
+from delta_engine.application.results import SyncReport, TableRunReport
 
 
 class SyncFailedError(Exception):
@@ -16,6 +23,26 @@ class SyncFailedError(Exception):
 
         details: list[str] = []
         for table_report in failed_tables:
-            details.extend(format_failure_detail(table_report))
+            details.extend(_format_failure_detail(table_report))
 
         super().__init__("\n".join([header, *details]))
+
+
+def _format_failure_detail(table_report: TableRunReport) -> list[str]:
+    """
+    Return the detail lines describing why a single table failed.
+
+    Covers the table headline, each top-level failure (read, validation,
+    execution), and SQL previews for any failed actions.
+    """
+    lines = [f"\n❌ {table_report.fully_qualified_name} [{table_report.status.value}]"]
+
+    for failure in table_report.all_failures:
+        lines.append(f"    {failure.format_line()}")
+
+    for result in table_report.execution_results:
+        if result.failure:
+            lines.append(f"    Failed SQL preview (action {result.action_index}):")
+            lines.append(f"        {result.statement_preview}")
+
+    return lines
