@@ -226,6 +226,88 @@ field-by-field) is not necessarily a violation.
 This is exploratory; findings it produces will be folded back into Part A with
 concrete locations and severities.
 
+### A8 — Deep-simplification pass: question the core abstractions — *investigation, pending*
+
+A8 is broader and more speculative than A7. Rather than hunting local smells, it
+steps back and asks whether the central abstractions are the *right* ones in
+Ousterhout's sense — deep modules with simple interfaces — or whether some exist
+mainly because the code grew that way. Each item below is a question to
+investigate and argue, not a decided change; some answers may well be "keep it as
+is, and here's why."
+
+Candidates to interrogate:
+
+1. **Can the result types be merged — or should they stay separate (and
+   secret)?** There are several outcome types: `ReadResult` (`ReadSucceeded |
+   ReadFailed`), `ValidationResult`, `ExecutionResult`, plus the per-phase
+   `Failure` variants and the aggregating `TableRunReport` / `SyncReport`. Ask:
+   - Is there one underlying concept — "the outcome of a phase" — that a single
+     parameterised type could express, or do the three phases genuinely differ
+     enough that merging would conflate them (the A2/A3 verifiers warned against
+     exactly this)?
+   - Which of these are part of the library's *public* contract and which are
+     internal plumbing that should be hidden? `ReadResult` is produced by the
+     adapter port, so it is shared; but are `ExecutionResult`/`TableRunReport`
+     details that callers should depend on, or could the engine expose a single
+     narrow report type and keep the rest private?
+   - Does the still-deferred `ExecutionResult` sum-type split (OK / NOOP /
+     FAILED) belong here, decided together with the others rather than in
+     isolation?
+2. **Is there a better solution than `PlanContext`?** It bundles
+   `desired` + `observed` + `plan` purely so the validator can receive one
+   argument. Ask: is it a deep abstraction or just a parameter object? Would
+   rules reading `(desired, observed, plan)` directly be clearer? Could the plan
+   itself carry enough context that the separate `desired`/`observed` fields are
+   redundant? Conversely, is the parameter object actually the right call
+   because it gives one stable seam as more context accrues — and if so, should
+   *more* live on it rather than less?
+3. **Should the validation step's approach change?** Today validation is a
+   sequence of `Rule` objects each returning an optional `ValidationFailure`,
+   run after planning and before execution. Ask:
+   - Is "validate the computed plan" the right altitude, or should some checks be
+     invariants on the domain model (unrepresentable bad states) and others be
+     plan-time concerns? (Several Part B findings — B1 type drift, B3 nullability
+     tightening, B5 column-mapping — are proposed as new rules; do they all
+     really belong in the same mechanism, or are some better expressed
+     elsewhere?)
+   - Is the `Rule` ABC + `PlanValidator` pairing a deep module, or ceremony
+     around a list of functions? Would plain predicate functions be simpler with
+     no loss?
+   - Should validation and diffing be more unified — e.g. the differ refusing to
+     emit an action it knows is unsafe — or is the strict "diff proposes,
+     validator disposes" separation worth keeping for clarity?
+
+For each, write down the trade-off and a recommendation (including "leave it").
+The bar is Ousterhout's: does the change make the interface simpler and hide more
+complexity, or does it just move complexity around?
+
+### A9 — File and folder structure review — *investigation, pending*
+
+Step back from individual modules and assess the package layout as a whole
+(`domain/` → `application/` → `adapters/`, with `model/`, `plan/`, `services/`
+under domain and `databricks/`, `schema/` under adapters). Questions to answer:
+
+- Does the directory tree still match the architecture now that A4/A5 removed
+  several modules (`column_diff`, `table_diff`, `ordering`, `format_report`)? Are
+  any folders now thin enough that they should collapse (e.g. is
+  `domain/services/` justified holding only `differ.py`)?
+- Is each module in the layer its dependencies imply? Anything in `domain/` that
+  reaches toward `application/` or an adapter? Anything Databricks-specific
+  sitting outside `adapters/databricks/`?
+- Are the public entry points obvious from the structure? A new user should be
+  able to find "define a table" (`adapters/schema`) and "run a sync"
+  (`adapters/databricks/build_engine`) without spelunking. Do the package
+  `__init__.py` exports tell that story, or are they empty/inconsistent?
+- Naming and granularity: are any files too small to justify their own module,
+  or too large and doing two jobs? Do file names describe their single
+  responsibility?
+- Does the `tests/` tree mirror `src/` cleanly after the A4/A5 test re-homing,
+  and are the unit/e2e boundaries clear?
+
+Deliverable: a short assessment of what (if anything) to restructure, weighed
+against the churn cost — structure changes are cheap to propose and disruptive to
+land, so the recommendation should be explicit about whether it earns its keep.
+
 ---
 
 ## B. Real-world fitness — what breaks in production
