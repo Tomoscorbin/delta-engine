@@ -157,11 +157,28 @@ class SetColumnNullability(Action):
         return self.column_name
 
 
+def _execution_order(action: Action) -> tuple[int, str]:
+    """Deterministic ordering key for an action: execution phase, then subject name."""
+    return (action.phase, action.subject)
+
+
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
-    """An ordered set of actions to apply to a table."""
+    """
+    The actions to apply to a table, held in execution order.
+
+    A plan keeps its actions sorted by execution phase and then by subject name,
+    regardless of the order they are supplied in: ordering is an invariant of the
+    plan, not a step a caller has to remember. Both the phase and the subject are
+    declared by each action type (see :class:`Action`), so a new action orders
+    itself with no change here.
+    """
 
     actions: tuple[Action, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Sort the actions into execution order, preserving input order on ties."""
+        object.__setattr__(self, "actions", tuple(sorted(self.actions, key=_execution_order)))
 
     def __len__(self) -> int:
         """Return the number of actions in the plan."""
