@@ -83,9 +83,7 @@ class DatabricksReader:
         catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
         columns = tuple(_to_domain_column(c) for c in catalog_columns)
         partition_columns = tuple(
-            c.name.casefold()
-            for c in catalog_columns
-            if bool(getattr(c, "isPartition", False))
+            c.name.casefold() for c in catalog_columns if bool(getattr(c, "isPartition", False))
         )
         observed = ObservedTable(
             qualified_name=qualified_name,

@@ -86,9 +86,7 @@ def test_raises_when_any_table_has_read_failure():
     t = _spec("c.s.read_fail")
     reg = Registry()
     reg.register(t)
-    reader = _FakeReader(
-        {"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))}
-    )
+    reader = _FakeReader({"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))})
     validator = _FakeValidator()  # no validation failures
     executor = _FakeExecutor(results=(_ok_exec(0),))  # would be fine if reached
 

@@ -88,9 +88,7 @@ def test_eager_surface_imports_without_pyspark_installed():
     )
 
     # When importing the eager root surface
-    result = subprocess.run(
-        [sys.executable, "-c", program], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
 
     # Then it succeeds without ever importing pyspark
     assert result.returncode == 0, result.stderr

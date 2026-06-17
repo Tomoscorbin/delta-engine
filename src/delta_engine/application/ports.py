@@ -31,5 +31,3 @@ class PlanExecutor(Protocol):
     def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
         """Run the plan and return the execution outcome."""
         ...
-
-

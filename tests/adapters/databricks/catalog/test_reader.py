@@ -173,9 +173,7 @@ def test_columns_maps_name_nullability_and_comment(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(
-        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
-    )
+    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -198,9 +196,7 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(
-        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
-    )
+    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -223,9 +219,7 @@ def test_partition_columns_ignores_missing_or_false_flags():
             ]
         }
     )
-    spark = FakeSparkForFetchState(
-        exists=True, catalog=catalog, describe_rows=[{"properties": {}}]
-    )
+    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -417,9 +411,7 @@ def test_fetch_state_returns_failed_when_column_type_is_unsupported():
     # Given an existing table whose schema contains a type the engine cannot map
     qn = QualifiedName("c", "s", "structy")
     catalog = FakeCatalog(
-        columns_by_table={
-            str(qn): [make_catalog_col("payload", dataType=T.BinaryType())]
-        },
+        columns_by_table={str(qn): [make_catalog_col("payload", dataType=T.BinaryType())]},
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
