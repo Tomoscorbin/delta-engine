@@ -68,12 +68,14 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
     """
     Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
 
-    Note: New columns are added as nullable and then tightened later.
+    The column is always added without a NOT NULL constraint: adding a
+    non-nullable column to an existing table is rejected at validation
+    (see NonNullableColumnAdd), so this path is only reached for nullable adds.
     """
     name = backtick(action.column.name)
     dtype = sql_type_for_data_type(action.column.data_type)
-    comment = quote_literal(action.column.comment)
-    return f"ALTER TABLE {backticked_table_name} ADD COLUMN {name} {dtype} COMMENT {comment}"
+    comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
+    return f"ALTER TABLE {backticked_table_name} ADD COLUMN {name} {dtype}{comment}"
 
 
 @_compile_action.register

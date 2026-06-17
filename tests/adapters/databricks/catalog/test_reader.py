@@ -280,12 +280,12 @@ def test_fetch_properties_returns_full_catalog_map_unfiltered(qn):
 )
 def test_fetch_table_comment_returns_description_or_empty(desc_value, expected):
     # Given a catalog that may or may not have a description
-    fq = "c.s.t"
-    catalog = FakeCatalog(table_comments={fq: desc_value})
+    qualified_name = QualifiedName("c", "s", "t")
+    catalog = FakeCatalog(table_comments={str(qualified_name): desc_value})
     reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
 
     # When we fetch the table comment
-    comment = reader._fetch_table_comment(fq)
+    comment = reader._fetch_table_comment(qualified_name)
 
     # Then we get the description or an empty string
     assert comment == expected

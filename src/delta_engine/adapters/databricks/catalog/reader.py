@@ -83,7 +83,7 @@ class DatabricksReader:
                 c.name for c in catalog_columns if bool(getattr(c, "isPartition", False))
             )
             properties = self._fetch_properties(qualified_name)
-            table_comment = self._fetch_table_comment(str(qualified_name))
+            table_comment = self._fetch_table_comment(qualified_name)
         except _SPARK_EXCEPTION as exc:
             failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
             return ReadFailed(failure=failure)
@@ -111,6 +111,6 @@ class DatabricksReader:
             return MappingProxyType({})
         return MappingProxyType(dict(row["properties"]))
 
-    def _fetch_table_comment(self, fully_qualified_name: str) -> str:
+    def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""
-        return self.spark.catalog.getTable(fully_qualified_name).description or ""
+        return self.spark.catalog.getTable(str(qualified_name)).description or ""

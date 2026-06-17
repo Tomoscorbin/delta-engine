@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
@@ -29,7 +30,7 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
 
 
-class Action:
+class Action(ABC):
     """
     Base class for all plan actions.
 
@@ -44,9 +45,10 @@ class Action:
     phase: ClassVar[ActionPhase]
 
     @property
+    @abstractmethod
     def subject(self) -> str:
         """Identifier targeted within the phase; subclasses must override."""
-        raise NotImplementedError
+        ...
 
 
 @dataclass(frozen=True, slots=True)

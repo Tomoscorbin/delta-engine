@@ -24,15 +24,14 @@ class Registry:
     """
     In-memory registry of desired table definitions.
 
-    Stores tables as a simple list while tracking fully qualified names in a
-    set for fast duplicate detection. Iteration yields tables in deterministic
+    Tables are keyed by fully qualified name, which gives duplicate detection
+    and uniqueness for free. Iteration yields tables in deterministic
     (name-sorted) order.
     """
 
     def __init__(self) -> None:
         """Create an empty registry."""
-        self._tables: list[DesiredTable] = []
-        self._names: set[str] = set()
+        self._tables_by_name: dict[str, DesiredTable] = {}
 
     def register(self, *tables: DesiredTableSource) -> None:
         """
@@ -47,25 +46,22 @@ class Registry:
                 (either within this call or across previous calls).
 
         """
-        # Validate duplicates both within this call and against existing entries
-        new_desired: list[DesiredTable] = []
-        seen_in_call: set[str] = set()
+        # Convert and check every table before mutating, so a duplicate in the
+        # batch leaves the registry unchanged rather than half-applied.
+        new_tables: dict[str, DesiredTable] = {}
         for table in tables:
             desired = table.to_desired_table()
             fqn = str(desired.qualified_name)
-            if fqn in self._names or fqn in seen_in_call:
+            if fqn in self._tables_by_name or fqn in new_tables:
                 raise ValueError(f"Duplicate table registration: {fqn}")
-            seen_in_call.add(fqn)
-            new_desired.append(desired)
+            new_tables[fqn] = desired
 
-        # Append after validation succeeds
-        self._tables.extend(new_desired)
-        self._names.update(str(d.qualified_name) for d in new_desired)
+        self._tables_by_name.update(new_tables)
 
     def __iter__(self):
         """Iterate over desired tables in fully-qualified-name order."""
-        yield from (d for _, d in sorted((str(d.qualified_name), d) for d in self._tables))
+        yield from (self._tables_by_name[fqn] for fqn in sorted(self._tables_by_name))
 
     def __len__(self):
         """Return the number of registered tables."""
-        return len(self._tables)
+        return len(self._tables_by_name)
