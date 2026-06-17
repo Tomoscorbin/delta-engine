@@ -457,60 +457,96 @@ logging (frozen data record; and `format_line()` would double-prefix the log lin
 previews (public field of a data record; a `failed_execution_previews` accessor
 would be a shallow wrapper coupling a result value object to error-formatting).
 
-### C2 — Deep-simplification pass: question the core abstractions — *investigation, pending*
+### C2 — Deep-simplification pass: question the core abstractions — *complete*
 
-C2 is broader and more speculative than C1. Rather than hunting local smells, it
-steps back and asks whether the central abstractions are the *right* ones in
-Ousterhout's sense — deep modules with simple interfaces — or whether some exist
-mainly because the code grew that way. Each item below is a question to
-investigate and argue, not a decided change; some answers may well be "keep it as
-is, and here's why."
+Stepped back from the central abstractions and asked, for each, whether it is the
+right shape in Ousterhout's sense or an accidental one. Method: for each question,
+two opposing proposals (e.g. unify vs. keep-separate) were generated, each
+adversarially critiqued against the code, then synthesised into one recommendation
+— with "leave as is" treated as a first-class answer. The bar throughout: does a
+change *hide more* complexity, or just move it?
 
-Candidates to interrogate:
+**Bottom line: the three core abstractions are fundamentally sound.** No
+restructuring is warranted. The pass surfaced one genuinely free win, two
+structural clean-ups worth batching into a future tidy-up, and one real
+prerequisite question (`NOOP`) that must be answered before a tempting change.
 
-1. **Can the result types be merged — or should they stay separate (and
-   secret)?** There are several outcome types: `ReadResult` (`ReadSucceeded |
-   ReadFailed`), `ValidationResult`, `ExecutionResult`, plus the per-phase
-   `Failure` variants and the aggregating `TableRunReport` / `SyncReport`. Ask:
-   - Is there one underlying concept — "the outcome of a phase" — that a single
-     parameterised type could express, or do the three phases genuinely differ
-     enough that merging would conflate them (the A2/A3 verifiers warned against
-     exactly this)?
-   - Which of these are part of the library's *public* contract and which are
-     internal plumbing that should be hidden? `ReadResult` is produced by the
-     adapter port, so it is shared; but are `ExecutionResult`/`TableRunReport`
-     details that callers should depend on, or could the engine expose a single
-     narrow report type and keep the rest private?
-   - Does the still-deferred `ExecutionResult` sum-type split (OK / NOOP /
-     FAILED) belong here, decided together with the others rather than in
-     isolation?
-2. **Is there a better solution than `PlanContext`?** It bundles
-   `desired` + `observed` + `plan` purely so the validator can receive one
-   argument. Ask: is it a deep abstraction or just a parameter object? Would
-   rules reading `(desired, observed, plan)` directly be clearer? Could the plan
-   itself carry enough context that the separate `desired`/`observed` fields are
-   redundant? Conversely, is the parameter object actually the right call
-   because it gives one stable seam as more context accrues — and if so, should
-   *more* live on it rather than less?
-3. **Should the validation step's approach change?** Today validation is a
-   sequence of `Rule` objects each returning an optional `ValidationFailure`,
-   run after planning and before execution. Ask:
-   - Is "validate the computed plan" the right altitude, or should some checks be
-     invariants on the domain model (unrepresentable bad states) and others be
-     plan-time concerns? (Several Part B findings — B1 type drift, B3 nullability
-     tightening, B5 column-mapping — are proposed as new rules; do they all
-     really belong in the same mechanism, or are some better expressed
-     elsewhere?)
-   - Is the `Rule` ABC + `PlanValidator` pairing a deep module, or ceremony
-     around a list of functions? Would plain predicate functions be simpler with
-     no loss?
-   - Should validation and diffing be more unified — e.g. the differ refusing to
-     emit an action it knows is unsafe — or is the strict "diff proposes,
-     validator disposes" separation worth keeping for clarity?
+#### Q1 — Result/outcome types: keep separate; declare the public surface; the `ExecutionResult` split is blocked on `NOOP`
 
-For each, write down the trade-off and a recommendation (including "leave it").
-The bar is Ousterhout's: does the change make the interface simpler and hide more
-complexity, or does it just move complexity around?
+- **Do not merge `ReadResult` / `ValidationResult` / `ExecutionResult`** into one
+  generic outcome type. They are genuinely distinct concepts (the A2/A3 verifiers
+  warned about this); a shared `Result[T]` would conflate them and the engine's
+  per-phase handling does not simplify. *Leave as is.*
+- **Free win — declare the public surface.** `application/__init__.py` is empty,
+  so `SyncReport` / `SyncFailedError` / `Failure` are reachable-but-undeclared
+  (callers get them via the engine return value / raised error). Export the
+  intended public contract (`Engine`, `SyncFailedError`, `SyncReport`, `Failure`)
+  from `application/__init__.py` — four import lines, zero structural change,
+  formalises what the type annotations already say (`all_failures` /
+  `failures_by_table` already return `tuple[Failure, ...]`). Keep
+  `ExecutionResult`/`TableRunReport` internals out of the declared surface unless a
+  user needs them. *Low severity; safe to do anytime.*
+  - *Dissent:* the empty `__init__` may be deliberate; dual import paths for the
+    same name are an occasional footgun. With no external users yet, "leave empty
+    until asked" is defensible.
+- **`ExecutionResult` OK/NOOP/FAILED split — deferred, blocked on a decision.**
+  The `__post_init__` invariant (`FAILED ⇔ failure present`, `results.py:147-152`)
+  is a real Ousterhout signal that a sum type would make structural. *But* the
+  `NOOP` variant is a phantom: `DatabricksExecutor` only ever emits `OK`/`FAILED`
+  (`executor.py:70-88`), yet the test suite constructs `NOOP` and relies on it for
+  `SUCCESS` status. Splitting now would promote a never-emitted state into the type
+  hierarchy — worse, not better. **Decide first:** either (A) give `NOOP` a real
+  emitter (e.g. executor marks already-satisfied actions as no-ops), or (B) delete
+  `NOOP`, collapse into `OK`, and split into `ExecutionSucceeded | ExecutionFailed`
+  (then `ActionStatus` becomes dead code). Both lead to a cleaner union; the split
+  is sound *after* the `NOOP` question is answered, not before.
+
+#### Q2 — `PlanContext`: keep it; optionally name the `is_create` guard later
+
+- **`PlanContext{desired, observed, plan}` is the right abstraction — leave the
+  structure unchanged.** It is a deep module: `make_plan_context(desired, observed)`
+  hides the diff-and-sort derivation and hands the validator one argument that
+  carries the type-level guarantee that `plan` was derived from that exact
+  desired/observed pair. Dissolving it into three positional args would widen every
+  rule signature and move complexity outward.
+- **Optional, deferred:** all four rules open with `if ctx.observed is None: return
+  None`. An `is_create` property on `PlanContext` would name that as a domain
+  concept ("creating, not altering"). Marginal — `observed is None` is already
+  transparent — and it carries a test cost (`_FakeContext` in `test_validation.py`
+  must gain the property too). Worth doing when a fifth rule is added (the naming
+  benefit compounds) or in a deliberate naming pass; not on its own today.
+- **Do not** promote `observed_columns_by_name` onto `PlanContext`: only
+  `UnsupportedColumnTypeChange` builds that lookup; single-consumer derived state
+  belongs in a local variable.
+
+#### Q3 — Validation: the `Rule` ABC + `PlanValidator` are shallow; consider functions in a future clean-up
+
+- **The `Rule(ABC)` + `PlanValidator` pairing is shallow ceremony.** No concrete
+  rule holds state; `evaluate`'s `self` is never used; `PlanValidator.validate` is
+  a four-line for-loop whose interface is as wide as its implementation. Tellingly,
+  `_FakeValidator` in `test_engine.py` does **not** subclass `PlanValidator` — the
+  nominal type enforces nothing today. Plain predicate functions
+  (`Callable[[PlanContext], ValidationFailure | None]`) collected in a tuple, with
+  `validate_plan` a module function and `DEFAULT_VALIDATOR` a `functools.partial`,
+  would lose nothing and remove the instantiation/`self`-dispatch theatre. Keep
+  `PlanValidator` as a `Callable` type alias so the engine signature is untouched;
+  give `rule_name` explicit string literals (not `__class__.__name__`, which would
+  flip PascalCase→snake_case and break any downstream parsing). *Low severity,
+  purely structural, no behaviour change — batch into a future tightening pass.*
+  - *Dissent:* the ABC is a visible, greppable extension point; a team with many
+    contributors may prefer that explicitness over the (real) Ousterhout win. An
+    ergonomic preference, not a correctness one.
+- **Altitude — keep "diff proposes, validator disposes."** The rule mechanism as
+  the home for "what is unsafe/unsupported" is the right seam (it absorbed B1/B3/B5
+  cleanly). Folding safety checks into the differ, or scattering them as domain
+  invariants, would couple concerns the current separation keeps clean. The rule
+  bag is not yet a dumping ground; revisit only if it grows large or the
+  unsupported-for-now vs. genuinely-dangerous distinction starts to matter.
+
+**Net recommendation:** do the one free win (declare the public API) opportunistically;
+hold the `ExecutionResult`/`NOOP` and `Rule`-as-functions changes for a future
+structural pass, with the `NOOP` decision as an explicit gate on the former. None of
+these are urgent and none change runtime behaviour.
 
 ### C3 — File/folder structure and test-suite review — *investigation, pending*
 
