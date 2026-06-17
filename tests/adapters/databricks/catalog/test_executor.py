@@ -128,7 +128,7 @@ def test_createtable_action_creates_table_with_correct_schema(spark, test_table)
     executor = DatabricksExecutor(spark)
 
     # When we apply the plan (compile → execute)
-    executor._apply(plan)
+    executor.execute(plan)
 
     # Then the table exists and its schema matches exactly
     assert spark.catalog.tableExists(str(desired.qualified_name))
@@ -149,7 +149,7 @@ def test_addcolumn_action_adds_column_to_existing_table(spark, test_table):
     )
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the new column exists
     actual_schema = spark.table(str(test_table)).schema
@@ -172,7 +172,7 @@ def test_dropcolumn_action_removes_column_from_existing_table(spark, test_table)
     )
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the 'name' column no longer exists
     actual_columns = spark.table(str(test_table)).columns
@@ -187,7 +187,7 @@ def test_setproperty_action_sets_table_property(spark, test_table):
     plan = ActionPlan(target=test_table, actions=(SetProperty(name=prop, value=val),))
 
     # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the property exists with the expected value
     props = _get_table_props(spark, str(test_table))
@@ -204,7 +204,7 @@ def test_setcolumncomment_sets_comment_on_column(spark, test_table):
         target=test_table,
         actions=(SetColumnComment(column_name=column, comment=new_comment),),
     )
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the column metadata contains the new comment
     after_field = next(f for f in spark.table(str(test_table)).schema if f.name == column)
@@ -216,7 +216,7 @@ def test_settablecomment_sets_comment_on_table(spark, test_table):
     # When we set the table comment
     comment = "customers staging table"
     plan = ActionPlan(target=test_table, actions=(SetTableComment(comment=comment),))
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the comment is set on the table
     after = _get_table_comment(spark, str(test_table))
@@ -228,7 +228,7 @@ def test_setcolumnnullability_sets_nullable(spark, test_table):
     # When we set NULL on 'id'
     full = str(test_table)
     plan = ActionPlan(test_table, (SetColumnNullability("id", True),))
-    DatabricksExecutor(spark)._apply(plan)
+    DatabricksExecutor(spark).execute(plan)
 
     # Then the column becomes NULLABLE
     field = _get_field(spark, full, "id")
