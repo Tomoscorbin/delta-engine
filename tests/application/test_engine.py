@@ -43,8 +43,8 @@ class _FakeValidator:
     ) -> None:
         self.failures_by_fqn = failures_by_fqn or {}
 
-    def validate(self, ctx) -> tuple[ValidationFailure, ...]:
-        return self.failures_by_fqn.get(str(ctx.desired.qualified_name), ())
+    def validate(self, desired, observed, plan) -> tuple[ValidationFailure, ...]:
+        return self.failures_by_fqn.get(str(desired.qualified_name), ())
 
 
 class _FakeExecutor:

@@ -1,4 +1,4 @@
-from delta_engine.application.plan import make_plan_context
+from delta_engine.application.plan import plan_table
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
 from delta_engine.domain.plan.actions import (
     ActionPhase,
@@ -8,28 +8,15 @@ from delta_engine.domain.plan.actions import (
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-def test_context_carries_desired_and_observed():
-    # Given a desired and an observed definition
-    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
-    observed = ObservedTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
-
-    # When building the plan context
-    context = make_plan_context(desired, observed)
-
-    # Then it exposes both states it was built from
-    assert context.desired is desired
-    assert context.observed is observed
-
-
 def test_missing_observed_plans_a_create_table():
     # Given a desired table and no observed table
     desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
 
-    # When building the plan context
-    context = make_plan_context(desired, observed=None)
+    # When planning against nothing
+    plan = plan_table(desired, observed=None)
 
     # Then the plan creates the table
-    assert context.plan.actions == (CreateTable(desired),)
+    assert plan.actions == (CreateTable(desired),)
 
 
 def test_plan_actions_are_ordered_by_execution_phase():
@@ -46,11 +33,11 @@ def test_plan_actions_are_ordered_by_execution_phase():
         comment="",
     )
 
-    # When building the plan context
-    context = make_plan_context(desired, observed)
+    # When planning desired against observed
+    plan = plan_table(desired, observed)
 
     # Then actions come out in non-decreasing execution-phase order
-    phases = [action.phase for action in context.plan.actions]
+    phases = [action.phase for action in plan.actions]
     assert phases == sorted(phases)
     # And the phases present are exactly those the diff produced
     assert set(phases) == {
@@ -66,8 +53,8 @@ def test_empty_diff_produces_an_empty_plan():
     desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=columns)
     observed = ObservedTable(qualified_name=_QUALIFIED_NAME, columns=columns)
 
-    # When building the plan context
-    context = make_plan_context(desired, observed)
+    # When planning
+    plan = plan_table(desired, observed)
 
     # Then there is nothing to do
-    assert context.plan.actions == ()
+    assert plan.actions == ()
