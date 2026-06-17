@@ -3,11 +3,42 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
 from delta_engine.domain.model import ObservedTable
 from delta_engine.domain.plan import AddColumn, SetColumnNullability
+
+
+@dataclass(frozen=True, slots=True)
+class RuleResult:
+    """
+    The outcome of checking one rule against a plan.
+
+    Build it through :meth:`satisfied` or :meth:`violated` rather than
+    constructing it directly -- those name the two outcomes so call sites read
+    plainly. ``is_satisfied`` answers the yes/no question; ``failures`` exposes
+    the (zero or one) failures so a caller can aggregate them without testing
+    for a sentinel.
+    """
+
+    failures: tuple[ValidationFailure, ...]
+
+    @classmethod
+    def satisfied(cls) -> RuleResult:
+        """Build the result for a plan that satisfies the rule."""
+        return cls(failures=())
+
+    @classmethod
+    def violated(cls, failure: ValidationFailure) -> RuleResult:
+        """Build the result for a plan that violates the rule, described by ``failure``."""
+        return cls(failures=(failure,))
+
+    @property
+    def is_satisfied(self) -> bool:
+        """True when the plan satisfies the rule."""
+        return not self.failures
 
 
 class Rule(ABC):
@@ -22,16 +53,18 @@ class Rule(ABC):
     observed table directly, already known to exist.
     """
 
-    def check(self, ctx: PlanContext) -> ValidationFailure | None:
-        """Return the failure this rule raises against ``ctx``, or ``None``."""
+    def check(self, ctx: PlanContext) -> RuleResult:
+        """Return whether the plan satisfies this rule, with any failure."""
         if ctx.observed is None:
-            return None
+            return RuleResult.satisfied()
         reason = self.violated_by(ctx, ctx.observed)
         if reason is None:
-            return None
-        return ValidationFailure(
-            rule_name=type(self).__name__,
-            message=f"Operation not allowed: {reason}",
+            return RuleResult.satisfied()
+        return RuleResult.violated(
+            ValidationFailure(
+                rule_name=type(self).__name__,
+                message=f"Operation not allowed: {reason}",
+            )
         )
 
     @abstractmethod
@@ -141,8 +174,10 @@ class PlanValidator:
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
         """Return one failure for each rule the plan breaks, in rule order."""
-        outcomes = (rule.check(ctx) for rule in self.rules)
-        return tuple(failure for failure in outcomes if failure is not None)
+        failures: list[ValidationFailure] = []
+        for rule in self.rules:
+            failures.extend(rule.check(ctx).failures)
+        return tuple(failures)
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (

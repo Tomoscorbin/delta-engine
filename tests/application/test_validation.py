@@ -1,9 +1,11 @@
 from delta_engine.application.plan import PlanContext
+from delta_engine.application.results import ValidationFailure
 from delta_engine.application.validation import (
     DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
     PlanValidator,
+    RuleResult,
     UnsupportedColumnTypeChange,
 )
 from delta_engine.domain.model import (
@@ -16,6 +18,28 @@ from delta_engine.domain.model import (
     String,
 )
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn, SetColumnNullability
+
+# ---- RuleResult
+
+
+def test_satisfied_result_has_no_failures():
+    # Given a rule that the plan satisfies
+    result = RuleResult.satisfied()
+
+    # Then it reports satisfied and carries no failures
+    assert result.is_satisfied
+    assert result.failures == ()
+
+
+def test_violated_result_carries_its_failure():
+    # Given a rule the plan violates
+    failure = ValidationFailure(rule_name="SomeRule", message="nope")
+    result = RuleResult.violated(failure)
+
+    # Then it reports unsatisfied and carries the failure
+    assert not result.is_satisfied
+    assert result.failures == (failure,)
+
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "events")
 _BASELINE_COLUMNS = (Column("id", Integer()),)
@@ -63,9 +87,9 @@ def test_rejects_add_of_non_nullable_column_on_existing_table():
     ctx = _context(actions=(AddColumn(column=Column("order_id", Integer(), nullable=False)),))
 
     # Then the rule flags the operation as invalid
-    failure = NonNullableColumnAdd().check(ctx)
-    assert failure is not None
-    assert "order_id" in failure.message
+    result = NonNullableColumnAdd().check(ctx)
+    assert not result.is_satisfied
+    assert "order_id" in result.failures[0].message
 
 
 def test_allows_add_of_nullable_column_on_existing_table():
@@ -73,7 +97,7 @@ def test_allows_add_of_nullable_column_on_existing_table():
     ctx = _context(actions=(AddColumn(column=Column("notes", String(), nullable=True)),))
 
     # Then the rule allows it
-    assert NonNullableColumnAdd().check(ctx) is None
+    assert NonNullableColumnAdd().check(ctx).is_satisfied
 
 
 def test_allows_non_nullable_column_when_creating_new_table():
@@ -84,7 +108,7 @@ def test_allows_non_nullable_column_when_creating_new_table():
     )
 
     # Then the rule does not block creation-time constraints
-    assert NonNullableColumnAdd().check(ctx) is None
+    assert NonNullableColumnAdd().check(ctx).is_satisfied
 
 
 # ---- DisallowPartitioningChange
@@ -100,7 +124,7 @@ def test_rejects_partitioning_change_on_existing_table():
     )
 
     # Then the rule flags the operation as invalid
-    assert DisallowPartitioningChange().check(ctx) is not None
+    assert not DisallowPartitioningChange().check(ctx).is_satisfied
 
 
 def test_allows_partitioning_on_new_table():
@@ -112,7 +136,7 @@ def test_allows_partitioning_on_new_table():
     )
 
     # Then the rule allows it for table creation
-    assert DisallowPartitioningChange().check(ctx) is None
+    assert DisallowPartitioningChange().check(ctx).is_satisfied
 
 
 def test_allows_when_partition_spec_unchanged_on_existing_table():
@@ -125,7 +149,7 @@ def test_allows_when_partition_spec_unchanged_on_existing_table():
     )
 
     # Then there is no failure from this rule
-    assert DisallowPartitioningChange().check(ctx) is None
+    assert DisallowPartitioningChange().check(ctx).is_satisfied
 
 
 # ---- NullabilityTighteningOnExistingColumn
@@ -136,9 +160,9 @@ def test_rejects_tightening_an_existing_column_to_not_null():
     ctx = _context(actions=(SetColumnNullability(column_name="id", nullable=False),))
 
     # Then the rule flags it: tightening can fail at runtime if NULLs already exist
-    failure = NullabilityTighteningOnExistingColumn().check(ctx)
-    assert failure is not None
-    assert "id" in failure.message
+    result = NullabilityTighteningOnExistingColumn().check(ctx)
+    assert not result.is_satisfied
+    assert "id" in result.failures[0].message
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
@@ -146,7 +170,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
     ctx = _context(actions=(SetColumnNullability(column_name="id", nullable=True),))
 
     # Then the rule allows it
-    assert NullabilityTighteningOnExistingColumn().check(ctx) is None
+    assert NullabilityTighteningOnExistingColumn().check(ctx).is_satisfied
 
 
 def test_allows_tightening_when_creating_a_new_table():
@@ -157,7 +181,7 @@ def test_allows_tightening_when_creating_a_new_table():
     )
 
     # Then creation-time constraints are not this rule's concern
-    assert NullabilityTighteningOnExistingColumn().check(ctx) is None
+    assert NullabilityTighteningOnExistingColumn().check(ctx).is_satisfied
 
 
 # ---- UnsupportedColumnTypeChange
@@ -171,9 +195,9 @@ def test_rejects_changing_the_type_of_an_existing_column():
     )
 
     # Then the drift is flagged rather than silently ignored
-    failure = UnsupportedColumnTypeChange().check(ctx)
-    assert failure is not None
-    assert "id" in failure.message
+    result = UnsupportedColumnTypeChange().check(ctx)
+    assert not result.is_satisfied
+    assert "id" in result.failures[0].message
 
 
 def test_allows_columns_whose_type_is_unchanged():
@@ -184,7 +208,7 @@ def test_allows_columns_whose_type_is_unchanged():
     )
 
     # Then nothing is flagged
-    assert UnsupportedColumnTypeChange().check(ctx) is None
+    assert UnsupportedColumnTypeChange().check(ctx).is_satisfied
 
 
 def test_ignores_added_and_dropped_columns_for_type_change():
@@ -195,7 +219,7 @@ def test_ignores_added_and_dropped_columns_for_type_change():
     )
 
     # Then only common columns are compared; add/drop are not type changes
-    assert UnsupportedColumnTypeChange().check(ctx) is None
+    assert UnsupportedColumnTypeChange().check(ctx).is_satisfied
 
 
 def test_allows_type_specification_when_creating_a_new_table():
@@ -203,7 +227,7 @@ def test_allows_type_specification_when_creating_a_new_table():
     ctx = _context(observed_exists=False, desired_columns=(Column("id", Long()),))
 
     # Then there is no prior type to conflict with
-    assert UnsupportedColumnTypeChange().check(ctx) is None
+    assert UnsupportedColumnTypeChange().check(ctx).is_satisfied
 
 
 # ---- PlanValidator
