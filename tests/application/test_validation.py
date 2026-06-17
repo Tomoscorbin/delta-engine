@@ -221,17 +221,18 @@ def test_allows_type_specification_when_creating_a_new_table():
 # ---- PlanValidator
 
 
-def test_validator_returns_empty_tuple_when_no_rules_fail():
+def test_validator_passes_when_no_rule_is_broken():
     # Given a creation plan that violates no rule
     validator = PlanValidator((NonNullableColumnAdd(), DisallowPartitioningChange()))
 
     # When validating
-    failures = validator.validate(
+    result = validator.validate(
         _desired(), None, _plan(AddColumn(Column("x", String(), nullable=True)))
     )
 
-    # Then no failures are returned
-    assert failures == ()
+    # Then the verdict is a passing ValidationResult
+    assert not result.failed
+    assert result.failures == ()
 
 
 def test_validator_collects_a_failure_from_every_broken_rule():
@@ -241,7 +242,7 @@ def test_validator_collects_a_failure_from_every_broken_rule():
     )
 
     # When validating
-    failures = validator.validate(
+    result = validator.validate(
         _desired(),
         _observed(),
         _plan(
@@ -250,8 +251,9 @@ def test_validator_collects_a_failure_from_every_broken_rule():
         ),
     )
 
-    # Then both broken rules contribute a failure, named after the rule classes
-    assert {f.rule_name for f in failures} == {
+    # Then the verdict fails, carrying a failure from each broken rule
+    assert result.failed
+    assert {f.rule_name for f in result.failures} == {
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
     }
@@ -262,7 +264,8 @@ def test_empty_plan_produces_no_failures():
     validator = PlanValidator((NonNullableColumnAdd(), DisallowPartitioningChange()))
 
     # When validating
-    failures = validator.validate(_desired(), _observed(), _plan())
+    result = validator.validate(_desired(), _observed(), _plan())
 
-    # Then nothing fails because there is nothing to validate
-    assert failures == ()
+    # Then the verdict passes with no failures
+    assert not result.failed
+    assert result.failures == ()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from delta_engine.application.results import ValidationFailure
+from delta_engine.application.results import ValidationFailure, ValidationResult
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import ActionPlan, AddColumn, SetColumnNullability
 
@@ -157,9 +157,9 @@ class PlanValidator:
 
     def validate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
+    ) -> ValidationResult:
         """
-        Evaluate all rules and collect any failures, in rule order.
+        Evaluate all rules and return the aggregate verdict.
 
         Args:
             desired: The user-authored target definition.
@@ -167,7 +167,8 @@ class PlanValidator:
             plan: The action plan to reach ``desired``.
 
         Returns:
-            A tuple of failures in rule evaluation order (empty if none).
+            A :class:`ValidationResult` whose ``failed`` gates execution. The
+            caller reads the verdict; it does not assemble it.
 
         """
         failures: list[ValidationFailure] = []
@@ -175,7 +176,7 @@ class PlanValidator:
             failure = rule.evaluate(desired, observed, plan)
             if failure is not None:
                 failures.append(failure)
-        return tuple(failures)
+        return ValidationResult(failures=tuple(failures))
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (

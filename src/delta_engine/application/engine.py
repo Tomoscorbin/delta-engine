@@ -129,9 +129,7 @@ class Engine:
             observed = read_result.observed
             plan = plan_table(desired, observed)
             logger.info("Planned %d action(s) for %s", len(plan), fully_qualified_name)
-            validation = ValidationResult(
-                failures=self.validator.validate(desired, observed, plan)
-            )
+            validation = self.validator.validate(desired, observed, plan)
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",

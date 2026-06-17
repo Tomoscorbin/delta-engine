@@ -16,6 +16,7 @@ from delta_engine.application.results import (
     SyncReport,
     TableRunStatus,
     ValidationFailure,
+    ValidationResult,
 )
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan
@@ -43,8 +44,9 @@ class _FakeValidator:
     ) -> None:
         self.failures_by_fqn = failures_by_fqn or {}
 
-    def validate(self, desired, observed, plan) -> tuple[ValidationFailure, ...]:
-        return self.failures_by_fqn.get(str(desired.qualified_name), ())
+    def validate(self, desired, observed, plan) -> ValidationResult:
+        failures = self.failures_by_fqn.get(str(desired.qualified_name), ())
+        return ValidationResult(failures=failures)
 
 
 class _FakeExecutor:
