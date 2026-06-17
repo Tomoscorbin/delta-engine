@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.application.ordering import action_sort_key
+from delta_engine.application.plan import action_sort_key
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.plan.actions import (
     AddColumn,
