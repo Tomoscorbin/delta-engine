@@ -385,7 +385,7 @@ findings worth acting on get folded back into a future A/B stage with concrete
 locations and severities. They are grouped here because they are exploratory and
 share that "investigate, argue, recommend — don't just change" character.
 
-### C1 — Encapsulation sweep: misused privates and reach-through access — *complete*
+### C1 — Encapsulation sweep: misused privates and reach-through access — *complete (re-run after C2)*
 
 Swept the whole codebase for two encapsulation smells: (1) `_private` members
 used from outside their owning class/module, and (2) reach-through / Law of
@@ -394,6 +394,30 @@ into production privates, reach-through into behavioural objects, and
 destructure-and-rebuild), each finding adversarially verified against the code
 with a default-to-reject skeptic. 13 candidates raised → **6 confirmed, 7
 rejected**.
+
+> **Re-run after C2 (verdict: stable, no new findings).** Re-swept against the
+> post-C2 code — the public-API declaration (Q1a), the `ExecutionResult` sum-type
+> split, and the new `isinstance` dispatch sites it introduced. The production
+> code is **still clean**: every C2-introduced construct that a scanner flagged
+> was rejected by the skeptic as a non-violation —
+> - `isinstance(x, ReadFailed)` / `isinstance(e, ExecutionFailed)` then reading the
+>   matched variant's fields is the **idiomatic way to consume a closed sum type**
+>   of frozen value objects, not a reach-through.
+> - The declared public API (`Engine`/`SyncFailedError`/`SyncReport`/`Failure`)
+>   with per-phase types reachable-but-undeclared via `SyncReport` is a deliberate,
+>   leak-free boundary.
+> - `ExecutionFailure.action_index` duplicating `ExecutionFailed.action_index` was
+>   raised as a duplication smell and **rejected**: the inner copy is genuinely read
+>   (via `format_line()` when failures travel through `action_failures` /
+>   `failures_by_table` detached from their wrapper), both are written from one
+>   source variable so they cannot diverge at construction, and dropping it would
+>   degrade the failure message. Worth a *note*, not a refactor, unless a second
+>   construction site for `ExecutionFailure` ever appears.
+> - A shared base class for the two `Execution*` variants was considered and
+>   rejected as a shallow abstraction (three fields, no behaviour).
+>
+> The six confirmed findings are **unchanged** — all the same test-private accesses
+> below; C2 neither touched nor needed to touch them.
 
 **Headline: production code (`src/`) has no encapsulation violations.** Every
 `src/`-level candidate was rejected — they were all either same-object `self._x`
