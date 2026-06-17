@@ -193,121 +193,6 @@ inline), shrinking the public surface to one symbol. Re-home tests onto
   `__iter__` (`application/registry.py`) — a single `dict[str, DesiredTable]`
   does insertion, dedup, and ordering with no shadow index.
 
-### A7 — Encapsulation sweep: misused privates and reach-through access — *investigation, pending*
-
-A dedicated pass over the whole codebase for two related encapsulation smells,
-not yet enumerated as concrete findings:
-
-1. **Private members used where they shouldn't be.** A `_name`-prefixed
-   function, method, or attribute referenced from outside the class/module that
-   owns it. Either the access is illegitimate (a layering or boundary
-   violation), or the member is genuinely needed by others and should be
-   promoted to part of the public interface. The fix differs per case — tighten
-   the caller, or widen the interface — so each instance must be judged
-   individually.
-2. **Reach-through access (Law of Demeter).** Code that digs through several
-   layers of objects/attributes to get at something — `a.b.c.d`, or pulling a
-   nested field out of a returned object to reconstruct something the owner
-   could have handed over directly. Reaching deep into another object's
-   internals means the caller knows structure it shouldn't; that knowledge
-   belongs behind a method or property on the object that owns the data. This is
-   the same "pull complexity downward / information hiding" principle as the
-   `format_line` move in A3 and the `_fetch_table_comment` consistency fix in
-   A6, applied as a codebase-wide search rather than a single site.
-
-**Method:** grep for cross-module/cross-class `._private` access; scan for
-attribute chains of depth ≥ 3 and for callers that destructure a returned object
-only to rebuild a value the owner could expose. For each hit, decide: promote
-the member to the public interface, add an accessor/method on the owner, or fix
-the caller. Verify each candidate against the code before acting — a deep chain
-through a plain data record (e.g. a frozen dataclass that is *meant* to be read
-field-by-field) is not necessarily a violation.
-
-This is exploratory; findings it produces will be folded back into Part A with
-concrete locations and severities.
-
-### A8 — Deep-simplification pass: question the core abstractions — *investigation, pending*
-
-A8 is broader and more speculative than A7. Rather than hunting local smells, it
-steps back and asks whether the central abstractions are the *right* ones in
-Ousterhout's sense — deep modules with simple interfaces — or whether some exist
-mainly because the code grew that way. Each item below is a question to
-investigate and argue, not a decided change; some answers may well be "keep it as
-is, and here's why."
-
-Candidates to interrogate:
-
-1. **Can the result types be merged — or should they stay separate (and
-   secret)?** There are several outcome types: `ReadResult` (`ReadSucceeded |
-   ReadFailed`), `ValidationResult`, `ExecutionResult`, plus the per-phase
-   `Failure` variants and the aggregating `TableRunReport` / `SyncReport`. Ask:
-   - Is there one underlying concept — "the outcome of a phase" — that a single
-     parameterised type could express, or do the three phases genuinely differ
-     enough that merging would conflate them (the A2/A3 verifiers warned against
-     exactly this)?
-   - Which of these are part of the library's *public* contract and which are
-     internal plumbing that should be hidden? `ReadResult` is produced by the
-     adapter port, so it is shared; but are `ExecutionResult`/`TableRunReport`
-     details that callers should depend on, or could the engine expose a single
-     narrow report type and keep the rest private?
-   - Does the still-deferred `ExecutionResult` sum-type split (OK / NOOP /
-     FAILED) belong here, decided together with the others rather than in
-     isolation?
-2. **Is there a better solution than `PlanContext`?** It bundles
-   `desired` + `observed` + `plan` purely so the validator can receive one
-   argument. Ask: is it a deep abstraction or just a parameter object? Would
-   rules reading `(desired, observed, plan)` directly be clearer? Could the plan
-   itself carry enough context that the separate `desired`/`observed` fields are
-   redundant? Conversely, is the parameter object actually the right call
-   because it gives one stable seam as more context accrues — and if so, should
-   *more* live on it rather than less?
-3. **Should the validation step's approach change?** Today validation is a
-   sequence of `Rule` objects each returning an optional `ValidationFailure`,
-   run after planning and before execution. Ask:
-   - Is "validate the computed plan" the right altitude, or should some checks be
-     invariants on the domain model (unrepresentable bad states) and others be
-     plan-time concerns? (Several Part B findings — B1 type drift, B3 nullability
-     tightening, B5 column-mapping — are proposed as new rules; do they all
-     really belong in the same mechanism, or are some better expressed
-     elsewhere?)
-   - Is the `Rule` ABC + `PlanValidator` pairing a deep module, or ceremony
-     around a list of functions? Would plain predicate functions be simpler with
-     no loss?
-   - Should validation and diffing be more unified — e.g. the differ refusing to
-     emit an action it knows is unsafe — or is the strict "diff proposes,
-     validator disposes" separation worth keeping for clarity?
-
-For each, write down the trade-off and a recommendation (including "leave it").
-The bar is Ousterhout's: does the change make the interface simpler and hide more
-complexity, or does it just move complexity around?
-
-### A9 — File and folder structure review — *investigation, pending*
-
-Step back from individual modules and assess the package layout as a whole
-(`domain/` → `application/` → `adapters/`, with `model/`, `plan/`, `services/`
-under domain and `databricks/`, `schema/` under adapters). Questions to answer:
-
-- Does the directory tree still match the architecture now that A4/A5 removed
-  several modules (`column_diff`, `table_diff`, `ordering`, `format_report`)? Are
-  any folders now thin enough that they should collapse (e.g. is
-  `domain/services/` justified holding only `differ.py`)?
-- Is each module in the layer its dependencies imply? Anything in `domain/` that
-  reaches toward `application/` or an adapter? Anything Databricks-specific
-  sitting outside `adapters/databricks/`?
-- Are the public entry points obvious from the structure? A new user should be
-  able to find "define a table" (`adapters/schema`) and "run a sync"
-  (`adapters/databricks/build_engine`) without spelunking. Do the package
-  `__init__.py` exports tell that story, or are they empty/inconsistent?
-- Naming and granularity: are any files too small to justify their own module,
-  or too large and doing two jobs? Do file names describe their single
-  responsibility?
-- Does the `tests/` tree mirror `src/` cleanly after the A4/A5 test re-homing,
-  and are the unit/e2e boundaries clear?
-
-Deliverable: a short assessment of what (if anything) to restructure, weighed
-against the churn cost — structure changes are cheap to propose and disruptive to
-land, so the recommendation should be explicit about whether it earns its keep.
-
 ---
 
 ## B. Real-world fitness — what breaks in production
@@ -476,3 +361,151 @@ recorded so they are not re-litigated:
 - **`singledispatch` compiler needs a compile-time-enforced port.** Rejected:
   the compiler is adapter-internal and fully covered; the real port is
   `PlanExecutor`. Promoting it to a public interface would add a shallow layer.
+
+---
+
+## C. Investigations — run later, separate from Part A/B
+
+Stage C is a set of read-and-report passes, deliberately separated from the
+concrete Part A refactors (now landed on `main`) and the Part B fixes. Each
+produces an assessment and a recommendation rather than an immediate change;
+findings worth acting on get folded back into a future A/B stage with concrete
+locations and severities. They are grouped here because they are exploratory and
+share that "investigate, argue, recommend — don't just change" character.
+
+### C1 — Encapsulation sweep: misused privates and reach-through access — *investigation, pending*
+
+A dedicated pass over the whole codebase for two related encapsulation smells,
+not yet enumerated as concrete findings:
+
+1. **Private members used where they shouldn't be.** A `_name`-prefixed
+   function, method, or attribute referenced from outside the class/module that
+   owns it. Either the access is illegitimate (a layering or boundary
+   violation), or the member is genuinely needed by others and should be
+   promoted to part of the public interface. The fix differs per case — tighten
+   the caller, or widen the interface — so each instance must be judged
+   individually.
+2. **Reach-through access (Law of Demeter).** Code that digs through several
+   layers of objects/attributes to get at something — `a.b.c.d`, or pulling a
+   nested field out of a returned object to reconstruct something the owner
+   could have handed over directly. Reaching deep into another object's
+   internals means the caller knows structure it shouldn't; that knowledge
+   belongs behind a method or property on the object that owns the data. This is
+   the same "pull complexity downward / information hiding" principle as the
+   `format_line` move in A3 and the `_fetch_table_comment` consistency fix in
+   A6, applied as a codebase-wide search rather than a single site.
+
+**Method:** grep for cross-module/cross-class `._private` access; scan for
+attribute chains of depth ≥ 3 and for callers that destructure a returned object
+only to rebuild a value the owner could expose. For each hit, decide: promote
+the member to the public interface, add an accessor/method on the owner, or fix
+the caller. Verify each candidate against the code before acting — a deep chain
+through a plain data record (e.g. a frozen dataclass that is *meant* to be read
+field-by-field) is not necessarily a violation.
+
+This is exploratory; findings it produces will be folded back into a future
+refactor stage with concrete locations and severities.
+
+### C2 — Deep-simplification pass: question the core abstractions — *investigation, pending*
+
+C2 is broader and more speculative than C1. Rather than hunting local smells, it
+steps back and asks whether the central abstractions are the *right* ones in
+Ousterhout's sense — deep modules with simple interfaces — or whether some exist
+mainly because the code grew that way. Each item below is a question to
+investigate and argue, not a decided change; some answers may well be "keep it as
+is, and here's why."
+
+Candidates to interrogate:
+
+1. **Can the result types be merged — or should they stay separate (and
+   secret)?** There are several outcome types: `ReadResult` (`ReadSucceeded |
+   ReadFailed`), `ValidationResult`, `ExecutionResult`, plus the per-phase
+   `Failure` variants and the aggregating `TableRunReport` / `SyncReport`. Ask:
+   - Is there one underlying concept — "the outcome of a phase" — that a single
+     parameterised type could express, or do the three phases genuinely differ
+     enough that merging would conflate them (the A2/A3 verifiers warned against
+     exactly this)?
+   - Which of these are part of the library's *public* contract and which are
+     internal plumbing that should be hidden? `ReadResult` is produced by the
+     adapter port, so it is shared; but are `ExecutionResult`/`TableRunReport`
+     details that callers should depend on, or could the engine expose a single
+     narrow report type and keep the rest private?
+   - Does the still-deferred `ExecutionResult` sum-type split (OK / NOOP /
+     FAILED) belong here, decided together with the others rather than in
+     isolation?
+2. **Is there a better solution than `PlanContext`?** It bundles
+   `desired` + `observed` + `plan` purely so the validator can receive one
+   argument. Ask: is it a deep abstraction or just a parameter object? Would
+   rules reading `(desired, observed, plan)` directly be clearer? Could the plan
+   itself carry enough context that the separate `desired`/`observed` fields are
+   redundant? Conversely, is the parameter object actually the right call
+   because it gives one stable seam as more context accrues — and if so, should
+   *more* live on it rather than less?
+3. **Should the validation step's approach change?** Today validation is a
+   sequence of `Rule` objects each returning an optional `ValidationFailure`,
+   run after planning and before execution. Ask:
+   - Is "validate the computed plan" the right altitude, or should some checks be
+     invariants on the domain model (unrepresentable bad states) and others be
+     plan-time concerns? (Several Part B findings — B1 type drift, B3 nullability
+     tightening, B5 column-mapping — are proposed as new rules; do they all
+     really belong in the same mechanism, or are some better expressed
+     elsewhere?)
+   - Is the `Rule` ABC + `PlanValidator` pairing a deep module, or ceremony
+     around a list of functions? Would plain predicate functions be simpler with
+     no loss?
+   - Should validation and diffing be more unified — e.g. the differ refusing to
+     emit an action it knows is unsafe — or is the strict "diff proposes,
+     validator disposes" separation worth keeping for clarity?
+
+For each, write down the trade-off and a recommendation (including "leave it").
+The bar is Ousterhout's: does the change make the interface simpler and hide more
+complexity, or does it just move complexity around?
+
+### C3 — File/folder structure and test-suite review — *investigation, pending*
+
+Step back from individual modules and assess two things: the package layout and
+the test suite as wholes.
+
+**Package structure** — the layout is `domain/` → `application/` → `adapters/`,
+with `model/`, `plan/`, `services/` under domain and `databricks/`, `schema/`
+under adapters. Questions:
+
+- Does the directory tree still match the architecture now that A4/A5 removed
+  several modules (`column_diff`, `table_diff`, `ordering`, `format_report`)? Are
+  any folders now thin enough that they should collapse (e.g. is
+  `domain/services/` justified holding only `differ.py`)?
+- Is each module in the layer its dependencies imply? Anything in `domain/` that
+  reaches toward `application/` or an adapter? Anything Databricks-specific
+  sitting outside `adapters/databricks/`?
+- Are the public entry points obvious from the structure? A new user should be
+  able to find "define a table" (`adapters/schema`) and "run a sync"
+  (`adapters/databricks/build_engine`) without spelunking. Do the package
+  `__init__.py` exports tell that story, or are they empty/inconsistent?
+- Naming and granularity: are any files too small to justify their own module,
+  or too large and doing two jobs? Do file names describe their single
+  responsibility?
+
+**Test suite** — assess the tests as a designed artefact, not just coverage:
+
+- Does the `tests/` tree mirror `src/` cleanly after the A4/A5/A6 re-homing, and
+  are the unit vs. e2e boundaries clear and consistently applied?
+- Are tests written against behaviour and public interfaces (per the project's
+  Detroit-school stance), or are any still coupled to private helpers or
+  implementation detail? Flag any remaining `._private` calls from tests.
+- Fakes vs. mocks: are test doubles used only for genuine outgoing boundaries
+  (Spark), with real domain objects everywhere else? Any over-mocking?
+- Gaps: which behaviours are only covered transitively (e.g. the compiler before
+  A6 had no direct tests)? Are the Part B hazards untested because the suite runs
+  against clean local/Unity-Catalog Spark? What would a mixed-case-HMS or
+  struct-column fixture catch that the current suite cannot?
+- Redundancy and clarity: duplicated setup that wants a fixture/builder,
+  unclear test names, or Given/When/Then comments that have drifted from what
+  the test does.
+- Is the 90% coverage gate measuring the right things, or does it create
+  pressure to test trivia? Are there critical paths under-covered despite the
+  high number?
+
+Deliverable: a short assessment of what (if anything) to restructure in both the
+package and the tests, weighed against churn cost — structure changes are cheap
+to propose and disruptive to land, so the recommendation should be explicit about
+whether it earns its keep.
