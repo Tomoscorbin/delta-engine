@@ -92,7 +92,7 @@ def spark() -> SparkSession:
 
 @pytest.fixture()
 def seed_spark_view(spark):
-    """Creates a view with the provided dataframe and teardown on test completion."""
+    """Create a view with the provided dataframe and teardown on test completion."""
     _view_name = ""
 
     def _seed_spark_view(view_name: str, df: DataFrame) -> None:
