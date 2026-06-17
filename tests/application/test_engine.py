@@ -15,10 +15,8 @@ from delta_engine.application.results import (
     ReadSucceeded,
     SyncReport,
     TableRunStatus,
-    ValidationFailure,
-    ValidationResult,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
@@ -30,23 +28,40 @@ def _spec(fqn: str) -> DeltaTable:
     return DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
 
+def _spec_adding_not_null(fqn: str) -> DeltaTable:
+    """
+    Build a spec that adds a NOT NULL column on top of the baseline 'id' column.
+
+    Diffed against an existing 'id'-only table, this trips the real
+    NonNullableColumnAdd rule, so the engine drives a genuine validation failure
+    instead of a faked one.
+    """
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("order_id", String(), nullable=False)),
+    )
+
+
+def _existing_id_table(fqn: str) -> ReadSucceeded:
+    """Build a successful read of an existing table with a single 'id' column."""
+    catalog, schema, name = fqn.split(".")
+    return ReadSucceeded(
+        observed=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, name),
+            columns=(Column("id", String()),),
+        )
+    )
+
+
 class _FakeReader:
     def __init__(self, mapping: dict[str, ReadResult]) -> None:
         self.mapping = mapping
 
     def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
         return self.mapping.get(str(qualified_name), ReadSucceeded(observed=None))
-
-
-class _FakeValidator:
-    def __init__(
-        self, failures_by_fqn: dict[str, tuple[ValidationFailure, ...]] | None = None
-    ) -> None:
-        self.failures_by_fqn = failures_by_fqn or {}
-
-    def validate(self, desired, observed, plan) -> ValidationResult:
-        failures = self.failures_by_fqn.get(str(desired.qualified_name), ())
-        return ValidationResult(failures=failures)
 
 
 class _FakeExecutor:
@@ -93,28 +108,27 @@ def test_raises_when_any_table_has_read_failure():
     reg = Registry()
     reg.register(t)
     reader = _FakeReader({"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))})
-    validator = _FakeValidator()  # no validation failures
     executor = _FakeExecutor(results=(_ok_exec(0),))  # would be fine if reached
 
     # When syncing
     # Then the engine raises SyncFailedError because read failed
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
     with pytest.raises(SyncFailedError):
         engine.sync(reg)
 
 
 def test_skips_execution_and_raises_when_validation_fails():
-    # Given a table that reads successfully but fails validation
+    # Given an existing table whose desired spec adds a NOT NULL column
+    # (a real rule violation, not a faked verdict)
     reg = Registry()
-    reg.register(_spec("c.s.val_fail"))
-    reader = _FakeReader({"c.s.val_fail": ReadSucceeded(observed=None)})
-    validator = _FakeValidator({"c.s.val_fail": (ValidationFailure("RuleX", "nope"),)})
+    reg.register(_spec_adding_not_null("c.s.val_fail"))
+    reader = _FakeReader({"c.s.val_fail": _existing_id_table("c.s.val_fail")})
     # Executor would return OK, but must not be used because validation fails
     executor = _FakeExecutor(results=(_ok_exec(0),))
 
     # When syncing
     # Then the engine raises SyncFailedError because validation failed
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
     with pytest.raises(SyncFailedError):
         engine.sync(reg)
 
@@ -124,12 +138,11 @@ def test_raises_when_execution_contains_any_failure():
     reg = Registry()
     reg.register(_spec("c.s.exec_fail"))
     reader = _FakeReader({"c.s.exec_fail": ReadSucceeded(observed=None)})
-    validator = _FakeValidator()  # passes
     executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _ok_exec(2)))
 
     # When syncing
     # Then the engine raises SyncFailedError because execution failed
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
     with pytest.raises(SyncFailedError):
         engine.sync(reg)
 
@@ -146,9 +159,8 @@ def test_returns_report_when_all_tables_succeed():
             "c.b.orders": ReadSucceeded(observed=None),
         }
     )
-    validator = _FakeValidator()
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
 
     # When syncing
     report = engine.sync(reg)
@@ -172,9 +184,8 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
             "c.s.b": ReadSucceeded(observed=None),
         }
     )
-    validator = _FakeValidator()  # both would pass if reached
     executor = _FakeExecutor(results=(_ok_exec(0),))  # irrelevant for a; used for b
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
 
     # When
     with pytest.raises(SyncFailedError) as err:
@@ -186,23 +197,18 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
 
 
 def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises():
-    # Given both tables read OK; one fails validation
+    # Given two tables that read OK; 'a' adds a NOT NULL column to an existing
+    # table (a real validation failure) while 'b' is a clean creation
     reg = Registry()
-    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reg.register(_spec_adding_not_null("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadSucceeded(observed=None),
-            "c.s.b": ReadSucceeded(observed=None),
-        }
-    )
-    validator = _FakeValidator(
-        {
-            "c.s.a": (ValidationFailure("RuleX", "nope"),),  # a fails validation
-            # b passes
+            "c.s.a": _existing_id_table("c.s.a"),  # existing -> add NOT NULL is rejected
+            "c.s.b": ReadSucceeded(observed=None),  # absent -> clean create
         }
     )
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))  # used only for b
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
 
     # When
     with pytest.raises(SyncFailedError) as err:
@@ -226,14 +232,13 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
             "c.s.b": ReadSucceeded(observed=None),
         }
     )
-    validator = _FakeValidator()  # both pass
     executor = _SeqExecutor(
         [
             (_ok_exec(0), _ok_exec(1)),  # execution for a: all good
             (_ok_exec(0), _failed_exec(1)),  # execution for b: one failed
         ]
     )
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
 
     # When
     with pytest.raises(SyncFailedError) as err:
@@ -254,14 +259,13 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
             "c.s.b": ReadSucceeded(observed=None),
         }
     )
-    validator = _FakeValidator()  # both pass
     executor = _SeqExecutor(
         [
             (_failed_exec(0),),  # execution for 'a' fails
             (_ok_exec(0), _ok_exec(1)),  # execution for 'b' succeeds
         ]
     )
-    engine = Engine(reader=reader, executor=executor, validator=validator)
+    engine = Engine(reader=reader, executor=executor)
 
     # When
     with pytest.raises(SyncFailedError) as err:

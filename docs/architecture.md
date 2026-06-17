@@ -6,7 +6,8 @@ This page shows the high-level design. It focuses on the main components, their 
 
 ```mermaid
 classDiagram
-    %% === Ports (interfaces the Engine talks to) ===
+    %% === What the Engine talks to: ports (reader/executor), the registry,
+    %% === and validate_plan (a pure function, not a port) ===
     class Registry {
       +register(*tables)
       +__iter__()
@@ -14,8 +15,9 @@ classDiagram
     class CatalogStateReader {
       +fetch_state(qualified_name)
     }
-    class PlanValidator {
-      +validate(plan)
+    class validate_plan {
+      <<function>>
+      +validate_plan(desired, observed, plan)
     }
     class PlanExecutor {
       +execute(plan)
@@ -43,7 +45,7 @@ classDiagram
     %% Engine depends on ports (dotted = lightweight dependency)
     Engine ..> Registry : iterates
     Engine ..> CatalogStateReader : reads state
-    Engine ..> PlanValidator : validates
+    Engine ..> validate_plan : validates
     Engine ..> PlanExecutor : executes
 
     %% Port -> Adapter realizations
@@ -67,7 +69,7 @@ sequenceDiagram
     participant R as Registry
     participant E as Engine
     participant CR as CatalogStateReader
-    participant V as PlanValidator
+    participant V as validate_plan
     participant X as PlanExecutor
 
     U->>R: register(DeltaTable)
@@ -77,7 +79,7 @@ sequenceDiagram
         E->>CR: fetch_state(qualified_name)
         CR-->>E: ReadResult
         E->>E: diff(desired, observed) → ActionPlan
-        E->>V: validate(ActionPlan)
+        E->>V: validate_plan(desired, observed, plan)
         V-->>E: ValidationResult
         E->>X: execute(ActionPlan)
         X-->>E: ExecutionResults
