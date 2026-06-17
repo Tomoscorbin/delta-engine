@@ -385,38 +385,77 @@ findings worth acting on get folded back into a future A/B stage with concrete
 locations and severities. They are grouped here because they are exploratory and
 share that "investigate, argue, recommend — don't just change" character.
 
-### C1 — Encapsulation sweep: misused privates and reach-through access — *investigation, pending*
+### C1 — Encapsulation sweep: misused privates and reach-through access — *complete*
 
-A dedicated pass over the whole codebase for two related encapsulation smells,
-not yet enumerated as concrete findings:
+Swept the whole codebase for two encapsulation smells: (1) `_private` members
+used from outside their owning class/module, and (2) reach-through / Law of
+Demeter chains. Four scanners (cross-object privates in `src/`, tests reaching
+into production privates, reach-through into behavioural objects, and
+destructure-and-rebuild), each finding adversarially verified against the code
+with a default-to-reject skeptic. 13 candidates raised → **6 confirmed, 7
+rejected**.
 
-1. **Private members used where they shouldn't be.** A `_name`-prefixed
-   function, method, or attribute referenced from outside the class/module that
-   owns it. Either the access is illegitimate (a layering or boundary
-   violation), or the member is genuinely needed by others and should be
-   promoted to part of the public interface. The fix differs per case — tighten
-   the caller, or widen the interface — so each instance must be judged
-   individually.
-2. **Reach-through access (Law of Demeter).** Code that digs through several
-   layers of objects/attributes to get at something — `a.b.c.d`, or pulling a
-   nested field out of a returned object to reconstruct something the owner
-   could have handed over directly. Reaching deep into another object's
-   internals means the caller knows structure it shouldn't; that knowledge
-   belongs behind a method or property on the object that owns the data. This is
-   the same "pull complexity downward / information hiding" principle as the
-   `format_line` move in A3 and the `_fetch_table_comment` consistency fix in
-   A6, applied as a codebase-wide search rather than a single site.
+**Headline: production code (`src/`) has no encapsulation violations.** Every
+`src/`-level candidate was rejected — they were all either same-object `self._x`
+access (fine), reads of frozen data records that exist to be read field-by-field
+(`Column`, `ReadFailure`, `ExecutionResult` — explicitly exempt), or traversals
+of PySpark's external API (`spark.catalog.getTable(...).description`), which we
+don't own and can't redesign. The hexagonal layering and value-object discipline
+hold up.
 
-**Method:** grep for cross-module/cross-class `._private` access; scan for
-attribute chains of depth ≥ 3 and for callers that destructure a returned object
-only to rebuild a value the owner could expose. For each hit, decide: promote
-the member to the public interface, add an accessor/method on the owner, or fix
-the caller. Verify each candidate against the code before acting — a deep chain
-through a plain data record (e.g. a frozen dataclass that is *meant* to be read
-field-by-field) is not necessarily a violation.
+**All 6 confirmed findings are tests reaching into production privates** — a
+test-hygiene issue, not an architectural one. They reduce to two fixes:
 
-This is exploratory; findings it produces will be folded back into a future
-refactor stage with concrete locations and severities.
+1. **`DatabricksReader` private read-helpers are tested directly** — *low*.
+   `tests/adapters/databricks/catalog/test_reader.py` calls `reader._table_exists`
+   (lines 144, 155), `reader._fetch_properties` (245, 267) and
+   `reader._fetch_table_comment` (292) from outside the class, and
+   `tests/e2e/test_engine_e2e.py:20` monkeypatches `_table_exists` with
+   `raising=False`. These are private helpers of `_read`, behind the public
+   `fetch_state`. Two viable fixes, judged per case:
+   - **Promote to public** (drop the underscores: `table_exists`,
+     `fetch_properties`, `fetch_table_comment`) — `DatabricksReader` is a concrete
+     adapter, not a domain type, so widening its surface costs nothing and turns
+     the e2e monkeypatch into a legitimate seam (drop `raising=False`). Do **not**
+     add them to the `CatalogStateReader` Protocol — they are adapter-internal,
+     not part of the port.
+   - **Or route through `fetch_state`** and assert on `result.observed.{properties,
+     comment}` — most of this coverage already exists at the `fetch_state` level
+     (e.g. the empty-properties path), so several of these tests are redundant and
+     could simply be deleted. One gap: the `None`-description→`""` coercion is only
+     tested via `_fetch_table_comment`, so it needs a replacement `fetch_state`
+     test before that one is removed.
+
+   The e2e monkeypatch (medium) is the strongest case for the *promote* option —
+   the existence check is a genuine injection seam the local-Spark e2e suite
+   depends on, so the private name sends the wrong signal.
+
+2. **`test_compile.py` interrogates the private `_compile_action`** — *low*.
+   The B7 completeness guard imports `_compile_action` and reads its
+   `.dispatch(...)` registry (lines 3, 60, 67) to assert every `Action` has a
+   compiler. The intent is sound (the invariant can't be checked through
+   `compile_plan` without an `ActionPlan` per action type), but reaching into a
+   private singledispatch function is fragile. Fix: rename `_compile_action` →
+   `compile_action` in `compile.py` (update `compile_plan`, the seven
+   `@register` decorators, and the test import). It is already indirectly public
+   via `compile_plan`; the underscore is a false privacy signal.
+
+**Recommendation:** all findings are low/medium test hygiene. The cleanest single
+move is to **make the genuinely-needed seams public** — `DatabricksReader`'s
+read-helpers and `compile_action` — and **delete the now-redundant private-poking
+tests** in favour of the existing public-interface coverage, adding the one
+missing `fetch_state`-level test for the null-comment case. No production
+behaviour changes; this is a tests + naming pass. Worth doing opportunistically,
+not urgent.
+
+**Rejected (recorded so they're not re-litigated):** `TableRunReport._any_action_failed`
+(same-object); `engine` reading `read_result.failure.{exception_type,message}` for
+logging (frozen data record; and `format_line()` would double-prefix the log line);
+`spark.catalog.getTable(...).description` (external API); `compile.py`
+`action.column.name`/`data_type` (data records); `errors._format_failure_detail`
+(uses public surface correctly); `errors` reading `execution_results` for SQL
+previews (public field of a data record; a `failed_execution_previews` accessor
+would be a shallow wrapper coupling a result value object to error-formatting).
 
 ### C2 — Deep-simplification pass: question the core abstractions — *investigation, pending*
 
