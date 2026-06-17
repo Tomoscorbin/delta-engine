@@ -141,9 +141,8 @@ class PlanValidator:
 
     def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
         """Return one failure for each rule the plan breaks, in rule order."""
-        return tuple(
-            failure for rule in self.rules if (failure := rule.check(ctx)) is not None
-        )
+        outcomes = (rule.check(ctx) for rule in self.rules)
+        return tuple(failure for failure in outcomes if failure is not None)
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
