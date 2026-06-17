@@ -72,3 +72,40 @@ Notes:
 - If validation fails, no SQL is executed for that table and `SyncFailedError` is raised with a report.
 - If the observed schema already matches the desired schema, the plan is a no‑op.
 - The Databricks adapter compiles actions to Spark SQL (CREATE TABLE, ALTER TABLE ADD/DROP COLUMN) and executes them with `spark.sql`.
+- Execution stops at the first failed action for a table: the engine is not transactional, so a failed statement leaves the actions before it applied and the rest unattempted. Re-running re-plans from the live state.
+
+## Safe-change rules
+
+Delta Engine reconciles schemas declaratively, but some changes cannot be made
+safely in place. These are rejected at validation (before any SQL runs) so they
+surface as a clear `SyncFailedError` rather than a partial migration:
+
+- **Adding a `NOT NULL` column to an existing table** — existing rows have no
+  value for it. Add it nullable, backfill, then tighten.
+- **Tightening an existing column to `NOT NULL`** — fails if the column already
+  holds NULLs. Keep it nullable, backfill the NULLs, then set `NOT NULL`.
+- **Changing a column's data type** — type migrations are not supported; recreate
+  the table to change a type. (Without this guard the change would silently do
+  nothing, since the differ matches columns by name.)
+- **Changing partitioning** — partitioning is fixed at creation; recreate the
+  table to repartition.
+
+## Non-goals and limitations
+
+Delta Engine manages **DDL for Delta tables only**. It deliberately does not
+cover, and the following are known boundaries to be aware of:
+
+- **No data movement or transformation** — it changes schema, not rows. It
+  complements ETL/ELT tools and schedulers rather than replacing them.
+- **Column renames are not modelled and cause data loss.** A rename reads as
+  "drop the old column, add a new one", because columns are matched by name.
+  The drop is explicit in your declared schema and visible in the plan, but the
+  old column's data is gone. To preserve data, rename out of band (e.g.
+  `ALTER TABLE ... RENAME COLUMN`) and update the definition to match.
+- **Dropping a column requires `delta.columnMapping.mode=name`** (the default).
+  Overriding it to `none` while dropping a column will fail at execution time.
+- **Properties are a declared subset.** The engine only reconciles property keys
+  you declare; properties set on the table out of band (e.g. by Databricks) are
+  left untouched, never unset.
+- **No support for views, constraints, generated/identity columns, or liquid
+  clustering** — these are out of scope for the current DDL-only model.
