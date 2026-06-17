@@ -28,6 +28,8 @@ class CatalogStateReader(Protocol):
 class PlanExecutor(Protocol):
     """Executes an action plan against a backing engine."""
 
-    def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
-        """Run the plan and return the execution outcome."""
+    def execute(
+        self, target: QualifiedName, plan: ActionPlan
+    ) -> tuple[ExecutionResult, ...]:
+        """Run the plan against ``target`` and return the execution outcome."""
         ...

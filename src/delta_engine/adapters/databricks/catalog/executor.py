@@ -20,6 +20,7 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
 )
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
 logger = logging.getLogger(__name__)
@@ -31,14 +32,16 @@ class DatabricksExecutor:
     def __init__(
         self,
         spark: SparkSession,
-        compiler: Callable[[ActionPlan], Iterable[str]] = compile_plan,
+        compiler: Callable[[QualifiedName, ActionPlan], Iterable[str]] = compile_plan,
     ) -> None:
         self.spark = spark
         self._compiler = compiler
 
-    def execute(self, plan: ActionPlan) -> tuple[ExecutionResult, ...]:
+    def execute(
+        self, target: QualifiedName, plan: ActionPlan
+    ) -> tuple[ExecutionResult, ...]:
         """
-        Execute the plan's actions in order, returning a per-action result.
+        Execute the plan's actions against ``target``, returning a per-action result.
 
         Execution stops at the first failure: the actions form a dependency
         chain, and the engine is not transactional, so continuing past a failure
@@ -46,7 +49,7 @@ class DatabricksExecutor:
         actions attempted, ending at the one that failed; actions after it are
         left unattempted rather than run against an inconsistent table.
         """
-        statements = self._compiler(plan)
+        statements = self._compiler(target, plan)
         results: list[ExecutionResult] = []
         for action_index, statement in enumerate(statements):
             result = self._run_statement(plan[action_index], action_index, statement)

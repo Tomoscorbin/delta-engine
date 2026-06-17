@@ -46,7 +46,7 @@ def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> Action
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
         )
-    return ActionPlan(desired.qualified_name, actions)
+    return ActionPlan(actions)
 
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:

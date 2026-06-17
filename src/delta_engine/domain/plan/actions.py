@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable
 
 
 class ActionPhase(IntEnum):
@@ -159,9 +159,8 @@ class SetColumnNullability(Action):
 
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
-    """Collection of actions targeting a single qualified name."""
+    """An ordered set of actions to apply to a table."""
 
-    target: QualifiedName
     actions: tuple[Action, ...] = ()
 
     def __len__(self) -> int:

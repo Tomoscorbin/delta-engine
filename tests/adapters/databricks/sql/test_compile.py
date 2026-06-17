@@ -27,7 +27,7 @@ def _concrete_action_types():
 
 def _compile_single(action) -> str:
     """Compile a one-action plan and return the single SQL statement."""
-    (statement,) = compile_plan(ActionPlan(target=_TARGET, actions=(action,)))
+    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
     return statement
 
 

@@ -187,7 +187,7 @@ _QUALIFIED_NAME = QualifiedName("dev", "silver", "events")
 def _context(*, observed: ObservedTable | None, actions: tuple) -> PlanContext:
     """Build a real PlanContext with the given plan actions for an existing/absent table."""
     desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
-    plan = ActionPlan(target=_QUALIFIED_NAME, actions=actions)
+    plan = ActionPlan(actions=actions)
     return PlanContext(desired=desired, observed=observed, plan=plan)
 
 
@@ -254,7 +254,7 @@ def _context_for_columns(
         if observed_columns is None
         else ObservedTable(qualified_name=_QUALIFIED_NAME, columns=observed_columns)
     )
-    return PlanContext(desired=desired, observed=observed, plan=ActionPlan(target=_QUALIFIED_NAME))
+    return PlanContext(desired=desired, observed=observed, plan=ActionPlan())
 
 
 def test_rejects_changing_the_type_of_an_existing_column():
