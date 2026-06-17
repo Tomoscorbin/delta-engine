@@ -4,8 +4,17 @@ from delta_engine.application.validation import (
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
     PlanValidator,
+    UnsupportedColumnTypeChange,
 )
-from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    ObservedTable,
+    QualifiedName,
+    String,
+)
 from delta_engine.domain.plan.actions import ActionPlan, AddColumn, SetColumnNullability
 
 # ---- Test fakes
@@ -229,4 +238,81 @@ def test_allows_tightening_when_creating_a_new_table():
     failure = rule.evaluate(ctx)
 
     # Then creation-time constraints are not this rule's concern
+    assert failure is None
+
+
+# ---- UnsupportedColumnTypeChange (real domain objects)
+
+
+def _context_for_columns(
+    *, desired_columns: tuple[Column, ...], observed_columns: tuple[Column, ...] | None
+) -> PlanContext:
+    """Build a real PlanContext from desired/observed column tuples (plan unused by this rule)."""
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=desired_columns)
+    observed = (
+        None
+        if observed_columns is None
+        else ObservedTable(qualified_name=_QUALIFIED_NAME, columns=observed_columns)
+    )
+    return PlanContext(desired=desired, observed=observed, plan=ActionPlan(target=_QUALIFIED_NAME))
+
+
+def test_rejects_changing_the_type_of_an_existing_column():
+    # Given an existing column whose desired type differs from the observed type
+    ctx = _context_for_columns(
+        desired_columns=(Column("id", Long()),),
+        observed_columns=(Column("id", Integer()),),
+    )
+    rule = UnsupportedColumnTypeChange()
+
+    # When evaluating the plan
+    failure = rule.evaluate(ctx)
+
+    # Then the drift is flagged rather than silently ignored
+    assert failure is not None
+    assert "id" in failure.message
+
+
+def test_allows_columns_whose_type_is_unchanged():
+    # Given an existing table where every common column keeps its type
+    ctx = _context_for_columns(
+        desired_columns=(Column("id", Integer()), Column("name", String())),
+        observed_columns=(Column("id", Integer()), Column("name", String())),
+    )
+    rule = UnsupportedColumnTypeChange()
+
+    # When evaluating the plan
+    failure = rule.evaluate(ctx)
+
+    # Then nothing is flagged
+    assert failure is None
+
+
+def test_ignores_added_and_dropped_columns_for_type_change():
+    # Given a column only in desired (add) and one only in observed (drop)
+    ctx = _context_for_columns(
+        desired_columns=(Column("id", Integer()), Column("added", String())),
+        observed_columns=(Column("id", Integer()), Column("dropped", String())),
+    )
+    rule = UnsupportedColumnTypeChange()
+
+    # When evaluating the plan
+    failure = rule.evaluate(ctx)
+
+    # Then only common columns are compared; add/drop are not type changes
+    assert failure is None
+
+
+def test_allows_type_specification_when_creating_a_new_table():
+    # Given a new table creation (no observed table)
+    ctx = _context_for_columns(
+        desired_columns=(Column("id", Long()),),
+        observed_columns=None,
+    )
+    rule = UnsupportedColumnTypeChange()
+
+    # When evaluating the plan
+    failure = rule.evaluate(ctx)
+
+    # Then there is no prior type to conflict with
     assert failure is None

@@ -80,6 +80,37 @@ class NullabilityTighteningOnExistingColumn(Rule):
         return None
 
 
+class UnsupportedColumnTypeChange(Rule):
+    """
+    Disallow changing the data type of an existing column.
+
+    The differ matches columns by name and has no type-change action, so a
+    changed type (e.g. ``Integer`` -> ``Long``) would otherwise produce no
+    action at all and the schema would silently drift from the declared spec
+    while the run reports success. Until type migrations are supported, surface
+    the drift as a validation failure instead of letting it vanish.
+    """
+
+    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+        """Flag any common column whose desired data type differs from observed."""
+        if ctx.observed is None:
+            return None
+        observed_types = {column.name: column.data_type for column in ctx.observed.columns}
+        for desired_column in ctx.desired.columns:
+            observed_type = observed_types.get(desired_column.name)
+            if observed_type is not None and observed_type != desired_column.data_type:
+                return ValidationFailure(
+                    rule_name=self.__class__.__name__,
+                    message=(
+                        "Operation not allowed: cannot change the type of existing"
+                        f" column '{desired_column.name}' from {observed_type} to"
+                        f" {desired_column.data_type}. Type migrations are not supported;"
+                        " recreate the table to change a column's type."
+                    ),
+                )
+        return None
+
+
 class DisallowPartitioningChange(Rule):
     """
     Disallow any plan that attempts to change partitioning.
@@ -133,6 +164,7 @@ class PlanValidator:
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
+    UnsupportedColumnTypeChange(),
     DisallowPartitioningChange(),
 )
 DEFAULT_VALIDATOR = PlanValidator(DEFAULT_RULES)
