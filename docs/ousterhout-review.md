@@ -580,51 +580,101 @@ hold the `ExecutionResult`/`NOOP` and `Rule`-as-functions changes for a future
 structural pass, with the `NOOP` decision as an explicit gate on the former. None of
 these are urgent and none change runtime behaviour.
 
-### C3 — File/folder structure and test-suite review — *investigation, pending*
+### C3 — File/folder structure and test-suite review — *complete*
 
-Step back from individual modules and assess two things: the package layout and
-the test suite as wholes.
+Assessed the package layout and the test suite as whole designed artefacts, plus
+the **consumer's import experience** (what a user actually has to type). Method:
+five assessors (layering/entry-points, folder granularity, user-import POV, test
+mirroring/coverage, test quality/doubles), each recommendation adversarially
+checked against an explicit "does it earn its churn?" bar (structure changes are
+cheap to propose, disruptive to land), then synthesised per area.
 
-**Package structure** — the layout is `domain/` → `application/` → `adapters/`,
-with `model/`, `plan/`, `services/` under domain and `databricks/`, `schema/`
-under adapters. Questions:
+**Bottom line: both the layout and the suite are fundamentally sound.** The
+hexagonal boundary is verified clean (domain imports no application/adapters;
+application imports no adapters; no Spark/Databricks names leak outside
+`adapters/databricks/`). No folder restructuring is warranted. What surfaced is a
+cluster of **low-churn polish** — mostly about the *consumer's* import experience
+and a few test-hygiene items.
 
-- Does the directory tree still match the architecture now that A4/A5 removed
-  several modules (`column_diff`, `table_diff`, `ordering`, `format_report`)? Are
-  any folders now thin enough that they should collapse (e.g. is
-  `domain/services/` justified holding only `differ.py`)?
-- Is each module in the layer its dependencies imply? Anything in `domain/` that
-  reaches toward `application/` or an adapter? Anything Databricks-specific
-  sitting outside `adapters/databricks/`?
-- Are the public entry points obvious from the structure? A new user should be
-  able to find "define a table" (`adapters/schema`) and "run a sync"
-  (`adapters/databricks/build_engine`) without spelunking. Do the package
-  `__init__.py` exports tell that story, or are they empty/inconsistent?
-- Naming and granularity: are any files too small to justify their own module,
-  or too large and doing two jobs? Do file names describe their single
-  responsibility?
+#### Package structure & the user's import experience
 
-**Test suite** — assess the tests as a designed artefact, not just coverage:
+The user's POV is where the real findings are. Today the README's minimal usage
+needs imports from **three different deep paths**, and the top-level
+`delta_engine/__init__.py` is empty — so a consumer must understand the internal
+hexagonal layering just to import the basics.
 
-- Does the `tests/` tree mirror `src/` cleanly after the A4/A5/A6 re-homing, and
-  are the unit vs. e2e boundaries clear and consistently applied?
-- Are tests written against behaviour and public interfaces (per the project's
-  Detroit-school stance), or are any still coupled to private helpers or
-  implementation detail? Flag any remaining `._private` calls from tests.
-- Fakes vs. mocks: are test doubles used only for genuine outgoing boundaries
-  (Spark), with real domain objects everywhere else? Any over-mocking?
-- Gaps: which behaviours are only covered transitively (e.g. the compiler before
-  A6 had no direct tests)? Are the Part B hazards untested because the suite runs
-  against clean local/Unity-Catalog Spark? What would a mixed-case-HMS or
-  struct-column fixture catch that the current suite cannot?
-- Redundancy and clarity: duplicated setup that wants a fixture/builder,
-  unclear test names, or Given/When/Then comments that have drifted from what
-  the test does.
-- Is the 90% coverage gate measuring the right things, or does it create
-  pressure to test trivia? Are there critical paths under-covered despite the
-  high number?
+- **`Registry` is unexported yet needed in every sync** — *medium, low churn*.
+  `Engine.sync` takes a `Registry` as its only argument, but `Registry` is absent
+  from `application/__init__.py`'s exports; every caller reaches the leaf
+  `delta_engine.application.registry`. Add it to `application/__init__.py` +
+  `__all__` (one line; no cycle — `registry.py` imports only from domain). Then
+  `from delta_engine.application import Engine, Registry` works.
+- **`Decimal`, `Array`, `Map` not re-exported from `adapters/schema`** — *low,
+  low churn*. The user-facing schema package exports the eight scalar type
+  classes but not the three parameterised ones, so defining a `Decimal(10, 2)`
+  column forces an import from the internal `domain.model` layer. Add the three
+  names to `adapters/schema/__init__.py`.
+- **Empty root `delta_engine/__init__.py` — the natural follow-on.** Once
+  `Registry` is exported, the remaining gap is a curated root surface that
+  collapses the three-deep README imports into one or two lines (e.g.
+  `from delta_engine import DeltaTable, Column, Integer, Registry,
+  build_databricks_engine`). This is a deliberate API-design choice — weigh a
+  flat top-level convenience namespace against keeping the adapter boundary
+  crisp / import-cycle risk — so it's flagged as the logical next step, not an
+  auto-apply. **Recommend deciding this explicitly.**
 
-Deliverable: a short assessment of what (if anything) to restructure in both the
-package and the tests, weighed against churn cost — structure changes are cheap
-to propose and disruptive to land, so the recommendation should be explicit about
-whether it earns its keep.
+**Deliberately left as-is** (churn not earned): `domain/plan/` and
+`domain/services/` single-file folders (meaningful DDD boundaries; `plan/`
+re-exports a clean surface); `adapters/schema/delta/` table/properties split
+(distinct axes of change); `results.py` at 228 lines (one tightly-coupled concept
+— splitting forces mutual imports); `log_config.py` at the package root (least-bad
+home for a cross-cutting stdlib helper; revisit if a second adapter lands);
+`adapters/schema/types.py` singletons (inert, no callers, but moving changes a
+public path).
+
+#### Test suite
+
+Sound: Detroit-school throughout, real domain objects in the domain/application
+layers, Spark fakes confined to adapter boundaries, clean Given/When/Then,
+coverage ~95%. Four low-churn improvements earn their keep:
+
+- **`test_ordering.py` is an orphan filename** — *low*. `ordering.py` was deleted
+  in A5 (`action_sort_key` moved into `plan.py`); the test still carries the ghost
+  module's name and sits separate from `test_plan.py`. Merge its 6 tests into
+  `test_plan.py` (zero topical overlap) to restore the mirror.
+- **`log_config.py` has untested logic** — *medium*. Three real contracts with no
+  test: `configure_logging` idempotency (the `root.handlers.clear()` guard — a
+  *public, README-documented* contract), `SafeStreamHandler.emit` swallowing
+  `ValueError` on teardown, and the formatter's level-colour branches. ~35-line
+  pure-stdlib `test_log_config.py` covers all three.
+- **SQL string composition in `read.py` is unpinned** — *low*. Every Spark fake
+  discards the query string, so a wrong column alias / dropped `LIMIT 1` / wrong
+  `DESCRIBE` verb would pass the whole suite and only fail against a live catalog.
+  A ~15-line `test_read.py` with substring assertions pins the one thing
+  `test_dialect.py` can't (the composition).
+- **`test_validation.py` fakes frozen domain objects** — *medium*. Its top half
+  defines five fakes (`_FakeColumn`/`_FakePlan`/`_FakeObserved`/`_FakeDesired`/
+  `_FakeContext`) standing in for frozen dataclasses that cost nothing to build —
+  a Detroit-school violation. The file's *lower* half already uses the real
+  `PlanContext`/`Column`/etc. via a `_context()` helper; converge on that. (One
+  wrinkle: partition tests need a real `Column("ds", …)` so `TableSnapshot`'s
+  partition-reference validation passes.)
+
+**Test items noted but not actioned:** the C1 test-private accesses
+(`reader._table_exists`/`_fetch_properties`/`_fetch_table_comment`, the e2e
+`_table_exists` monkeypatch, `test_compile`'s `_compile_action.dispatch`) — these
+are the C1 findings; the `_table_exists` pair is redundant and deletable, but the
+`_fetch_properties`/`_fetch_table_comment` tests carry two assertions
+(MappingProxyType immutability; `None`→`""` comment coercion) with no current
+public-interface equivalent, so they need those assertions migrated to
+`fetch_state`-level tests first. A `@pytest.mark.spark` scheme to give a fast
+`pytest -m "not spark"` loop is endorsed in principle but only pays off if
+documented in a Make target. `properties.py` / `ports.py` correctly need no
+dedicated tests.
+
+**One genuine bug surfaced, not just polish:** `tests/adapters/schema/delta/` is
+missing its `__init__.py` (every other populated leaf test dir has one). Two files
+named `test_table.py` exist in the tree, and with pytest's default *prepend*
+import mode and no `importmode` set, that is an import-collision hazard that
+happens to pass today only because the two files' names are disjoint. Add the
+empty `__init__.py` — *low churn, removes undefined behaviour*.
