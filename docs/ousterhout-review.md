@@ -282,17 +282,29 @@ implement a real `RenameColumn` action (needs column-mapping mode + a new phase
 slot between ADD and DROP). Recommendation: document it now, build it when a
 user actually needs it.
 
-### B5 — `columnMapping.mode` precondition for DROP is unchecked — *medium, narrow*
+### B5 — `columnMapping.mode` precondition for DROP is unchecked — *medium, narrow* — **resolved: documented, not validated**
 
-`adapters/schema/delta/table.py:14-18`
+`adapters/schema/delta/table.py`
 
 The default `columnMapping.mode=name` protects the common case, but a user can
 override it to `"none"` (it is a managed key) and a `DropColumn` then fails at
-runtime. Worth a validation rule — but the obvious implementation checks
-`desired.properties`, where the key is *always* present via
-`effective_properties`, so the `.get` default is dead code. A correct rule
-checks `observed.properties` and/or that the plan contains a preceding
-`SetProperty` for the mode. Lower priority than B1–B3.
+runtime.
+
+**Decision:** documented rather than enforced with a rule. Two reasons:
+1. **Layering.** A rule that hardcodes the `delta.columnMapping.mode` string
+   would leak a Delta/Databricks-specific concept into the backend-agnostic
+   `application/validation.py`, where every other rule is generic. The right home
+   for such a check would be a Databricks-specific rule set composed in at engine
+   build time — worth doing if more backend-specific preconditions accumulate,
+   but not justified by this single narrow case today.
+2. **Narrow residual risk.** The default protects every normal case, and B3's
+   fail-stop means a failed DROP no longer cascades into later actions. Triggering
+   it requires a deliberate `properties={"delta.columnMapping.mode": "none"}`
+   override *and* a column drop in the same sync.
+
+Documented on the `DeltaTable` class docstring so the precondition is visible at
+the point a user would override the property. Revisit as a Databricks-scoped
+rule (per layering option above) if backend-specific validation grows.
 
 ### B6 — `build_databricks_engine` clears root logging as a side effect — *medium*
 
