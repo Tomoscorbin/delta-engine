@@ -4,21 +4,26 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from delta_engine.application.plan import PlanContext
 from delta_engine.application.results import ValidationFailure
-from delta_engine.domain.plan import AddColumn, SetColumnNullability
+from delta_engine.domain.model import DesiredTable, ObservedTable
+from delta_engine.domain.plan import ActionPlan, AddColumn, SetColumnNullability
 
 
 class Rule(ABC):
     """Abstract interface for plan validation rules."""
 
     @abstractmethod
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def evaluate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> ValidationFailure | None:
         """
-        Evaluate the rule against a planning context.
+        Evaluate the rule against a planned change.
 
         Args:
-            ctx: The plan context to validate.
+            desired: The user-authored target definition.
+            observed: The current catalog state, or ``None`` when the table is
+                being created.
+            plan: The action plan to reach ``desired``.
 
         Returns:
             A failure description if the rule is violated, otherwise ``None``.
@@ -35,11 +40,13 @@ class NonNullableColumnAdd(Rule):
     already exists (it does not attempt to infer data emptiness).
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def evaluate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> ValidationFailure | None:
         """Flag the plan if it adds a NOT NULL column to an existing table."""
-        if ctx.observed is None:
+        if observed is None:
             return None
-        for action in ctx.plan.actions:
+        for action in plan.actions:
             if isinstance(action, AddColumn) and (not action.column.nullable):
                 return ValidationFailure(
                     rule_name=self.__class__.__name__,
@@ -63,11 +70,13 @@ class NullabilityTighteningOnExistingColumn(Rule):
     and is not flagged.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def evaluate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> ValidationFailure | None:
         """Flag the plan if it tightens any existing column to NOT NULL."""
-        if ctx.observed is None:
+        if observed is None:
             return None
-        for action in ctx.plan.actions:
+        for action in plan.actions:
             if isinstance(action, SetColumnNullability) and (not action.nullable):
                 return ValidationFailure(
                     rule_name=self.__class__.__name__,
@@ -91,12 +100,14 @@ class UnsupportedColumnTypeChange(Rule):
     the drift as a validation failure instead of letting it vanish.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def evaluate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> ValidationFailure | None:
         """Flag any common column whose desired data type differs from observed."""
-        if ctx.observed is None:
+        if observed is None:
             return None
-        observed_types = {column.name: column.data_type for column in ctx.observed.columns}
-        for desired_column in ctx.desired.columns:
+        observed_types = {column.name: column.data_type for column in observed.columns}
+        for desired_column in desired.columns:
             observed_type = observed_types.get(desired_column.name)
             if observed_type is not None and observed_type != desired_column.data_type:
                 return ValidationFailure(
@@ -118,17 +129,19 @@ class DisallowPartitioningChange(Rule):
     Partitioning can only occur during the creation of a table.
     """
 
-    def evaluate(self, ctx: PlanContext) -> ValidationFailure | None:
+    def evaluate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> ValidationFailure | None:
         """Flag the plan if desired and observed partition columns differ."""
-        if ctx.observed is None:
+        if observed is None:
             return None
-        if ctx.desired.partitioned_by != ctx.observed.partitioned_by:
+        if desired.partitioned_by != observed.partitioned_by:
             return ValidationFailure(
                 rule_name=self.__class__.__name__,
                 message=(
                     "Operation not allowed: partitioning changes are not supported."
-                    f" Current partition columns: {ctx.observed.partitioned_by}"
-                    f" - Requested partition columns: {ctx.desired.partitioned_by}."
+                    f" Current partition columns: {observed.partitioned_by}"
+                    f" - Requested partition columns: {desired.partitioned_by}."
                     " Recreate the table with the desired partitioning."
                 ),
             )
@@ -136,18 +149,22 @@ class DisallowPartitioningChange(Rule):
 
 
 class PlanValidator:
-    """Run a sequence of validation rules against a plan."""
+    """Run a sequence of validation rules against a planned change."""
 
     def __init__(self, rules: tuple[Rule, ...]) -> None:
         """Create a validator configured with an ordered set of rules."""
         self.rules = rules
 
-    def validate(self, ctx: PlanContext) -> tuple[ValidationFailure, ...]:
+    def validate(
+        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
+    ) -> tuple[ValidationFailure, ...]:
         """
-        Evaluate all rules and collect any failures.
+        Evaluate all rules and collect any failures, in rule order.
 
         Args:
-            ctx: The plan context being validated.
+            desired: The user-authored target definition.
+            observed: The current catalog state, or ``None`` when creating.
+            plan: The action plan to reach ``desired``.
 
         Returns:
             A tuple of failures in rule evaluation order (empty if none).
@@ -155,7 +172,7 @@ class PlanValidator:
         """
         failures: list[ValidationFailure] = []
         for rule in self.rules:
-            failure = rule.evaluate(ctx)
+            failure = rule.evaluate(desired, observed, plan)
             if failure is not None:
                 failures.append(failure)
         return tuple(failures)

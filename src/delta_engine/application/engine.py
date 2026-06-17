@@ -15,7 +15,7 @@ import logging
 from delta_engine.application.errors import (
     SyncFailedError,
 )
-from delta_engine.application.plan import make_plan_context
+from delta_engine.application.plan import plan_table
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
@@ -126,9 +126,12 @@ class Engine:
                 fully_qualified_name,
                 "present" if read_result.observed is not None else "absent",
             )
-            context = make_plan_context(desired, read_result.observed)
-            logger.info("Planned %d action(s) for %s", len(context.plan), fully_qualified_name)
-            validation = ValidationResult(failures=self.validator.validate(context))
+            observed = read_result.observed
+            plan = plan_table(desired, observed)
+            logger.info("Planned %d action(s) for %s", len(plan), fully_qualified_name)
+            validation = ValidationResult(
+                failures=self.validator.validate(desired, observed, plan)
+            )
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
@@ -137,7 +140,7 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
-                executions = self.executor.execute(desired.qualified_name, context.plan)
+                executions = self.executor.execute(desired.qualified_name, plan)
                 failed_count = sum(1 for e in executions if isinstance(e, ExecutionFailed))
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",
