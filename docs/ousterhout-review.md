@@ -599,9 +599,14 @@ and a few test-hygiene items.
 #### Package structure & the user's import experience
 
 > **Status (implemented):** the two re-export gaps below (`Registry`,
-> `Decimal`/`Array`/`Map`) and the missing-`__init__.py` test bug have since been
-> fixed on `docs/ousterhout-stage-c`. The empty-root-`__init__` convenience
-> namespace remains an open API-design decision, deliberately not auto-applied.
+> `Decimal`/`Array`/`Map`) and the missing-`__init__.py` test bug have been fixed
+> on `docs/ousterhout-stage-c`. The root `delta_engine/__init__.py` convenience
+> namespace has **also** been added: it eagerly re-exports the pyspark-free surface
+> (schema + application) and exposes `build_databricks_engine` / `configure_logging`
+> **lazily** via a PEP 562 `__getattr__`, so `import delta_engine` never forces
+> pyspark — preserving the deliberate "define tables without a Spark install"
+> capability (pyspark is a dev-only dependency). The README now imports everything
+> from `delta_engine` in one statement.
 
 The user's POV is where the real findings are. Today the README's minimal usage
 needs imports from **three different deep paths**, and the top-level
