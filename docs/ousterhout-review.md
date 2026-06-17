@@ -598,6 +598,11 @@ and a few test-hygiene items.
 
 #### Package structure & the user's import experience
 
+> **Status (implemented):** the two re-export gaps below (`Registry`,
+> `Decimal`/`Array`/`Map`) and the missing-`__init__.py` test bug have since been
+> fixed on `docs/ousterhout-stage-c`. The empty-root-`__init__` convenience
+> namespace remains an open API-design decision, deliberately not auto-applied.
+
 The user's POV is where the real findings are. Today the README's minimal usage
 needs imports from **three different deep paths**, and the top-level
 `delta_engine/__init__.py` is empty — so a consumer must understand the internal

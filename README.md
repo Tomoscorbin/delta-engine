@@ -47,7 +47,7 @@ Requires an active `SparkSession` on Databricks or local Spark.
 ```python
 from delta_engine.adapters.databricks import build_databricks_engine, configure_logging
 from delta_engine.adapters.schema import DeltaTable, Column, Integer, String
-from delta_engine.application.registry import Registry
+from delta_engine.application import Registry
 
 configure_logging()  # optional: install the package's coloured log handler
 engine = build_databricks_engine(spark)
