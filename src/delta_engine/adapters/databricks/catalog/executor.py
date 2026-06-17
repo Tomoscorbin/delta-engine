@@ -15,9 +15,10 @@ from pyspark.sql import SparkSession
 from delta_engine.adapters.databricks.sql.compile import compile_plan
 from delta_engine.adapters.databricks.sql.preview import error_preview, sql_preview
 from delta_engine.application.results import (
-    ActionStatus,
+    ExecutionFailed,
     ExecutionFailure,
     ExecutionResult,
+    ExecutionSucceeded,
 )
 from delta_engine.domain.plan.actions import ActionPlan
 
@@ -50,7 +51,7 @@ class DatabricksExecutor:
         for action_index, statement in enumerate(statements):
             result = self._run_statement(plan[action_index], action_index, statement)
             results.append(result)
-            if result.status is ActionStatus.FAILED:
+            if isinstance(result, ExecutionFailed):
                 break
         return tuple(results)
 
@@ -67,10 +68,9 @@ class DatabricksExecutor:
                 error_preview(exception),
                 preview,
             )
-            return ExecutionResult(
+            return ExecutionFailed(
                 action=action_name,
                 action_index=action_index,
-                status=ActionStatus.FAILED,
                 statement_preview=preview,
                 failure=ExecutionFailure(
                     action_index=action_index,
@@ -80,9 +80,8 @@ class DatabricksExecutor:
             )
 
         logger.info("Executed: %s", action_name)
-        return ExecutionResult(
+        return ExecutionSucceeded(
             action=action_name,
             action_index=action_index,
-            status=ActionStatus.OK,
             statement_preview=preview,
         )

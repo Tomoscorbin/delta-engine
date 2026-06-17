@@ -5,9 +5,10 @@ from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
-    ActionStatus,
+    ExecutionFailed,
     ExecutionFailure,
     ExecutionResult,
+    ExecutionSucceeded,
     ReadFailed,
     ReadFailure,
     ReadResult,
@@ -55,22 +56,13 @@ class _FakeExecutor:
 
 
 def _ok_exec(idx: int = 0) -> ExecutionResult:
-    return ExecutionResult(
-        action="X", action_index=idx, status=ActionStatus.OK, statement_preview="-- ok"
-    )
-
-
-def _noop_exec(idx: int = 0) -> ExecutionResult:
-    return ExecutionResult(
-        action="X", action_index=idx, status=ActionStatus.NOOP, statement_preview="-- noop"
-    )
+    return ExecutionSucceeded(action="X", action_index=idx, statement_preview="-- ok")
 
 
 def _failed_exec(idx: int = 0, exc="AnalysisException", msg="boom") -> ExecutionResult:
-    return ExecutionResult(
+    return ExecutionFailed(
         action="X",
         action_index=idx,
-        status=ActionStatus.FAILED,
         statement_preview="-- bad sql",
         failure=ExecutionFailure(action_index=idx, exception_type=exc, message=msg),
     )
@@ -129,7 +121,7 @@ def test_raises_when_execution_contains_any_failure():
     reg.register(_spec("c.s.exec_fail"))
     reader = _FakeReader({"c.s.exec_fail": ReadSucceeded(observed=None)})
     validator = _FakeValidator()  # passes
-    executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _noop_exec(2)))
+    executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _ok_exec(2)))
 
     # When syncing
     # Then the engine raises SyncFailedError because execution failed
@@ -151,7 +143,7 @@ def test_returns_report_when_all_tables_succeed():
         }
     )
     validator = _FakeValidator()
-    executor = _FakeExecutor(results=(_ok_exec(0), _noop_exec(1)))
+    executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))
     engine = Engine(reader=reader, executor=executor, validator=validator)
 
     # When syncing
@@ -205,7 +197,7 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
             # b passes
         }
     )
-    executor = _FakeExecutor(results=(_ok_exec(0), _noop_exec(1)))  # used only for b
+    executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))  # used only for b
     engine = Engine(reader=reader, executor=executor, validator=validator)
 
     # When
@@ -233,7 +225,7 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
     validator = _FakeValidator()  # both pass
     executor = _SeqExecutor(
         [
-            (_ok_exec(0), _noop_exec(1)),  # execution for a: all good
+            (_ok_exec(0), _ok_exec(1)),  # execution for a: all good
             (_ok_exec(0), _failed_exec(1)),  # execution for b: one failed
         ]
     )
@@ -262,7 +254,7 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     executor = _SeqExecutor(
         [
             (_failed_exec(0),),  # execution for 'a' fails
-            (_ok_exec(0), _noop_exec(1)),  # execution for 'b' succeeds
+            (_ok_exec(0), _ok_exec(1)),  # execution for 'b' succeeds
         ]
     )
     engine = Engine(reader=reader, executor=executor, validator=validator)

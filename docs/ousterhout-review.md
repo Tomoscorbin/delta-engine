@@ -471,6 +471,14 @@ restructuring is warranted. The pass surfaced one genuinely free win, two
 structural clean-ups worth batching into a future tidy-up, and one real
 prerequisite question (`NOOP`) that must be answered before a tempting change.
 
+> **Status (implemented):** Q1a (declare public API) and Q1b (delete `NOOP`,
+> split `ExecutionResult`) have since been actioned on `docs/ousterhout-stage-c`.
+> The `NOOP` question below was resolved by **deleting** it (Option B): the
+> diff-based design never produces an already-satisfied action, so `NOOP` had no
+> production meaning. `ExecutionResult` is now `ExecutionSucceeded |
+> ExecutionFailed`, `ActionStatus` and the `__post_init__` guard are gone. Q2 and
+> Q3 below remain recommendations only.
+
 #### Q1 — Result/outcome types: keep separate; declare the public surface; the `ExecutionResult` split is blocked on `NOOP`
 
 - **Do not merge `ReadResult` / `ValidationResult` / `ExecutionResult`** into one

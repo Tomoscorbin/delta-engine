@@ -2,7 +2,7 @@ import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
-from delta_engine.application.results import ActionStatus
+from delta_engine.application.results import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
@@ -93,8 +93,8 @@ def test_execute_maps_success_and_failure_without_leakage():
     # Then the success and failure are mapped with correct metadata and no leakage
     assert [r.action for r in results] == ["AddColumn", "DropColumn"]
     assert [r.action_index for r in results] == [0, 1]
-    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.FAILED]
-    assert results[0].failure is None
+    assert isinstance(results[0], ExecutionSucceeded)
+    assert isinstance(results[1], ExecutionFailed)
     assert results[1].failure is not None
 
 
@@ -124,7 +124,7 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
 
     # And the report covers only the attempted actions, ending at the failure
-    assert [r.status for r in results] == [ActionStatus.OK, ActionStatus.FAILED]
+    assert [type(r) for r in results] == [ExecutionSucceeded, ExecutionFailed]
     assert [r.action_index for r in results] == [0, 1]
 
 
