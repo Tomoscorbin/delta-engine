@@ -15,7 +15,6 @@ import logging
 from delta_engine.application.errors import (
     SyncFailedError,
 )
-from delta_engine.application.plan import plan_table
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
@@ -28,6 +27,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.plan.differ import diff_tables
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ class Engine:
                 qualified_name,
                 "present" if observed is not None else "absent",
             )
-            plan = plan_table(desired, observed)
+            plan = diff_tables(desired=desired, observed=observed)
             logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
             validation = validate_plan(desired, observed, plan)
             if validation.failed:
