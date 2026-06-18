@@ -17,7 +17,9 @@ def _patch_table_exists_for_local(monkeypatch):
         # Local Spark fallback for existence checks
         return self.spark.catalog.tableExists(f"{qualified_name.schema}.{qualified_name.name}")
 
-    monkeypatch.setattr(DatabricksReader, "_table_exists", _table_exists, raising=False)
+    # raising=True so a rename of _table_exists fails loudly here rather than
+    # silently leaving every e2e test running against the unpatched method.
+    monkeypatch.setattr(DatabricksReader, "_table_exists", _table_exists, raising=True)
 
 
 @pytest.fixture
@@ -288,7 +290,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
 
 
 def test_engine_isolates_failures_and_applies_successful_tables(
-    spark, monkeypatch, temp_schema, make_temp_table
+    spark, monkeypatch, temp_schema
 ):
     _patch_table_exists_for_local(monkeypatch)
 
@@ -297,13 +299,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(
     fq_ok = f"{TEST_CATALOG}.{temp_schema}.{ok}"
     fq_bad = f"{TEST_CATALOG}.{temp_schema}.{bad}"
 
-    # seed both tables
-    for _ in (fq_ok, fq_bad):
-        make_temp_table(
-            "seed_ignored",
-            "id INT NOT NULL, name STRING",
-            tblprops={"delta.columnMapping.mode": "name"},
-        )  # created and auto-dropped; we need specific names instead:
+    # seed both tables with specific names the registry will target
     spark.sql(
         f"CREATE TABLE {fq_ok} (id INT NOT NULL, name STRING)"
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
