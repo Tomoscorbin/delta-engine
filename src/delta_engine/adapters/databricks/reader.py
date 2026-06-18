@@ -8,9 +8,11 @@ from py4j.protocol import Py4JJavaError  # type: ignore[import]
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
-from delta_engine.adapters.databricks.sql.preview import error_preview
-from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
-from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
+from delta_engine.adapters.databricks.sql import (
+    backtick_qualified_name,
+    domain_type_from_spark,
+    error_preview,
+)
 from delta_engine.application.results import (
     CatalogState,
     ReadFailed,
@@ -101,13 +103,21 @@ class DatabricksReader:
         return TablePresent(table=observed)
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
-        """Return `True` if the table exists, else `False`."""
-        query = query_table_existence(qualified_name)
-        return bool(self.spark.sql(query).head(1))
+        """
+        Return `True` if the table exists, else `False`.
+
+        Uses the catalog's own existence check rather than a hand-rolled
+        information_schema query. Note: ``tableExists`` also reports ``True`` for
+        a session temporary view registered under this name; that is an unusual
+        collision for a three-part ``catalog.schema.table`` and, if it happened,
+        the subsequent read would surface as a ``ReadFailed`` rather than corrupt
+        state.
+        """
+        return self.spark.catalog.tableExists(str(qualified_name))
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return all catalog table properties as a read-only mapping."""
-        query = query_describe_detail(qualified_name)
+        query = f"DESCRIBE DETAIL {backtick_qualified_name(qualified_name)}"
         df = self.spark.sql(query)
         row = df.first()
         if not row:

@@ -10,12 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import singledispatch
 
-from delta_engine.adapters.databricks.sql import (
+from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
     backtick_qualified_name,
     quote_literal,
-    sql_type_for_data_type,
 )
+from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
