@@ -40,7 +40,10 @@ def _format_failure_detail(table_report: TableRunReport) -> list[str]:
     for failure in table_report.all_failures:
         lines.append(f"    {failure.format_line()}")
 
-    for result in table_report.execution_results:
+    # The surviving isinstance is structural: statement_preview lives on the
+    # ExecutionFailed result arm, not on ExecutionFailure, so it cannot be
+    # reached through execution.failures.
+    for result in table_report.execution.results:
         if isinstance(result, ExecutionFailed):
             lines.append(f"    Failed SQL preview (action {result.action_index}):")
             lines.append(f"        {result.statement_preview}")

@@ -19,6 +19,7 @@ from delta_engine.application.results import (
     ExecutionFailure,
     ExecutionResult,
     ExecutionSucceeded,
+    ExecutionSummary,
 )
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
@@ -37,17 +38,15 @@ class DatabricksExecutor:
         self.spark = spark
         self._compiler = compiler
 
-    def execute(
-        self, target: QualifiedName, plan: ActionPlan
-    ) -> tuple[ExecutionResult, ...]:
+    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
         """
-        Execute the plan's actions against ``target``, returning a per-action result.
+        Execute the plan's actions against ``target`` and summarize the outcome.
 
         Execution stops at the first failure: the actions form a dependency
         chain, and the engine is not transactional, so continuing past a failure
-        risks compounding a half-migrated table. The returned results cover the
-        actions attempted, ending at the one that failed; actions after it are
-        left unattempted rather than run against an inconsistent table.
+        risks compounding a half-migrated table. The summary covers the actions
+        attempted, ending at the one that failed; actions after it are left
+        unattempted rather than run against an inconsistent table.
         """
         statements = self._compiler(target, plan)
         results: list[ExecutionResult] = []
@@ -56,7 +55,7 @@ class DatabricksExecutor:
             results.append(result)
             if isinstance(result, ExecutionFailed):
                 break
-        return tuple(results)
+        return ExecutionSummary(tuple(results))
 
     def _run_statement(self, action, action_index: int, statement: str) -> ExecutionResult:
         """Run a single compiled statement and map its outcome to an `ExecutionResult`."""

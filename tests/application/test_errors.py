@@ -2,14 +2,14 @@ from datetime import UTC, datetime
 
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.results import (
+    CatalogState,
     ExecutionFailed,
     ExecutionFailure,
-    ExecutionResult,
+    ExecutionSummary,
     ReadFailed,
     ReadFailure,
-    ReadResult,
-    ReadSucceeded,
     SyncReport,
+    TableAbsent,
     TableRunReport,
     ValidationFailure,
     ValidationResult,
@@ -17,13 +17,14 @@ from delta_engine.application.results import (
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _NO_VALIDATION_FAILURES = ValidationResult()
+_NO_EXECUTION = ExecutionSummary()
 
 
 def _table_report(
     *,
-    read: ReadResult,
+    read: CatalogState,
     validation: ValidationResult = _NO_VALIDATION_FAILURES,
-    execution_results: tuple[ExecutionResult, ...] = (),
+    execution: ExecutionSummary = _NO_EXECUTION,
 ) -> TableRunReport:
     return TableRunReport(
         fully_qualified_name="cat.sch.tbl",
@@ -31,7 +32,7 @@ def _table_report(
         ended_at=_AT,
         read=read,
         validation=validation,
-        execution_results=execution_results,
+        execution=execution,
     )
 
 
@@ -67,7 +68,7 @@ def test_message_renders_read_failure_detail():
 def test_message_renders_validation_failure_detail():
     # Given a table whose validation phase failed
     report = _table_report(
-        read=ReadSucceeded(observed=None),
+        read=TableAbsent(),
         validation=ValidationResult(
             failures=(ValidationFailure("DisallowPartitioningChange", "cannot repartition"),)
         ),
@@ -89,7 +90,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
         statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         failure=ExecutionFailure(action_index=2, exception_type="SparkException", message="boom"),
     )
-    report = _table_report(read=ReadSucceeded(observed=None), execution_results=(failed_result,))
+    report = _table_report(read=TableAbsent(), execution=ExecutionSummary((failed_result,)))
 
     # When building the error message
     message = _message_for(report)

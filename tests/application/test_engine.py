@@ -5,15 +5,17 @@ from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
+    CatalogState,
     ExecutionFailed,
     ExecutionFailure,
     ExecutionResult,
     ExecutionSucceeded,
+    ExecutionSummary,
     ReadFailed,
     ReadFailure,
-    ReadResult,
-    ReadSucceeded,
     SyncReport,
+    TableAbsent,
+    TablePresent,
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
@@ -45,11 +47,11 @@ def _spec_adding_not_null(fqn: str) -> DeltaTable:
     )
 
 
-def _existing_id_table(fqn: str) -> ReadSucceeded:
-    """Build a successful read of an existing table with a single 'id' column."""
+def _existing_id_table(fqn: str) -> TablePresent:
+    """Build the present-state read of an existing table with a single 'id' column."""
     catalog, schema, name = fqn.split(".")
-    return ReadSucceeded(
-        observed=ObservedTable(
+    return TablePresent(
+        table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String()),),
         )
@@ -57,21 +59,19 @@ def _existing_id_table(fqn: str) -> ReadSucceeded:
 
 
 class _FakeReader:
-    def __init__(self, mapping: dict[str, ReadResult]) -> None:
+    def __init__(self, mapping: dict[str, CatalogState]) -> None:
         self.mapping = mapping
 
-    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
-        return self.mapping.get(str(qualified_name), ReadSucceeded(observed=None))
+    def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
+        return self.mapping.get(str(qualified_name), TableAbsent())
 
 
 class _FakeExecutor:
     def __init__(self, results: tuple[ExecutionResult, ...]) -> None:
         self.results = results
 
-    def execute(
-        self, target: QualifiedName, plan: ActionPlan
-    ) -> tuple[ExecutionResult, ...]:
-        return self.results
+    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+        return ExecutionSummary(self.results)
 
 
 def _ok_exec(idx: int = 0) -> ExecutionResult:
@@ -93,10 +93,8 @@ class _SeqExecutor:
     def __init__(self, per_call_results: list[tuple[ExecutionResult, ...]]) -> None:
         self._seq = list(per_call_results)
 
-    def execute(
-        self, target: QualifiedName, plan: ActionPlan
-    ) -> tuple[ExecutionResult, ...]:
-        return self._seq.pop(0)
+    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+        return ExecutionSummary(self._seq.pop(0))
 
 
 # ---------- Tests
@@ -137,7 +135,7 @@ def test_raises_when_execution_contains_any_failure():
     # Given a table that reads & validates successfully, but execution has a failed action
     reg = Registry()
     reg.register(_spec("c.s.exec_fail"))
-    reader = _FakeReader({"c.s.exec_fail": ReadSucceeded(observed=None)})
+    reader = _FakeReader({"c.s.exec_fail": TableAbsent()})
     executor = _FakeExecutor(results=(_ok_exec(0), _failed_exec(1), _ok_exec(2)))
 
     # When syncing
@@ -155,8 +153,8 @@ def test_returns_report_when_all_tables_succeed():
     )  # registry will yield in name-sorted order
     reader = _FakeReader(
         {
-            "c.a.users": ReadSucceeded(observed=None),
-            "c.b.orders": ReadSucceeded(observed=None),
+            "c.a.users": TableAbsent(),
+            "c.b.orders": TableAbsent(),
         }
     )
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))
@@ -181,7 +179,7 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
     reader = _FakeReader(
         {
             "c.s.a": ReadFailed(ReadFailure("IOError", "cannot read")),
-            "c.s.b": ReadSucceeded(observed=None),
+            "c.s.b": TableAbsent(),
         }
     )
     executor = _FakeExecutor(results=(_ok_exec(0),))  # irrelevant for a; used for b
@@ -204,7 +202,7 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     reader = _FakeReader(
         {
             "c.s.a": _existing_id_table("c.s.a"),  # existing -> add NOT NULL is rejected
-            "c.s.b": ReadSucceeded(observed=None),  # absent -> clean create
+            "c.s.b": TableAbsent(),  # absent -> clean create
         }
     )
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))  # used only for b
@@ -217,9 +215,9 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     # Then the report shows a VALIDATION_FAILED and a SUCCESS
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.VALIDATION_FAILED
-    assert tr_a.execution_results == ()  # a was not executed
+    assert tr_a.execution.results == ()  # a was not executed
     assert tr_b.status is TableRunStatus.SUCCESS
-    assert tr_b.execution_results != ()  # b was executed
+    assert tr_b.execution.results != ()  # b was executed
 
 
 def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
@@ -228,8 +226,8 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadSucceeded(observed=None),
-            "c.s.b": ReadSucceeded(observed=None),
+            "c.s.a": TableAbsent(),
+            "c.s.b": TableAbsent(),
         }
     )
     executor = _SeqExecutor(
@@ -255,8 +253,8 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     reg.register(_spec("c.s.a"), _spec("c.s.b"))
     reader = _FakeReader(
         {
-            "c.s.a": ReadSucceeded(observed=None),
-            "c.s.b": ReadSucceeded(observed=None),
+            "c.s.a": TableAbsent(),
+            "c.s.b": TableAbsent(),
         }
     )
     executor = _SeqExecutor(
@@ -275,4 +273,4 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.EXECUTION_FAILED
     assert tr_b.status is TableRunStatus.SUCCESS
-    assert tr_b.execution_results != ()  # proves 'b' actually executed
+    assert tr_b.execution.results != ()  # proves 'b' actually executed

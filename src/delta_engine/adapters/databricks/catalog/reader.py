@@ -11,7 +11,13 @@ from pyspark.sql.catalog import Column as SparkColumn
 from delta_engine.adapters.databricks.sql.preview import error_preview
 from delta_engine.adapters.databricks.sql.read import query_describe_detail, query_table_existence
 from delta_engine.adapters.databricks.sql.types import domain_type_from_spark
-from delta_engine.application.results import ReadFailed, ReadFailure, ReadResult, ReadSucceeded
+from delta_engine.application.results import (
+    CatalogState,
+    ReadFailed,
+    ReadFailure,
+    TableAbsent,
+    TablePresent,
+)
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 
 
@@ -55,19 +61,19 @@ class DatabricksReader:
         """Initialize the reader with a `SparkSession`."""
         self.spark = spark
 
-    def fetch_state(self, qualified_name: QualifiedName) -> ReadResult:
+    def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """
-        Fetch observed table schema or absence for a qualified name.
+        Fetch the current state of a table: present, absent, or unreadable.
 
-        Returns ``ReadSucceeded`` carrying the current columns, properties, and
-        table comment; ``ReadSucceeded`` with ``observed=None`` when the table
-        doesn't exist; or ``ReadFailed`` if catalog access raised an exception.
+        Returns ``TablePresent`` carrying the current columns, properties, and
+        table comment; ``TableAbsent`` when the table doesn't exist; or
+        ``ReadFailed`` if catalog access raised an exception.
 
         Every failure mode is contained: anything that goes wrong reading this
         table -- a failing existence probe, an unsupported column type, a Spark
         error mid-read -- becomes a ``ReadFailed`` for this table rather than an
         exception that aborts the whole sync. The ``CatalogStateReader`` contract
-        promises a ``ReadResult``, so the boundary must be total.
+        promises a ``CatalogState``, so the boundary must be total.
         """
         try:
             return self._read(qualified_name)
@@ -75,10 +81,10 @@ class DatabricksReader:
             failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
             return ReadFailed(failure=failure)
 
-    def _read(self, qualified_name: QualifiedName) -> ReadResult:
+    def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""
         if not self._table_exists(qualified_name):
-            return ReadSucceeded(observed=None)
+            return TableAbsent()
 
         catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
         columns = tuple(_to_domain_column(c) for c in catalog_columns)
@@ -92,7 +98,7 @@ class DatabricksReader:
             properties=self._fetch_properties(qualified_name),
             partitioned_by=partition_columns,
         )
-        return ReadSucceeded(observed=observed)
+        return TablePresent(table=observed)
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
         """Return `True` if the table exists, else `False`."""

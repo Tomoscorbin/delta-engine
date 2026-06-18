@@ -19,10 +19,10 @@ from delta_engine.application.plan import plan_table
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
-    ExecutionFailed,
-    ExecutionResult,
+    ExecutionSummary,
     ReadFailed,
     SyncReport,
+    TablePresent,
     TableRunReport,
     ValidationResult,
 )
@@ -107,23 +107,23 @@ class Engine:
         logger.info("Processing table %s", fully_qualified_name)
 
         validation = ValidationResult()
-        executions: tuple[ExecutionResult, ...] = ()
+        execution = ExecutionSummary()
 
-        read_result = self.reader.fetch_state(desired.qualified_name)
-        if isinstance(read_result, ReadFailed):
+        catalog_state = self.reader.fetch_state(desired.qualified_name)
+        if isinstance(catalog_state, ReadFailed):
             logger.error(
                 "Read failed for %s: %s - %s",
                 fully_qualified_name,
-                read_result.failure.exception_type,
-                read_result.failure.message,
+                catalog_state.failure.exception_type,
+                catalog_state.failure.message,
             )
         else:
+            observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
             logger.info(
                 "Read state for %s: %s",
                 fully_qualified_name,
-                "present" if read_result.observed is not None else "absent",
+                "present" if observed is not None else "absent",
             )
-            observed = read_result.observed
             plan = plan_table(desired, observed)
             logger.info("Planned %d action(s) for %s", len(plan), fully_qualified_name)
             validation = validate_plan(desired, observed, plan)
@@ -135,20 +135,19 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", fully_qualified_name)
-                executions = self.executor.execute(desired.qualified_name, plan)
-                failed_count = sum(1 for e in executions if isinstance(e, ExecutionFailed))
+                execution = self.executor.execute(desired.qualified_name, plan)
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",
-                    len(executions),
+                    len(execution.results),
                     fully_qualified_name,
-                    failed_count,
+                    execution.failed_count,
                 )
 
         return TableRunReport(
             fully_qualified_name=fully_qualified_name,
             started_at=started,
             ended_at=_utc_now(),
-            read=read_result,
+            read=catalog_state,
             validation=validation,
-            execution_results=executions,
+            execution=execution,
         )

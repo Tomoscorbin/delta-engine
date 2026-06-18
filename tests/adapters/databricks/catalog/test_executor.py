@@ -85,11 +85,12 @@ def test_execute_maps_success_and_failure_without_leakage():
         return ["SELECT 1", "SELECT * FROM __nope__"]  # OK, then FAIL
 
     # When we execute
-    results = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(
+    summary = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(
         _dummy_target(), plan
     )
 
     # Then the success and failure are mapped with correct metadata and no leakage
+    results = summary.results
     assert [r.action for r in results] == ["AddColumn", "DropColumn"]
     assert [r.action_index for r in results] == [0, 1]
     assert isinstance(results[0], ExecutionSucceeded)
@@ -116,25 +117,27 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
         ]
 
     # When we execute
-    results = DatabricksExecutor(spark, compiler=_fake_compiler).execute(_dummy_target(), plan)
+    summary = DatabricksExecutor(spark, compiler=_fake_compiler).execute(_dummy_target(), plan)
 
     # Then execution stops at the failure: the third statement never runs
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
 
     # And the report covers only the attempted actions, ending at the failure
+    results = summary.results
     assert [type(r) for r in results] == [ExecutionSucceeded, ExecutionFailed]
     assert [r.action_index for r in results] == [0, 1]
 
 
-def test_execute_returns_empty_tuple_for_empty_plan():
+def test_execute_returns_empty_summary_for_empty_plan():
     # Given an empty plan
     plan = ActionPlan(actions=())
 
     # When we execute the plan
-    results = DatabricksExecutor(_FakeSpark()).execute(_dummy_target(), plan)
+    summary = DatabricksExecutor(_FakeSpark()).execute(_dummy_target(), plan)
 
-    # Then no results are returned
-    assert results == ()
+    # Then nothing ran and the summary is empty and non-failing
+    assert summary.results == ()
+    assert summary.failed is False
 
 
 def test_createtable_action_creates_table_with_correct_schema(spark, test_table):

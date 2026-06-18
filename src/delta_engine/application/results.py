@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -80,20 +80,19 @@ class ExecutionFailure(Failure):
         )
 
 
-# ---------- ReadResult ----------
+# ---------- CatalogState ----------
 
 
 @dataclass(frozen=True, slots=True)
-class ReadSucceeded:
-    """
-    A catalog read that completed without error.
+class TablePresent:
+    """The catalog holds a live table; ``table`` is its observed schema."""
 
-    ``observed`` carries the table's current schema, or ``None`` when the table
-    does not exist. Both outcomes are successful reads: the engine plans against
-    either, treating a missing table as "create it".
-    """
+    table: ObservedTable
 
-    observed: ObservedTable | None
+
+@dataclass(frozen=True, slots=True)
+class TableAbsent:
+    """The catalog confirmed the table does not exist; the engine will create it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,9 +102,9 @@ class ReadFailed:
     failure: ReadFailure
 
 
-# A read either succeeds (with or without an existing table) or fails. The split
-# makes the "succeeded but errored" state unrepresentable.
-ReadResult = ReadSucceeded | ReadFailed
+# The three answers a catalog can give about a table: it is there, it is not
+# there, or it could not be read.
+CatalogState = TablePresent | TableAbsent | ReadFailed
 
 
 # ---------- ValidationResult ----------
@@ -151,6 +150,37 @@ class ExecutionFailed:
 ExecutionResult = ExecutionSucceeded | ExecutionFailed
 
 
+@dataclass(frozen=True, slots=True)
+class ExecutionSummary:
+    """
+    The outcome of running a whole action plan.
+
+    Mirrors :class:`ValidationResult`: a frozen container over the phase's raw
+    results that answers ``failed`` and exposes its ``failures``. It owns the
+    single pass that separates failed actions from successful ones, so callers
+    read a property instead of re-deriving the split with ``isinstance``.
+    """
+
+    results: tuple[ExecutionResult, ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        """True when any action in the plan failed."""
+        return any(isinstance(result, ExecutionFailed) for result in self.results)
+
+    @property
+    def failures(self) -> tuple[ExecutionFailure, ...]:
+        """The failure detail from each failed action, in execution order."""
+        return tuple(
+            result.failure for result in self.results if isinstance(result, ExecutionFailed)
+        )
+
+    @property
+    def failed_count(self) -> int:
+        """How many of the plan's actions failed."""
+        return len(self.failures)
+
+
 # ---------- Reports ----------
 
 
@@ -161,14 +191,9 @@ class TableRunReport:
     fully_qualified_name: str
     started_at: datetime
     ended_at: datetime
-    read: ReadResult
+    read: CatalogState
     validation: ValidationResult
-    execution_results: tuple[ExecutionResult, ...] = ()
-
-    @property
-    def _any_action_failed(self) -> bool:
-        """True if any executed action failed."""
-        return any(isinstance(e, ExecutionFailed) for e in self.execution_results)
+    execution: ExecutionSummary = field(default_factory=ExecutionSummary)
 
     @property
     def status(self) -> TableRunStatus:
@@ -177,7 +202,7 @@ class TableRunReport:
             return TableRunStatus.READ_FAILED
         if self.validation.failed:
             return TableRunStatus.VALIDATION_FAILED
-        if self._any_action_failed:
+        if self.execution.failed:
             return TableRunStatus.EXECUTION_FAILED
         return TableRunStatus.SUCCESS
 
@@ -187,19 +212,13 @@ class TableRunReport:
         return self.status is not TableRunStatus.SUCCESS
 
     @property
-    def action_failures(self) -> tuple[ExecutionFailure, ...]:
-        """Failures captured from action execution results only."""
-        return tuple(e.failure for e in self.execution_results if isinstance(e, ExecutionFailed))
-
-    @property
     def all_failures(self) -> tuple[Failure, ...]:
         """All failures for this table (read, validation, execution)."""
         out: list[Failure] = []
         if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
-        if self.validation.failed:
-            out.extend(self.validation.failures)
-        out.extend(self.action_failures)
+        out.extend(self.validation.failures)
+        out.extend(self.execution.failures)
         return tuple(out)
 
 
