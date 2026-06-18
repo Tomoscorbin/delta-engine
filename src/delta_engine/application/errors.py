@@ -35,7 +35,7 @@ def _format_failure_detail(table_report: TableRunReport) -> list[str]:
     Covers the table headline, each top-level failure (read, validation,
     execution), and SQL previews for any failed actions.
     """
-    lines = [f"\n❌ {table_report.fully_qualified_name} [{table_report.status.value}]"]
+    lines = [f"\n❌ {table_report.qualified_name} [{table_report.status.value}]"]
 
     for failure in table_report.all_failures:
         lines.append(f"    {failure.format_line()}")

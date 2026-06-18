@@ -70,7 +70,7 @@ class _FakeExecutor:
     def __init__(self, results: tuple[ExecutionResult, ...]) -> None:
         self.results = results
 
-    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
         return ExecutionSummary(self.results)
 
 
@@ -93,7 +93,7 @@ class _SeqExecutor:
     def __init__(self, per_call_results: list[tuple[ExecutionResult, ...]]) -> None:
         self._seq = list(per_call_results)
 
-    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
         return ExecutionSummary(self._seq.pop(0))
 
 

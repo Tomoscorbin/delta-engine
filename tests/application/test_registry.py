@@ -18,8 +18,8 @@ def _tbl(fqn: str, **kwargs) -> DeltaTable:
     return DeltaTable(catalog=catalog, schema=schema, name=name, **defaults)
 
 
-def test_register_rejects_duplicate_fqn_within_same_call():
-    # Given an empty registry and two specs with same FQN
+def test_register_rejects_duplicate_qualified_name_within_same_call():
+    # Given an empty registry and two specs with the same qualified name
     reg = Registry()
     t1 = _tbl("cat.a.users")
     t2 = _tbl("cat.a.users")  # duplicate in same call
@@ -29,18 +29,18 @@ def test_register_rejects_duplicate_fqn_within_same_call():
         reg.register(t1, t2)
 
 
-def test_register_rejects_duplicate_fqn_across_calls():
+def test_register_rejects_duplicate_qualified_name_across_calls():
     # Given a registry with one table already registered
     reg = Registry()
     reg.register(_tbl("cat.a.users"))
 
-    # When attempting to register the same FQN again (separate call)
+    # When attempting to register the same qualified name again (separate call)
     # Then a clear duplicate error is raised
     with pytest.raises(ValueError):
         reg.register(_tbl("cat.a.users"))
 
 
-def test_iteration_is_sorted_by_fully_qualified_name():
+def test_iteration_is_sorted_by_qualified_name():
     # Given tables registered out of order
     reg = Registry()
     reg.register(

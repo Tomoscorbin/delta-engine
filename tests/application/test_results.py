@@ -15,13 +15,13 @@ from delta_engine.application.results import (
     ValidationFailure,
     ValidationResult,
 )
+from delta_engine.domain.model import QualifiedName
 
 # ---------- test fakes / builders
 
 
 class _FakeObservedTable:
-    def __init__(self, name="dummy", partitioned_by=()):
-        self.fully_qualified_name = name  # not used here, kept for parity
+    def __init__(self, partitioned_by=()):
         self.partitioned_by = partitioned_by
 
 
@@ -179,7 +179,7 @@ def test_table_status_success_when_all_actions_succeed():
 
     # When aggregating
     report = TableRunReport(
-        fully_qualified_name="cat.schema.tbl",
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
         started_at=_t0(),
         ended_at=_t1(),
         read=read,
@@ -196,7 +196,7 @@ def test_table_status_success_when_all_actions_succeed():
 def test_sync_report_any_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
-        fully_qualified_name="a",
+        qualified_name=QualifiedName("cat", "s", "a"),
         started_at=_t0(),
         ended_at=_t1(),
         read=TablePresent(table=_FakeObservedTable()),
@@ -204,7 +204,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
-        fully_qualified_name="b",
+        qualified_name=QualifiedName("cat", "s", "b"),
         started_at=_t0(),
         ended_at=_t1(),
         read=TablePresent(table=_FakeObservedTable()),
@@ -221,8 +221,10 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
+    ok_name = QualifiedName("cat", "s", "x")
+    failed_name = QualifiedName("cat", "s", "y")
     t_ok = TableRunReport(
-        fully_qualified_name="x",
+        qualified_name=ok_name,
         started_at=_t0(),
         ended_at=_t1(),
         read=TablePresent(table=_FakeObservedTable()),
@@ -230,7 +232,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
-        fully_qualified_name="y",
+        qualified_name=failed_name,
         started_at=_t0(),
         ended_at=_t1(),
         read=TableAbsent(),
@@ -241,9 +243,10 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     # When
     sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
 
-    # Then only the failed table appears, with its failures
+    # Then only the failed table appears, keyed by its QualifiedName, with its failures
     mapping = sr.failures_by_table
-    assert list(mapping.keys()) == ["y"]
+    assert list(mapping.keys()) == [failed_name]
     assert all(
-        isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure) for f in mapping["y"]
+        isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure)
+        for f in mapping[failed_name]
     )

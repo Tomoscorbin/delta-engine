@@ -103,17 +103,17 @@ class Engine:
         produced.
         """
         started = _utc_now()
-        fully_qualified_name = str(desired.qualified_name)
-        logger.info("Processing table %s", fully_qualified_name)
+        qualified_name = desired.qualified_name
+        logger.info("Processing table %s", qualified_name)
 
         validation = ValidationResult()
         execution = ExecutionSummary()
 
-        catalog_state = self.reader.fetch_state(desired.qualified_name)
+        catalog_state = self.reader.fetch_state(qualified_name)
         if isinstance(catalog_state, ReadFailed):
             logger.error(
                 "Read failed for %s: %s - %s",
-                fully_qualified_name,
+                qualified_name,
                 catalog_state.failure.exception_type,
                 catalog_state.failure.message,
             )
@@ -121,30 +121,30 @@ class Engine:
             observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
             logger.info(
                 "Read state for %s: %s",
-                fully_qualified_name,
+                qualified_name,
                 "present" if observed is not None else "absent",
             )
             plan = plan_table(desired, observed)
-            logger.info("Planned %d action(s) for %s", len(plan), fully_qualified_name)
+            logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
             validation = validate_plan(desired, observed, plan)
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
-                    fully_qualified_name,
+                    qualified_name,
                     len(validation.failures),
                 )
             else:
-                logger.info("Validation passed for %s", fully_qualified_name)
-                execution = self.executor.execute(desired.qualified_name, plan)
+                logger.info("Validation passed for %s", qualified_name)
+                execution = self.executor.execute(qualified_name, plan)
                 logger.info(
                     "Executed %d action(s) for %s (%d failed)",
                     len(execution.results),
-                    fully_qualified_name,
+                    qualified_name,
                     execution.failed_count,
                 )
 
         return TableRunReport(
-            fully_qualified_name=fully_qualified_name,
+            qualified_name=qualified_name,
             started_at=started,
             ended_at=_utc_now(),
             read=catalog_state,

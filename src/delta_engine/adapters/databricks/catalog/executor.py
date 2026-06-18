@@ -38,9 +38,9 @@ class DatabricksExecutor:
         self.spark = spark
         self._compiler = compiler
 
-    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
         """
-        Execute the plan's actions against ``target`` and summarize the outcome.
+        Execute the plan's actions against ``qualified_name`` and summarize the outcome.
 
         Execution stops at the first failure: the actions form a dependency
         chain, and the engine is not transactional, so continuing past a failure
@@ -48,7 +48,7 @@ class DatabricksExecutor:
         attempted, ending at the one that failed; actions after it are left
         unattempted rather than run against an inconsistent table.
         """
-        statements = self._compiler(target, plan)
+        statements = self._compiler(qualified_name, plan)
         results: list[ExecutionResult] = []
         for action_index, statement in enumerate(statements):
             result = self._run_statement(plan[action_index], action_index, statement)

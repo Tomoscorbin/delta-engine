@@ -57,7 +57,7 @@ def _get_field(spark, full_table_name: str, column_name: str):
     return next(f for f in spark.table(full_table_name).schema.fields if f.name == column_name)
 
 
-def _dummy_target() -> QualifiedName:
+def _dummy_qualified_name() -> QualifiedName:
     return QualifiedName("cat", "sch", "tbl")
 
 
@@ -86,7 +86,7 @@ def test_execute_maps_success_and_failure_without_leakage():
 
     # When we execute
     summary = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(
-        _dummy_target(), plan
+        _dummy_qualified_name(), plan
     )
 
     # Then the success and failure are mapped with correct metadata and no leakage
@@ -117,7 +117,8 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
         ]
 
     # When we execute
-    summary = DatabricksExecutor(spark, compiler=_fake_compiler).execute(_dummy_target(), plan)
+    executor = DatabricksExecutor(spark, compiler=_fake_compiler)
+    summary = executor.execute(_dummy_qualified_name(), plan)
 
     # Then execution stops at the failure: the third statement never runs
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
@@ -133,7 +134,7 @@ def test_execute_returns_empty_summary_for_empty_plan():
     plan = ActionPlan(actions=())
 
     # When we execute the plan
-    summary = DatabricksExecutor(_FakeSpark()).execute(_dummy_target(), plan)
+    summary = DatabricksExecutor(_FakeSpark()).execute(_dummy_qualified_name(), plan)
 
     # Then nothing ran and the summary is empty and non-failing
     assert summary.results == ()
