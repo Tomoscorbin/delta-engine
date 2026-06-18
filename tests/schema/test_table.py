@@ -1,8 +1,8 @@
 import pytest
 
-from delta_engine.adapters.schema import Column, DeltaTable, Integer, String
-from delta_engine.adapters.schema.delta.properties import Property
 from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.schema import Column, DeltaTable, Integer, String
+from delta_engine.schema.properties import Property
 
 
 class _Column:

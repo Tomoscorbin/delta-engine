@@ -1,15 +1,18 @@
-from delta_engine.adapters.schema.delta.table import DeltaTable
-from delta_engine.adapters.schema.types import (
+from delta_engine.domain.model import (
+    Array,
     Boolean,
+    Column,
     Date,
+    Decimal,
     Double,
     Float,
     Integer,
     Long,
+    Map,
     String,
     Timestamp,
 )
-from delta_engine.domain.model import Array, Column, Decimal, Map
+from delta_engine.schema.table import DeltaTable
 
 __all__ = [
     "Array",

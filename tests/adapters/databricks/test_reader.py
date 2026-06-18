@@ -6,7 +6,7 @@ import pyspark.sql.types as T
 from pyspark.sql.utils import AnalysisException
 import pytest
 
-from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
+from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 

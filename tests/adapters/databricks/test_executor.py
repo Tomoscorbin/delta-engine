@@ -1,7 +1,7 @@
 import pyspark.sql.types as T
 import pytest
 
-from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
+from delta_engine.adapters.databricks.executor import DatabricksExecutor
 from delta_engine.application.results import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
