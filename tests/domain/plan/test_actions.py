@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
@@ -16,16 +16,13 @@ from delta_engine.domain.plan.actions import (
 
 
 def _column(name: str) -> Column:
-    return Column(name=name, data_type="string", nullable=True, comment=None)
+    return Column(name=name, data_type=Integer())
 
 
 def _create_table_action() -> CreateTable:
     table = DesiredTable(
         qualified_name=QualifiedName("c", "s", "t"),
         columns=(_column("id"),),
-        comment=None,
-        properties={},
-        partitioned_by=(),
     )
     return CreateTable(table=table)
 
