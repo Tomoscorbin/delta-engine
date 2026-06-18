@@ -566,7 +566,7 @@ prerequisite question (`NOOP`) that must be answered before a tempting change.
 - **Resolution (PR #44): dissolved `PlanValidator` into a module function**
   `validate_plan(desired, observed, plan, rules=DEFAULT_RULES) -> ValidationResult`.
   The engine now calls it directly, exactly as it calls the planning phase
-  (`diff_tables`) — two pure phases, one shape. The validator injection is gone
+  (`compute_plan`) — two pure phases, one shape. The validator injection is gone
   from `Engine.__init__` (which
   now takes only its two genuine ports, reader and executor), the engine tests
   drive validation through the *real* default rules, and `_FakeValidator` is

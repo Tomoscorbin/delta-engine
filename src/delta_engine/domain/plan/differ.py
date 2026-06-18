@@ -1,11 +1,11 @@
 """
 Compute the actions required to reconcile a table to its desired schema.
 
-`diff_tables` is the single public entry point: given the desired definition and
+`compute_plan` is the single public entry point: given the desired definition and
 the currently observed one (or ``None`` when the table is missing), it returns
 the `ActionPlan` that closes the gap. The per-dimension diffs (columns,
 properties, table comment) are private helpers — they exist only to keep
-`diff_tables` readable and have no meaning outside it.
+`compute_plan` readable and have no meaning outside it.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def diff_tables(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
+def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
     Compute the actions required to reach the desired schema.
 

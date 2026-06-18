@@ -27,7 +27,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.differ import diff_tables
+from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ class Engine:
                 qualified_name,
                 "present" if observed is not None else "absent",
             )
-            plan = diff_tables(desired=desired, observed=observed)
+            plan = compute_plan(desired=desired, observed=observed)
             logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
             validation = validate_plan(desired, observed, plan)
             if validation.failed:
