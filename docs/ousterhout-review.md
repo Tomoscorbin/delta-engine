@@ -644,9 +644,18 @@ hexagonal layering just to import the basics.
   crisp / import-cycle risk — so it's flagged as the logical next step, not an
   auto-apply. **Recommend deciding this explicitly.**
 
-**Deliberately left as-is** (churn not earned): `domain/plan/` and
-`domain/services/` single-file folders (meaningful DDD boundaries; `plan/`
-re-exports a clean surface); `adapters/schema/delta/` table/properties split
+**Superseded — `domain/services/` dissolved into `domain/plan/`.** This was
+originally left as-is ("meaningful DDD boundaries"), but a later review found
+`services/` to be a non-name folder with an empty `__init__` wrapping a single
+file (`differ.py`). Since the differ *produces* an `ActionPlan` and changes
+together with `actions.py`, `differ.py` was moved into `domain/plan/`, which now
+earns its package status by holding two cohesive files (`actions.py` defines the
+change vocabulary; `differ.py` computes it). `plan/__init__` keeps exporting only
+the type surface; callers reach the differ via `domain.plan.differ`. `model/`
+was reviewed and deliberately left intact (its four files change on independent
+axes; no merges).
+
+**Deliberately left as-is** (churn not earned): `adapters/schema/delta/` table/properties split
 (distinct axes of change); `results.py` at 228 lines (one tightly-coupled concept
 — splitting forces mutual imports); `log_config.py` at the package root (least-bad
 home for a cross-cutting stdlib helper; revisit if a second adapter lands);

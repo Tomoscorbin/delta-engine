@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.services.differ import diff_tables
+from delta_engine.domain.plan.differ import diff_tables
 
 
 def plan_table(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
