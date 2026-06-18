@@ -77,22 +77,17 @@ class FakeSparkForFetchState:
     """
     Spark fake for fetch_state().
 
-      catalog.tableExists() -> existence probe (driven by `exists` / `exists_exc`)
+      catalog.tableExists() -> existence probe (configured on the FakeCatalog)
       sql() -> DESCRIBE DETAIL (returns rows or raises)
     """
 
     def __init__(
         self,
         *,
-        exists: bool,
         catalog: FakeCatalog,
         describe_rows=None,
         describe_exc: Exception | None = None,
-        exists_exc: Exception | None = None,
     ):
-        # Existence is answered by the catalog now; forward the probe outcome onto it.
-        catalog._exists = exists
-        catalog._exists_exc = exists_exc
         self._catalog = catalog
         self._describe_rows = describe_rows
         self._describe_exc = describe_exc
@@ -173,7 +168,7 @@ def test_columns_maps_name_nullability_and_comment(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -197,7 +192,7 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -221,7 +216,7 @@ def test_partition_columns_ignores_missing_or_false_flags():
             ]
         }
     )
-    spark = FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -294,7 +289,7 @@ def test_fetch_table_comment_returns_description_or_empty(desc_value, expected):
 
 def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
     # Given a reader whose existence probe returns empty
-    reader = DatabricksReader(FakeSparkForFetchState(exists=False, catalog=FakeCatalog()))
+    reader = DatabricksReader(FakeSparkForFetchState(catalog=FakeCatalog(exists=False)))
 
     # When we fetch state
     result = reader.fetch_state(qn)
@@ -329,7 +324,7 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     ]
 
     reader = DatabricksReader(
-        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=describe_rows),
+        FakeSparkForFetchState(catalog=catalog, describe_rows=describe_rows),
     )
 
     # When we fetch state
@@ -357,7 +352,7 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
         table_comments={fq: ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[]),
+        FakeSparkForFetchState(catalog=catalog, describe_rows=[]),
     )
 
     # When we fetch state
@@ -376,7 +371,7 @@ def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
     catalog = FakeCatalog(columns_by_table={fq: []}, table_comments={fq: ""})
     reader = DatabricksReader(
         FakeSparkForFetchState(
-            exists=True, catalog=catalog, describe_exc=AnalysisException("kaboom")
+            catalog=catalog, describe_exc=AnalysisException("kaboom")
         )
     )
 
@@ -393,9 +388,7 @@ def test_fetch_state_returns_failed_when_existence_probe_raises():
     qn = QualifiedName("c", "s", "missing_ns")
     reader = DatabricksReader(
         FakeSparkForFetchState(
-            exists=True,
-            catalog=FakeCatalog(),
-            exists_exc=AnalysisException("namespace not found"),
+            catalog=FakeCatalog(exists_exc=AnalysisException("namespace not found")),
         )
     )
 
@@ -415,7 +408,7 @@ def test_fetch_state_returns_failed_when_column_type_is_unsupported():
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
     )
 
     # When we fetch state
@@ -439,7 +432,7 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(exists=True, catalog=catalog, describe_rows=[{"properties": {}}])
+        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
     )
 
     # When we fetch state

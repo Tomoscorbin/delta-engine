@@ -5,11 +5,6 @@ from delta_engine.schema import Column, DeltaTable, Integer, String
 from delta_engine.schema.properties import Property
 
 
-class _Column:
-    def __init__(self, name: str):
-        self.name = name
-
-
 def test_user_overrides_take_precedence_over_defaults():
     # Given default properties include deletion vectors=true, column mapping=name
     user_properties = {
@@ -19,7 +14,7 @@ def test_user_overrides_take_precedence_over_defaults():
         catalog="coredev",
         schema="medallia",
         name="responses",
-        columns=[_Column("id")],
+        columns=[Column("id", Integer())],
         properties=user_properties,
     )
 
@@ -37,7 +32,7 @@ def test_defaults_are_applied_when_no_user_properties_given():
         catalog="coredev",
         schema="medallia",
         name="responses",
-        columns=[_Column("id")],
+        columns=[Column("id", Integer())],
     )
 
     # When computing effective properties
@@ -65,7 +60,7 @@ def test_rejects_unknown_table_property_keys(bad_keys):
             catalog="coredev",
             schema="medallia",
             name="responses",
-            columns=[_Column("id")],
+            columns=[Column("id", Integer())],
             properties=user_properties,
         )
 
@@ -82,7 +77,7 @@ def test_accepts_only_enum_property_keys():
         catalog="coredev",
         schema="medallia",
         name="responses",
-        columns=[_Column("id")],
+        columns=[Column("id", Integer())],
         properties=user_properties,
     )
 
