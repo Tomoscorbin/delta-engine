@@ -83,6 +83,26 @@ def test_message_renders_validation_failure_detail():
     assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 
+def test_message_renders_every_validation_failure_when_a_table_breaks_several_rules():
+    # Given a table whose plan tripped two rules at once
+    report = _table_report(
+        read=TableAbsent(),
+        validation=ValidationResult(
+            failures=(
+                ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
+                ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
+            )
+        ),
+    )
+
+    # When building the error message
+    message = _message_for(report)
+
+    # Then BOTH failures are surfaced together, not just the first
+    assert "Validation failed: NonNullableColumnAdd - cannot add NOT NULL column 'age'" in message
+    assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
+
+
 def test_message_renders_execution_failure_detail_with_sql_preview():
     # Given a table whose execution phase failed on one action
     failed_result = ExecutionFailed(

@@ -274,3 +274,17 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     assert tr_a.status is TableRunStatus.EXECUTION_FAILED
     assert tr_b.status is TableRunStatus.SUCCESS
     assert tr_b.execution.results != ()  # proves 'b' actually executed
+
+
+def test_syncing_an_empty_registry_returns_an_empty_report_without_raising():
+    # Given a registry with no tables registered (e.g. nothing matched a filter)
+    reg = Registry()
+    engine = Engine(reader=_FakeReader({}), executor=_FakeExecutor(results=()))
+
+    # When syncing
+    report = engine.sync(reg)
+
+    # Then an empty, non-failing report comes back -- no SyncFailedError
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is False
+    assert tuple(report) == ()
