@@ -17,7 +17,7 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
-from delta_engine.domain.services.differ import diff_tables
+from delta_engine.domain.plan.differ import diff_tables
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _BASELINE_COLUMNS = (Column("id", Integer()),)
