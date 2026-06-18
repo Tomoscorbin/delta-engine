@@ -83,7 +83,10 @@ def test_eager_surface_imports_without_pyspark_installed():
     # pyspark is a dev-only dependency)
     program = (
         "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine import DeltaTable, Column, Integer, Registry, Engine\n"
+        "from delta_engine import (\n"
+        "    DeltaTable, Column, Integer, Registry, Engine,\n"
+        "    SyncReport, SyncFailedError, Failure,\n"
+        ")\n"
         "print('ok')\n"
     )
 

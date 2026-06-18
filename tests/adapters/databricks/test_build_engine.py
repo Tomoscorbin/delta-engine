@@ -1,6 +1,7 @@
 import logging
 
 from delta_engine.adapters.databricks import build_databricks_engine, configure_logging
+from delta_engine.adapters.databricks.log_config import LevelColorFormatter
 from delta_engine.application.engine import Engine
 
 
@@ -32,7 +33,21 @@ def test_build_databricks_engine_does_not_touch_root_logging():
         root.removeHandler(sentinel)
 
 
-def test_configure_logging_is_publicly_available_for_opt_in():
-    # Given the opt-in logging escape hatch the factory docstring advertises
-    # Then it is reachable from the package's public surface
-    assert callable(configure_logging)
+def test_configure_logging_installs_the_coloured_handler_at_the_requested_level():
+    # Given the root logger's current state (restored afterwards so this opt-in
+    # global mutation does not leak into other tests)
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    try:
+        # When the caller opts in to the package's logging
+        configure_logging(level=logging.DEBUG)
+
+        # Then the root logger carries exactly the package's coloured handler at
+        # the requested level -- the escape hatch actually configures logging
+        assert root.level == logging.DEBUG
+        colour_handlers = [h for h in root.handlers if isinstance(h.formatter, LevelColorFormatter)]
+        assert len(colour_handlers) == 1
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
