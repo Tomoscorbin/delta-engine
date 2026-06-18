@@ -25,9 +25,23 @@ class FakeDataFrame:
 
 
 class FakeCatalog:
-    def __init__(self, *, columns_by_table=None, table_comments=None):
+    def __init__(
+        self,
+        *,
+        columns_by_table=None,
+        table_comments=None,
+        exists: bool = True,
+        exists_exc: Exception | None = None,
+    ):
         self._columns_by_table = columns_by_table or {}
         self._table_comments = table_comments or {}
+        self._exists = exists
+        self._exists_exc = exists_exc
+
+    def tableExists(self, fully_qualified_name: str) -> bool:
+        if self._exists_exc is not None:
+            raise self._exists_exc
+        return self._exists
 
     def listColumns(self, fully_qualified_name: str):
         return self._columns_by_table.get(fully_qualified_name, [])
@@ -38,19 +52,10 @@ class FakeCatalog:
 
 
 class FakeSpark:
-    """
-    Spark fake for existence checks and catalog lookups.
+    """Spark fake whose catalog.* calls delegate to the provided FakeCatalog."""
 
-    - sql(query) -> head(1) truthiness driven by `target_exists`
-    - catalog.* calls are delegated to the provided FakeCatalog
-    """
-
-    def __init__(self, *, target_exists: bool, catalog: FakeCatalog | None = None):
-        self.target_exists = target_exists
+    def __init__(self, *, catalog: FakeCatalog | None = None):
         self.catalog = catalog or FakeCatalog()
-
-    def sql(self, _query: str):
-        return FakeDataFrame([1] if self.target_exists else [])
 
 
 class FakeSparkProps:
@@ -72,8 +77,8 @@ class FakeSparkForFetchState:
     """
     Spark fake for fetch_state().
 
-      1st sql() -> existence probe
-      2nd sql() -> DESCRIBE DETAIL (returns rows or raises)
+      catalog.tableExists() -> existence probe (driven by `exists` / `exists_exc`)
+      sql() -> DESCRIBE DETAIL (returns rows or raises)
     """
 
     def __init__(
@@ -85,23 +90,18 @@ class FakeSparkForFetchState:
         describe_exc: Exception | None = None,
         exists_exc: Exception | None = None,
     ):
-        self._exists = exists
+        # Existence is answered by the catalog now; forward the probe outcome onto it.
+        catalog._exists = exists
+        catalog._exists_exc = exists_exc
         self._catalog = catalog
         self._describe_rows = describe_rows
         self._describe_exc = describe_exc
-        self._exists_exc = exists_exc
-        self._sql_calls = 0
 
     @property
     def catalog(self):
         return self._catalog
 
     def sql(self, _query: str):
-        self._sql_calls += 1
-        if self._sql_calls == 1:
-            if self._exists_exc is not None:
-                raise self._exists_exc
-            return FakeDataFrame([1] if self._exists else [])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
@@ -136,9 +136,9 @@ def qn() -> QualifiedName:
 # ---------- tests: existence ----------
 
 
-def test_table_exists_returns_true_when_head_has_rows(qn):
-    # Given a reader whose existence probe should be truthy
-    reader = DatabricksReader(FakeSpark(target_exists=True))
+def test_table_exists_returns_true_when_catalog_reports_present(qn):
+    # Given a catalog that reports the table as present
+    reader = DatabricksReader(FakeSpark(catalog=FakeCatalog(exists=True)))
 
     # When we check whether the table exists
     result = reader._table_exists(qn)
@@ -147,9 +147,9 @@ def test_table_exists_returns_true_when_head_has_rows(qn):
     assert result is True
 
 
-def test_table_exists_returns_false_when_head_is_empty(qn):
-    # Given a reader whose existence probe should be empty
-    reader = DatabricksReader(FakeSpark(target_exists=False))
+def test_table_exists_returns_false_when_catalog_reports_absent(qn):
+    # Given a catalog that reports the table as absent
+    reader = DatabricksReader(FakeSpark(catalog=FakeCatalog(exists=False)))
 
     # When we check whether the table exists
     result = reader._table_exists(qn)
@@ -283,7 +283,7 @@ def test_fetch_table_comment_returns_description_or_empty(desc_value, expected):
     # Given a catalog that may or may not have a description
     qualified_name = QualifiedName("c", "s", "t")
     catalog = FakeCatalog(table_comments={str(qualified_name): desc_value})
-    reader = DatabricksReader(FakeSpark(target_exists=True, catalog=catalog))
+    reader = DatabricksReader(FakeSpark(catalog=catalog))
 
     # When we fetch the table comment
     comment = reader._fetch_table_comment(qualified_name)

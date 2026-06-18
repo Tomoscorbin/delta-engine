@@ -3,6 +3,13 @@ Map between domain `DataType` and Spark SQL types.
 
 Provides conversions to Spark SQL DDL strings and from
 `pyspark.sql.types.DataType` instances or DDL strings back to domain types.
+
+Uses ``match``/``case`` rather than ``functools.singledispatch`` (which the plan
+compiler uses): ``DataType`` is a closed set and the mapping is a leaf lookup,
+where structural patterns like ``case Decimal(precision, scale)`` and
+``case Array(element)`` destructure fields inline. ``singledispatch`` fits the
+compiler because the ``Action`` hierarchy is open to extension; it would only add
+ceremony here.
 """
 
 from __future__ import annotations
