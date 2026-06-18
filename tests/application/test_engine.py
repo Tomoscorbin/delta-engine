@@ -1,6 +1,5 @@
 import pytest
 
-from delta_engine.adapters.schema import Column, DeltaTable, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
@@ -20,6 +19,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
+from delta_engine.schema import Column, DeltaTable, String
 
 # --------- helpers/fakes
 

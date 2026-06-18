@@ -2,8 +2,8 @@
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
-from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
+from delta_engine.adapters.databricks.executor import DatabricksExecutor
+from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.engine import Engine
 
 

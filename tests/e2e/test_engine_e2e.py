@@ -3,12 +3,12 @@ from uuid import uuid4
 import pyspark.sql.types as T
 import pytest
 
-from delta_engine.adapters.databricks.catalog.executor import DatabricksExecutor
-from delta_engine.adapters.databricks.catalog.reader import DatabricksReader
-from delta_engine.adapters.schema import Column, Date, DeltaTable, Integer, String
+from delta_engine.adapters.databricks.executor import DatabricksExecutor
+from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
+from delta_engine.schema import Column, Date, DeltaTable, Integer, String
 from tests.config import TEST_CATALOG, TEST_SCHEMA
 
 

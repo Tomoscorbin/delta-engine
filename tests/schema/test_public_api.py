@@ -1,7 +1,7 @@
 """The user-facing schema package re-exports the names needed to define a table."""
 
-import delta_engine.adapters.schema as schema
 from delta_engine.domain.model import Array, Decimal, Map
+import delta_engine.schema as schema
 
 _EXPECTED = {
     "Array",
@@ -25,7 +25,7 @@ def test_schema_exposes_column_and_all_data_types():
     # from it directly, so a Decimal/Array/Map column needs no reach into the
     # internal domain layer
     for name in _EXPECTED:
-        assert hasattr(schema, name), f"{name} not importable from delta_engine.adapters.schema"
+        assert hasattr(schema, name), f"{name} not importable from delta_engine.schema"
 
     # And the declared surface advertises them
     assert _EXPECTED <= set(schema.__all__)

@@ -1,8 +1,8 @@
 import pytest
 
-from delta_engine.adapters.schema import Column, DeltaTable, Integer, String
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model import DesiredTable
+from delta_engine.schema import Column, DeltaTable, Integer, String
 
 
 def _tbl(fqn: str, **kwargs) -> DeltaTable:

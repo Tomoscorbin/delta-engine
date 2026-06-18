@@ -656,12 +656,24 @@ the type surface; callers reach the differ via `domain.plan.differ`. `model/`
 was reviewed and deliberately left intact (its four files change on independent
 axes; no merges).
 
-**Deliberately left as-is** (churn not earned): `adapters/schema/delta/` table/properties split
-(distinct axes of change); `results.py` at 228 lines (one tightly-coupled concept
-— splitting forces mutual imports); `log_config.py` at the package root (least-bad
-home for a cross-cutting stdlib helper; revisit if a second adapter lands);
-`adapters/schema/types.py` singletons (inert, no callers, but moving changes a
-public path).
+**Superseded by the `adapters/` reshape.** Three items previously left as-is here
+were revisited and changed when the `adapters/` layer was swept:
+- `adapters/schema/` was **promoted to top-level `delta_engine/schema/`**: it is the
+  pyspark-free, inbound user DSL (the *driving* side), not an outgoing/driven
+  technology adapter. `adapters/` now means exactly one thing — the Databricks
+  binding — and a second backend lands cleanly as `adapters/<backend>/` beside it.
+- `schema/delta/` was **collapsed** into `schema/` (the `delta` nesting named a
+  format distinction that does not exist; the class is already `DeltaTable`).
+- `schema/types.py` singletons (`INTEGER`/`STRING`/…) were **deleted** — zero
+  internal callers; the type *classes* are imported directly from `domain.model`.
+- `log_config.py` **moved into `adapters/databricks/`**: its sole caller is the
+  Databricks entry point and it contains Spark/py4j-specific logger quieting, so
+  the package root falsely implied generality. (Also dissolved `databricks/catalog/`
+  — `reader.py`/`executor.py` sit at the `databricks/` root now.)
+
+**Deliberately left as-is** (churn not earned): `results.py` at 228 lines (one
+tightly-coupled concept — splitting forces mutual imports); the `databricks/sql/`
+package (five files, distinct responsibilities, curated surface — earns it).
 
 #### Test suite
 
