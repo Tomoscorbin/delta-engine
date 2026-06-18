@@ -22,12 +22,14 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
-        """Raise if any part contains uppercase characters."""
+        """Raise if any part is blank or contains uppercase characters."""
         for field_name, value in (
             ("catalog", self.catalog),
             ("schema", self.schema),
             ("name", self.name),
         ):
+            if not value.strip():
+                raise ValueError(f"QualifiedName {field_name} must not be blank: {value!r}")
             if value != value.casefold():
                 raise ValueError(f"QualifiedName {field_name} must be lowercase: {value!r}")
 

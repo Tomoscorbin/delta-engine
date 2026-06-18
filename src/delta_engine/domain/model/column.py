@@ -25,6 +25,8 @@ class Column:
     comment: str = ""
 
     def __post_init__(self) -> None:
-        """Raise if name contains uppercase characters."""
+        """Raise if the name is blank or contains uppercase characters."""
+        if not self.name.strip():
+            raise ValueError(f"Column name must not be blank: {self.name!r}")
         if self.name != self.name.casefold():
             raise ValueError(f"Column name must be lowercase: {self.name!r}")

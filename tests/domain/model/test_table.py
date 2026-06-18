@@ -40,3 +40,13 @@ def test_partition_reference_matches_a_column_case_insensitively():
 
     # Then: the reference resolves to the column (the check casefolds) and is preserved
     assert snapshot.partitioned_by == ("VISIT_DATE",)
+
+
+def test_fails_when_partition_columns_are_duplicated():
+    # Given: columns 'visit_date' and 'id'
+    cols = (Column("visit_date", Date()), Column("id", Integer()))
+    # When: the same partition column is listed twice (would emit malformed
+    # PARTITIONED BY (visit_date, visit_date) DDL)
+    # Then: validation fails rather than producing invalid SQL
+    with pytest.raises(ValueError):
+        TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("visit_date", "visit_date"))

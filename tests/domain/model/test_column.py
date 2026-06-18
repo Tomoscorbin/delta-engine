@@ -18,3 +18,12 @@ def test_raises_when_name_is_not_lowercase() -> None:
     # Then: a ValueError is raised
     with pytest.raises(ValueError, match="lowercase"):
         Column("UserId", Integer())
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
+def test_raises_when_name_is_blank(blank: str) -> None:
+    # Given: a blank or whitespace-only column name (would emit a malformed
+    # `` `` identifier in DDL)
+    # When/Then: constructing a Column fails
+    with pytest.raises(ValueError, match="blank"):
+        Column(blank, Integer())
