@@ -14,6 +14,7 @@ from delta_engine.application.results import (
     ValidationFailure,
     ValidationResult,
 )
+from delta_engine.domain.model import QualifiedName
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _NO_VALIDATION_FAILURES = ValidationResult()
@@ -27,7 +28,7 @@ def _table_report(
     execution: ExecutionSummary = _NO_EXECUTION,
 ) -> TableRunReport:
     return TableRunReport(
-        fully_qualified_name="cat.sch.tbl",
+        qualified_name=QualifiedName("cat", "sch", "tbl"),
         started_at=_AT,
         ended_at=_AT,
         read=read,

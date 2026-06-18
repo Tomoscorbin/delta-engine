@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from delta_engine.domain.model import ObservedTable
+from delta_engine.domain.model import ObservedTable, QualifiedName
 
 # ---------- Status enums ----------
 
@@ -188,7 +188,7 @@ class ExecutionSummary:
 class TableRunReport:
     """Per-table report with timings, outcomes, and failures."""
 
-    fully_qualified_name: str
+    qualified_name: QualifiedName
     started_at: datetime
     ended_at: datetime
     read: CatalogState
@@ -236,10 +236,10 @@ class SyncReport:
         return any(t.has_failures for t in self.table_reports)
 
     @property
-    def failures_by_table(self) -> dict[str, tuple[Failure, ...]]:
-        """Mapping of fully qualified table name to its failures (if any)."""
+    def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
+        """Mapping of qualified table name to its failures (if any)."""
         return {
-            t.fully_qualified_name: t.all_failures for t in self.table_reports if t.has_failures
+            t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures
         }
 
     def __iter__(self) -> Iterator[TableRunReport]:

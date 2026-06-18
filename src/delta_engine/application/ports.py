@@ -28,6 +28,6 @@ class CatalogStateReader(Protocol):
 class PlanExecutor(Protocol):
     """Executes an action plan against a backing engine."""
 
-    def execute(self, target: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
-        """Run the plan against ``target`` and return the execution outcome."""
+    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+        """Run the plan against ``qualified_name`` and return the execution outcome."""
         ...

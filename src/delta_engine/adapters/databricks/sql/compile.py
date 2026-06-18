@@ -30,9 +30,9 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def compile_plan(target: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-    """Compile an :class:`ActionPlan` for ``target`` into Spark SQL statements."""
-    backticked_table_name = backtick_qualified_name(target)
+def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    """Compile an :class:`ActionPlan` for ``qualified_name`` into Spark SQL statements."""
+    backticked_table_name = backtick_qualified_name(qualified_name)
     return tuple(_compile_action(action, backticked_table_name) for action in plan)
 
 
