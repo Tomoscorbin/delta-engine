@@ -165,7 +165,7 @@ def validate_plan(
     """
     Evaluate every rule against a planned change and return the verdict.
 
-    A pure phase alongside :func:`~delta_engine.domain.plan.differ.diff_tables`:
+    A pure phase alongside :func:`~delta_engine.domain.plan.differ.compute_plan`:
     the same inputs always yield the same result. The caller reads
     ``ValidationResult.failed`` to gate execution; it does not assemble the verdict.
 

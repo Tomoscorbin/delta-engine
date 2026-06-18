@@ -17,7 +17,7 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
-from delta_engine.domain.plan.differ import diff_tables
+from delta_engine.domain.plan.differ import compute_plan
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _BASELINE_COLUMNS = (Column("id", Integer()),)
@@ -69,7 +69,7 @@ def test_creates_table_when_observed_is_missing():
     )
 
     # When: diffing desired vs None
-    plan = diff_tables(desired, observed=None)
+    plan = compute_plan(desired, observed=None)
 
     # Then: we get a CreateTable wrapped in an ActionPlan
     assert plan.actions == (CreateTable(desired),)
@@ -96,7 +96,7 @@ def test_no_actions_when_desired_equals_observed():
     )
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: nothing to do
     assert plan.actions == ()
@@ -129,7 +129,7 @@ def test_combines_column_property_comment_and_partition_diffs():
     )
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: the plan contains the expected representative actions
     assert isinstance(plan, ActionPlan)
@@ -151,7 +151,7 @@ def test_no_column_actions_when_columns_are_identical():
     columns = (Column("id", Integer()), Column("name", String(), comment="customer name"))
 
     # When
-    plan = diff_tables(_desired(columns=columns), _observed(columns=columns))
+    plan = compute_plan(_desired(columns=columns), _observed(columns=columns))
 
     # Then: nothing to do
     assert plan.actions == ()
@@ -163,7 +163,7 @@ def test_adds_columns_present_only_in_desired():
     observed = _observed(columns=(Column("id", Integer()),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: an AddColumn for "age" is produced
     assert AddColumn(column=Column("age", Integer())) in plan.actions
@@ -175,7 +175,7 @@ def test_drops_columns_present_only_in_observed():
     observed = _observed(columns=(Column("id", Integer()), Column("legacy", String())))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a DropColumn for "legacy" is produced
     assert plan.actions == (DropColumn("legacy"),)
@@ -187,7 +187,7 @@ def test_sets_column_comment_when_desired_differs_from_observed():
     observed = _observed(columns=(Column("name", String(), comment=""),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a SetColumnComment aligns the comment
     assert plan.actions == (SetColumnComment("name", "customer"),)
@@ -199,7 +199,7 @@ def test_clears_column_comment_when_desired_is_empty_and_observed_is_not():
     observed = _observed(columns=(Column("name", String(), comment="customer"),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a SetColumnComment clears it to empty
     assert plan.actions == (SetColumnComment("name", ""),)
@@ -211,7 +211,7 @@ def test_sets_column_nullability_when_flag_differs():
     observed = _observed(columns=(Column("active", String(), nullable=True),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a SetColumnNullability aligns the flag
     assert plan.actions == (SetColumnNullability(column_name="active", nullable=False),)
@@ -230,7 +230,7 @@ def test_combines_column_add_drop_and_updates_without_duplicates():
     )
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: exactly three actions — no redundant comment/nullability for the added column
     assert plan.actions == (
@@ -251,7 +251,7 @@ def test_adding_column_to_existing_table_emits_only_add_column():
     observed = _observed(columns=(Column("id", Integer()),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: only one AddColumn; no redundant SetColumnComment or SetColumnNullability
     assert plan.actions == (
@@ -265,7 +265,7 @@ def test_ignores_column_type_changes_until_type_migrations_supported():
     observed = _observed(columns=(Column("id", Integer()),))
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: no action emitted for type change (explicitly unsupported for now)
     assert plan.actions == ()
@@ -279,7 +279,7 @@ def test_no_property_actions_when_mappings_are_identical():
     props = {"delta.appendOnly": "true", "owner": "cdm"}
 
     # When
-    plan = diff_tables(_desired(properties=props), _observed(properties=props))
+    plan = compute_plan(_desired(properties=props), _observed(properties=props))
 
     # Then: nothing to do
     assert plan.actions == ()
@@ -291,7 +291,7 @@ def test_sets_property_when_missing_in_observed():
     observed = _observed(properties={})
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a SetProperty is emitted with the desired value
     assert plan.actions == (SetProperty(name="delta.appendOnly", value="true"),)
@@ -303,7 +303,7 @@ def test_updates_property_when_value_differs():
     observed = _observed(properties={"delta.appendOnly": "true"})
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: a single SetProperty updates the value
     assert plan.actions == (SetProperty(name="delta.appendOnly", value="false"),)
@@ -316,7 +316,7 @@ def test_ignores_observed_only_properties():
     observed = _observed(properties={"owner": "cdm", "delta.minReaderVersion": "2"})
 
     # When
-    plan = diff_tables(desired, observed)
+    plan = compute_plan(desired, observed)
 
     # Then: the undeclared property is left untouched — no unset is emitted
     assert plan.actions == ()
@@ -327,7 +327,7 @@ def test_ignores_observed_only_properties():
 
 def test_no_comment_action_when_comments_match():
     # Given: same comment on desired and observed
-    plan = diff_tables(_desired(comment="core table"), _observed(comment="core table"))
+    plan = compute_plan(_desired(comment="core table"), _observed(comment="core table"))
 
     # Then
     assert plan.actions == ()
@@ -335,7 +335,7 @@ def test_no_comment_action_when_comments_match():
 
 def test_sets_table_comment_when_comment_differs():
     # Given: desired has a different comment than observed
-    plan = diff_tables(_desired(comment="core table"), _observed(comment=""))
+    plan = compute_plan(_desired(comment="core table"), _observed(comment=""))
 
     # Then: a single SetTableComment is emitted with the desired text
     assert plan.actions == (SetTableComment(comment="core table"),)
@@ -343,7 +343,7 @@ def test_sets_table_comment_when_comment_differs():
 
 def test_clears_table_comment_when_desired_is_empty():
     # Given: observed has a comment; desired clears it
-    plan = diff_tables(_desired(comment=""), _observed(comment="legacy"))
+    plan = compute_plan(_desired(comment=""), _observed(comment="legacy"))
 
     # Then: a single SetTableComment clears to empty
     assert plan.actions == (SetTableComment(comment=""),)
