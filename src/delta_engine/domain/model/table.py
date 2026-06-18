@@ -29,7 +29,7 @@ class TableSnapshot:
     partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Validate columns are non-empty, unique, and partition references exist."""
+        """Validate columns are non-empty and unique, and partitions exist and are unique."""
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
@@ -43,6 +43,13 @@ class TableSnapshot:
             missing = [name for name in self.partitioned_by if name.casefold() not in seen_names]
             if missing:
                 raise ValueError(f"Partition column not found: {missing[0]}")
+
+            seen_partitions: set[str] = set()
+            for name in self.partitioned_by:
+                folded = name.casefold()
+                if folded in seen_partitions:
+                    raise ValueError(f"Duplicate partition column: {name}")
+                seen_partitions.add(folded)
 
 
 @dataclass(frozen=True, slots=True)
