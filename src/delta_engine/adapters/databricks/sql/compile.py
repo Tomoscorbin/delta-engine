@@ -114,14 +114,18 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
 
 
 def _column_definition(column) -> str:
-    """Render a single column definition fragment."""
+    """Render a single column definition fragment, including its comment."""
     column_name = backtick(column.name)
     type = sql_type_for_data_type(column.data_type)
     nullable = "" if column.nullable else "NOT NULL"
-    return f"{column_name} {type} {nullable}".strip()
+    comment = f"COMMENT {quote_literal(column.comment)}" if column.comment else ""
+    return " ".join(part for part in (column_name, type, nullable, comment) if part)
 
 
 def _set_table_comment(comment: str) -> str:
+    """Render the table COMMENT clause, or '' when there is no comment to set."""
+    if not comment:
+        return ""
     return f"COMMENT {quote_literal(comment)}"
 
 
