@@ -1,3 +1,5 @@
+import pytest
+
 from delta_engine.adapters.databricks.sql.preview import (
     error_preview,
     sql_preview,
@@ -25,6 +27,29 @@ def test_sql_preview_truncates_and_appends_unicode_ellipsis() -> None:
     assert len(out) > 50  # because the ellipsis is appended after slicing
     # sanity: prefix preserved
     assert out.startswith("SELECT ")
+
+
+@pytest.mark.parametrize(
+    "length, truncated",
+    [
+        (9, False),  # below the limit: unchanged
+        (10, False),  # exactly at the limit: unchanged (the boundary that pins <=)
+        (11, True),  # one over: truncated to max_chars + ellipsis
+    ],
+    ids=["below", "at-limit", "over"],
+)
+def test_sql_preview_truncates_only_beyond_max_chars(length: int, truncated: bool) -> None:
+    # Given a single-line SQL string of a known length around max_chars=10
+    sql = "x" * length
+
+    # When previewing it with max_chars=10
+    out = sql_preview(sql, max_chars=10, single_line=True)
+
+    # Then it is left intact at or below the limit, and truncated only beyond it
+    if truncated:
+        assert out == "x" * 10 + "…"
+    else:
+        assert out == sql
 
 
 def test_error_preview_returns_first_5_lines() -> None:

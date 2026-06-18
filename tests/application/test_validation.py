@@ -59,6 +59,7 @@ def test_rejects_add_of_non_nullable_column_on_existing_table():
         _desired(), _observed(), _plan(AddColumn(Column("order_id", Integer(), nullable=False)))
     )
     assert failure is not None
+    assert failure.rule_name == "NonNullableColumnAdd"
 
 
 def test_allows_add_of_nullable_column_on_existing_table():
@@ -103,6 +104,7 @@ def test_rejects_partitioning_change_on_existing_table():
         _plan(),
     )
     assert failure is not None
+    assert failure.rule_name == "DisallowPartitioningChange"
 
 
 def test_allows_partitioning_on_new_table():
@@ -186,6 +188,7 @@ def test_rejects_changing_the_type_of_an_existing_column():
         _plan(),
     )
     assert failure is not None
+    assert failure.rule_name == "UnsupportedColumnTypeChange"
     assert "id" in failure.message
 
 
@@ -282,3 +285,18 @@ def test_validation_uses_the_default_rules_when_none_are_supplied():
     # Then the default NonNullableColumnAdd rule rejects it
     assert result.failed
     assert {f.rule_name for f in result.failures} == {"NonNullableColumnAdd"}
+
+
+def test_validation_passes_when_no_rules_are_supplied():
+    # Given an empty rule set (a caller can scope validation down to nothing)
+    # and a plan that the default rules WOULD reject
+    result = validate_plan(
+        _desired(),
+        _observed(),
+        _plan(AddColumn(Column("order_id", Integer(), nullable=False))),
+        rules=(),
+    )
+
+    # Then nothing is evaluated, so the verdict passes
+    assert not result.failed
+    assert result.failures == ()
