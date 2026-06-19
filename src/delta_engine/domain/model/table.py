@@ -40,16 +40,19 @@ class TableSnapshot:
             seen_names.add(column.name)
 
         if self.partitioned_by:
-            missing = [name for name in self.partitioned_by if name.casefold() not in seen_names]
+            for name in self.partitioned_by:
+                if name != name.casefold():
+                    raise ValueError(f"Partition column name must be lowercase: {name!r}")
+
+            missing = [name for name in self.partitioned_by if name not in seen_names]
             if missing:
                 raise ValueError(f"Partition column not found: {missing[0]}")
 
             seen_partitions: set[str] = set()
             for name in self.partitioned_by:
-                folded = name.casefold()
-                if folded in seen_partitions:
+                if name in seen_partitions:
                     raise ValueError(f"Duplicate partition column: {name}")
-                seen_partitions.add(folded)
+                seen_partitions.add(name)
 
 
 @dataclass(frozen=True, slots=True)

@@ -45,7 +45,7 @@ class DeltaTable:
         self.columns = tuple(columns)
         self.comment = comment
         self.properties = dict(properties or {})
-        self.partitioned_by = partitioned_by
+        self.partitioned_by = tuple(partitioned_by) if partitioned_by is not None else ()
 
         # Fast-fail on property keys this engine does not manage (e.g. typos)
         if self.properties:
@@ -79,5 +79,5 @@ class DeltaTable:
             columns=tuple(self.columns),
             comment=self.comment,
             properties=self.effective_properties,
-            partitioned_by=tuple(self.partitioned_by) if self.partitioned_by else (),
+            partitioned_by=self.partitioned_by,
         )

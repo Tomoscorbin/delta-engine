@@ -31,15 +31,15 @@ def test_fails_when_partition_references_undefined_column():
         TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("date",))
 
 
-def test_partition_reference_matches_a_column_case_insensitively():
+def test_fails_when_partition_column_name_is_not_lowercase():
     # Given: a column 'visit_date' and a partition spec naming it in upper case
     cols = (Column("visit_date", Date()), Column("id", Integer()))
 
-    # When: constructing the snapshot with a differently-cased partition reference
-    snapshot = TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
-
-    # Then: the reference resolves to the column (the check casefolds) and is preserved
-    assert snapshot.partitioned_by == ("VISIT_DATE",)
+    # When: constructing the snapshot with a mixed-case partition reference
+    # Then: validation fails — partition column names must be lowercase, consistent
+    # with Column and QualifiedName which reject non-lowercase identifiers at construction
+    with pytest.raises(ValueError, match="lowercase"):
+        TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
 
 
 def test_fails_when_partition_columns_are_duplicated():
