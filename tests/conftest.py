@@ -2,12 +2,13 @@ import os
 import shutil
 import sys
 import tempfile
+from uuid import uuid4
 
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
 import pytest
 
-from tests.config import TEST_CATALOG
+from tests.config import TEST_CATALOG, TEST_SCHEMA
 
 
 @pytest.fixture(scope="session")
@@ -57,3 +58,37 @@ def spark() -> SparkSession:  # type: ignore[misc]
     finally:
         spark.stop()
         shutil.rmtree(warehouse_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def temp_schema(spark):
+    """Unique schema per test, dropped with CASCADE on teardown."""
+    schema = f"{TEST_SCHEMA}_tmp_{uuid4().hex[:8]}"
+    spark.sql(f"CREATE DATABASE {schema}")
+    try:
+        yield schema
+    finally:
+        spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+
+
+@pytest.fixture
+def make_temp_table(spark, temp_schema):
+    """Factory that creates an isolated Delta table within the test's temp_schema."""
+    created = []
+
+    def _create(name_prefix: str, columns_sql: str, *, tblprops: dict[str, str] | None = None):
+        name = f"{name_prefix}_{uuid4().hex[:8]}"
+        fq = f"{TEST_CATALOG}.{temp_schema}.{name}"
+        props = ""
+        if tblprops:
+            items = ", ".join(f"'{k}'='{v}'" for k, v in tblprops.items())
+            props = f"TBLPROPERTIES ({items})"
+        spark.sql(f"CREATE TABLE {fq} ({columns_sql}) USING DELTA {props}")
+        created.append(fq)
+        return fq
+
+    try:
+        yield _create
+    finally:
+        for fq in created:
+            spark.sql(f"DROP TABLE IF EXISTS {fq}")
