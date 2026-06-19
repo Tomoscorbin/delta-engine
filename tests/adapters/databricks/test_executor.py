@@ -1,5 +1,4 @@
 import pyspark.sql.types as T
-import pytest
 
 from delta_engine.adapters.databricks.executor import DatabricksExecutor
 from delta_engine.application.results import ExecutionFailed, ExecutionSucceeded

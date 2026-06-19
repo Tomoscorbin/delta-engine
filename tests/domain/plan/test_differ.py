@@ -1,11 +1,19 @@
+from hypothesis import given, strategies as st
+
 from delta_engine.domain.model import (
+    Boolean,
     Column,
     Date,
+    Decimal,
     DesiredTable,
+    Double,
+    Float,
     Integer,
+    Long,
     ObservedTable,
     QualifiedName,
     String,
+    Timestamp,
 )
 from delta_engine.domain.plan.actions import (
     ActionPlan,
@@ -18,6 +26,73 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
 )
 from delta_engine.domain.plan.differ import compute_plan
+
+# ----- Hypothesis strategies for valid domain objects
+
+_SIMPLE_DATA_TYPES = st.one_of(
+    st.just(Integer()),
+    st.just(Long()),
+    st.just(Float()),
+    st.just(Double()),
+    st.just(Boolean()),
+    st.just(String()),
+    st.just(Date()),
+    st.just(Timestamp()),
+    st.builds(
+        Decimal,
+        precision=st.integers(min_value=1, max_value=38),
+        scale=st.integers(min_value=0, max_value=0),
+    ).filter(lambda d: d.scale <= d.precision),
+)
+
+# Valid column name: non-empty, lowercase, no special chars that break the model
+_COLUMN_NAME = st.from_regex(r"[a-z][a-z0-9_]{0,19}", fullmatch=True)
+
+_COLUMN = st.builds(
+    Column,
+    name=_COLUMN_NAME,
+    data_type=_SIMPLE_DATA_TYPES,
+    nullable=st.booleans(),
+    comment=st.text(max_size=40),
+)
+
+
+def _unique_columns(columns: list[Column]) -> list[Column]:
+    """Deduplicate columns by name, keeping first occurrence."""
+    seen: set[str] = set()
+    result = []
+    for column in columns:
+        if column.name not in seen:
+            seen.add(column.name)
+            result.append(column)
+    return result
+
+
+_COLUMNS = st.lists(_COLUMN, min_size=1, max_size=6).map(_unique_columns).filter(bool)
+
+_PROPERTY_KEY = st.from_regex(r"[a-z][a-z.]{0,19}", fullmatch=True)
+_PROPERTIES = st.dictionaries(_PROPERTY_KEY, st.text(max_size=20), max_size=4)
+
+_QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
+
+
+@st.composite
+def _desired_table(draw: st.DrawFn) -> DesiredTable:
+    columns = draw(_COLUMNS)
+    column_names = [c.name for c in columns]
+    partitioned_by = draw(
+        st.lists(
+            st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
+        ).map(tuple)
+    )
+    return DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=tuple(columns),
+        comment=draw(st.text(max_size=40)),
+        properties=draw(_PROPERTIES),
+        partitioned_by=partitioned_by,
+    )
+
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _BASELINE_COLUMNS = (Column("id", Integer()),)
@@ -347,3 +422,26 @@ def test_clears_table_comment_when_desired_is_empty():
 
     # Then: a single SetTableComment clears to empty
     assert plan.actions == (SetTableComment(comment=""),)
+
+
+# ---------- property: reflexivity ----------
+
+
+@given(_desired_table())
+def test_compute_plan_produces_no_actions_when_desired_equals_observed(
+    desired: DesiredTable,
+) -> None:
+    # Given: an arbitrary desired table and an observed table identical to it
+    observed = ObservedTable(
+        qualified_name=desired.qualified_name,
+        columns=desired.columns,
+        comment=desired.comment,
+        properties=desired.properties,
+        partitioned_by=desired.partitioned_by,
+    )
+
+    # When: computing the plan
+    plan = compute_plan(desired, observed)
+
+    # Then: there is nothing to do — the differ is reflexive
+    assert plan.actions == ()

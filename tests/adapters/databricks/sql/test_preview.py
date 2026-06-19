@@ -1,3 +1,4 @@
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.adapters.databricks.sql.preview import (
@@ -62,3 +63,12 @@ def test_error_preview_returns_first_5_lines() -> None:
 def test_error_preview_short_message_unchanged() -> None:
     exc = Exception("Only one line")
     assert error_preview(exc) == "Only one line"
+
+
+@given(st.text(), st.integers(min_value=1, max_value=500))
+def test_sql_preview_single_line_output_never_contains_newline(sql: str, max_chars: int) -> None:
+    # Given: any SQL string and any max_chars
+    # When: previewing with single_line=True
+    result = sql_preview(sql, max_chars=max_chars, single_line=True)
+    # Then: the output never contains a newline regardless of input content
+    assert "\n" not in result

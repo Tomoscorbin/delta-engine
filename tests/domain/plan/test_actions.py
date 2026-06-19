@@ -1,7 +1,9 @@
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
+    Action,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -125,3 +127,32 @@ def test_create_table_action_has_no_subject():
     # Given a CreateTable action (targets the table as a whole)
     # Then it has no within-phase subject
     assert _create_table_action().subject == ""
+
+
+# ----- ActionPlan: permutation invariance
+
+
+_SAMPLE_ACTIONS: list[Action] = [
+    AddColumn(column=_column("alpha")),
+    AddColumn(column=_column("beta")),
+    DropColumn(column_name="gamma"),
+    SetProperty(name="k1", value="v1"),
+    SetProperty(name="k2", value="v2"),
+    SetColumnComment(column_name="delta", comment="c"),
+    SetTableComment(comment="tbl"),
+    SetColumnNullability(column_name="epsilon", nullable=False),
+]
+
+
+@given(st.permutations(_SAMPLE_ACTIONS))
+def test_actionplan_order_is_independent_of_input_permutation(
+    shuffled: list[Action],
+) -> None:
+    # Given: the canonical plan built from a fixed action list
+    canonical = ActionPlan(tuple(_SAMPLE_ACTIONS))
+
+    # When: the same actions are supplied in an arbitrary permutation
+    result = ActionPlan(tuple(shuffled))
+
+    # Then: both plans hold the same actions in the same execution order
+    assert tuple(result) == tuple(canonical)
