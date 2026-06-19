@@ -181,8 +181,6 @@ def validate_plan(
 
     """
     failures = tuple(
-        failure
-        for rule in rules
-        if (failure := rule.evaluate(desired, observed, plan)) is not None
+        failure for rule in rules if (failure := rule.evaluate(desired, observed, plan)) is not None
     )
     return ValidationResult(failures=failures)

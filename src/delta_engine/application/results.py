@@ -238,9 +238,7 @@ class SyncReport:
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
         """Mapping of qualified table name to its failures (if any)."""
-        return {
-            t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures
-        }
+        return {t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures}
 
     def __iter__(self) -> Iterator[TableRunReport]:
         """Iterate over per-table reports in the sync run."""
