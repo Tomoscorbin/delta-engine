@@ -105,17 +105,15 @@ def test_partition_columns_must_exist():
 
 def test_missing_partition_column_raises_error():
     # Given a partition spec referencing a column that does not exist
-    table = DeltaTable(
-        catalog="coredev",
-        schema="medallia",
-        name="responses",
-        columns=[Column("id", Integer()), Column("event_date", String())],
-        partitioned_by=["store_id"],  # not present
-    )
-
-    # When/Then converting to the domain table fails on the domain invariant
+    # Then construction itself fails — invalid definitions are rejected immediately
     with pytest.raises(ValueError):
-        table.to_desired_table()
+        DeltaTable(
+            catalog="coredev",
+            schema="medallia",
+            name="responses",
+            columns=[Column("id", Integer()), Column("event_date", String())],
+            partitioned_by=["store_id"],  # not present
+        )
 
 
 def test_to_desired_table_preserves_columns_and_metadata():

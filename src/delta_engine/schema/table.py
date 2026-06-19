@@ -38,46 +38,34 @@ class DeltaTable:
         properties: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
     ) -> None:
-        self.catalog = catalog
-        self.schema = schema
-        self.name = name
-        # Materialize columns to allow safe repeated iteration
-        self.columns = tuple(columns)
-        self.comment = comment
-        self.properties = dict(properties or {})
-        self.partitioned_by = tuple(partitioned_by) if partitioned_by is not None else ()
+        user_properties = dict(properties or {})
 
         # Fast-fail on property keys this engine does not manage (e.g. typos)
-        if self.properties:
-            unmanaged = [k for k in self.properties if k not in self._managed_property_keys]
+        if user_properties:
+            unmanaged = [k for k in user_properties if k not in self._managed_property_keys]
             if unmanaged:
                 raise ValueError(
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
+        effective = {**self.default_properties, **user_properties}
+
+        # Building DesiredTable here enforces all domain invariants (non-empty
+        # columns, unique names, partition columns must exist) at construction
+        # time rather than deferring them to to_desired_table().
+        self._desired_table = DesiredTable(
+            qualified_name=QualifiedName(catalog, schema, name),
+            columns=tuple(columns),
+            comment=comment,
+            properties=effective,
+            partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
+        )
+
     @property
     def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
-        return {**self.default_properties, **self.properties}
+        return self._desired_table.properties
 
     def to_desired_table(self) -> DesiredTable:
-        """
-        Convert this user-facing definition into a domain :class:`DesiredTable`.
-
-        Column, comment, property, and partition data are mapped onto the
-        domain model. The domain model owns structural invariants (non-empty
-        columns, unique names, partition columns must exist), so those are
-        enforced here rather than duplicated on this user-facing type.
-
-        Raises:
-            ValueError: If the resulting table violates a domain invariant
-                (e.g. a partition column not among the defined columns).
-
-        """
-        return DesiredTable(
-            qualified_name=QualifiedName(self.catalog, self.schema, self.name),
-            columns=tuple(self.columns),
-            comment=self.comment,
-            properties=self.effective_properties,
-            partitioned_by=self.partitioned_by,
-        )
+        """Return the domain :class:`DesiredTable` for this table definition."""
+        return self._desired_table
