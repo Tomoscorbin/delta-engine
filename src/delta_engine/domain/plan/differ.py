@@ -17,8 +17,10 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -45,6 +47,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             _diff_columns(desired.columns, observed.columns)
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
+            + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
         )
     return ActionPlan(actions)
 
@@ -74,7 +77,16 @@ def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> 
         for desired_column, observed_column in common
         if desired_column.nullable != observed_column.nullable
     )
-    return add_actions + drop_actions + comment_actions + nullability_actions
+    type_change_actions = tuple(
+        ColumnTypeChange(
+            column_name=desired_column.name,
+            from_type=observed_column.data_type,
+            to_type=desired_column.data_type,
+        )
+        for desired_column, observed_column in common
+        if desired_column.data_type != observed_column.data_type
+    )
+    return add_actions + drop_actions + comment_actions + nullability_actions + type_change_actions
 
 
 def _diff_properties(
@@ -92,6 +104,15 @@ def _diff_properties(
         for name, value in desired.items()
         if observed.get(name) != value
     )
+
+
+def _diff_partitioning(
+    desired: tuple[str, ...], observed: tuple[str, ...]
+) -> tuple[PartitioningChange, ...]:
+    """Return a PartitioningChange action when the partition specs differ."""
+    if desired == observed:
+        return ()
+    return (PartitioningChange(desired_partitioning=desired, observed_partitioning=observed),)
 
 
 def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, ...]:

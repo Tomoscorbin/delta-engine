@@ -126,7 +126,7 @@ class Engine:
             )
             plan = compute_plan(desired=desired, observed=observed)
             logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
-            validation = validate_plan(desired, observed, plan)
+            validation = validate_plan(plan)
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",

@@ -1,9 +1,8 @@
-from hypothesis import given, strategies as st
-import pytest
-
 from types import SimpleNamespace
 
+from hypothesis import given, strategies as st
 from py4j.protocol import Py4JJavaError
+import pytest
 
 from delta_engine.adapters.databricks.sql.preview import (
     error_preview,

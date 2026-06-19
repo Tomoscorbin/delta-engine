@@ -108,7 +108,6 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     assert [r.action_index for r in results] == [0, 1]
 
 
-
 def test_execute_returns_empty_summary_for_empty_plan():
     # Given an empty plan
     plan = ActionPlan(actions=())

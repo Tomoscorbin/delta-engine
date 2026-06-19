@@ -18,8 +18,10 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -215,7 +217,14 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition change is detected by the validator (no PartitionBy action in plan)
+    # Partition change is surfaced as a PartitioningChange action in the plan
+    assert (
+        PartitioningChange(
+            desired_partitioning=("event_date", "country"),
+            observed_partitioning=("event_date",),
+        )
+        in plan.actions
+    )
 
 
 # ---------- column diffs ----------
@@ -334,7 +343,7 @@ def test_adding_column_to_existing_table_emits_only_add_column():
     )
 
 
-def test_ignores_column_type_changes_until_type_migrations_supported():
+def test_emits_column_type_change_action_when_type_differs():
     # Given: same column name exists but data type differs
     desired = _desired(columns=(Column("id", String()),))
     observed = _observed(columns=(Column("id", Integer()),))
@@ -342,7 +351,36 @@ def test_ignores_column_type_changes_until_type_migrations_supported():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: no action emitted for type change (explicitly unsupported for now)
+    # Then: a ColumnTypeChange makes the drift visible in the plan so validation can reject it
+    assert plan.actions == (
+        ColumnTypeChange(column_name="id", from_type=Integer(), to_type=String()),
+    )
+
+
+def test_emits_partitioning_change_action_when_partition_spec_differs():
+    # Given: desired and observed partition specs differ
+    columns = (Column("id", Integer()), Column("ds", String()))
+    desired = _desired(columns=columns, partitioned_by=("ds",))
+    observed = _observed(columns=columns, partitioned_by=())
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then: a PartitioningChange makes the conflict visible so validation can reject it
+    assert plan.actions == (
+        PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()),
+    )
+
+
+def test_no_partitioning_action_when_partition_spec_is_unchanged():
+    # Given: identical partition specs
+    columns = (Column("id", Integer()), Column("ds", String()))
+    plan = compute_plan(
+        _desired(columns=columns, partitioned_by=("ds",)),
+        _observed(columns=columns, partitioned_by=("ds",)),
+    )
+
+    # Then: nothing to do
     assert plan.actions == ()
 
 

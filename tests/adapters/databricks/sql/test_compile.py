@@ -1,14 +1,18 @@
 import inspect
 
+import pytest
+
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -215,3 +219,21 @@ def test_every_action_type_has_a_registered_compiler():
         if _compile_action.dispatch(action_type) is fallback
     ]
     assert unregistered == []
+
+
+def test_column_type_change_compiler_raises_not_implemented():
+    # Given a ColumnTypeChange action (blocked by validation; should never reach execution)
+    action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
+
+    # Then compiling it raises NotImplementedError rather than silently producing bad SQL
+    with pytest.raises(NotImplementedError, match="id"):
+        _compile_single(action)
+
+
+def test_partitioning_change_compiler_raises_not_implemented():
+    # Given a PartitioningChange action (blocked by validation; should never reach execution)
+    action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
+
+    # Then compiling it raises NotImplementedError
+    with pytest.raises(NotImplementedError, match="Partitioning"):
+        _compile_single(action)

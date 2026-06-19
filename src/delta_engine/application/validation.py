@@ -2,39 +2,44 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from typing import ClassVar, Protocol
 
 from delta_engine.application.results import ValidationFailure, ValidationResult
-from delta_engine.domain.model import DesiredTable, ObservedTable
-from delta_engine.domain.plan import ActionPlan, AddColumn, SetColumnNullability
+from delta_engine.domain.plan import (
+    ActionPlan,
+    AddColumn,
+    ColumnTypeChange,
+    PartitioningChange,
+    SetColumnNullability,
+)
 
 
-class Rule(ABC):
-    """Abstract interface for plan validation rules."""
+class Rule(Protocol):
+    """Interface for plan validation rules."""
 
-    @abstractmethod
-    def evaluate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
+    name: ClassVar[str]
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """
         Evaluate the rule against a planned change.
 
         Args:
-            desired: The user-authored target definition.
-            observed: The current catalog state, or ``None`` when the table is
-                being created.
-            plan: The action plan to reach ``desired``.
+            plan: The action plan to reach the desired state. A creation plan
+                contains only a ``CreateTable`` action; a migration plan
+                contains the specific change actions. Rules inspect the actions
+                they care about and ignore the rest.
 
         Returns:
             A tuple of failures — one per violation found. Empty when the rule
-            passes. Returning all violations in one call lets the caller report
-            the full set rather than requiring a fix-and-rerun cycle per failure.
+            passes. All violations are returned in a single call so the caller
+            reports the full set rather than requiring a fix-and-rerun cycle
+            per failure.
 
         """
         ...
 
 
-class NonNullableColumnAdd(Rule):
+class NonNullableColumnAdd:
     """
     Disallow adding non-nullable columns to existing tables.
 
@@ -42,18 +47,15 @@ class NonNullableColumnAdd(Rule):
     already exists (it does not attempt to infer data emptiness).
     """
 
-    def evaluate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
+    name: ClassVar[str] = "NonNullableColumnAdd"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
-        if observed is None:
-            return ()
         return tuple(
             ValidationFailure(
-                rule_name=self.__class__.__name__,
+                rule_name=self.name,
                 message=(
-                    "Operation not allowed: cannot add non-nullable"
-                    f" column '{action.column.name}'"
+                    f"Operation not allowed: cannot add non-nullable column '{action.column.name}'"
                 ),
             )
             for action in plan.actions
@@ -61,7 +63,7 @@ class NonNullableColumnAdd(Rule):
         )
 
 
-class NullabilityTighteningOnExistingColumn(Rule):
+class NullabilityTighteningOnExistingColumn:
     """
     Disallow tightening an existing column to NOT NULL.
 
@@ -73,15 +75,13 @@ class NullabilityTighteningOnExistingColumn(Rule):
     and is not flagged.
     """
 
-    def evaluate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
+    name: ClassVar[str] = "NullabilityTighteningOnExistingColumn"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag every action that tightens an existing column to NOT NULL."""
-        if observed is None:
-            return ()
         return tuple(
             ValidationFailure(
-                rule_name=self.__class__.__name__,
+                rule_name=self.name,
                 message=(
                     "Operation not allowed: cannot tighten existing column"
                     f" '{action.column_name}' to NOT NULL. Keep it nullable,"
@@ -93,66 +93,61 @@ class NullabilityTighteningOnExistingColumn(Rule):
         )
 
 
-class UnsupportedColumnTypeChange(Rule):
+class UnsupportedColumnTypeChange:
     """
     Disallow changing the data type of an existing column.
 
-    The differ matches columns by name and has no type-change action, so a
-    changed type (e.g. ``Integer`` -> ``Long``) would otherwise produce no
-    action at all and the schema would silently drift from the declared spec
-    while the run reports success. Until type migrations are supported, surface
-    the drift as a validation failure instead of letting it vanish.
+    The differ emits a :class:`~delta_engine.domain.plan.ColumnTypeChange`
+    action when it detects a type mismatch between desired and observed. Delta
+    Lake does not support type migrations, so this rule blocks any such action
+    and surfaces the drift as a clear validation failure.
     """
 
-    def evaluate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
-        """Flag every common column whose desired data type differs from observed."""
-        if observed is None:
-            return ()
-        observed_types = {column.name: column.data_type for column in observed.columns}
+    name: ClassVar[str] = "UnsupportedColumnTypeChange"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag every ColumnTypeChange action in the plan."""
         return tuple(
             ValidationFailure(
-                rule_name=self.__class__.__name__,
+                rule_name=self.name,
                 message=(
                     "Operation not allowed: cannot change the type of existing"
-                    f" column '{desired_column.name}' from {observed_types[desired_column.name]} to"
-                    f" {desired_column.data_type}. Type migrations are not supported;"
+                    f" column '{action.column_name}' from {action.from_type} to"
+                    f" {action.to_type}. Type migrations are not supported;"
                     " recreate the table to change a column's type."
                 ),
             )
-            for desired_column in desired.columns
-            if desired_column.name in observed_types
-            and observed_types[desired_column.name] != desired_column.data_type
+            for action in plan.actions
+            if isinstance(action, ColumnTypeChange)
         )
 
 
-class DisallowPartitioningChange(Rule):
+class DisallowPartitioningChange:
     """
     Disallow any plan that attempts to change partitioning.
 
-    Partitioning can only occur during the creation of a table.
+    The differ emits a :class:`~delta_engine.domain.plan.PartitioningChange`
+    action when desired and observed partition specs differ. Partitioning can
+    only be set during table creation, so this rule blocks any such action.
     """
 
-    def evaluate(
-        self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> tuple[ValidationFailure, ...]:
-        """Flag the plan if desired and observed partition columns differ."""
-        if observed is None:
-            return ()
-        if desired.partitioned_by != observed.partitioned_by:
-            return (
-                ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: partitioning changes are not supported."
-                        f" Current partition columns: {observed.partitioned_by}"
-                        f" - Requested partition columns: {desired.partitioned_by}."
-                        " Recreate the table with the desired partitioning."
-                    ),
+    name: ClassVar[str] = "DisallowPartitioningChange"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag the plan if it contains a PartitioningChange action."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: partitioning changes are not supported."
+                    f" Current partition columns: {action.observed_partitioning}"
+                    f" - Requested partition columns: {action.desired_partitioning}."
+                    " Recreate the table with the desired partitioning."
                 ),
             )
-        return ()
+            for action in plan.actions
+            if isinstance(action, PartitioningChange)
+        )
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -164,8 +159,6 @@ DEFAULT_RULES: tuple[Rule, ...] = (
 
 
 def validate_plan(
-    desired: DesiredTable,
-    observed: ObservedTable | None,
     plan: ActionPlan,
     rules: tuple[Rule, ...] = DEFAULT_RULES,
 ) -> ValidationResult:
@@ -176,10 +169,11 @@ def validate_plan(
     the same inputs always yield the same result. The caller reads
     ``ValidationResult.failed`` to gate execution; it does not assemble the verdict.
 
+    Creation plans (containing only a ``CreateTable`` action) pass all rules
+    automatically because none of the blocked action types appear in them.
+
     Args:
-        desired: The user-authored target definition.
-        observed: The current catalog state, or ``None`` when creating.
-        plan: The action plan to reach ``desired``.
+        plan: The action plan to reach the desired state.
         rules: The rules to apply, in evaluation order. Defaults to the full
             production set; override only to scope a check (e.g. in tests).
 
@@ -187,9 +181,5 @@ def validate_plan(
         A :class:`ValidationResult` carrying a failure from each broken rule.
 
     """
-    failures = tuple(
-        failure
-        for rule in rules
-        for failure in rule.evaluate(desired, observed, plan)
-    )
+    failures = tuple(failure for rule in rules for failure in rule.evaluate(plan))
     return ValidationResult(failures=failures)
