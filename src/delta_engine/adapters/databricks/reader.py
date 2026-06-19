@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from py4j.protocol import Py4JJavaError  # type: ignore[import]
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
@@ -12,6 +11,7 @@ from delta_engine.adapters.databricks.sql import (
     backtick_qualified_name,
     domain_type_from_spark,
     error_preview,
+    exc_type_name,
 )
 from delta_engine.application.results import (
     CatalogState,
@@ -21,18 +21,6 @@ from delta_engine.application.results import (
     TablePresent,
 )
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
-
-
-def _exc_type_name(exc: Exception) -> str:
-    """Prefer the underlying Java class for Py4J errors; else the Python class."""
-    if isinstance(exc, Py4JJavaError):
-        try:
-            return (
-                exc.java_exception.getClass().getName()
-            )  # e.g. 'org.apache.spark.sql.AnalysisException'
-        except Exception:
-            return "Py4JJavaError"
-    return type(exc).__name__
 
 
 def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -> DomainColumn:
@@ -80,7 +68,7 @@ class DatabricksReader:
         try:
             return self._read(qualified_name)
         except Exception as exc:
-            failure = ReadFailure(_exc_type_name(exc), error_preview(exc))
+            failure = ReadFailure(exc_type_name(exc), error_preview(exc))
             return ReadFailed(failure=failure)
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
