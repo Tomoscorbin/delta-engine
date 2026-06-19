@@ -218,10 +218,13 @@ def test_combines_column_property_comment_and_partition_diffs():
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
     # Partition change is surfaced as a PartitioningChange action in the plan
-    assert PartitioningChange(
-        desired_partitioning=("event_date", "country"),
-        observed_partitioning=("event_date",),
-    ) in plan.actions
+    assert (
+        PartitioningChange(
+            desired_partitioning=("event_date", "country"),
+            observed_partitioning=("event_date",),
+        )
+        in plan.actions
+    )
 
 
 # ---------- column diffs ----------

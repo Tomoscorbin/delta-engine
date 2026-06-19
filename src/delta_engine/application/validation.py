@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import ClassVar, Protocol
 
 from delta_engine.application.results import ValidationFailure, ValidationResult
-from delta_engine.domain.plan import ActionPlan, AddColumn, ColumnTypeChange, PartitioningChange, SetColumnNullability
+from delta_engine.domain.plan import (
+    ActionPlan,
+    AddColumn,
+    ColumnTypeChange,
+    PartitioningChange,
+    SetColumnNullability,
+)
 
 
 class Rule(Protocol):
@@ -49,8 +55,7 @@ class NonNullableColumnAdd:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    "Operation not allowed: cannot add non-nullable"
-                    f" column '{action.column.name}'"
+                    f"Operation not allowed: cannot add non-nullable column '{action.column.name}'"
                 ),
             )
             for action in plan.actions
@@ -176,9 +181,5 @@ def validate_plan(
         A :class:`ValidationResult` carrying a failure from each broken rule.
 
     """
-    failures = tuple(
-        failure
-        for rule in rules
-        for failure in rule.evaluate(plan)
-    )
+    failures = tuple(failure for rule in rules for failure in rule.evaluate(plan))
     return ValidationResult(failures=failures)

@@ -83,7 +83,6 @@ def test_rejects_tightening_an_existing_column_to_not_null():
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
     # Given a plan tightening two columns to NOT NULL at once
     rule = NullabilityTighteningOnExistingColumn()
-    cols = (Column("id", Integer()), Column("name", String()))
 
     # When evaluating
     failures = rule.evaluate(
