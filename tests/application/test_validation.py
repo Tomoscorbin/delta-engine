@@ -55,11 +55,32 @@ def test_rejects_add_of_non_nullable_column_on_existing_table():
     rule = NonNullableColumnAdd()
 
     # Then the rule flags the operation as invalid
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), _observed(), _plan(AddColumn(Column("order_id", Integer(), nullable=False)))
     )
-    assert failure is not None
-    assert failure.rule_name == "NonNullableColumnAdd"
+    assert len(failures) == 1
+    assert failures[0].rule_name == "NonNullableColumnAdd"
+
+
+def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
+    # Given an existing table and a plan adding three NOT NULL columns at once
+    rule = NonNullableColumnAdd()
+
+    # When evaluating the plan
+    failures = rule.evaluate(
+        _desired(),
+        _observed(),
+        _plan(
+            AddColumn(Column("a", Integer(), nullable=False)),
+            AddColumn(Column("b", String(), nullable=False)),
+            AddColumn(Column("c", Integer(), nullable=False)),
+        ),
+    )
+
+    # Then all three violations are reported in one pass, not just the first
+    assert len(failures) == 3
+    assert {f.rule_name for f in failures} == {"NonNullableColumnAdd"}
+    assert {"a", "b", "c"} == {f.message.split("'")[1] for f in failures}
 
 
 def test_allows_add_of_nullable_column_on_existing_table():
@@ -67,10 +88,10 @@ def test_allows_add_of_nullable_column_on_existing_table():
     rule = NonNullableColumnAdd()
 
     # Then the rule allows it
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), _observed(), _plan(AddColumn(Column("notes", String(), nullable=True)))
     )
-    assert failure is None
+    assert failures == ()
 
 
 def test_allows_non_nullable_column_when_creating_new_table():
@@ -78,10 +99,10 @@ def test_allows_non_nullable_column_when_creating_new_table():
     rule = NonNullableColumnAdd()
 
     # Then the rule does not block creation-time constraints
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), None, _plan(AddColumn(Column("id", Integer(), nullable=False)))
     )
-    assert failure is None
+    assert failures == ()
 
 
 # ---- DisallowPartitioningChange
@@ -92,7 +113,7 @@ def test_rejects_partitioning_change_on_existing_table():
     rule = DisallowPartitioningChange()
 
     # Then the rule flags the operation as invalid
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(
             columns=(Column("id", Integer()), Column("country", String())),
             partitioned_by=("country",),
@@ -103,8 +124,8 @@ def test_rejects_partitioning_change_on_existing_table():
         ),
         _plan(),
     )
-    assert failure is not None
-    assert failure.rule_name == "DisallowPartitioningChange"
+    assert len(failures) == 1
+    assert failures[0].rule_name == "DisallowPartitioningChange"
 
 
 def test_allows_partitioning_on_new_table():
@@ -112,7 +133,7 @@ def test_allows_partitioning_on_new_table():
     rule = DisallowPartitioningChange()
 
     # Then the rule allows it for table creation
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(
             columns=(Column("id", Integer()), Column("ds", String())),
             partitioned_by=("ds",),
@@ -120,7 +141,7 @@ def test_allows_partitioning_on_new_table():
         None,
         _plan(),
     )
-    assert failure is None
+    assert failures == ()
 
 
 def test_allows_when_partition_spec_unchanged_on_existing_table():
@@ -129,12 +150,12 @@ def test_allows_when_partition_spec_unchanged_on_existing_table():
 
     # Then there is no failure from this rule
     columns = (Column("id", Integer()), Column("ds", String()))
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(columns=columns, partitioned_by=("ds",)),
         _observed(columns=columns, partitioned_by=("ds",)),
         _plan(),
     )
-    assert failure is None
+    assert failures == ()
 
 
 # ---- NullabilityTighteningOnExistingColumn
@@ -145,11 +166,31 @@ def test_rejects_tightening_an_existing_column_to_not_null():
     rule = NullabilityTighteningOnExistingColumn()
 
     # Then the rule flags it: tightening can fail at runtime if NULLs already exist
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), _observed(), _plan(SetColumnNullability(column_name="id", nullable=False))
     )
-    assert failure is not None
-    assert "id" in failure.message
+    assert len(failures) == 1
+    assert "id" in failures[0].message
+
+
+def test_rejects_all_nullability_tightenings_in_a_single_pass():
+    # Given an existing table and a plan tightening two columns to NOT NULL at once
+    rule = NullabilityTighteningOnExistingColumn()
+    cols = (Column("id", Integer()), Column("name", String()))
+
+    # When evaluating the plan
+    failures = rule.evaluate(
+        _desired(columns=cols),
+        _observed(columns=cols),
+        _plan(
+            SetColumnNullability(column_name="id", nullable=False),
+            SetColumnNullability(column_name="name", nullable=False),
+        ),
+    )
+
+    # Then both violations are reported in one pass
+    assert len(failures) == 2
+    assert {"id", "name"} == {f.message.split("'")[1] for f in failures}
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
@@ -157,10 +198,10 @@ def test_allows_loosening_an_existing_column_to_nullable():
     rule = NullabilityTighteningOnExistingColumn()
 
     # Then the rule allows it
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), _observed(), _plan(SetColumnNullability(column_name="id", nullable=True))
     )
-    assert failure is None
+    assert failures == ()
 
 
 def test_allows_tightening_when_creating_a_new_table():
@@ -168,10 +209,10 @@ def test_allows_tightening_when_creating_a_new_table():
     rule = NullabilityTighteningOnExistingColumn()
 
     # Then creation-time constraints are not this rule's concern
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(), None, _plan(SetColumnNullability(column_name="id", nullable=False))
     )
-    assert failure is None
+    assert failures == ()
 
 
 # ---- UnsupportedColumnTypeChange
@@ -182,14 +223,31 @@ def test_rejects_changing_the_type_of_an_existing_column():
     rule = UnsupportedColumnTypeChange()
 
     # Then the drift is flagged rather than silently ignored
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(columns=(Column("id", Long()),)),
         _observed(columns=(Column("id", Integer()),)),
         _plan(),
     )
-    assert failure is not None
-    assert failure.rule_name == "UnsupportedColumnTypeChange"
-    assert "id" in failure.message
+    assert len(failures) == 1
+    assert failures[0].rule_name == "UnsupportedColumnTypeChange"
+    assert "id" in failures[0].message
+
+
+def test_rejects_all_type_changes_in_a_single_pass():
+    # Given two columns that both have changed type at once
+    rule = UnsupportedColumnTypeChange()
+
+    # When evaluating the plan
+    failures = rule.evaluate(
+        _desired(columns=(Column("id", Long()), Column("score", String()))),
+        _observed(columns=(Column("id", Integer()), Column("score", Integer()))),
+        _plan(),
+    )
+
+    # Then both type mismatches are reported in one pass
+    assert len(failures) == 2
+    assert {f.rule_name for f in failures} == {"UnsupportedColumnTypeChange"}
+    assert {"id", "score"} == {f.message.split("'")[1] for f in failures}
 
 
 def test_allows_columns_whose_type_is_unchanged():
@@ -197,28 +255,28 @@ def test_allows_columns_whose_type_is_unchanged():
     rule = UnsupportedColumnTypeChange()
 
     columns = (Column("id", Integer()), Column("name", String()))
-    failure = rule.evaluate(_desired(columns=columns), _observed(columns=columns), _plan())
-    assert failure is None
+    failures = rule.evaluate(_desired(columns=columns), _observed(columns=columns), _plan())
+    assert failures == ()
 
 
 def test_ignores_added_and_dropped_columns_for_type_change():
     # Given a column only in desired (add) and one only in observed (drop)
     rule = UnsupportedColumnTypeChange()
 
-    failure = rule.evaluate(
+    failures = rule.evaluate(
         _desired(columns=(Column("id", Integer()), Column("added", String()))),
         _observed(columns=(Column("id", Integer()), Column("dropped", String()))),
         _plan(),
     )
-    assert failure is None
+    assert failures == ()
 
 
 def test_allows_type_specification_when_creating_a_new_table():
     # Given a new table creation (no observed table)
     rule = UnsupportedColumnTypeChange()
 
-    failure = rule.evaluate(_desired(columns=(Column("id", Long()),)), None, _plan())
-    assert failure is None
+    failures = rule.evaluate(_desired(columns=(Column("id", Long()),)), None, _plan())
+    assert failures == ()
 
 
 # ---- validate_plan
