@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import MappingProxyType
 
 from pyspark.sql import SparkSession
@@ -23,24 +24,37 @@ from delta_engine.application.results import (
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 
 
-def _to_domain_column(column: SparkColumn, type_mapper=domain_type_from_spark) -> DomainColumn:
+@dataclass(frozen=True, slots=True)
+class _ColumnMapping:
+    column: DomainColumn
+    is_partition: bool
+
+
+def _to_column_mapping(
+    spark_column: SparkColumn, type_mapper=domain_type_from_spark
+) -> _ColumnMapping:
     """
-    Convert a spark Column object into a domain `Column`.
+    Convert a Spark catalog column into a domain ``Column`` and its partition flag.
 
     The column name is lowercased here: the domain model requires lowercase
     identifiers, and case-preserving catalogs (e.g. Hive Metastore) can return
     mixed-case names. Normalising at the adapter boundary keeps that impedance
-    mismatch out of the domain.
+    mismatch out of the domain. The partition name in ``_ColumnMapping`` is
+    therefore derived from the already-normalised domain column name, not from
+    the raw Spark object.
     """
-    domain_data_type = type_mapper(column.dataType)
-    nullable = bool(getattr(column, "nullable", True))
-    comment = column.description if column.description else ""
+    domain_data_type = type_mapper(spark_column.dataType)
+    nullable = bool(getattr(spark_column, "nullable", True))
+    comment = spark_column.description if spark_column.description else ""
 
-    return DomainColumn(
-        name=column.name.casefold(),
-        data_type=domain_data_type,
-        nullable=nullable,
-        comment=comment,
+    return _ColumnMapping(
+        column=DomainColumn(
+            name=spark_column.name.casefold(),
+            data_type=domain_data_type,
+            nullable=nullable,
+            comment=comment,
+        ),
+        is_partition=bool(getattr(spark_column, "isPartition", False)),
     )
 
 
@@ -76,11 +90,9 @@ class DatabricksReader:
         if not self._table_exists(qualified_name):
             return TableAbsent()
 
-        catalog_columns = self.spark.catalog.listColumns(str(qualified_name))
-        columns = tuple(_to_domain_column(c) for c in catalog_columns)
-        partition_columns = tuple(
-            c.name.casefold() for c in catalog_columns if bool(getattr(c, "isPartition", False))
-        )
+        mappings = tuple(_to_column_mapping(c) for c in self.spark.catalog.listColumns(str(qualified_name)))
+        columns = tuple(m.column for m in mappings)
+        partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(
             qualified_name=qualified_name,
             columns=columns,
