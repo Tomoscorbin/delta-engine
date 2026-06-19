@@ -32,11 +32,11 @@ class TableRunStatus(StrEnum):
 
 
 class Failure(ABC):
-    """A failure that can render itself as a one-line display string."""
+    """A failure that can render itself as display lines."""
 
     @abstractmethod
-    def format_line(self) -> str:
-        """Return a single human-readable line describing this failure."""
+    def format_lines(self) -> tuple[str, ...]:
+        """Return one or more human-readable lines describing this failure."""
         ...
 
 
@@ -47,9 +47,9 @@ class ReadFailure(Failure):
     exception_type: str
     message: str
 
-    def format_line(self) -> str:
+    def format_lines(self) -> tuple[str, ...]:
         """Render the read failure as a display line."""
-        return f"Read error: {self.exception_type} - {self.message}"
+        return (f"Read error: {self.exception_type} - {self.message}",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +59,9 @@ class ValidationFailure(Failure):
     rule_name: str
     message: str
 
-    def format_line(self) -> str:
+    def format_lines(self) -> tuple[str, ...]:
         """Render the validation failure as a display line."""
-        return f"Validation failed: {self.rule_name} - {self.message}"
+        return (f"Validation failed: {self.rule_name} - {self.message}",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,12 +71,14 @@ class ExecutionFailure(Failure):
     action_index: int
     exception_type: str
     message: str
+    statement_preview: str
 
-    def format_line(self) -> str:
-        """Render the execution failure as a display line, including the action index."""
+    def format_lines(self) -> tuple[str, ...]:
+        """Render the execution failure and its SQL preview as display lines."""
         return (
             f"Execution failed at action {self.action_index}: "
-            f"{self.exception_type} - {self.message}"
+            f"{self.exception_type} - {self.message}",
+            f"    SQL preview: {self.statement_preview}",
         )
 
 

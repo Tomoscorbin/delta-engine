@@ -68,12 +68,8 @@ class DatabricksExecutor:
         try:
             self.spark.sql(statement)
         except Exception as exception:
-            logger.warning(
-                "%s failed: %s\nSQL: %s",
-                action_name,
-                error_preview(exception),
-                preview,
-            )
+            err = error_preview(exception)
+            logger.warning("%s failed: %s\nSQL: %s", action_name, err, preview)
             return ExecutionFailed(
                 action=action_name,
                 action_index=action_index,
@@ -81,7 +77,8 @@ class DatabricksExecutor:
                 failure=ExecutionFailure(
                     action_index=action_index,
                     exception_type=exc_type_name(exception),
-                    message=error_preview(exception),
+                    message=err,
+                    statement_preview=preview,
                 ),
             )
 

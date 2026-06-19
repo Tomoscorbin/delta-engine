@@ -47,7 +47,9 @@ def _failed_exec(
         action=action,
         action_index=idx,
         statement_preview=preview,
-        failure=ExecutionFailure(action_index=idx, exception_type=exc, message=msg),
+        failure=ExecutionFailure(
+            action_index=idx, exception_type=exc, message=msg, statement_preview=preview
+        ),
     )
 
 
@@ -92,7 +94,7 @@ def test_read_failure_formats_itself_as_a_display_line():
     failure = ReadFailure(exception_type="AnalysisException", message="table not found")
 
     # Then it renders its own one-line description
-    assert failure.format_line() == "Read error: AnalysisException - table not found"
+    assert failure.format_lines() == ("Read error: AnalysisException - table not found",)
 
 
 def test_validation_failure_formats_itself_as_a_display_line():
@@ -102,18 +104,24 @@ def test_validation_failure_formats_itself_as_a_display_line():
     )
 
     # Then it renders its own one-line description
-    assert (
-        failure.format_line()
-        == "Validation failed: DisallowPartitioningChange - cannot repartition"
+    assert failure.format_lines() == (
+        "Validation failed: DisallowPartitioningChange - cannot repartition",
     )
 
 
-def test_execution_failure_formats_itself_as_a_display_line():
-    # Given an execution failure at a known action index
-    failure = ExecutionFailure(action_index=2, exception_type="SparkException", message="boom")
+def test_execution_failure_formats_itself_as_two_lines_including_sql_preview():
+    # Given an execution failure with a SQL preview
+    failure = ExecutionFailure(
+        action_index=2,
+        exception_type="SparkException",
+        message="boom",
+        statement_preview="ALTER TABLE t ADD COLUMN x INT",
+    )
 
-    # Then it renders its own one-line description including the action index
-    assert failure.format_line() == "Execution failed at action 2: SparkException - boom"
+    # Then it renders the error line and the SQL preview together
+    lines = failure.format_lines()
+    assert lines[0] == "Execution failed at action 2: SparkException - boom"
+    assert "ALTER TABLE t ADD COLUMN x INT" in lines[1]
 
 
 def test_validation_result_failed_property_reflects_presence_of_failures():
@@ -166,7 +174,9 @@ def test_execution_outcome_variants_carry_the_right_payload():
         action="AddColumn",
         action_index=1,
         statement_preview="SQL",
-        failure=ExecutionFailure(action_index=1, exception_type="E", message="m"),
+        failure=ExecutionFailure(
+            action_index=1, exception_type="E", message="m", statement_preview="SQL"
+        ),
     )
 
     # Then a failure is only representable on the failed variant
@@ -242,6 +252,7 @@ _EXECUTION_RESULT = st.one_of(
             action_index=st.integers(min_value=0, max_value=100),
             exception_type=st.just("SparkException"),
             message=st.text(max_size=40),
+            statement_preview=st.just("ALTER TABLE ..."),
         ),
     ),
 )
