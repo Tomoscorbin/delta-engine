@@ -53,8 +53,6 @@ def configure_logging(level: int = logging.INFO) -> None:
     Uses sys.__stderr__ to avoid pytest's captured stream and installs a
     shutdown-safe handler. Also quiets noisy third-party loggers.
     """
-    logging.raiseExceptions = False
-
     root = logging.getLogger()
 
     if root.handlers:
