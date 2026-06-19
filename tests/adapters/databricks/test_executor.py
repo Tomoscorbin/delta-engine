@@ -15,29 +15,9 @@ from delta_engine.domain.plan import (
     SetProperty,
     SetTableComment,
 )
-from tests.config import TEST_CATALOG, TEST_SCHEMA
+from tests.config import TEST_CATALOG
 
-# ----------- Fixtures & test helpers
-
-
-@pytest.fixture(scope="module")
-def test_table(spark):
-    """Creates a simple Delta table to mutate during tests, and drops the schema afterwards."""
-    catalog = TEST_CATALOG
-    schema = TEST_SCHEMA
-    full_table_name = f"{catalog}.{schema}.test"
-
-    try:
-        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {catalog}.{schema}")
-        spark.sql(
-            f"CREATE TABLE {full_table_name}"
-            " (id INT NOT NULL, name STRING, column_to_drop STRING)"
-            " USING DELTA"
-            " TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
-        )
-        yield QualifiedName(catalog, schema, "test")
-    finally:
-        spark.sql(f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE")
+# ----------- Test helpers
 
 
 def _get_table_props(spark, full_table_name: str) -> dict[str, str]:
@@ -141,17 +121,16 @@ def test_execute_returns_empty_summary_for_empty_plan():
     assert summary.failed is False
 
 
-def test_createtable_action_creates_table_with_correct_schema(spark, test_table):
-    # Given a desired customers table to be created
+def test_createtable_action_creates_table_with_correct_schema(spark, temp_schema):
+    # Given a desired table to be created in an empty schema
     desired = DesiredTable(
-        qualified_name=QualifiedName(TEST_CATALOG, TEST_SCHEMA, "customers"),
+        qualified_name=QualifiedName(TEST_CATALOG, temp_schema, "customers"),
         columns=(Column(name="id", data_type=Integer()),),
     )
     plan = ActionPlan(actions=(CreateTable(table=desired),))
-    executor = DatabricksExecutor(spark)
 
     # When we apply the plan (compile → execute)
-    executor.execute(desired.qualified_name, plan)
+    DatabricksExecutor(spark).execute(desired.qualified_name, plan)
 
     # Then the table exists and its schema matches exactly
     assert spark.catalog.tableExists(str(desired.qualified_name))
@@ -160,90 +139,86 @@ def test_createtable_action_creates_table_with_correct_schema(spark, test_table)
     assert actual_schema == expected_schema
 
 
-def test_addcolumn_action_adds_column_to_existing_table(spark, test_table):
-    # Given an existing table (test_table)
-    # And a plan that adds a new INT column 'age'
-    column_name = "age"
-    data_type = Integer()
-    actions = (AddColumn(column=Column(name=column_name, data_type=data_type)),)
-    plan = ActionPlan(actions=actions)
+def test_addcolumn_action_adds_column_to_existing_table(spark, make_temp_table):
+    # Given an existing Delta table with a single column
+    fq = make_temp_table("add_col", "id INT NOT NULL")
+    qualified_name = QualifiedName(*fq.split("."))
+    plan = ActionPlan(actions=(AddColumn(column=Column(name="age", data_type=Integer())),))
 
-    # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(test_table, plan)
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
 
-    # Then the new column exists
-    actual_schema = spark.table(str(test_table)).schema
-    assert any(f.name == column_name for f in actual_schema.fields), (
-        f"Column '{column_name}' was not created"
+    # Then the new column exists with the expected type
+    age_field = _get_field(spark, fq, "age")
+    assert age_field.dataType.simpleString() == "int"
+
+
+def test_dropcolumn_action_removes_column_from_existing_table(spark, make_temp_table):
+    # Given an existing Delta table with column mapping enabled (required for DROP COLUMN)
+    fq = make_temp_table(
+        "drop_col",
+        "id INT NOT NULL, to_remove STRING",
+        tblprops={"delta.columnMapping.mode": "name"},
     )
-    age_field = next(f for f in actual_schema.fields if f.name == "age")
-    assert age_field.dataType.simpleString() == "int", (
-        f"Column '{column_name}' is not {data_type!s}"
-    )
+    qualified_name = QualifiedName(*fq.split("."))
+    plan = ActionPlan(actions=(DropColumn(column_name="to_remove"),))
+
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
+
+    # Then the column no longer exists
+    assert "to_remove" not in spark.table(fq).columns
 
 
-def test_dropcolumn_action_removes_column_from_existing_table(spark, test_table):
-    # Given an existing table (test_table)
-    # And a plan that drops the 'name' column
-    actions = (DropColumn(column_name="column_to_drop"),)
-    plan = ActionPlan(actions=actions)
-
-    # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(test_table, plan)
-
-    # Then the 'name' column no longer exists
-    actual_columns = spark.table(str(test_table)).columns
-    assert "column_to_drop" not in actual_columns
-
-
-def test_setproperty_action_sets_table_property(spark, test_table):
-    # Given an existing table
-    # And a plan that sets a custom property
+def test_setproperty_action_sets_table_property(spark, make_temp_table):
+    # Given an existing Delta table
+    fq = make_temp_table("set_prop", "id INT NOT NULL")
+    qualified_name = QualifiedName(*fq.split("."))
     prop = "engine.test.setproperty"
-    val = "yes"
-    plan = ActionPlan(actions=(SetProperty(name=prop, value=val),))
+    plan = ActionPlan(actions=(SetProperty(name=prop, value="yes"),))
 
-    # When we apply the plan (compile → execute)
-    DatabricksExecutor(spark).execute(test_table, plan)
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
 
     # Then the property exists with the expected value
-    props = _get_table_props(spark, str(test_table))
-    assert props.get(prop) == val
+    assert _get_table_props(spark, fq).get(prop) == "yes"
 
 
-def test_setcolumncomment_sets_comment_on_column(spark, test_table):
-    # Given an existing Delta table with column 'name'
-    column = "name"
+def test_setcolumncomment_sets_comment_on_column(spark, make_temp_table):
+    # Given an existing Delta table with a 'name' column
+    fq = make_temp_table("col_comment", "id INT NOT NULL, name STRING")
+    qualified_name = QualifiedName(*fq.split("."))
+    plan = ActionPlan(actions=(SetColumnComment(column_name="name", comment="customer name"),))
 
-    # When we apply a plan to set the column comment
-    new_comment = "customer name"
-    plan = ActionPlan(actions=(SetColumnComment(column_name=column, comment=new_comment),))
-    DatabricksExecutor(spark).execute(test_table, plan)
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
 
     # Then the column metadata contains the new comment
-    after_field = next(f for f in spark.table(str(test_table)).schema if f.name == column)
-    assert dict(after_field.metadata).get("comment") == new_comment
+    field = _get_field(spark, fq, "name")
+    assert dict(field.metadata).get("comment") == "customer name"
 
 
-def test_settablecomment_sets_comment_on_table(spark, test_table):
+def test_settablecomment_sets_comment_on_table(spark, make_temp_table):
     # Given an existing Delta table
-    # When we set the table comment
-    comment = "customers staging table"
-    plan = ActionPlan(actions=(SetTableComment(comment=comment),))
-    DatabricksExecutor(spark).execute(test_table, plan)
+    fq = make_temp_table("tbl_comment", "id INT NOT NULL")
+    qualified_name = QualifiedName(*fq.split("."))
+    plan = ActionPlan(actions=(SetTableComment(comment="staging table"),))
+
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
 
     # Then the comment is set on the table
-    after = _get_table_comment(spark, str(test_table))
-    assert after == comment
+    assert _get_table_comment(spark, fq) == "staging table"
 
 
-def test_setcolumnnullability_sets_nullable(spark, test_table):
-    # Given an existing table with a non-nullable 'id' column
-    # When we set NULL on 'id'
-    full = str(test_table)
+def test_setcolumnnullability_sets_nullable(spark, make_temp_table):
+    # Given an existing table with a NOT NULL 'id' column
+    fq = make_temp_table("nullability", "id INT NOT NULL, name STRING")
+    qualified_name = QualifiedName(*fq.split("."))
     plan = ActionPlan((SetColumnNullability("id", True),))
-    DatabricksExecutor(spark).execute(test_table, plan)
 
-    # Then the column becomes NULLABLE
-    field = _get_field(spark, full, "id")
-    assert field.nullable is True
+    # When we apply the plan
+    DatabricksExecutor(spark).execute(qualified_name, plan)
+
+    # Then the column becomes nullable
+    assert _get_field(spark, fq, "id").nullable is True

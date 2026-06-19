@@ -22,43 +22,6 @@ def _patch_table_exists_for_local(monkeypatch):
     monkeypatch.setattr(DatabricksReader, "_table_exists", _table_exists, raising=True)
 
 
-@pytest.fixture
-def temp_schema(spark):
-    """
-    Create a unique schema (database) for the test and drop it afterwards.
-    Keeps the workspace clean even if the test fails (CASCADE).
-    """
-    schema = f"{TEST_SCHEMA}_tmp_{uuid4().hex[:8]}"
-    spark.sql(f"CREATE DATABASE {schema}")
-    try:
-        yield schema
-    finally:
-        spark.sql(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
-
-
-@pytest.fixture
-def make_temp_table(spark, temp_schema):
-    created = []
-
-    def _create(name_prefix: str, columns_sql: str, *, tblprops: dict[str, str] | None = None):
-        name = f"{name_prefix}_{uuid4().hex[:8]}"
-        fq = f"{TEST_CATALOG}.{temp_schema}.{name}"
-        props = ""
-        if tblprops:
-            # e.g. {"delta.columnMapping.mode":"name"} -> "('k'='v',...)"
-            items = ", ".join(f"'{k}'='{v}'" for k, v in tblprops.items())
-            props = f"TBLPROPERTIES ({items})"
-        spark.sql(f"CREATE TABLE {fq} ({columns_sql}) USING DELTA {props}")
-        created.append(fq)
-        return fq
-
-    try:
-        yield _create
-    finally:
-        for fq in created:
-            spark.sql(f"DROP TABLE IF EXISTS {fq}")
-
-
 def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
     # Given a desired table definition in an empty temp schema
     _patch_table_exists_for_local(monkeypatch)
