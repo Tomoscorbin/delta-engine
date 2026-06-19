@@ -12,7 +12,12 @@ import logging
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.sql import compile_plan, error_preview, sql_preview
+from delta_engine.adapters.databricks.sql import (
+    compile_plan,
+    error_preview,
+    exc_type_name,
+    sql_preview,
+)
 from delta_engine.application.results import (
     ExecutionFailed,
     ExecutionFailure,
@@ -75,7 +80,7 @@ class DatabricksExecutor:
                 statement_preview=preview,
                 failure=ExecutionFailure(
                     action_index=action_index,
-                    exception_type=type(exception).__name__,
+                    exception_type=exc_type_name(exception),
                     message=error_preview(exception),
                 ),
             )
