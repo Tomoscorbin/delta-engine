@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+from typing import Iterable
 
 from delta_engine.application.errors import (
     SyncFailedError,
 )
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
-from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     ExecutionSummary,
     ReadFailed,
@@ -62,12 +62,12 @@ class Engine:
         self.reader = reader
         self.executor = executor
 
-    def sync(self, registry: Registry) -> SyncReport:
+    def sync(self, tables: Iterable[DesiredTable]) -> SyncReport:
         """
-        Synchronize all registered tables to their desired state.
+        Synchronize a collection of tables to their desired state.
 
         Computes, validates, and executes plans for each table in the supplied
-        registry.
+        iterable.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -78,8 +78,9 @@ class Engine:
 
         """
         run_started = _utc_now()
-        logger.info("Starting sync for %d table(s)", len(registry))
-        table_reports = [self._sync_table(t) for t in registry]
+        desired = list(tables)
+        logger.info("Starting sync for %d table(s)", len(desired))
+        table_reports = [self._sync_table(t) for t in desired]
 
         report = SyncReport(
             started_at=run_started,

@@ -288,3 +288,21 @@ def test_syncing_an_empty_registry_returns_an_empty_report_without_raising():
     assert isinstance(report, SyncReport)
     assert report.any_failures is False
     assert tuple(report) == ()
+
+
+def test_sync_accepts_any_iterable_of_desired_tables_without_registry():
+    # Given a lazy iterable of DesiredTable with no __len__ (no Registry involved)
+    def _desired_tables():
+        yield _spec("c.s.users").to_desired_table()
+        yield _spec("c.s.orders").to_desired_table()
+
+    reader = _FakeReader({"c.s.users": TableAbsent(), "c.s.orders": TableAbsent()})
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing with the generator (no __len__)
+    report = engine.sync(_desired_tables())
+
+    # Then a successful report is returned
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is False
