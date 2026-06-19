@@ -15,7 +15,7 @@ class Rule(ABC):
     @abstractmethod
     def evaluate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> ValidationFailure | None:
+    ) -> tuple[ValidationFailure, ...]:
         """
         Evaluate the rule against a planned change.
 
@@ -26,7 +26,9 @@ class Rule(ABC):
             plan: The action plan to reach ``desired``.
 
         Returns:
-            A failure description if the rule is violated, otherwise ``None``.
+            A tuple of failures — one per violation found. Empty when the rule
+            passes. Returning all violations in one call lets the caller report
+            the full set rather than requiring a fix-and-rerun cycle per failure.
 
         """
         ...
@@ -42,20 +44,21 @@ class NonNullableColumnAdd(Rule):
 
     def evaluate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> ValidationFailure | None:
-        """Flag the plan if it adds a NOT NULL column to an existing table."""
+    ) -> tuple[ValidationFailure, ...]:
+        """Flag every NOT NULL column addition to an existing table."""
         if observed is None:
-            return None
-        for action in plan.actions:
-            if isinstance(action, AddColumn) and (not action.column.nullable):
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot add non-nullable"
-                        f" column '{action.column.name}'"
-                    ),
-                )
-        return None
+            return ()
+        return tuple(
+            ValidationFailure(
+                rule_name=self.__class__.__name__,
+                message=(
+                    "Operation not allowed: cannot add non-nullable"
+                    f" column '{action.column.name}'"
+                ),
+            )
+            for action in plan.actions
+            if isinstance(action, AddColumn) and not action.column.nullable
+        )
 
 
 class NullabilityTighteningOnExistingColumn(Rule):
@@ -72,21 +75,22 @@ class NullabilityTighteningOnExistingColumn(Rule):
 
     def evaluate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> ValidationFailure | None:
-        """Flag the plan if it tightens any existing column to NOT NULL."""
+    ) -> tuple[ValidationFailure, ...]:
+        """Flag every action that tightens an existing column to NOT NULL."""
         if observed is None:
-            return None
-        for action in plan.actions:
-            if isinstance(action, SetColumnNullability) and (not action.nullable):
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot tighten existing column"
-                        f" '{action.column_name}' to NOT NULL. Keep it nullable,"
-                        " backfill any NULLs in a separate step, then set NOT NULL."
-                    ),
-                )
-        return None
+            return ()
+        return tuple(
+            ValidationFailure(
+                rule_name=self.__class__.__name__,
+                message=(
+                    "Operation not allowed: cannot tighten existing column"
+                    f" '{action.column_name}' to NOT NULL. Keep it nullable,"
+                    " backfill any NULLs in a separate step, then set NOT NULL."
+                ),
+            )
+            for action in plan.actions
+            if isinstance(action, SetColumnNullability) and not action.nullable
+        )
 
 
 class UnsupportedColumnTypeChange(Rule):
@@ -102,24 +106,25 @@ class UnsupportedColumnTypeChange(Rule):
 
     def evaluate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> ValidationFailure | None:
-        """Flag any common column whose desired data type differs from observed."""
+    ) -> tuple[ValidationFailure, ...]:
+        """Flag every common column whose desired data type differs from observed."""
         if observed is None:
-            return None
+            return ()
         observed_types = {column.name: column.data_type for column in observed.columns}
-        for desired_column in desired.columns:
-            observed_type = observed_types.get(desired_column.name)
-            if observed_type is not None and observed_type != desired_column.data_type:
-                return ValidationFailure(
-                    rule_name=self.__class__.__name__,
-                    message=(
-                        "Operation not allowed: cannot change the type of existing"
-                        f" column '{desired_column.name}' from {observed_type} to"
-                        f" {desired_column.data_type}. Type migrations are not supported;"
-                        " recreate the table to change a column's type."
-                    ),
-                )
-        return None
+        return tuple(
+            ValidationFailure(
+                rule_name=self.__class__.__name__,
+                message=(
+                    "Operation not allowed: cannot change the type of existing"
+                    f" column '{desired_column.name}' from {observed_types[desired_column.name]} to"
+                    f" {desired_column.data_type}. Type migrations are not supported;"
+                    " recreate the table to change a column's type."
+                ),
+            )
+            for desired_column in desired.columns
+            if desired_column.name in observed_types
+            and observed_types[desired_column.name] != desired_column.data_type
+        )
 
 
 class DisallowPartitioningChange(Rule):
@@ -131,21 +136,23 @@ class DisallowPartitioningChange(Rule):
 
     def evaluate(
         self, desired: DesiredTable, observed: ObservedTable | None, plan: ActionPlan
-    ) -> ValidationFailure | None:
+    ) -> tuple[ValidationFailure, ...]:
         """Flag the plan if desired and observed partition columns differ."""
         if observed is None:
-            return None
+            return ()
         if desired.partitioned_by != observed.partitioned_by:
-            return ValidationFailure(
-                rule_name=self.__class__.__name__,
-                message=(
-                    "Operation not allowed: partitioning changes are not supported."
-                    f" Current partition columns: {observed.partitioned_by}"
-                    f" - Requested partition columns: {desired.partitioned_by}."
-                    " Recreate the table with the desired partitioning."
+            return (
+                ValidationFailure(
+                    rule_name=self.__class__.__name__,
+                    message=(
+                        "Operation not allowed: partitioning changes are not supported."
+                        f" Current partition columns: {observed.partitioned_by}"
+                        f" - Requested partition columns: {desired.partitioned_by}."
+                        " Recreate the table with the desired partitioning."
+                    ),
                 ),
             )
-        return None
+        return ()
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -181,6 +188,8 @@ def validate_plan(
 
     """
     failures = tuple(
-        failure for rule in rules if (failure := rule.evaluate(desired, observed, plan)) is not None
+        failure
+        for rule in rules
+        for failure in rule.evaluate(desired, observed, plan)
     )
     return ValidationResult(failures=failures)
