@@ -62,7 +62,7 @@ def spark() -> SparkSession:  # type: ignore[misc]
 
 @pytest.fixture
 def temp_schema(spark):
-    """Unique schema per test, dropped with CASCADE on teardown."""
+    """Create a unique schema per test, dropped with CASCADE on teardown."""
     schema = f"{TEST_SCHEMA}_tmp_{uuid4().hex[:8]}"
     spark.sql(f"CREATE DATABASE {schema}")
     try:
@@ -73,7 +73,7 @@ def temp_schema(spark):
 
 @pytest.fixture
 def make_temp_table(spark, temp_schema):
-    """Factory that creates an isolated Delta table within the test's temp_schema."""
+    """Create an isolated Delta table within the test's temp_schema."""
     created = []
 
     def _create(name_prefix: str, columns_sql: str, *, tblprops: dict[str, str] | None = None):

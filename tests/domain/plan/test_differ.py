@@ -1,5 +1,4 @@
-from hypothesis import given
-from hypothesis import strategies as st
+from hypothesis import given, strategies as st
 
 from delta_engine.domain.model import (
     Boolean,
@@ -39,7 +38,11 @@ _SIMPLE_DATA_TYPES = st.one_of(
     st.just(String()),
     st.just(Date()),
     st.just(Timestamp()),
-    st.builds(Decimal, precision=st.integers(min_value=1, max_value=38), scale=st.integers(min_value=0, max_value=0)).filter(lambda d: d.scale <= d.precision),
+    st.builds(
+        Decimal,
+        precision=st.integers(min_value=1, max_value=38),
+        scale=st.integers(min_value=0, max_value=0),
+    ).filter(lambda d: d.scale <= d.precision),
 )
 
 # Valid column name: non-empty, lowercase, no special chars that break the model
@@ -78,7 +81,9 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
     columns = draw(_COLUMNS)
     column_names = [c.name for c in columns]
     partitioned_by = draw(
-        st.lists(st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True).map(tuple)
+        st.lists(
+            st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
+        ).map(tuple)
     )
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
@@ -87,6 +92,7 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
         properties=draw(_PROPERTIES),
         partitioned_by=partitioned_by,
     )
+
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 _BASELINE_COLUMNS = (Column("id", Integer()),)

@@ -1,6 +1,5 @@
+from hypothesis import given, strategies as st
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 from delta_engine.adapters.databricks.sql.preview import (
     error_preview,

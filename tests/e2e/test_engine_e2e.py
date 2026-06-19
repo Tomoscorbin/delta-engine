@@ -9,7 +9,7 @@ from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
 from delta_engine.schema import Column, Date, DeltaTable, Integer, String
-from tests.config import TEST_CATALOG, TEST_SCHEMA
+from tests.config import TEST_CATALOG
 
 
 def _patch_table_exists_for_local(monkeypatch):

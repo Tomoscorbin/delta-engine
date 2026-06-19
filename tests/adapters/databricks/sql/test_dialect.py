@@ -1,5 +1,4 @@
-from hypothesis import given
-from hypothesis import strategies as st
+from hypothesis import given, strategies as st
 
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,

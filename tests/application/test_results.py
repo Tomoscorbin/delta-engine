@@ -1,7 +1,6 @@
 from datetime import datetime
 
-from hypothesis import given
-from hypothesis import strategies as st
+from hypothesis import given, strategies as st
 
 from delta_engine.application.results import (
     ExecutionFailed,

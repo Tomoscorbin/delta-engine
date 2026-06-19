@@ -1,14 +1,15 @@
+from hypothesis import given, strategies as st
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 from delta_engine.application.registry import Registry
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
-from delta_engine.schema import Column as SchemaColumn, DeltaTable, Integer as SchemaInteger, String
+from delta_engine.schema import DeltaTable, String
 
 
 @st.composite
-def _distinct_qualified_names(draw: st.DrawFn, min_size: int = 1, max_size: int = 8) -> list[QualifiedName]:
+def _distinct_qualified_names(
+    draw: st.DrawFn, min_size: int = 1, max_size: int = 8
+) -> list[QualifiedName]:
     """Draw a list of distinct QualifiedName instances."""
     part = st.from_regex(r"[a-z][a-z0-9]{0,9}", fullmatch=True)
     names: list[QualifiedName] = []
