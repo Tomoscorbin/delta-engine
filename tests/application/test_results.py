@@ -1,8 +1,12 @@
 from datetime import datetime
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from delta_engine.application.results import (
     ExecutionFailed,
     ExecutionFailure,
+    ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadFailed,
@@ -217,6 +221,44 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
 
     # Then any_failures is True
     assert sr.any_failures is True
+
+
+# ---------- property: ExecutionSummary internal consistency ----------
+
+
+_EXECUTION_RESULT = st.one_of(
+    st.builds(
+        ExecutionSucceeded,
+        action=st.just("AddColumn"),
+        action_index=st.integers(min_value=0, max_value=100),
+        statement_preview=st.just("ALTER TABLE ..."),
+    ),
+    st.builds(
+        ExecutionFailed,
+        action=st.just("AddColumn"),
+        action_index=st.integers(min_value=0, max_value=100),
+        statement_preview=st.just("ALTER TABLE ..."),
+        failure=st.builds(
+            ExecutionFailure,
+            action_index=st.integers(min_value=0, max_value=100),
+            exception_type=st.just("SparkException"),
+            message=st.text(max_size=40),
+        ),
+    ),
+)
+
+
+@given(st.lists(_EXECUTION_RESULT, max_size=10))
+def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
+    results: list[ExecutionResult],
+) -> None:
+    # Given: any mix of succeeded and failed execution results
+    summary = ExecutionSummary(tuple(results))
+
+    # Then: failed, failures, and failed_count all agree
+    assert summary.failed == (summary.failed_count > 0)
+    assert summary.failed_count == len(summary.failures)
+    assert all(isinstance(f, ExecutionFailure) for f in summary.failures)
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
