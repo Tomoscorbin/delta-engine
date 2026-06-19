@@ -289,9 +289,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
     assert spark.catalog.getTable(fq).description == "partitioned table"
 
 
-def test_engine_isolates_failures_and_applies_successful_tables(
-    spark, monkeypatch, temp_schema
-):
+def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypatch, temp_schema):
     _patch_table_exists_for_local(monkeypatch)
 
     ok = f"ok_{uuid4().hex[:8]}"

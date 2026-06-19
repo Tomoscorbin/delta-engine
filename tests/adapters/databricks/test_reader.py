@@ -371,9 +371,7 @@ def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
     fq = str(qn)
     catalog = FakeCatalog(columns_by_table={fq: []}, table_comments={fq: ""})
     reader = DatabricksReader(
-        FakeSparkForFetchState(
-            catalog=catalog, describe_exc=AnalysisException("kaboom")
-        )
+        FakeSparkForFetchState(catalog=catalog, describe_exc=AnalysisException("kaboom"))
     )
 
     # When we fetch state

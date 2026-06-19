@@ -168,9 +168,7 @@ def test_set_column_comment_renders_alter_alter_column_comment():
     statement = _compile_single(SetColumnComment(column_name="id", comment="primary key"))
 
     # Then it renders an ALTER COLUMN ... COMMENT
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'primary key'"
-    )
+    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'primary key'")
 
 
 def test_set_column_comment_escapes_single_quotes_end_to_end():
@@ -178,9 +176,7 @@ def test_set_column_comment_escapes_single_quotes_end_to_end():
     statement = _compile_single(SetColumnComment(column_name="id", comment="it's the key"))
 
     # Then the quote is doubled in the emitted SQL
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'"
-    )
+    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'")
 
 
 def test_set_table_comment_renders_comment_on_table():
