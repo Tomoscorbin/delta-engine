@@ -8,6 +8,7 @@ from enum import IntEnum, auto
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable
+from delta_engine.domain.model.data_type import DataType
 
 
 class ActionPhase(IntEnum):
@@ -28,6 +29,8 @@ class ActionPhase(IntEnum):
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
+    COLUMN_TYPE_CHANGE = auto()
+    PARTITIONING_CHANGE = auto()
 
 
 class Action(ABC):
@@ -155,6 +158,50 @@ class SetColumnNullability(Action):
     def subject(self) -> str:
         """The column whose nullability changes."""
         return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnTypeChange(Action):
+    """
+    Records that a column's type differs between desired and observed.
+
+    Delta Lake does not support column type changes, so this action is never
+    executed — it exists so the differ can make the drift visible in the plan
+    and validation can reject it with a clear message instead of silently
+    ignoring it.
+    """
+
+    column_name: str
+    from_type: DataType
+    to_type: DataType
+
+    phase: ClassVar[ActionPhase] = ActionPhase.COLUMN_TYPE_CHANGE
+
+    @property
+    def subject(self) -> str:
+        """The column whose type changed."""
+        return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class PartitioningChange(Action):
+    """
+    Records that the desired and observed partition specs differ.
+
+    Partitioning cannot be changed on an existing Delta table, so this action
+    is never executed — it exists so the differ can make the conflict visible
+    in the plan and validation can reject it with a clear message.
+    """
+
+    desired_partitioning: tuple[str, ...]
+    observed_partitioning: tuple[str, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.PARTITIONING_CHANGE
+
+    @property
+    def subject(self) -> str:
+        """Targets the table as a whole."""
+        return ""
 
 
 def _execution_order(action: Action) -> tuple[int, str]:

@@ -21,8 +21,10 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetProperty,
@@ -108,6 +110,25 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
     sign = "DROP" if action.nullable else "SET"
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
+
+
+@_compile_action.register
+def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
+    # Validation rejects this action before execution; reaching here is a bug.
+    raise NotImplementedError(
+        f"Column type changes are not supported: column '{action.column_name}'"
+        f" ({action.from_type} -> {action.to_type}). Recreate the table to change a column's type."
+    )
+
+
+@_compile_action.register
+def _(action: PartitioningChange, backticked_table_name: str) -> str:
+    # Validation rejects this action before execution; reaching here is a bug.
+    raise NotImplementedError(
+        f"Partitioning changes are not supported"
+        f" ({action.observed_partitioning} -> {action.desired_partitioning})."
+        " Recreate the table with the desired partitioning."
+    )
 
 
 # ----------- helpers ------------
