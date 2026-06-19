@@ -90,7 +90,9 @@ class DatabricksReader:
         if not self._table_exists(qualified_name):
             return TableAbsent()
 
-        mappings = tuple(_to_column_mapping(c) for c in self.spark.catalog.listColumns(str(qualified_name)))
+        mappings = tuple(
+            _to_column_mapping(c) for c in self.spark.catalog.listColumns(str(qualified_name))
+        )
         columns = tuple(m.column for m in mappings)
         partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(
