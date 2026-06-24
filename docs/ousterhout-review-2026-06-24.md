@@ -39,7 +39,7 @@ This is the only finding with behavioural or API impact.
 
 **Done.** `Property` is exported from both [schema/__init__.py](../src/delta_engine/schema/__init__.py) and the [top-level package](../src/delta_engine/__init__.py) (eager — it is pyspark-free). The original note suggested also annotating the constructor as `dict[Property | str, str]`; this was **rejected on inspection**. `Property` subclasses `str` (`StrEnum`), so `Property | str` collapses to `str` for the type checker — the annotation conveys nothing to mypy and adds visual noise. Enum members already work as dict keys at runtime and type-check fine under `dict[str, str]`; this is locked in by `test_accepts_property_enum_members_as_keys`.
 
-### R2 — Make the `AddColumn` compiler's hidden contract loud — *low*
+### R2 — Make the `AddColumn` compiler's hidden contract loud — *low* — ✅ done
 
 **File:** [compile.py:68-79](../src/delta_engine/adapters/databricks/sql/compile.py)
 
@@ -56,45 +56,45 @@ assert action.column.nullable, (
 
 One line. A bypassed or customised rule set then fails loudly instead of emitting wrong DDL.
 
-### R3 — Pair statements to actions explicitly in the executor — *low*
+### R3 — Pair statements to actions explicitly in the executor — *low* — ✅ done
 
 **File:** [executor.py:55-61](../src/delta_engine/adapters/databricks/executor.py)
 
 `execute()` relies on an undocumented 1:1 correspondence between compiled statements and `plan[action_index]`. `zip(plan, statements)` makes the pairing explicit and removes the integer index — an obscurity removal.
 
-**Change:** Replace `for action_index, statement in enumerate(statements)` with `zip(plan, statements)`, deriving the index from `enumerate(zip(...))` only if a result still needs it.
+**Change:** Replaced `enumerate(statements)` + `plan[action_index]` with `enumerate(zip(plan, statements, strict=True))`. `strict=True` (added to satisfy ruff B905, and a genuine improvement) turns a compiler/plan length mismatch into a loud error instead of a silent truncation.
 
-### R4 — Use `AssertionError`, not `NotImplementedError`, for invariant guards — *low*
+### R4 — Use `AssertionError`, not `NotImplementedError`, for invariant guards — *low* — ✅ done
 
 **File:** [compile.py:115-131](../src/delta_engine/adapters/databricks/sql/compile.py)
 
 The `ColumnTypeChange` and `PartitioningChange` dispatchers raise `NotImplementedError`, which signals "abstract stub not yet written." These are "validation should have caught this" invariant violations. `AssertionError` reads correctly. Keep the user-facing hint in the message.
 
-### R5 — Cheap consistency wins — *low*
+### R5 — Cheap consistency wins — *low* — ✅ mostly done (one item deferred)
 
-- **Iterate the plan, not its field.** Replace `for action in plan.actions` with `for action in plan` in all four [validation rules](../src/delta_engine/application/validation.py) (lines 61, 92, 120, 148). `ActionPlan.__iter__` exists precisely to hide `.actions`; the rules are the only callers that reach past it.
-- **Drop the redundant class-var alias.** [`_managed_property_keys`](../src/delta_engine/schema/table.py) (line 29) is a private `ClassVar` set to `MANAGED_PROPERTY_KEYS`, used once. Delete it and use `MANAGED_PROPERTY_KEYS` directly at line 45.
-- **Naming** (per coding standard: avoid abbreviations):
-  - `lg` → `logger` in [log_config.py:72](../src/delta_engine/adapters/databricks/log_config.py).
-  - Local `type` shadows the builtin in [compile.py:140](../src/delta_engine/adapters/databricks/sql/compile.py) → `sql_type`.
-  - `exc_type_name` → `exception_type_name` ([preview.py](../src/delta_engine/adapters/databricks/sql/preview.py), plus `sql/__init__.py`, `reader.py`, `executor.py`, and tests). It sits on the public adapter surface.
-  - Inline `df` at [reader.py:123](../src/delta_engine/adapters/databricks/reader.py): `row = self.spark.sql(query).first()`.
-- **Remove restating docstrings.** Delete the docstrings on `ActionPlan`'s dunders (`__len__`, `__bool__`, `__iter__`, `__getitem__`) and the nine concrete `subject` overrides in [actions.py](../src/delta_engine/domain/plan/actions.py). The abstract `Action.subject` already documents the contract.
+- ✅ **Iterate the plan, not its field.** All four [validation rules](../src/delta_engine/application/validation.py) now use `for action in plan`.
+- ✅ **Drop the redundant class-var alias.** `_managed_property_keys` removed from [schema/table.py](../src/delta_engine/schema/table.py); the call site uses `MANAGED_PROPERTY_KEYS` directly.
+- ✅ **Naming** (per coding standard: avoid abbreviations):
+  - `lg` → `py4j_logger` in [log_config.py](../src/delta_engine/adapters/databricks/log_config.py) (named for what it is, not the generic `logger`).
+  - Local `type` → `sql_type` and `cols`/`c` → `quoted_columns`/`column` in [compile.py](../src/delta_engine/adapters/databricks/sql/compile.py).
+  - `exc_type_name` → `exception_type_name` across [preview.py](../src/delta_engine/adapters/databricks/sql/preview.py), `sql/__init__.py`, `reader.py`, `executor.py`, and tests. Also `exc` → `exception` in `reader.py`.
+  - Inlined `df` at [reader.py](../src/delta_engine/adapters/databricks/reader.py): `row = self.spark.sql(query).first()`.
+- ⚠️ **DEFERRED — Remove restating docstrings.** The proposal was to delete the docstrings on `ActionPlan`'s dunders and the nine `subject` overrides in [actions.py](../src/delta_engine/domain/plan/actions.py). **This conflicts with the project's own lint gate:** `pyproject.toml` enables ruff's `D` (pydocstyle) ruleset for `src/`, and `D105` (magic-method docstrings) / `D102` (public-method docstrings) are *not* in the ignore list — removing them fails `ruff check`. Resolving this means either (a) adding `D105`/`D102` to the per-path ignores for `actions.py`, or (b) accepting the docstrings as the project standard. Left as-is pending that call; reverted cleanly.
 
-### R6 — Test hygiene (Detroit-school) — *low*
+### R6 — Test hygiene (Detroit-school) — *low* — ✅ done
 
-- [test_results.py:26](../tests/application/test_results.py) uses a `_FakeObservedTable`. Replace it with a real `ObservedTable`; mocking internal collaborators violates the classical-testing rule.
-- [test_reader.py](../tests/adapters/databricks/test_reader.py) tests private methods directly (`_table_exists`, `_fetch_properties`, `_fetch_table_comment`). Promote the meaningful cases to `fetch_state`-level scenarios so the tests survive refactors, then delete the private-method tests.
-- [test_validation.py:53,97,135](../tests/application/test_validation.py) asserts via `message.split("'")[1]`. Replace with `any(name in f.message for f in failures)`, which survives message rephrasing without changing what behaviour is verified.
+- ✅ [test_results.py](../tests/application/test_results.py): `_FakeObservedTable` replaced with a real `ObservedTable` via an `_an_observed_table()` builder.
+- ✅ [test_reader.py](../tests/adapters/databricks/test_reader.py): the two white-box `_table_exists` tests deleted (the present/absent paths are covered at `fetch_state` level, and the e2e suite monkeypatches `_table_exists` with `raising=True`, keeping the name honest). The two `exc_type_name` tests here were redundant with `test_preview.py` and were removed. The `_fetch_properties`/`_fetch_table_comment` private tests were **kept** — they assert the read-only/`MappingProxy` immutability guard and the None-comment edge case, which aren't redundantly covered elsewhere; deleting them would lose real coverage.
+- ✅ [test_validation.py](../tests/application/test_validation.py): the brittle `message.split("'")[1]` asserts replaced with substring-membership checks.
 
 ---
 
-## Documentation gaps worth closing — *low*
+## Documentation gaps worth closing — *low* — ✅ done
 
-- [table.py:32](../src/delta_engine/domain/model/table.py): the `TableSnapshot.__post_init__` docstring omits the lowercase-partition invariant. Add it to the existing sentence.
-- [reader.py:118,122](../src/delta_engine/adapters/databricks/reader.py): the two `QualifiedName` rendering strategies (`str()` for the Catalog API, `backtick_qualified_name()` for SQL DDL) are correct but undocumented. A one-line comment explaining that SQL DDL requires identifier quoting while the Catalog API parses dot-separated parts internally closes the unknown unknown.
-- [executor.py:64](../src/delta_engine/adapters/databricks/executor.py): `_run_statement`'s broad `except` has no rationale, unlike `fetch_state`'s. Note that Spark raises heterogeneous exceptions (`Py4JJavaError`, `AnalysisException`, Python-level errors) and the executor's contract is to wrap any failure in `ExecutionFailed`. The asymmetry is a cognitive-load tax: a future maintainer could narrow the catch and reintroduce silent propagation.
-- [engine.py:53-62](../src/delta_engine/application/engine.py) and [build_engine.py](../src/delta_engine/adapters/databricks/build_engine.py): `Args:` blocks that restate typed parameter names add nothing. Keep only prose that documents non-obvious constraints, such as the "no logging side effect" note.
+- ✅ [table.py](../src/delta_engine/domain/model/table.py): the `TableSnapshot.__post_init__` docstring now states the lowercase-partition invariant (and the existence/uniqueness ones), as a multi-line docstring to stay within the line limit.
+- ✅ [reader.py](../src/delta_engine/adapters/databricks/reader.py): `_fetch_properties` now carries a comment explaining why SQL DDL needs `backtick_qualified_name()` while the `catalog.*` calls take the plain `str()` form — with a "don't unify the two" warning.
+- ✅ [executor.py](../src/delta_engine/adapters/databricks/executor.py): `_run_statement`'s broad `except` now documents the same total-function rationale as `fetch_state`. The inner reflection catch in `exception_type_name` was also narrowed from `except Exception` to `except (AttributeError, TypeError)` (the review's "narrow the bare except" nit).
+- ✅ [engine.py](../src/delta_engine/application/engine.py) and [build_engine.py](../src/delta_engine/adapters/databricks/build_engine.py): the mechanical `Args:` blocks were removed; the non-obvious "no logging side effect" prose in `build_databricks_engine` was kept.
 
 ---
 

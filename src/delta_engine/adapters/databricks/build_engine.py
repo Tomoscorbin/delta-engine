@@ -15,10 +15,6 @@ def build_databricks_engine(spark: SparkSession) -> Engine:
     for the common script/notebook case, call :func:`configure_logging` once at
     startup to install the package's coloured handler; embedders who own their
     own logging simply leave it alone.
-
-    Args:
-        spark: The Spark session the reader and executor run against.
-
     """
     reader = DatabricksReader(spark)
     executor = DatabricksExecutor(spark)

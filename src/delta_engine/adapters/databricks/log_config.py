@@ -69,6 +69,6 @@ def configure_logging(level: int = logging.INFO) -> None:
     root.addHandler(handler)
 
     for name in ("py4j", "py4j.clientserver"):
-        lg = logging.getLogger(name)
-        lg.setLevel(logging.WARNING)
-        lg.propagate = False
+        py4j_logger = logging.getLogger(name)
+        py4j_logger.setLevel(logging.WARNING)
+        py4j_logger.propagate = False

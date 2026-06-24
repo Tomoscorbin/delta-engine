@@ -58,7 +58,7 @@ class NonNullableColumnAdd:
                     f"Operation not allowed: cannot add non-nullable column '{action.column.name}'"
                 ),
             )
-            for action in plan.actions
+            for action in plan
             if isinstance(action, AddColumn) and not action.column.nullable
         )
 
@@ -88,7 +88,7 @@ class NullabilityTighteningOnExistingColumn:
                     " backfill any NULLs in a separate step, then set NOT NULL."
                 ),
             )
-            for action in plan.actions
+            for action in plan
             if isinstance(action, SetColumnNullability) and not action.nullable
         )
 
@@ -117,7 +117,7 @@ class UnsupportedColumnTypeChange:
                     " recreate the table to change a column's type."
                 ),
             )
-            for action in plan.actions
+            for action in plan
             if isinstance(action, ColumnTypeChange)
         )
 
@@ -145,7 +145,7 @@ class DisallowPartitioningChange:
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for action in plan.actions
+            for action in plan
             if isinstance(action, PartitioningChange)
         )
 

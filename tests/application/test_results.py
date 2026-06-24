@@ -18,14 +18,18 @@ from delta_engine.application.results import (
     ValidationFailure,
     ValidationResult,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import Column, Integer, ObservedTable, QualifiedName
 
-# ---------- test fakes / builders
+# ---------- test builders
 
 
-class _FakeObservedTable:
-    def __init__(self, partitioned_by=()):
-        self.partitioned_by = partitioned_by
+def _an_observed_table(partitioned_by=()):
+    """Build a real ObservedTable, so reports are exercised against the domain type."""
+    return ObservedTable(
+        qualified_name=QualifiedName("cat", "schema", "observed"),
+        columns=(Column("id", Integer()),),
+        partitioned_by=partitioned_by,
+    )
 
 
 def _t0():
@@ -58,7 +62,7 @@ def _failed_exec(
 
 def test_present_state_holds_the_observed_table():
     # Given a table that was read and exists
-    observed = _FakeObservedTable()
+    observed = _an_observed_table()
 
     # When recording its catalog state
     state = TablePresent(table=observed)
@@ -186,7 +190,7 @@ def test_execution_outcome_variants_carry_the_right_payload():
 
 def test_table_status_success_when_all_actions_succeed():
     # Given successful read, no validation failures, and only successful actions
-    read = TablePresent(table=_FakeObservedTable())
+    read = TablePresent(table=_an_observed_table())
     validation = ValidationResult()
     execution = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
 
@@ -212,7 +216,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         qualified_name=QualifiedName("cat", "s", "a"),
         started_at=_t0(),
         ended_at=_t1(),
-        read=TablePresent(table=_FakeObservedTable()),
+        read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
@@ -220,7 +224,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         qualified_name=QualifiedName("cat", "s", "b"),
         started_at=_t0(),
         ended_at=_t1(),
-        read=TablePresent(table=_FakeObservedTable()),
+        read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_failed_exec(0),)),
     )
@@ -279,7 +283,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         qualified_name=ok_name,
         started_at=_t0(),
         ended_at=_t1(),
-        read=TablePresent(table=_FakeObservedTable()),
+        read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )

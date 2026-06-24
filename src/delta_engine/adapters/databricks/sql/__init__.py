@@ -13,7 +13,11 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
-from delta_engine.adapters.databricks.sql.preview import error_preview, exc_type_name, sql_preview
+from delta_engine.adapters.databricks.sql.preview import (
+    error_preview,
+    exception_type_name,
+    sql_preview,
+)
 from delta_engine.adapters.databricks.sql.types import (
     domain_type_from_spark,
     sql_type_for_data_type,
@@ -25,7 +29,7 @@ __all__ = [
     "compile_plan",
     "domain_type_from_spark",
     "error_preview",
-    "exc_type_name",
+    "exception_type_name",
     "quote_literal",
     "sql_preview",
     "sql_type_for_data_type",

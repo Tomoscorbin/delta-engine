@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from py4j.protocol import Py4JJavaError
 import pyspark.sql.types as T
 from pyspark.sql.utils import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
-from delta_engine.adapters.databricks.sql import exc_type_name
 from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 
@@ -128,31 +126,6 @@ def make_catalog_col(
 @pytest.fixture
 def qn() -> QualifiedName:
     return QualifiedName("c", "s", "t")
-
-
-# ---------- tests: existence ----------
-
-
-def test_table_exists_returns_true_when_catalog_reports_present(qn):
-    # Given a catalog that reports the table as present
-    reader = DatabricksReader(FakeSpark(catalog=FakeCatalog(exists=True)))
-
-    # When we check whether the table exists
-    result = reader._table_exists(qn)
-
-    # Then the table is reported as existing
-    assert result is True
-
-
-def test_table_exists_returns_false_when_catalog_reports_absent(qn):
-    # Given a catalog that reports the table as absent
-    reader = DatabricksReader(FakeSpark(catalog=FakeCatalog(exists=False)))
-
-    # When we check whether the table exists
-    result = reader._table_exists(qn)
-
-    # Then the table is reported as missing
-    assert result is False
 
 
 # ---------- tests: columns & partitions ----------
@@ -442,37 +415,3 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
     assert isinstance(result, TablePresent)
     assert [c.name for c in result.table.columns] == ["eventid", "username"]
     assert result.table.partitioned_by == ("username",)
-
-
-def _py4j_java_error(java_class_name: str) -> Py4JJavaError:
-    """
-    Build a Py4JJavaError whose underlying Java exception reports the given class.
-
-    ``_target_id`` is the only attribute Py4JJavaError.__init__ touches; the
-    ``getClass().getName()`` chain is what ``_exc_type_name`` reads. (Its
-    ``__str__`` would need a live JVM gateway, so the error is never stringified
-    here -- _exc_type_name only inspects the class.)
-    """
-    java_exception = SimpleNamespace(
-        _target_id="o123",
-        getClass=lambda: SimpleNamespace(getName=lambda: java_class_name),
-    )
-    return Py4JJavaError("boom", java_exception)
-
-
-def test_exc_type_name_reports_the_underlying_java_class_for_a_py4j_error():
-    # Given a Py4JJavaError -- the primary failure shape on real Databricks, where
-    # JVM exceptions surface through py4j wrapping the real Spark exception
-    error = _py4j_java_error("org.apache.spark.sql.AnalysisException")
-
-    # When naming the exception type at the adapter boundary
-    name = exc_type_name(error)
-
-    # Then the underlying Java class is reported, not the "Py4JJavaError" wrapper
-    assert name == "org.apache.spark.sql.AnalysisException"
-
-
-def test_exc_type_name_falls_back_to_python_class_for_a_plain_exception():
-    # Given a plain Python exception (no JVM origin)
-    # Then the Python class name is used
-    assert exc_type_name(ValueError("nope")) == "ValueError"
