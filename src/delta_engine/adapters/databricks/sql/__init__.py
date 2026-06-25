@@ -21,6 +21,7 @@ from delta_engine.adapters.databricks.sql.preview import (
 from delta_engine.adapters.databricks.sql.types import (
     domain_type_from_spark,
     sql_type_for_data_type,
+    try_domain_type_from_spark,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "quote_literal",
     "sql_preview",
     "sql_type_for_data_type",
+    "try_domain_type_from_spark",
 ]

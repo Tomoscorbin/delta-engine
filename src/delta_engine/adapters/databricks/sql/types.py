@@ -107,4 +107,18 @@ def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
                 domain_type_from_spark(spark_type.valueType),
             )
         case _:
-            raise TypeError(f"Unsupported Spark type: {spark_type!r}")
+            raise TypeError(f"Unrecognised Spark type: {spark_type!r}")
+
+
+def try_domain_type_from_spark(spark_type: str | SparkType) -> DataType | None:
+    """
+    Map a Spark SQL type to a domain type, returning ``None`` for unrecognised types.
+
+    A non-raising companion to :func:`domain_type_from_spark`. Use this when a
+    missing mapping should degrade gracefully (e.g. skipping a column) rather
+    than raise. Callers are responsible for any logging or fallback behaviour.
+    """
+    try:
+        return domain_type_from_spark(spark_type)
+    except TypeError:
+        return None

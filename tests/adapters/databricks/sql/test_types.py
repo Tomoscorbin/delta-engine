@@ -1,8 +1,10 @@
+import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.sql.types import (
     domain_type_from_spark,
     sql_type_for_data_type,
+    try_domain_type_from_spark,
 )
 from delta_engine.domain.model.data_type import (
     Array,
@@ -39,6 +41,24 @@ def test_sql_type_for_decimal_array_map_recursive() -> None:
     # nested
     nested = Array(Map(String(), Decimal(9, 0)))
     assert sql_type_for_data_type(nested) == "ARRAY<MAP<STRING,DECIMAL(9,0)>>"
+
+
+def test_try_domain_type_from_spark_returns_none_for_unrecognised_type() -> None:
+    # Given a Spark type the engine does not yet map
+    # When we attempt a non-raising conversion
+    result = try_domain_type_from_spark(T.BinaryType())
+
+    # Then None is returned rather than raising
+    assert result is None
+
+
+def test_try_domain_type_from_spark_returns_domain_type_for_known_type() -> None:
+    # Given a Spark type the engine maps
+    # When we attempt a non-raising conversion
+    result = try_domain_type_from_spark(T.IntegerType())
+
+    # Then the domain type is returned
+    assert result == Integer()
 
 
 def test_domain_type_from_spark_primitives_via_strings(spark) -> None:
