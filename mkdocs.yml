@@ -2,6 +2,7 @@ site_name: delta-engine
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Design Review: design-review.md
 
 markdown_extensions:
   - admonition
