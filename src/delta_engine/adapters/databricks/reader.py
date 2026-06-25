@@ -8,6 +8,8 @@ from types import MappingProxyType
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
+import logging
+
 from delta_engine.adapters.databricks.sql import (
     backtick_qualified_name,
     domain_type_from_spark,
@@ -22,6 +24,8 @@ from delta_engine.application.results import (
     TablePresent,
 )
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,28 @@ def _to_column_mapping(spark_column: SparkColumn) -> _ColumnMapping:
         ),
         is_partition=bool(getattr(spark_column, "isPartition", False)),
     )
+
+
+def _is_unmappable(spark_column: SparkColumn, qualified_name: QualifiedName) -> bool:
+    """
+    Return ``True`` and log a warning if ``spark_column`` has a type the engine
+    cannot represent; return ``False`` when the column maps cleanly.
+
+    Skipping rather than failing the whole table matches the "manage what you
+    understand, ignore the rest" design: a table with one STRUCT column and ten
+    simple ones remains manageable for the simple columns.
+    """
+    try:
+        domain_type_from_spark(spark_column.dataType)
+        return False
+    except TypeError:
+        logger.warning(
+            "Skipping column %r in %s: unsupported Spark type %r",
+            spark_column.name,
+            qualified_name,
+            spark_column.dataType,
+        )
+        return True
 
 
 class DatabricksReader:
@@ -89,7 +115,9 @@ class DatabricksReader:
             return TableAbsent()
 
         mappings = tuple(
-            _to_column_mapping(c) for c in self.spark.catalog.listColumns(str(qualified_name))
+            _to_column_mapping(c)
+            for c in self.spark.catalog.listColumns(str(qualified_name))
+            if not _is_unmappable(c, qualified_name)
         )
         columns = tuple(m.column for m in mappings)
         partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
