@@ -28,6 +28,8 @@ Tables created by the engine are safe — it always sets these properties at cre
 
 **Status:** Unconfirmed. Local verification was blocked by an environment issue: the dev machine cannot resolve Delta jars from Maven (SSL trust), and the installed pyspark (4.1.1) mismatches the cached Delta build (4.2.0 for Spark 4.0). The Delta docs describe the field only as "all the properties set for this table." Confirm against a real Databricks Unity Catalog cluster.
 
+**Ready to verify:** [`scripts/verify_property_idempotency.py`](../scripts/verify_property_idempotency.py) settles this on a live session. It creates a plain Delta table (no managed properties — the adopted-table condition), registers it with the engine, and syncs three times: it exits 0 if syncs 2 and 3 are true no-ops, or 1 (with the confirmed finding and fix direction) if the engine re-emits `SetProperty` every run. Run it as `python scripts/verify_property_idempotency.py --catalog <cat> --schema <schema>`.
+
 **Fix, regardless of the runtime answer:** Strengthen the idempotency test (see Priority 3). The current test cannot catch this because `SET TBLPROPERTIES` is idempotent at the DDL level, so the schema stays equal even when properties are re-set every run.
 
 ## Priority 2 — Quick wins
@@ -98,6 +100,8 @@ assert all(len(t.execution.results) == 0 for t in second_report)
 Every e2e test calls `_patch_table_exists_for_local`, which monkey-patches `DatabricksReader._table_exists` ([test_engine_e2e.py:15](../tests/e2e/test_engine_e2e.py#L15)). This couples the suite to a private implementation detail and changes the method's semantics (three-part name versus two-part). The e2e tests no longer exercise the real existence-check path. It also breaks the project's own rule against mocking internal collaborators.
 
 **Fix:** Check whether `spark.catalog.tableExists("spark_catalog.schema.table")` resolves under the local DeltaCatalog. If it does, delete the patch. If three-part resolution genuinely fails locally, fix it at the data level in the fixture rather than patching the adapter.
+
+**Ready to verify:** `_patch_table_exists_for_local` now carries an in-code `TODO` and is gated behind an env var. Set `DELTA_ENGINE_E2E_REAL_TABLE_EXISTS=1` to skip the patch and run the e2e suite against the real `DatabricksReader._table_exists`. If it passes on a session that can run e2e, delete the helper and its call sites; the env var made the experiment a one-line change rather than a code edit per run.
 
 ### Read-failure isolation is under-tested
 
