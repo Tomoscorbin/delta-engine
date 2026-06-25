@@ -191,8 +191,12 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
         engine.sync(reg)
 
     # Then both tables appear in the report; one READ_FAILED, one SUCCESS
-    statuses = [tr.status for tr in err.value.report]
-    assert statuses == [TableRunStatus.READ_FAILED, TableRunStatus.SUCCESS]
+    [tr_a, tr_b] = list(err.value.report)
+    assert tr_a.status is TableRunStatus.READ_FAILED
+    assert tr_b.status is TableRunStatus.SUCCESS
+    # And the surviving table was actually executed, not just reported as success
+    # with an empty (never-run) execution summary
+    assert tr_b.execution.results != ()
 
 
 def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises():
