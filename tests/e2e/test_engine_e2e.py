@@ -184,12 +184,12 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
     engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
 
     engine.sync(reg)
-    first = spark.table(fq).schema.jsonValue()
 
-    engine.sync(reg)
-    second = spark.table(fq).schema.jsonValue()
+    # When syncing a second time against an already-correct table
+    second_report = engine.sync(reg)
 
-    assert first == second
+    # Then no actions were executed (true no-op, not just a schema-equal re-apply)
+    assert all(len(t.execution.results) == 0 for t in second_report.table_reports)
     assert spark.catalog.getTable(fq).description == "idempotency test"
 
 
