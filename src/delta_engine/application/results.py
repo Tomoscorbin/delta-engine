@@ -48,7 +48,6 @@ class ReadFailure(Failure):
     message: str
 
     def format_lines(self) -> tuple[str, ...]:
-        """Render the read failure as a display line."""
         return (f"Read error: {self.exception_type} - {self.message}",)
 
 
@@ -60,7 +59,6 @@ class ValidationFailure(Failure):
     message: str
 
     def format_lines(self) -> tuple[str, ...]:
-        """Render the validation failure as a display line."""
         return (f"Validation failed: {self.rule_name} - {self.message}",)
 
 
@@ -74,7 +72,6 @@ class ExecutionFailure(Failure):
     statement_preview: str
 
     def format_lines(self) -> tuple[str, ...]:
-        """Render the execution failure and its SQL preview as display lines."""
         return (
             f"Execution failed at action {self.action_index}: "
             f"{self.exception_type} - {self.message}",
@@ -242,5 +239,4 @@ class SyncReport:
         return {t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures}
 
     def __iter__(self) -> Iterator[TableRunReport]:
-        """Iterate over per-table reports in the sync run."""
         return iter(self.table_reports)

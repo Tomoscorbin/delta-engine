@@ -70,7 +70,6 @@ class CreateTable(Action):
 
     @property
     def subject(self) -> str:
-        """Targets the table as a whole."""
         return ""
 
 
@@ -84,7 +83,6 @@ class AddColumn(Action):
 
     @property
     def subject(self) -> str:
-        """The added column's name."""
         return self.column.name
 
 
@@ -98,7 +96,6 @@ class DropColumn(Action):
 
     @property
     def subject(self) -> str:
-        """The dropped column's name."""
         return self.column_name
 
 
@@ -113,7 +110,6 @@ class SetProperty(Action):
 
     @property
     def subject(self) -> str:
-        """The property name being set."""
         return self.name
 
 
@@ -128,7 +124,6 @@ class SetColumnComment(Action):
 
     @property
     def subject(self) -> str:
-        """The commented column's name."""
         return self.column_name
 
 
@@ -142,7 +137,6 @@ class SetTableComment(Action):
 
     @property
     def subject(self) -> str:
-        """Targets the table as a whole."""
         return ""
 
 
@@ -157,7 +151,6 @@ class SetColumnNullability(Action):
 
     @property
     def subject(self) -> str:
-        """The column whose nullability changes."""
         return self.column_name
 
 
@@ -180,7 +173,6 @@ class ColumnTypeChange(Action):
 
     @property
     def subject(self) -> str:
-        """The column whose type changed."""
         return self.column_name
 
 
@@ -201,7 +193,6 @@ class PartitioningChange(Action):
 
     @property
     def subject(self) -> str:
-        """Targets the table as a whole."""
         return ""
 
 
@@ -229,13 +220,10 @@ class ActionPlan:
         object.__setattr__(self, "actions", tuple(sorted(self.actions, key=_execution_order)))
 
     def __len__(self) -> int:
-        """Return the number of actions in the plan."""
         return len(self.actions)
 
     def __bool__(self) -> bool:
-        """Return ``True`` if the plan contains any actions."""
         return bool(self.actions)
 
     def __iter__(self) -> Iterator[Action]:
-        """Iterate over actions in plan order."""
         return iter(self.actions)

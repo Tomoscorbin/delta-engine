@@ -61,6 +61,7 @@ ignore = [
   "E203", # slice spacing (compatible with ruff-format/black)
   "E266", # allow long inline comments
   "D104", # don't require package docstrings in __init__.py
+  "D105", # magic methods implement named protocols (len/iter/bool); the protocol documents them
   "D107", # don't require docstrings on __init__ methods
   "D212", # don't require multi-line docstring summary to start at the first line
   "D203", # no blank line before docstring
@@ -91,6 +92,11 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
   "N815", # allow variables in class scope to be mixedCase
   "N812", # allow uppercase variable names
 ]
+# Value-object modules: each class is documented and the contract lives on the
+# abstract method (Action.subject, Failure.format_lines). Concrete overrides
+# only restate it, so we don't require a docstring on every override.
+"src/delta_engine/domain/plan/actions.py" = ["D102"]
+"src/delta_engine/application/results.py" = ["D102"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
