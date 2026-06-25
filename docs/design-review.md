@@ -26,7 +26,7 @@ These types are common in PySpark 4.0 production tables. A table with one nested
 
 Tables created by the engine are safe — it always sets these properties at creation. The risk applies to pre-existing tables adopted into management.
 
-**Status:** Unconfirmed. Local verification was blocked by an environment issue: the dev machine cannot resolve Delta jars from Maven (SSL trust), and the installed pyspark (4.1.1) mismatches the cached Delta build (4.2.0 for Spark 4.0). The Delta docs describe the field only as "all the properties set for this table." Confirm against a real Databricks Unity Catalog cluster.
+**Status:** Unconfirmed, and **deferred** — not pursued now. Local verification was blocked by an environment issue: the dev machine cannot resolve Delta jars from Maven (SSL trust), and the installed pyspark (4.1.1) mismatches the cached Delta build (4.2.0 for Spark 4.0). The Delta docs describe the field only as "all the properties set for this table." This finding only bites *adopted* tables (pre-existing tables brought under management), which the engine does not yet support as a first-class flow — it is folded into the [Future work: adopting existing tables](#future-work-adopting-existing-tables) section below rather than chased in isolation.
 
 **Fix, regardless of the runtime answer:** Strengthen the idempotency test (see Priority 3). The current test cannot catch this because `SET TBLPROPERTIES` is idempotent at the DDL level, so the schema stays equal even when properties are re-set every run.
 
@@ -99,6 +99,8 @@ Every e2e test calls `_patch_table_exists_for_local`, which monkey-patches `Data
 
 **Fix:** Check whether `spark.catalog.tableExists("spark_catalog.schema.table")` resolves under the local DeltaCatalog. If it does, delete the patch. If three-part resolution genuinely fails locally, fix it at the data level in the fixture rather than patching the adapter.
 
+**Status: Deferred.** Settling this needs a session that can run the e2e suite, which the dev machine cannot (the same Delta-jar/version blocker above). The patch stays in place for now. It is most naturally resolved alongside the [Future work: adopting existing tables](#future-work-adopting-existing-tables) effort, when real-catalog behaviour gets exercised properly.
+
 ### Read-failure isolation is under-tested
 
 `test_engine_reads_all_tables_then_raises_on_any_read_failure` checks that both tables appear in the report when one read fails ([test_engine.py:177](../tests/application/test_engine.py#L177)). It does not assert that the surviving table was executed. `TableRunStatus.SUCCESS` is consistent with an empty, never-run `ExecutionSummary`, so the status check alone does not prove the engine honoured "failures in individual tables do not halt the sync of others."
@@ -136,12 +138,29 @@ Two adjustments:
 
 **Status: ✅ Done (`docs/aposd-comments-and-docs`).** The restate-the-code docstrings were removed (the nine `subject()` overrides, the trivial `__len__`/`__bool__`/`__iter__` dunders, and the three concrete `format_lines` overrides), keeping the contract-bearing docstrings on the abstract `Action.subject` and `Failure.format_lines`. Because the `D` ruleset forced these, `D105` is now ignored project-wide (magic methods are documented by the protocol they implement) and `D102` is ignored for the two value-object modules (`actions.py`, `results.py`); `D102` stays enforced everywhere else. The totality contract is lifted onto both `CatalogStateReader` and `PlanExecutor` Protocol docstrings.
 
+## Future work: adopting existing tables
+
+Today the engine assumes it owns the tables it manages — the well-trodden path is "engine creates the table, engine keeps it in sync." It has no deliberate flow for **adopting** a pre-existing table: one created outside the engine (by another team, an ETL job, or a migration) and then brought under management. Two of this review's findings are really symptoms of that gap rather than independent bugs, which is why both are deferred here rather than chased in isolation:
+
+- **Property idempotency on adopted tables** (Priority 1). The engine injects `delta.*` defaults into every desired state. For an engine-created table those are set at creation, so the table reaches a no-op. For an adopted table they may be enabled by a workspace/catalog default but absent from the table's own `TBLPROPERTIES` — and if `DESCRIBE DETAIL` does not report them back, the differ re-emits `SetProperty` forever. The table never settles. This is squarely an adoption problem: it cannot happen to a table the engine created.
+
+- **E2E existence-check patch** (Priority 3). The e2e suite patches `DatabricksReader._table_exists` because three-part-name resolution against a real catalog is unverified locally. Adoption is exactly the scenario that exercises "does this table already exist, under its real catalog name?" — so confirming and removing the patch belongs with this work.
+
+Questions to settle when this is picked up (on a real Unity Catalog session):
+
+1. **Should adoption be an explicit, opt-in step**, distinct from "create and own"? An explicit `adopt` path could read the live table, reconcile only what the user declares, and avoid touching catalog-default properties at all.
+2. **Should property reconciliation compare against *effective* (`DESCRIBE`-reported) properties rather than *declared* keys**, so a default-enabled key is treated as already-satisfied? This likely resolves the idempotency finding regardless of the runtime answer.
+3. **What is the desired stance on properties the engine does not manage** but that exist on an adopted table — leave untouched (current "declared subset" behaviour), or surface them in the plan for visibility?
+4. **How should an adopted table with unmappable column types behave** — the unmappable-column skip (Priority 1, done) already partly covers this, but adoption may want to *report* what it is ignoring rather than silently skip.
+
+Until there is a concrete need to manage pre-existing tables, this stays as a documented gap, not a half-built feature.
+
 ## Summary
 
 | Priority | Item | Action |
 | --- | --- | --- |
 | 1 | Unmappable column fails whole table | Skip column, log, document |
-| 1 | Property idempotency on adopted tables | Verify on UC; strengthen test |
+| 1 | Property idempotency on adopted tables | Deferred → [Future work: adopting existing tables](#future-work-adopting-existing-tables) |
 | 2 | `assert` disabled under `-O` | Use `raise AssertionError` |
 | 2 | Comment cleared as `''` not NULL | Emit `UNSET COMMENT` |
 | 2 | `statement_preview` duplicated | Drop from `ExecutionFailed` |
@@ -149,5 +168,5 @@ Two adjustments:
 | 2 | Missing type hints | Add them |
 | 2 | Dead `__getitem__` | Remove |
 | 3 | Idempotency test | Assert empty second plan |
-| 3 | E2E patches private method | Remove patch |
+| 3 | E2E patches private method | Deferred → [Future work: adopting existing tables](#future-work-adopting-existing-tables) |
 | 3 | Read-failure isolation | Assert survivor executed |
