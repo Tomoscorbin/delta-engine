@@ -33,13 +33,9 @@ These types are common in PySpark 4.0 production tables. A table with one nested
 
 **Fix:** Catch `TypeError` per column in `_to_column_mapping` and skip the unmappable column instead of failing the table. Log a warning naming the column and its Spark type. This matches the existing "properties are a declared subset" design: manage what you understand, ignore the rest. Document the supported type set in the README. Do not add an `Unsupported` sentinel to the domain — that would pollute the pure layer.
 
-**Status: ✅ Done (PR #74).** Implemented as a non-raising `try_domain_type_from_spark` companion in the types module, so the reader skips on a `None` return rather than knowing the types module signals via `TypeError` — keeping the error-signalling convention behind the layer boundary. `_to_column_mapping` returns `_ColumnMapping | None`; `_read` filters the `None`s. A table whose columns are all unmappable still surfaces as `ReadFailed` via the domain's zero-column invariant. The supported type set is documented in the README.
+**Status: ✅ Done (PR #74).** `domain_type_from_spark` returns `DataType | None`: an unmappable Spark type is a routine, expected condition (new Spark types appear over time), so it is modelled as a `None` return rather than an exception — "define errors out of existence". The reader skips a column when the mapping is `None` and logs a warning; `_to_column_mapping` returns `_ColumnMapping | None` and `_read` filters the `None`s. An unmappable element inside an `ARRAY`/`MAP` makes the whole type `None`. A table whose columns are all unmappable still surfaces as `ReadFailed` via the domain's zero-column invariant. The supported type set is documented in the README.
 
-The implementation review caught three issues, all corrected on the branch:
-
-- **Regression (fixed):** a late commit had reverted `_to_column_mapping` to catch `TypeError` directly from `domain_type_from_spark`, which both re-leaked the types module's error convention across the boundary (APoSD information hiding) *and* left `try_domain_type_from_spark` as exported-but-unused dead code. The commit was dropped, restoring the clean companion-based design.
-- **Lint (fixed):** `import logging` was mis-ordered within the stdlib import block (ruff `I001`).
-- **Docs (fixed):** the README supported-type-set documentation, prescribed above, had been skipped.
+This replaced the original `TypeError`-then-catch design. An interim version exposed a separate non-raising `try_domain_type_from_spark` companion alongside a raising `domain_type_from_spark`; that was a shallow wrapper and a second public entry point production never needed, so the two were collapsed into the single Optional-returning function above. The implementation review also caught and fixed two mechanical issues: `import logging` mis-ordered in the stdlib block (ruff `I001`), and the README supported-type-set documentation (prescribed above) had been skipped.
 
 ### Properties may never reach a no-op on adopted tables
 
