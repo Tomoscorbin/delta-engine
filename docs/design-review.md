@@ -123,6 +123,8 @@ The reader reports `TableAbsent`, the differ emits `CreateTable`, and the compil
 
 **Recommendation:** Add a comment in the compiler stating the intent, and a note in the README's non-goals section.
 
+**Status: ✅ Done (`docs/aposd-comments-and-docs`).** The compiler now carries a comment on the `CREATE TABLE IF NOT EXISTS` clause explaining the read-then-create race and the resilience trade-off, and the README non-goals section documents that creation is not race-safe against concurrent writers. The `ColumnTypeChange`/`PartitioningChange`-as-`Action` decision above is left as recommended.
+
 ## Comments and documentation
 
 The codebase has excellent comments where they matter. The `zip(strict=True)` comment captures the cross-module one-statement-per-action contract ([executor.py:57](../src/delta_engine/adapters/databricks/executor.py#L57)). The `_fetch_properties` comment explains why two quoting paths must stay separate ([reader.py:122](../src/delta_engine/adapters/databricks/reader.py#L122)). The `ActionPhase` docstring explains the ordering invariant, not just the enum.
@@ -131,6 +133,8 @@ Two adjustments:
 
 - **Trim restate-the-code docstrings.** The `D` (pydocstyle) ruleset forces low-value docstrings: nine near-identical `subject()` docstrings, trivial `__len__`/`__bool__`/`__iter__` docstrings, and `format_lines` docstrings that name the method. APoSD treats these as noise.
 - **Thicken the port docstrings.** `CatalogStateReader` and `PlanExecutor` are the extension points every future adapter implements ([ports.py:13](../src/delta_engine/application/ports.py#L13)). The totality contract — "always returns a `CatalogState`, never raises" — currently lives on the concrete `DatabricksReader`. Lift it to the Protocol.
+
+**Status: ✅ Done (`docs/aposd-comments-and-docs`).** The restate-the-code docstrings were removed (the nine `subject()` overrides, the trivial `__len__`/`__bool__`/`__iter__` dunders, and the three concrete `format_lines` overrides), keeping the contract-bearing docstrings on the abstract `Action.subject` and `Failure.format_lines`. Because the `D` ruleset forced these, `D105` is now ignored project-wide (magic methods are documented by the protocol they implement) and `D102` is ignored for the two value-object modules (`actions.py`, `results.py`); `D102` stays enforced everywhere else. The totality contract is lifted onto both `CatalogStateReader` and `PlanExecutor` Protocol docstrings.
 
 ## Summary
 
