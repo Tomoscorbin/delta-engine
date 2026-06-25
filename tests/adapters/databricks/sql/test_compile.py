@@ -194,6 +194,14 @@ def test_set_column_comment_escapes_single_quotes_end_to_end():
     assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'")
 
 
+def test_set_column_comment_emits_unset_when_comment_is_empty():
+    # Given a SetColumnComment with an empty comment (clearing the comment)
+    statement = _compile_single(SetColumnComment(column_name="id", comment=""))
+
+    # Then it emits UNSET COMMENT rather than COMMENT '' to avoid storing an empty string
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET COMMENT"
+
+
 def test_set_table_comment_renders_comment_on_table():
     # When compiling a SetTableComment
     statement = _compile_single(SetTableComment(comment="core table"))

@@ -6,6 +6,7 @@ duplicate names, and iterates in qualified-name order to produce deterministic
 planning input for the engine.
 """
 
+from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 from delta_engine.domain.model import DesiredTable, QualifiedName
@@ -58,10 +59,10 @@ class Registry:
 
         self._tables.update(new_tables)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[DesiredTable]:
         """Iterate over desired tables in qualified-name order."""
         yield from (self._tables[name] for name in sorted(self._tables, key=str))
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of registered tables."""
         return len(self._tables)

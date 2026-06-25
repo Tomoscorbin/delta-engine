@@ -142,7 +142,6 @@ class ExecutionFailed:
 
     action: str
     action_index: int
-    statement_preview: str
     failure: ExecutionFailure
 
 
