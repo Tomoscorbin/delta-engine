@@ -115,3 +115,9 @@ cover, and the following are known boundaries to be aware of:
   left untouched, never unset.
 - **No support for views, constraints, generated/identity columns, or liquid
   clustering** — these are out of scope for the current DDL-only model.
+- **Table creation is not race-safe against concurrent writers.** Creation is
+  compiled as `CREATE TABLE IF NOT EXISTS`, so if another process creates the
+  table between the engine's read and its execution, the statement no-ops and the
+  run reports success without reconciling that table's schema. The next sync
+  re-reads the live state and plans any drift. Run a single writer per table if
+  you need create-time schema guarantees.
