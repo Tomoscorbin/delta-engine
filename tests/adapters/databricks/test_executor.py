@@ -1,6 +1,6 @@
 import pyspark.sql.types as T
 
-from delta_engine.adapters.databricks.executor import DatabricksExecutor
+from delta_engine.adapters.databricks.executor import DatabricksExecutor, _execute_statements
 from delta_engine.application.results import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
@@ -57,16 +57,12 @@ class _FakeSpark:
 
 
 def test_execute_maps_success_and_failure_without_leakage():
-    # Given a 2-action plan whose statements run OK → FAIL
+    # Given a 2-action plan and the statements it compiles to (OK → FAIL)
     plan = ActionPlan(actions=(AddColumn(Column("a", Integer())), DropColumn("b")))
+    statements = ["SELECT 1", "SELECT * FROM __nope__"]
 
-    def _fake_compiler(_target, _plan):
-        return ["SELECT 1", "SELECT * FROM __nope__"]  # OK, then FAIL
-
-    # When we execute
-    summary = DatabricksExecutor(_FakeSpark(), compiler=_fake_compiler).execute(
-        _dummy_qualified_name(), plan
-    )
+    # When we execute the statements against the plan
+    summary = _execute_statements(_FakeSpark(), plan, statements)
 
     # Then the success and failure are mapped with correct metadata and no leakage
     results = summary.results
@@ -87,17 +83,14 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
             AddColumn(Column("c", Integer())),
         ),
     )
+    statements = [
+        "SELECT 1",  # OK
+        "SELECT * FROM __nope__",  # FAIL
+        "SELECT 2",  # must NOT run -- the plan stops at the failure
+    ]
 
-    def _fake_compiler(_target, _plan):
-        return [
-            "SELECT 1",  # OK
-            "SELECT * FROM __nope__",  # FAIL
-            "SELECT 2",  # must NOT run -- the plan stops at the failure
-        ]
-
-    # When we execute
-    executor = DatabricksExecutor(spark, compiler=_fake_compiler)
-    summary = executor.execute(_dummy_qualified_name(), plan)
+    # When we execute the statements against the plan
+    summary = _execute_statements(spark, plan, statements)
 
     # Then execution stops at the failure: the third statement never runs
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]

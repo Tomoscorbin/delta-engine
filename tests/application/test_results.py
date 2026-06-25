@@ -50,7 +50,6 @@ def _failed_exec(
     return ExecutionFailed(
         action=action,
         action_index=idx,
-        statement_preview=preview,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
@@ -177,7 +176,6 @@ def test_execution_outcome_variants_carry_the_right_payload():
     failed = ExecutionFailed(
         action="AddColumn",
         action_index=1,
-        statement_preview="SQL",
         failure=ExecutionFailure(
             action_index=1, exception_type="E", message="m", statement_preview="SQL"
         ),
@@ -250,7 +248,6 @@ _EXECUTION_RESULT = st.one_of(
         ExecutionFailed,
         action=st.just("AddColumn"),
         action_index=st.integers(min_value=0, max_value=100),
-        statement_preview=st.just("ALTER TABLE ..."),
         failure=st.builds(
             ExecutionFailure,
             action_index=st.integers(min_value=0, max_value=100),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
@@ -235,10 +236,6 @@ class ActionPlan:
         """Return ``True`` if the plan contains any actions."""
         return bool(self.actions)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Action]:
         """Iterate over actions in plan order."""
         return iter(self.actions)
-
-    def __getitem__(self, index):
-        """Return the action at ``index`` (supports slicing)."""
-        return self.actions[index]

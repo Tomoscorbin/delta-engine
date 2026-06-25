@@ -108,7 +108,6 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
     failed_result = ExecutionFailed(
         action="AddColumn",
         action_index=2,
-        statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         failure=ExecutionFailure(
             action_index=2,
             exception_type="SparkException",

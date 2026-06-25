@@ -32,7 +32,7 @@ from delta_engine.domain.plan.differ import compute_plan
 logger = logging.getLogger(__name__)
 
 
-def _utc_now():
+def _utc_now() -> datetime:
     """Return current UTC time as a timezone-aware datetime."""
     return datetime.now(UTC)
 

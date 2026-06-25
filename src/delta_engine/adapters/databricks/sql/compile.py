@@ -16,7 +16,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     quote_literal,
 )
 from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import Column, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -72,14 +72,17 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
     The column is always added without a NOT NULL constraint: adding a
     non-nullable column to an existing table is rejected at validation
     (see NonNullableColumnAdd), so this path is only reached for nullable adds.
-    The assert makes that contract loud -- it fires only if validation was
+    The guard makes that contract loud -- it fires only if validation was
     bypassed or a custom rule set let a NOT NULL add through, rather than
-    silently emitting an add that drops the constraint.
+    silently emitting an add that drops the constraint. It is an unconditional
+    ``raise`` (not ``assert``) so the invariant survives ``python -O``, matching
+    the ColumnTypeChange/PartitioningChange guards below.
     """
-    assert action.column.nullable, (
-        f"AddColumn reached the compiler with non-nullable column {action.column.name!r}; "
-        "validation (NonNullableColumnAdd) should have blocked this"
-    )
+    if not action.column.nullable:
+        raise AssertionError(
+            f"AddColumn reached the compiler with non-nullable column {action.column.name!r}; "
+            "validation (NonNullableColumnAdd) should have blocked this"
+        )
     name = backtick(action.column.name)
     dtype = sql_type_for_data_type(action.column.data_type)
     comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
@@ -102,6 +105,8 @@ def _(action: SetProperty, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetColumnComment, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
+    if not action.comment:
+        return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} UNSET COMMENT"
     comment = quote_literal(action.comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
@@ -143,7 +148,7 @@ def _(action: PartitioningChange, backticked_table_name: str) -> str:
 # ----------- helpers ------------
 
 
-def _column_definition(column) -> str:
+def _column_definition(column: Column) -> str:
     """Render a single column definition fragment, including its comment."""
     column_name = backtick(column.name)
     sql_type = sql_type_for_data_type(column.data_type)

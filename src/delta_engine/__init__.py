@@ -71,7 +71,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Resolve the pyspark-bound exports on first access (PEP 562)."""
     if name in _LAZY_EXPORTS:
         from delta_engine.adapters import databricks

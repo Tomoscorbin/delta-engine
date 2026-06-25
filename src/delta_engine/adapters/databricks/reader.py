@@ -30,9 +30,7 @@ class _ColumnMapping:
     is_partition: bool
 
 
-def _to_column_mapping(
-    spark_column: SparkColumn, type_mapper=domain_type_from_spark
-) -> _ColumnMapping:
+def _to_column_mapping(spark_column: SparkColumn) -> _ColumnMapping:
     """
     Convert a Spark catalog column into a domain ``Column`` and its partition flag.
 
@@ -43,7 +41,7 @@ def _to_column_mapping(
     therefore derived from the already-normalised domain column name, not from
     the raw Spark object.
     """
-    domain_data_type = type_mapper(spark_column.dataType)
+    domain_data_type = domain_type_from_spark(spark_column.dataType)
     nullable = bool(getattr(spark_column, "nullable", True))
     comment = spark_column.description if spark_column.description else ""
 
