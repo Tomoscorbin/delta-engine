@@ -1,3 +1,4 @@
+import os
 from uuid import uuid4
 
 import pyspark.sql.types as T
@@ -11,8 +12,24 @@ from delta_engine.application.registry import Registry
 from delta_engine.schema import Column, Date, DeltaTable, Integer, String
 from tests.config import TEST_CATALOG
 
+# TODO(design-review Priority 3): remove this patch once confirmed unnecessary.
+# The patch rewrites the three-part `catalog.schema.table` name to a two-part
+# `schema.table` because three-part resolution under the local in-memory
+# DeltaCatalog is unverified. It mocks a private method of the class under test,
+# which violates the project's "no mocking internal collaborators" rule and means
+# the e2e suite never exercises the real existence-check path. TEST_CATALOG is
+# already "spark_catalog" (the local catalog id), so the three-part name likely
+# resolves as-is. To settle it on a cluster (or any session that can run e2e),
+# set DELTA_ENGINE_E2E_REAL_TABLE_EXISTS=1 to skip the patch and run against the
+# real DatabricksReader._table_exists; if the suite passes, delete this helper
+# and every call to it.
+_USE_REAL_TABLE_EXISTS = os.environ.get("DELTA_ENGINE_E2E_REAL_TABLE_EXISTS") == "1"
+
 
 def _patch_table_exists_for_local(monkeypatch):
+    if _USE_REAL_TABLE_EXISTS:
+        return
+
     def _table_exists(self, qualified_name):
         # Local Spark fallback for existence checks
         return self.spark.catalog.tableExists(f"{qualified_name.schema}.{qualified_name.name}")
