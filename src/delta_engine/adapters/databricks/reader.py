@@ -12,7 +12,6 @@ import logging
 
 from delta_engine.adapters.databricks.sql import (
     backtick_qualified_name,
-    domain_type_from_spark,
     error_preview,
     exception_type_name,
     try_domain_type_from_spark,
@@ -35,9 +34,14 @@ class _ColumnMapping:
     is_partition: bool
 
 
-def _to_column_mapping(spark_column: SparkColumn) -> _ColumnMapping:
+def _to_column_mapping(
+    spark_column: SparkColumn, qualified_name: QualifiedName
+) -> _ColumnMapping | None:
     """
     Convert a Spark catalog column into a domain ``Column`` and its partition flag.
+
+    Returns ``None`` for columns whose Spark type has no domain mapping yet,
+    logging a warning so operators can track gaps as new Spark types are released.
 
     The column name is lowercased here: the domain model requires lowercase
     identifiers, and case-preserving catalogs (e.g. Hive Metastore) can return
@@ -46,7 +50,17 @@ def _to_column_mapping(spark_column: SparkColumn) -> _ColumnMapping:
     therefore derived from the already-normalised domain column name, not from
     the raw Spark object.
     """
-    domain_data_type = domain_type_from_spark(spark_column.dataType)
+    domain_data_type = try_domain_type_from_spark(spark_column.dataType)
+    if domain_data_type is None:
+        logger.warning(
+            "Skipping column %r in %s: unrecognised Spark type %r"
+            " — column will be unmanaged until support is added",
+            spark_column.name,
+            qualified_name,
+            spark_column.dataType,
+        )
+        return None
+
     nullable = bool(getattr(spark_column, "nullable", True))
     comment = spark_column.description if spark_column.description else ""
 
@@ -59,25 +73,6 @@ def _to_column_mapping(spark_column: SparkColumn) -> _ColumnMapping:
         ),
         is_partition=bool(getattr(spark_column, "isPartition", False)),
     )
-
-
-
-def _is_known_type(spark_column: SparkColumn, qualified_name: QualifiedName) -> bool:
-    """Return ``True`` if the column's Spark type has a domain mapping, ``False`` otherwise.
-
-    Logs a warning for unrecognised types so operators know a column is being
-    skipped and can track support gaps as new Spark types are released.
-    """
-    if try_domain_type_from_spark(spark_column.dataType) is not None:
-        return True
-    logger.warning(
-        "Skipping column %r in %s: unrecognised Spark type %r"
-        " — column will be unmanaged until support is added",
-        spark_column.name,
-        qualified_name,
-        spark_column.dataType,
-    )
-    return False
 
 
 class DatabricksReader:
@@ -112,12 +107,11 @@ class DatabricksReader:
         if not self._table_exists(qualified_name):
             return TableAbsent()
 
-        spark_columns = self.spark.catalog.listColumns(str(qualified_name))
-        mappings = tuple(
-            _to_column_mapping(c)
-            for c in spark_columns
-            if _is_known_type(c, qualified_name)
+        all_mappings = (
+            _to_column_mapping(c, qualified_name)
+            for c in self.spark.catalog.listColumns(str(qualified_name))
         )
+        mappings = tuple(m for m in all_mappings if m is not None)
         columns = tuple(m.column for m in mappings)
         partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(
