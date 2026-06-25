@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from types import MappingProxyType
 
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
-
-import logging
 
 from delta_engine.adapters.databricks.sql import (
     backtick_qualified_name,
