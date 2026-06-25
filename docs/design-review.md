@@ -10,6 +10,19 @@ The findings below are refinements, not rework. Two are correctness hazards wort
 
 Method: nine reviewers each applied a distinct APoSD lens. Every finding was then re-checked against the source by a separate pass. Of roughly 78 raised findings, 49 survived; 29 were rejected as taste, documented intent, or worse-if-changed.
 
+## Implementation status
+
+Tracked as the review is worked section by section. A second review pass over the implementation (2026-06-25) confirmed each item and surfaced the follow-ups noted inline.
+
+| Item | Status |
+| --- | --- |
+| P1 — Unmappable column skip | ✅ Done (PR #74). Implementation review found and corrected a regression; see the section below. |
+| P1 — Property idempotency on adopted tables | ⏳ Unconfirmed — still needs Unity Catalog verification. |
+| P2 — all quick wins | ✅ Done and merged (#72). Verified faithful, no regressions. |
+| P3 — idempotency + read-failure tests | ✅ Done and merged (#73). |
+| P3 — e2e monkeypatch removal | ⏳ Deferred (see Priority 3 follow-ups below). |
+| Comments & docs — port docstrings, restate-the-code trim | ⬜ Not started. |
+
 ## Priority 1 — Correctness hazards
 
 ### One unmappable column type makes the whole table unmanageable
@@ -19,6 +32,14 @@ Method: nine reviewers each applied a distinct APoSD lens. Every finding was the
 These types are common in PySpark 4.0 production tables. A table with one nested column and ten simple ones the user wants to manage becomes wholly unmanageable.
 
 **Fix:** Catch `TypeError` per column in `_to_column_mapping` and skip the unmappable column instead of failing the table. Log a warning naming the column and its Spark type. This matches the existing "properties are a declared subset" design: manage what you understand, ignore the rest. Document the supported type set in the README. Do not add an `Unsupported` sentinel to the domain — that would pollute the pure layer.
+
+**Status: ✅ Done (PR #74).** Implemented as a non-raising `try_domain_type_from_spark` companion in the types module, so the reader skips on a `None` return rather than knowing the types module signals via `TypeError` — keeping the error-signalling convention behind the layer boundary. `_to_column_mapping` returns `_ColumnMapping | None`; `_read` filters the `None`s. A table whose columns are all unmappable still surfaces as `ReadFailed` via the domain's zero-column invariant. The supported type set is documented in the README.
+
+The implementation review caught three issues, all corrected on the branch:
+
+- **Regression (fixed):** a late commit had reverted `_to_column_mapping` to catch `TypeError` directly from `domain_type_from_spark`, which both re-leaked the types module's error convention across the boundary (APoSD information hiding) *and* left `try_domain_type_from_spark` as exported-but-unused dead code. The commit was dropped, restoring the clean companion-based design.
+- **Lint (fixed):** `import logging` was mis-ordered within the stdlib import block (ruff `I001`).
+- **Docs (fixed):** the README supported-type-set documentation, prescribed above, had been skipped.
 
 ### Properties may never reach a no-op on adopted tables
 
@@ -93,17 +114,23 @@ second_report = engine.sync(reg)
 assert all(len(t.execution.results) == 0 for t in second_report)
 ```
 
+**Status: ✅ Done (#73).** The assertion is semantically sound: the engine always calls `execute` even for an empty plan, so zero results provably means the differ found no drift. Minor follow-up: the test's setup block lacks a `# Given` comment.
+
 ### E2E tests patch a private method of the class under test
 
 Every e2e test calls `_patch_table_exists_for_local`, which monkey-patches `DatabricksReader._table_exists` ([test_engine_e2e.py:15](../tests/e2e/test_engine_e2e.py#L15)). This couples the suite to a private implementation detail and changes the method's semantics (three-part name versus two-part). The e2e tests no longer exercise the real existence-check path. It also breaks the project's own rule against mocking internal collaborators.
 
 **Fix:** Check whether `spark.catalog.tableExists("spark_catalog.schema.table")` resolves under the local DeltaCatalog. If it does, delete the patch. If three-part resolution genuinely fails locally, fix it at the data level in the fixture rather than patching the adapter.
 
+**Status: ⏳ Deferred (#73).** The blocker is that the local dev machine cannot run the e2e suite against a real Delta session (the same SSL/jar issue noted in Priority 1). Worth noting for the follow-up: `TEST_CATALOG` is already `"spark_catalog"`, so `spark.catalog.tableExists("spark_catalog.schema.table")` likely resolves under the local catalog and the patch may simply be deletable once verified. Until then the patch should carry an in-code `TODO` pointing to this section — the deferral reason currently lives only in the commit message.
+
 ### Read-failure isolation is under-tested
 
 `test_engine_reads_all_tables_then_raises_on_any_read_failure` checks that both tables appear in the report when one read fails ([test_engine.py:177](../tests/application/test_engine.py#L177)). It does not assert that the surviving table was executed. `TableRunStatus.SUCCESS` is consistent with an empty, never-run `ExecutionSummary`, so the status check alone does not prove the engine honoured "failures in individual tables do not halt the sync of others."
 
 **Fix:** Assert `tr_b.execution.results != ()` for the surviving table.
+
+**Status: ✅ Done (#73).** The assertion proves `execute` ran for the survivor: the report's `execution` defaults to an empty `ExecutionSummary` and is only overwritten when read+validation pass, so a non-empty `results` is a faithful proxy. (A stricter check on *which* plan was passed was considered and rejected — it would be interaction testing, against the project's classical-testing standard.)
 
 ## Decisions to weigh, not fix
 
