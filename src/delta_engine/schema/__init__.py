@@ -12,6 +12,7 @@ from delta_engine.domain.model import (
     String,
     Timestamp,
 )
+from delta_engine.schema.properties import Property
 from delta_engine.schema.table import DeltaTable
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "Integer",
     "Long",
     "Map",
+    "Property",
     "String",
     "Timestamp",
 ]

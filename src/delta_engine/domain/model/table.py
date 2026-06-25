@@ -29,7 +29,12 @@ class TableSnapshot:
     partitioned_by: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Validate columns are non-empty and unique, and partitions exist and are unique."""
+        """
+        Validate the snapshot's structural invariants.
+
+        Columns must be non-empty and unique; partition columns must be
+        lowercase, must each exist in ``columns``, and must be unique.
+        """
         if not self.columns:
             raise ValueError("Table requires at least one column")
 

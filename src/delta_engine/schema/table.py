@@ -26,8 +26,6 @@ class DeltaTable:
         }
     )
 
-    _managed_property_keys: ClassVar[frozenset[str]] = MANAGED_PROPERTY_KEYS
-
     def __init__(
         self,
         catalog: str,
@@ -42,7 +40,7 @@ class DeltaTable:
 
         # Fast-fail on property keys this engine does not manage (e.g. typos)
         if user_properties:
-            unmanaged = [k for k in user_properties if k not in self._managed_property_keys]
+            unmanaged = [k for k in user_properties if k not in MANAGED_PROPERTY_KEYS]
             if unmanaged:
                 raise ValueError(
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"

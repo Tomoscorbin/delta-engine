@@ -33,6 +33,7 @@ from delta_engine.schema import (
     Integer,
     Long,
     Map,
+    Property,
     String,
     Timestamp,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "Integer",
     "Long",
     "Map",
+    "Property",
     "Registry",
     "String",
     "SyncFailedError",

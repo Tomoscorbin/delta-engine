@@ -48,7 +48,7 @@ def _compile_action(action: Action, backticked_table_name: str) -> str:
 def _(action: CreateTable, backticked_table_name: str) -> str:
     """Compile a CREATE TABLE statement including columns, comment, and properties."""
     table = action.table
-    columns = ", ".join(_column_definition(c) for c in table.columns)
+    columns = ", ".join(_column_definition(column) for column in table.columns)
     table_comment = _set_table_comment(table.comment)
     properties = _set_properties(table.properties)
     partition_by = _set_partitioned_by(table.partitioned_by)
@@ -72,7 +72,14 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
     The column is always added without a NOT NULL constraint: adding a
     non-nullable column to an existing table is rejected at validation
     (see NonNullableColumnAdd), so this path is only reached for nullable adds.
+    The assert makes that contract loud -- it fires only if validation was
+    bypassed or a custom rule set let a NOT NULL add through, rather than
+    silently emitting an add that drops the constraint.
     """
+    assert action.column.nullable, (
+        f"AddColumn reached the compiler with non-nullable column {action.column.name!r}; "
+        "validation (NonNullableColumnAdd) should have blocked this"
+    )
     name = backtick(action.column.name)
     dtype = sql_type_for_data_type(action.column.data_type)
     comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
@@ -114,8 +121,9 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
-    # Validation rejects this action before execution; reaching here is a bug.
-    raise NotImplementedError(
+    # Validation rejects this action before execution, so reaching here is an
+    # internal-invariant violation (AssertionError), not an unimplemented feature.
+    raise AssertionError(
         f"Column type changes are not supported: column '{action.column_name}'"
         f" ({action.from_type} -> {action.to_type}). Recreate the table to change a column's type."
     )
@@ -123,8 +131,9 @@ def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: PartitioningChange, backticked_table_name: str) -> str:
-    # Validation rejects this action before execution; reaching here is a bug.
-    raise NotImplementedError(
+    # Validation rejects this action before execution, so reaching here is an
+    # internal-invariant violation (AssertionError), not an unimplemented feature.
+    raise AssertionError(
         f"Partitioning changes are not supported"
         f" ({action.observed_partitioning} -> {action.desired_partitioning})."
         " Recreate the table with the desired partitioning."
@@ -137,10 +146,10 @@ def _(action: PartitioningChange, backticked_table_name: str) -> str:
 def _column_definition(column) -> str:
     """Render a single column definition fragment, including its comment."""
     column_name = backtick(column.name)
-    type = sql_type_for_data_type(column.data_type)
+    sql_type = sql_type_for_data_type(column.data_type)
     nullable = "" if column.nullable else "NOT NULL"
     comment = f"COMMENT {quote_literal(column.comment)}" if column.comment else ""
-    return " ".join(part for part in (column_name, type, nullable, comment) if part)
+    return " ".join(part for part in (column_name, sql_type, nullable, comment) if part)
 
 
 def _set_table_comment(comment: str) -> str:
@@ -161,5 +170,5 @@ def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
-    cols = ", ".join(backtick(c) for c in partitioned_by)
-    return f"PARTITIONED BY ({cols})"
+    quoted_columns = ", ".join(backtick(column_name) for column_name in partitioned_by)
+    return f"PARTITIONED BY ({quoted_columns})"

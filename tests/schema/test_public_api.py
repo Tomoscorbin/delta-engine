@@ -2,6 +2,7 @@
 
 from delta_engine.domain.model import Array, Decimal, Map
 import delta_engine.schema as schema
+from delta_engine.schema.properties import Property as PropertyImpl
 from delta_engine.schema.table import DeltaTable as DeltaTableImpl
 
 _EXPECTED = {
@@ -16,6 +17,7 @@ _EXPECTED = {
     "Integer",
     "Long",
     "Map",
+    "Property",
     "String",
     "Timestamp",
 }
@@ -38,3 +40,16 @@ def test_schema_exposes_delta_table_column_and_all_data_types():
     assert schema.Decimal is Decimal
     assert schema.Array is Array
     assert schema.Map is Map
+    assert schema.Property is PropertyImpl
+
+
+def test_property_enum_lists_the_keys_deltatable_accepts():
+    # Given the property vocabulary a user must declare against
+    # Then the keys DeltaTable validates against are discoverable via the public
+    # Property enum, rather than only surfacing as a runtime rejection
+    from delta_engine.schema.properties import MANAGED_PROPERTY_KEYS
+
+    assert {member.value for member in schema.Property} == set(MANAGED_PROPERTY_KEYS)
+
+    # And Property is a str enum, so its members can be used directly as dict keys
+    assert schema.Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"

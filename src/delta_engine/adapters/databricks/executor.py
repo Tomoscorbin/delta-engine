@@ -15,7 +15,7 @@ from pyspark.sql import SparkSession
 from delta_engine.adapters.databricks.sql import (
     compile_plan,
     error_preview,
-    exc_type_name,
+    exception_type_name,
     sql_preview,
 )
 from delta_engine.application.results import (
@@ -54,15 +54,30 @@ class DatabricksExecutor:
         """
         statements = self._compiler(qualified_name, plan)
         results: list[ExecutionResult] = []
-        for action_index, statement in enumerate(statements):
-            result = self._run_statement(plan[action_index], action_index, statement)
+        # The compiler emits exactly one statement per action, in plan order, so
+        # zip pairs each action with its statement directly -- no positional index
+        # into the plan to keep in step with the loop counter. strict=True turns a
+        # compiler/plan length mismatch into a loud error rather than a silent
+        # truncation.
+        for action_index, (action, statement) in enumerate(zip(plan, statements, strict=True)):
+            result = self._run_statement(action, action_index, statement)
             results.append(result)
             if isinstance(result, ExecutionFailed):
                 break
         return ExecutionSummary(tuple(results))
 
     def _run_statement(self, action, action_index: int, statement: str) -> ExecutionResult:
-        """Run a single compiled statement and map its outcome to an `ExecutionResult`."""
+        """
+        Run a single compiled statement and map its outcome to an `ExecutionResult`.
+
+        The broad ``except`` is intentional and mirrors the reader's ``fetch_state``:
+        Spark raises a heterogeneous set of failures (``Py4JJavaError``,
+        ``AnalysisException``, and plain Python errors) that varies across runtime
+        environments. The executor's contract is to wrap any failure in an
+        ``ExecutionFailed`` so the run can record it and stop cleanly, never to let
+        a backend-specific exception escape. Narrowing the catch would reintroduce
+        silent propagation of whichever type was missed.
+        """
         action_name = type(action).__name__
         preview = sql_preview(statement)
         try:
@@ -76,7 +91,7 @@ class DatabricksExecutor:
                 statement_preview=preview,
                 failure=ExecutionFailure(
                     action_index=action_index,
-                    exception_type=exc_type_name(exception),
+                    exception_type=exception_type_name(exception),
                     message=err,
                     statement_preview=preview,
                 ),

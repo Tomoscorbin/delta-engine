@@ -51,14 +51,7 @@ class Engine:
         reader: CatalogStateReader,
         executor: PlanExecutor,
     ) -> None:
-        """
-        Initialize the engine with its catalog adapters.
-
-        Args:
-            reader: Adapter that fetches the current catalog state.
-            executor: Adapter that executes action plans.
-
-        """
+        """Initialize the engine with the catalog adapters it orchestrates."""
         self.reader = reader
         self.executor = executor
 

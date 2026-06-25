@@ -22,7 +22,7 @@ def error_preview(exception: Exception) -> str:
     return "\n".join(message_head.splitlines()[:5])
 
 
-def exc_type_name(exc: Exception) -> str:
+def exception_type_name(exception: Exception) -> str:
     """
     Return the most informative exception class name available.
 
@@ -35,11 +35,11 @@ def exc_type_name(exc: Exception) -> str:
     try:
         from py4j.protocol import Py4JJavaError  # type: ignore[import]
 
-        if isinstance(exc, Py4JJavaError):
+        if isinstance(exception, Py4JJavaError):
             try:
-                return exc.java_exception.getClass().getName()
-            except Exception:
+                return exception.java_exception.getClass().getName()
+            except (AttributeError, TypeError):
                 return "Py4JJavaError"
     except ImportError:
         pass
-    return type(exc).__name__
+    return type(exception).__name__

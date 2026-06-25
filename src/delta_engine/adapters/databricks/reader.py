@@ -12,7 +12,7 @@ from delta_engine.adapters.databricks.sql import (
     backtick_qualified_name,
     domain_type_from_spark,
     error_preview,
-    exc_type_name,
+    exception_type_name,
 )
 from delta_engine.application.results import (
     CatalogState,
@@ -81,8 +81,8 @@ class DatabricksReader:
         """
         try:
             return self._read(qualified_name)
-        except Exception as exc:
-            failure = ReadFailure(exc_type_name(exc), error_preview(exc))
+        except Exception as exception:
+            failure = ReadFailure(exception_type_name(exception), error_preview(exception))
             return ReadFailed(failure=failure)
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
@@ -119,9 +119,12 @@ class DatabricksReader:
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """Return all catalog table properties as a read-only mapping."""
+        # The name is interpolated into SQL text here, so it must be backtick-quoted
+        # to stay an identifier (and escape any embedded backtick). This differs
+        # deliberately from the catalog.* calls, which take the plain ``str()`` form
+        # because they parse the dot-separated parts themselves. Don't unify the two.
         query = f"DESCRIBE DETAIL {backtick_qualified_name(qualified_name)}"
-        df = self.spark.sql(query)
-        row = df.first()
+        row = self.spark.sql(query).first()
         if not row:
             return MappingProxyType({})
         return MappingProxyType(dict(row["properties"]))

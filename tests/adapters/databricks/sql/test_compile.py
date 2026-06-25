@@ -141,6 +141,17 @@ def test_create_table_renders_partition_clause():
     assert statement.endswith("PARTITIONED BY (`ds`)")
 
 
+def test_add_column_rejects_non_nullable_column():
+    # Given an AddColumn carrying a NOT NULL column -- validation (NonNullableColumnAdd)
+    # blocks this before execution, so the compiler must never silently emit an
+    # ADD COLUMN that drops the NOT NULL constraint
+    action = AddColumn(Column("age", Integer(), nullable=False))
+
+    # Then compiling it fails loudly rather than producing nullable-by-stealth SQL
+    with pytest.raises(AssertionError, match="age"):
+        _compile_single(action)
+
+
 def test_drop_column_renders_alter_drop():
     # When compiling a DropColumn
     statement = _compile_single(DropColumn("legacy"))
@@ -221,19 +232,20 @@ def test_every_action_type_has_a_registered_compiler():
     assert unregistered == []
 
 
-def test_column_type_change_compiler_raises_not_implemented():
+def test_column_type_change_compiler_raises_on_invariant_violation():
     # Given a ColumnTypeChange action (blocked by validation; should never reach execution)
     action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
 
-    # Then compiling it raises NotImplementedError rather than silently producing bad SQL
-    with pytest.raises(NotImplementedError, match="id"):
+    # Then reaching the compiler is an internal-invariant violation, not an
+    # unimplemented feature -- it raises AssertionError rather than producing bad SQL
+    with pytest.raises(AssertionError, match="id"):
         _compile_single(action)
 
 
-def test_partitioning_change_compiler_raises_not_implemented():
+def test_partitioning_change_compiler_raises_on_invariant_violation():
     # Given a PartitioningChange action (blocked by validation; should never reach execution)
     action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
 
-    # Then compiling it raises NotImplementedError
-    with pytest.raises(NotImplementedError, match="Partitioning"):
+    # Then reaching the compiler is an internal-invariant violation -- AssertionError
+    with pytest.raises(AssertionError, match=r"[Pp]artitioning"):
         _compile_single(action)

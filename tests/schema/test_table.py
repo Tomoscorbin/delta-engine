@@ -86,6 +86,26 @@ def test_accepts_only_enum_property_keys():
     assert table.effective_properties[Property.COLUMN_MAPPING_MODE.value] == "name"
 
 
+def test_accepts_property_enum_members_as_keys():
+    # Given properties keyed by the Property enum members directly (not their .value)
+    user_properties = {Property.ENABLE_DELETION_VECTORS: "false"}
+
+    # When constructing the table
+    table = DeltaTable(
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
+        columns=[Column("id", Integer())],
+        properties=user_properties,
+    )
+
+    # Then the enum key is accepted and resolves to the same managed property as
+    # its string value, so callers can declare properties without reaching for .value
+    desired = table.to_desired_table()
+    assert desired.properties[Property.ENABLE_DELETION_VECTORS.value] == "false"
+    assert desired.properties[Property.COLUMN_MAPPING_MODE.value] == "name"
+
+
 def test_partition_columns_must_exist():
     # Given columns include 'event_date' and the partition spec references it
     table = DeltaTable(
