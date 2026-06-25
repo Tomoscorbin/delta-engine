@@ -53,6 +53,13 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     properties = _set_properties(table.properties)
     partition_by = _set_partitioned_by(table.partitioned_by)
 
+    # IF NOT EXISTS, even though CreateTable is only emitted after the reader
+    # reports the table absent. It guards the read-then-create race: if another
+    # process creates the table in that window, the statement no-ops rather than
+    # erroring. The trade-off is that such a table is reported created without
+    # reconciling its schema; the next sync re-reads and plans any drift. This
+    # favours a resilient run over failing loud on a rare race -- see the README
+    # non-goals.
     parts = [
         f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
         f"({columns})",

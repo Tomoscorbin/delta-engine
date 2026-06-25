@@ -64,5 +64,4 @@ class Registry:
         yield from (self._tables[name] for name in sorted(self._tables, key=str))
 
     def __len__(self) -> int:
-        """Return the number of registered tables."""
         return len(self._tables)
