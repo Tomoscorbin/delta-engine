@@ -24,7 +24,7 @@ from delta_engine.domain.plan.actions import (
 _TARGET = QualifiedName("cat", "sch", "tbl")
 
 
-def _create_table(*columns: Column, comment: str = "", properties=None, partitioned_by=()):
+def _create_table(*columns: Column, comment: str = "", properties=None, partitioned_by=(), primary_key=()):
     """Wrap columns in a CreateTable action for the target table."""
     return CreateTable(
         table=DesiredTable(
@@ -33,6 +33,7 @@ def _create_table(*columns: Column, comment: str = "", properties=None, partitio
             comment=comment,
             properties=properties or {},
             partitioned_by=partitioned_by,
+            primary_key=primary_key,
         )
     )
 
@@ -287,3 +288,59 @@ def test_set_primary_key_renders_add_constraint_primary_key():
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT orders_pk PRIMARY KEY (`tenant_id`, `order_id`)"
     )
+
+
+def test_set_primary_key_renders_alter_add_constraint():
+    # When compiling a SetPrimaryKey with one column
+    action = SetPrimaryKey(
+        columns=(Column("id", Integer(), nullable=False),),
+        constraint_name="tbl_pk",
+    )
+    statement = _compile_single(action)
+
+    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT tbl_pk PRIMARY KEY (`id`)"
+    )
+
+
+def test_set_primary_key_renders_multiple_columns():
+    # When compiling a SetPrimaryKey with two columns
+    action = SetPrimaryKey(
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("tenant_id", Integer(), nullable=False),
+        ),
+        constraint_name="tbl_pk",
+    )
+    statement = _compile_single(action)
+
+    # Then both columns appear in the PRIMARY KEY clause
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT tbl_pk PRIMARY KEY (`id`, `tenant_id`)"
+    )
+
+
+def test_create_table_inlines_primary_key_constraint():
+    # Given a CREATE TABLE with a primary key column
+    action = _create_table(
+        Column("id", Integer(), nullable=False),
+        Column("name", String()),
+        primary_key=("id",),
+    )
+    statement = _compile_single(action)
+
+    # Then the constraint is inlined in the column list
+    assert "CONSTRAINT tbl_pk PRIMARY KEY (`id`)" in statement
+    # And it appears after the column definitions, inside the parentheses
+    assert statement.startswith("CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl` (")
+
+
+def test_create_table_without_pk_omits_constraint_clause():
+    # Given a CREATE TABLE with no primary key
+    action = _create_table(Column("id", Integer()))
+    statement = _compile_single(action)
+
+    # Then no CONSTRAINT clause appears
+    assert "PRIMARY KEY" not in statement
+    assert "CONSTRAINT" not in statement
