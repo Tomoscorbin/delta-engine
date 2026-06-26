@@ -46,6 +46,7 @@ extend-exclude = [
   "build",
   ".mypy_cache",
   ".ruff_cache",
+  "docs",
 ]
 fix = true
 unsafe-fixes = false
