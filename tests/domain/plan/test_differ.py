@@ -503,9 +503,11 @@ def test_compute_plan_produces_no_actions_when_desired_equals_observed(
 
 def _desired_with_pk(pk_columns: list[str]) -> DesiredTable:
     """Build a DesiredTable whose listed columns are NOT NULL and in the primary key."""
+    extra_columns = [] if "name" in pk_columns else ["name"]
+    all_column_names = pk_columns + extra_columns
     all_columns = tuple(
         Column(name, Integer(), nullable=name not in pk_columns)
-        for name in (["id", "name"] if not pk_columns else pk_columns + ["name"])
+        for name in all_column_names
     )
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,

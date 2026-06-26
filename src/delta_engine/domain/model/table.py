@@ -68,6 +68,12 @@ class TableSnapshot:
             if missing_pk:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
+            seen_pk: set[str] = set()
+            for name in self.primary_key:
+                if name in seen_pk:
+                    raise ValueError(f"Duplicate primary key column: {name}")
+                seen_pk.add(name)
+
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):

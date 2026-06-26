@@ -10,6 +10,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
 from delta_engine.adapters.databricks.sql import (
+    backtick,
     backtick_qualified_name,
     domain_type_from_spark,
     error_preview,
@@ -156,13 +157,13 @@ class DatabricksReader:
         normalised to lowercase at the adapter boundary.
         """
         query = (
-            f"SELECT ccu.column_name"
-            f" FROM `{qualified_name.catalog}`.information_schema.constraint_column_usage AS ccu"
-            f" JOIN `{qualified_name.catalog}`.information_schema.table_constraints AS tc"
+            f"SELECT constraint_columns.column_name"
+            f" FROM {backtick(qualified_name.catalog)}.information_schema.constraint_column_usage AS constraint_columns"
+            f" JOIN {backtick(qualified_name.catalog)}.information_schema.table_constraints AS table_constraints_info"
             f" USING (constraint_catalog, constraint_schema, constraint_name)"
-            f" WHERE ccu.table_schema = {quote_literal(qualified_name.schema)}"
-            f" AND ccu.table_name = {quote_literal(qualified_name.name)}"
-            f" AND tc.constraint_type = 'PRIMARY KEY'"
+            f" WHERE constraint_columns.table_schema = {quote_literal(qualified_name.schema)}"
+            f" AND constraint_columns.table_name = {quote_literal(qualified_name.name)}"
+            f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
         )
         rows = self.spark.sql(query).collect()
         return tuple(row["column_name"].casefold() for row in rows)

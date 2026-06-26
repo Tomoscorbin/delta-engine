@@ -91,3 +91,14 @@ def test_observed_table_has_primary_key_field():
 
     # Then the field is readable
     assert table.primary_key == ("id",)
+
+
+def test_table_snapshot_rejects_duplicate_pk_column_names():
+    # Given a primary_key with the same column name twice
+    # Then construction raises ValueError
+    with pytest.raises(ValueError, match="id"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("id", Integer(), nullable=False),),
+            primary_key=("id", "id"),
+        )

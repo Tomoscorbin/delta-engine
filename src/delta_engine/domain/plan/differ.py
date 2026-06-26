@@ -148,10 +148,12 @@ def _diff_primary_key(
         pk_columns = tuple(
             column for column in desired.columns if column.name in desired_set
         )
+        constraint_name = desired.primary_key_constraint_name
+        assert constraint_name is not None  # guaranteed: desired_set is non-empty
         actions.append(
             SetPrimaryKey(
                 columns=pk_columns,
-                constraint_name=desired.primary_key_constraint_name,  # type: ignore[arg-type]
+                constraint_name=constraint_name,
             )
         )
 

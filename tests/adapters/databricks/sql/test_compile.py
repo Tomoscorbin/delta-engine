@@ -286,7 +286,7 @@ def test_set_primary_key_renders_add_constraint_primary_key():
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT orders_pk PRIMARY KEY (`tenant_id`, `order_id`)"
+        " ADD CONSTRAINT `orders_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
     )
 
 
@@ -300,7 +300,7 @@ def test_set_primary_key_renders_alter_add_constraint():
 
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
     assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT tbl_pk PRIMARY KEY (`id`)"
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)"
     )
 
 
@@ -317,7 +317,7 @@ def test_set_primary_key_renders_multiple_columns():
 
     # Then both columns appear in the PRIMARY KEY clause
     assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT tbl_pk PRIMARY KEY (`id`, `tenant_id`)"
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`, `tenant_id`)"
     )
 
 
@@ -331,7 +331,7 @@ def test_create_table_inlines_primary_key_constraint():
     statement = _compile_single(action)
 
     # Then the constraint is inlined in the column list
-    assert "CONSTRAINT tbl_pk PRIMARY KEY (`id`)" in statement
+    assert "CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)" in statement
     # And it appears after the column definitions, inside the parentheses
     assert statement.startswith("CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl` (")
 

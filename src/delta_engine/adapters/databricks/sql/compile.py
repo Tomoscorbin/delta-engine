@@ -54,7 +54,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
 
     if table.primary_key and table.primary_key_constraint_name:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key)
-        column_defs.append(f"CONSTRAINT {table.primary_key_constraint_name} PRIMARY KEY ({pk_cols})")
+        column_defs.append(f"CONSTRAINT {backtick(table.primary_key_constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
     table_comment = _set_table_comment(table.comment)
@@ -149,8 +149,7 @@ def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_list = ", ".join(backtick(column.name) for column in action.columns)
-    constraint_name = action.constraint_name
-    return f"ALTER TABLE {backticked_table_name} ADD CONSTRAINT {constraint_name} PRIMARY KEY ({column_list})"
+    return f"ALTER TABLE {backticked_table_name} ADD CONSTRAINT {backtick(action.constraint_name)} PRIMARY KEY ({column_list})"
 
 
 @_compile_action.register
