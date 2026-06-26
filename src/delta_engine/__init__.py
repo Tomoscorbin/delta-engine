@@ -20,6 +20,7 @@ from delta_engine.application import (
     Registry,
     SyncFailedError,
     SyncReport,
+    TableRunStatus,
 )
 from delta_engine.schema import (
     Array,
@@ -65,6 +66,7 @@ __all__ = [
     "String",
     "SyncFailedError",
     "SyncReport",
+    "TableRunStatus",
     "Timestamp",
     "build_databricks_engine",
     "configure_logging",
