@@ -1,11 +1,11 @@
-"""Public schema container for describing a Delta table."""
+"""Public API container for describing a Delta table."""
 
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
-from delta_engine.schema.properties import MANAGED_PROPERTY_KEYS, Property
+from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
 
 
 class DeltaTable:

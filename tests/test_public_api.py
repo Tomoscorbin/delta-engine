@@ -46,7 +46,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     # Then every pyspark-free name resolves to the same object as its source module
     from delta_engine import Column, DeltaTable, Engine, Property, Registry
     from delta_engine.application import Engine as EngineImpl, Registry as RegistryImpl
-    from delta_engine.schema import (
+    from delta_engine.api import (
         Column as ColumnImpl,
         DeltaTable as DeltaTableImpl,
         Property as PropertyImpl,

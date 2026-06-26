@@ -1,8 +1,8 @@
 import pytest
 
 from delta_engine.domain.model import Column as DomainColumn
-from delta_engine.schema import Column, DeltaTable, Integer, String
-from delta_engine.schema.properties import Property
+from delta_engine.api import Column, DeltaTable, Integer, String
+from delta_engine.api.properties import Property
 
 
 def test_user_overrides_take_precedence_over_defaults():
@@ -182,7 +182,7 @@ def test_to_desired_table_carries_effective_properties_with_defaults():
 
 
 def test_to_desired_table_defaults_partitioning_to_empty_tuple():
-    # Given a table with no partition spec
+    # Given a table with no partition specs
     table = DeltaTable(
         catalog="cat",
         schema="core",
