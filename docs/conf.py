@@ -25,11 +25,4 @@ autodoc_typehints = "description"
 autodoc_mock_imports = ["pyspark", "delta"]
 napoleon_use_ivar = True
 
-exclude_patterns = ["_build", "superpowers"]
-
-# Suppress toctree and cross-reference warnings for docs not yet wired into nav
-# (navigation is assembled in a later task).
-suppress_warnings = [
-    "toc.not_included",
-    "myst.xref_missing",
-]
+exclude_patterns = ["_build", "superpowers", "todo.md"]

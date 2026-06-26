@@ -1,8 +1,34 @@
 delta-engine
 ============
 
+Declarative schema management for Delta Lake tables on Databricks.
+
 .. toctree::
    :hidden:
-   :maxdepth: 2
+   :caption: Getting started
+
+   tutorial-getting-started
+
+.. toctree::
+   :hidden:
+   :caption: How-to guides
+
+   how-to-handle-sync-failures
+   how-to-declare-partitioned-tables
+   how-to-configure-properties
+
+.. toctree::
+   :hidden:
+   :caption: Reference
+
+   reference-data-types
+   reference-safe-change-rules
+   reference-api
+
+.. toctree::
+   :hidden:
+   :caption: Advanced
 
    explanation-architecture
+   how-to-implement-adapter
+   how-to-add-action-type
