@@ -373,8 +373,8 @@ def test_fetch_state_returns_failed_when_existence_probe_raises():
     assert result.failure.exception_type == "AnalysisException"
 
 
-def test_fetch_state_returns_failed_when_column_type_is_unsupported():
-    # Given an existing table whose schema contains a type the engine cannot map
+def test_fetch_state_returns_failed_when_all_columns_are_unsupported():
+    # Given a table whose only column has a type the engine cannot map (BinaryType)
     qn = QualifiedName("c", "s", "structy")
     catalog = FakeCatalog(
         columns_by_table={str(qn): [make_catalog_col("payload", dataType=T.BinaryType())]},
@@ -387,9 +387,34 @@ def test_fetch_state_returns_failed_when_column_type_is_unsupported():
     # When we fetch state
     result = reader.fetch_state(qn)
 
-    # Then the unsupported type fails this table instead of crashing the whole run
+    # Then the table fails: skipping its only column leaves zero columns, which
+    # violates the TableSnapshot invariant and surfaces as a ReadFailed
     assert isinstance(result, ReadFailed)
-    assert result.failure.exception_type == "TypeError"
+
+
+def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact():
+    # Given a table with one unsupported column (BinaryType) and two supported ones
+    qn = QualifiedName("c", "s", "mixed")
+    catalog = FakeCatalog(
+        columns_by_table={
+            str(qn): [
+                make_catalog_col("id", dataType=T.IntegerType()),
+                make_catalog_col("payload", dataType=T.BinaryType()),
+                make_catalog_col("name", dataType=T.StringType()),
+            ]
+        },
+        table_comments={str(qn): ""},
+    )
+    reader = DatabricksReader(
+        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+    )
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the table is present with only the two mappable columns; payload is dropped
+    assert isinstance(result, TablePresent)
+    assert [c.name for c in result.table.columns] == ["id", "name"]
 
 
 def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():

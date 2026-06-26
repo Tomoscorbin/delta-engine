@@ -75,8 +75,17 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             raise TypeError(f"Unsupported DataType variant: {cls}")
 
 
-def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
-    """Map a Spark SQL type (instance or DDL string) to a domain type."""
+def domain_type_from_spark(spark_type: str | SparkType) -> DataType | None:
+    """
+    Map a Spark SQL type (instance or DDL string) to a domain type.
+
+    Returns ``None`` when the type has no domain mapping (e.g. ``BINARY``,
+    ``STRUCT``, ``VARIANT``, ``TIMESTAMP_NTZ``). An unmappable element inside an
+    ``ARRAY`` or ``MAP`` makes the whole type unmappable. An unmappable type is a
+    routine, expected condition -- new Spark types appear over time -- so it is a
+    ``None`` return, not an exception. Callers decide what to do with ``None``
+    (the reader skips the column and logs a warning).
+    """
     if isinstance(spark_type, str):
         spark_type = SparkType.fromDDL(spark_type)
 
@@ -100,11 +109,13 @@ def domain_type_from_spark(spark_type: str | SparkType) -> DataType:
         case DecimalType():
             return Decimal(spark_type.precision, spark_type.scale)
         case ArrayType():
-            return Array(domain_type_from_spark(spark_type.elementType))
+            element = domain_type_from_spark(spark_type.elementType)
+            return Array(element) if element is not None else None
         case MapType():
-            return Map(
-                domain_type_from_spark(spark_type.keyType),
-                domain_type_from_spark(spark_type.valueType),
-            )
+            key = domain_type_from_spark(spark_type.keyType)
+            value = domain_type_from_spark(spark_type.valueType)
+            if key is None or value is None:
+                return None
+            return Map(key, value)
         case _:
-            raise TypeError(f"Unsupported Spark type: {spark_type!r}")
+            return None

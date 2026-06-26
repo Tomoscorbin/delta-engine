@@ -96,6 +96,32 @@ surface as a clear `SyncFailedError` rather than a partial migration:
 - **Changing partitioning** — partitioning is fixed at creation; recreate the
   table to repartition.
 
+## Supported column types
+
+The engine maps the following Spark column types to and from its domain model:
+
+| Domain type | Spark SQL type |
+| --- | --- |
+| `Integer` | `INT` |
+| `Long` | `BIGINT` |
+| `Float` | `FLOAT` |
+| `Double` | `DOUBLE` |
+| `Boolean` | `BOOLEAN` |
+| `String` | `STRING` |
+| `Date` | `DATE` |
+| `Timestamp` | `TIMESTAMP` |
+| `Decimal` | `DECIMAL(precision, scale)` |
+| `Array` | `ARRAY<...>` (of any supported element type) |
+| `Map` | `MAP<..., ...>` (of any supported key/value types) |
+
+A column whose Spark type is outside this set (e.g. `STRUCT`, `BINARY`,
+`VARIANT`, `TIMESTAMP_NTZ`) is **skipped, not failed**: it is left unmanaged and
+a warning naming the column and its type is logged, while every other column on
+the table is still managed normally. This mirrors the declared-subset handling
+of properties below — the engine manages what it understands and leaves the rest
+untouched. A table whose columns are *all* unmappable surfaces as a read failure
+for that table alone.
+
 ## Non-goals and limitations
 
 Delta Engine manages **DDL for Delta tables only**. It deliberately does not
@@ -113,6 +139,9 @@ cover, and the following are known boundaries to be aware of:
 - **Properties are a declared subset.** The engine only reconciles property keys
   you declare; properties set on the table out of band (e.g. by Databricks) are
   left untouched, never unset.
+- **Unmappable column types are skipped, not managed.** Columns whose Spark type
+  is outside the [supported set](#supported-column-types) are left unmanaged with
+  a logged warning; they are neither created, altered, nor dropped.
 - **No support for views, constraints, generated/identity columns, or liquid
   clustering** — these are out of scope for the current DDL-only model.
 - **Table creation is not race-safe against concurrent writers.** Creation is
