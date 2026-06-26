@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
@@ -30,6 +31,7 @@ class TableSnapshot:
     properties: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
     primary_key: tuple[str, ...] = ()
+    foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
 
     def __post_init__(self) -> None:
         """
@@ -74,6 +76,14 @@ class TableSnapshot:
                     raise ValueError(f"Duplicate primary key column: {name}")
                 seen_pk.add(name)
 
+        if self.foreign_keys:
+            for fk in self.foreign_keys:
+                missing = [col for col in fk.local_columns if col not in seen_names]
+                if missing:
+                    raise ValueError(
+                        f"Foreign key local column not found in columns: {missing[0]}"
+                    )
+
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
@@ -85,6 +95,10 @@ class DesiredTable(TableSnapshot):
         if not self.primary_key:
             return None
         return f"{self.qualified_name.name}_pk"
+
+    def foreign_key_constraint_name(self, fk: ForeignKeyConstraint) -> str:
+        """Return the resolved constraint name for the given foreign key."""
+        return fk.resolved_constraint_name(self.qualified_name.name)
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,6 +10,7 @@ from delta_engine.domain.model import (
     String,
     TableSnapshot,
 )
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
@@ -111,3 +112,68 @@ def test_table_snapshot_rejects_duplicate_pk_column_names():
             columns=(Column("id", Integer(), nullable=False),),
             primary_key=("id", "id"),
         )
+
+
+def test_table_snapshot_defaults_to_no_foreign_keys():
+    # Given a minimal table definition
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()),),
+    )
+
+    # Then foreign_keys defaults to empty
+    assert table.foreign_keys == ()
+
+
+def test_table_snapshot_stores_foreign_keys():
+    # Given a foreign key referencing another table
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+
+    # Then the FK is stored
+    assert table.foreign_keys == (fk,)
+
+
+def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
+    # Given a FK whose local column is not declared
+    fk = ForeignKeyConstraint(
+        local_columns=("nonexistent",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+
+    # When / Then
+    with pytest.raises(ValueError, match="nonexistent"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(Column("id", Integer()),),
+            foreign_keys=(fk,),
+        )
+
+
+def test_desired_table_foreign_key_constraint_name_delegates_to_fk():
+    # Given a DesiredTable with a FK with no explicit name
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+
+    # When resolving the constraint name
+    name = table.foreign_key_constraint_name(fk)
+
+    # Then it is derived from table name + local columns
+    assert name == "orders_customer_id_fk"
