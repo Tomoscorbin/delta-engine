@@ -22,7 +22,7 @@ from delta_engine.application import (
     SyncReport,
     TableRunStatus,
 )
-from delta_engine.schema import (
+from delta_engine.api import (
     Array,
     Boolean,
     Column,

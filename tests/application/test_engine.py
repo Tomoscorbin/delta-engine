@@ -19,7 +19,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.schema import Column, DeltaTable, String
+from delta_engine.api import Column, DeltaTable, String
 
 # --------- helpers/fakes
 
