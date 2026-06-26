@@ -5,10 +5,10 @@ import pytest
 
 from delta_engine.adapters.databricks.executor import DatabricksExecutor
 from delta_engine.adapters.databricks.reader import DatabricksReader
+from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
-from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from tests.config import TEST_CATALOG
 
 

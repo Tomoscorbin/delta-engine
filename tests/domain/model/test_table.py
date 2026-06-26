@@ -1,6 +1,15 @@
 import pytest
 
-from delta_engine.domain.model import Column, Date, DesiredTable, Integer, ObservedTable, QualifiedName, String, TableSnapshot
+from delta_engine.domain.model import (
+    Column,
+    Date,
+    DesiredTable,
+    Integer,
+    ObservedTable,
+    QualifiedName,
+    String,
+    TableSnapshot,
+)
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")

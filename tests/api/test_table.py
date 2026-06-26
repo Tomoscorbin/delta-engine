@@ -1,8 +1,8 @@
 import pytest
 
-from delta_engine.domain.model import Column as DomainColumn
 from delta_engine.api import Column, DeltaTable, Integer, String
 from delta_engine.api.properties import Property
+from delta_engine.domain.model import Column as DomainColumn
 
 
 def test_user_overrides_take_precedence_over_defaults():

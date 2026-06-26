@@ -151,18 +151,24 @@ class DatabricksReader:
         return MappingProxyType(dict(row["properties"]))
 
     def _fetch_primary_key(self, qualified_name: QualifiedName) -> tuple[str, ...]:
-        """Return the primary key column names from Unity Catalog information_schema.
+        """
+        Return the primary key column names from Unity Catalog information_schema.
 
         Returns an empty tuple when no primary key is defined. Column names are
         normalised to lowercase at the adapter boundary.
         """
+        catalog = backtick(qualified_name.catalog)
         query = (
             f"SELECT constraint_columns.column_name"
-            f" FROM {backtick(qualified_name.catalog)}.information_schema.constraint_column_usage AS constraint_columns"
-            f" JOIN {backtick(qualified_name.catalog)}.information_schema.table_constraints AS table_constraints_info"
+            f" FROM {catalog}.information_schema.constraint_column_usage"
+            f" AS constraint_columns"
+            f" JOIN {catalog}.information_schema.table_constraints"
+            f" AS table_constraints_info"
             f" USING (constraint_catalog, constraint_schema, constraint_name)"
-            f" WHERE constraint_columns.table_schema = {quote_literal(qualified_name.schema)}"
-            f" AND constraint_columns.table_name = {quote_literal(qualified_name.name)}"
+            f" WHERE constraint_columns.table_schema ="
+            f" {quote_literal(qualified_name.schema)}"
+            f" AND constraint_columns.table_name ="
+            f" {quote_literal(qualified_name.name)}"
             f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
         )
         rows = self.spark.sql(query).collect()

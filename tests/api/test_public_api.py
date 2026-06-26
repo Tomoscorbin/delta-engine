@@ -1,9 +1,9 @@
 """The user-facing api package re-exports the names needed to define a table."""
 
-from delta_engine.domain.model import Array, Decimal, Map
 import delta_engine.api as api
 from delta_engine.api.properties import Property as PropertyImpl
 from delta_engine.api.table import DeltaTable as DeltaTableImpl
+from delta_engine.domain.model import Array, Decimal, Map
 
 _EXPECTED = {
     "DeltaTable",

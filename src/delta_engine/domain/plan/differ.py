@@ -125,10 +125,9 @@ def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, .
     return (SetTableComment(comment=desired),)
 
 
-def _diff_primary_key(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[Action, ...]:
-    """Return the primary key actions to align observed with desired.
+def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+    """
+    Return the primary key actions to align observed with desired.
 
     Uses frozenset comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns.
@@ -145,9 +144,7 @@ def _diff_primary_key(
         actions.append(DropPrimaryKey())
 
     if desired_set:
-        pk_columns = tuple(
-            column for column in desired.columns if column.name in desired_set
-        )
+        pk_columns = tuple(column for column in desired.columns if column.name in desired_set)
         constraint_name = desired.primary_key_constraint_name
         assert constraint_name is not None  # guaranteed: desired_set is non-empty
         actions.append(

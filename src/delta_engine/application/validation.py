@@ -10,7 +10,6 @@ from delta_engine.domain.plan import (
     AddColumn,
     ColumnTypeChange,
     CreateTable,
-    DropPrimaryKey,
     PartitioningChange,
     SetColumnNullability,
     SetPrimaryKey,

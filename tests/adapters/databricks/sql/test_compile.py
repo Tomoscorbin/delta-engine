@@ -24,7 +24,9 @@ from delta_engine.domain.plan.actions import (
 _TARGET = QualifiedName("cat", "sch", "tbl")
 
 
-def _create_table(*columns: Column, comment: str = "", properties=None, partitioned_by=(), primary_key=()):
+def _create_table(
+    *columns: Column, comment: str = "", properties=None, partitioned_by=(), primary_key=()
+):
     """Wrap columns in a CreateTable action for the target table."""
     return CreateTable(
         table=DesiredTable(
@@ -299,9 +301,7 @@ def test_set_primary_key_renders_alter_add_constraint():
     statement = _compile_single(action)
 
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)"
-    )
+    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)")
 
 
 def test_set_primary_key_renders_multiple_columns():

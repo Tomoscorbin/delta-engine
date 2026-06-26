@@ -6,8 +6,7 @@ from delta_engine.application.validation import (
     UnsupportedColumnTypeChange,
     validate_plan,
 )
-from delta_engine.domain.model import Column, Integer, Long, String
-from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
@@ -291,9 +290,7 @@ def test_allows_set_primary_key_with_all_non_nullable_columns():
     # Given a SetPrimaryKey where every column is NOT NULL
     rule = PrimaryKeyColumnsNullable()
 
-    failures = rule.evaluate(
-        _plan(_set_pk(Column("id", Integer(), nullable=False)))
-    )
+    failures = rule.evaluate(_plan(_set_pk(Column("id", Integer(), nullable=False))))
 
     assert failures == ()
 
@@ -353,8 +350,6 @@ def test_pk_nullable_rule_ignores_non_pk_actions():
     # Given a plan with only column-level actions
     rule = PrimaryKeyColumnsNullable()
 
-    failures = rule.evaluate(
-        _plan(AddColumn(Column("x", Integer())), DropPrimaryKey())
-    )
+    failures = rule.evaluate(_plan(AddColumn(Column("x", Integer())), DropPrimaryKey()))
 
     assert failures == ()

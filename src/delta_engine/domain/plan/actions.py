@@ -169,7 +169,8 @@ class DropPrimaryKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """Add a primary key constraint to a table.
+    """
+    Add a primary key constraint to a table.
 
     Carries the full Column objects so the validation rule can check
     nullability without requiring a DesiredTable reference.

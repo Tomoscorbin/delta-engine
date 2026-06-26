@@ -506,8 +506,7 @@ def _desired_with_pk(pk_columns: list[str]) -> DesiredTable:
     extra_columns = [] if "name" in pk_columns else ["name"]
     all_column_names = pk_columns + extra_columns
     all_columns = tuple(
-        Column(name, Integer(), nullable=name not in pk_columns)
-        for name in all_column_names
+        Column(name, Integer(), nullable=name not in pk_columns) for name in all_column_names
     )
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,

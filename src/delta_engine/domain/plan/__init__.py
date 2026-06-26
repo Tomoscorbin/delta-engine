@@ -10,8 +10,8 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
-    SetProperty,
     SetPrimaryKey,
+    SetProperty,
     SetTableComment,
 )
 
@@ -27,7 +27,7 @@ __all__ = [
     "PartitioningChange",
     "SetColumnComment",
     "SetColumnNullability",
-    "SetProperty",
     "SetPrimaryKey",
+    "SetProperty",
     "SetTableComment",
 ]

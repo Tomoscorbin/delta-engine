@@ -4,8 +4,8 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 
 
 class DeltaTable:
