@@ -17,3 +17,6 @@
 - [ ] add clarifying comments to validation rules
 - [ ] make each CI step independently in parallel
 - [ ] review except AnalysisException in reader's _fetch_primary_key()
+- [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
+- [ ] Document that DBR runtime & delta table version issues are for the user to resolve. If they want to use Databricks unique constraints or CDF, they have to make sure they are on the right runtime/Delta version. The way the engine is designed, it will fail and return the relevant error.
+- [ ] make the nested if else statments in engine more readable
