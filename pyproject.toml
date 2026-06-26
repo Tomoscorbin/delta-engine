@@ -21,10 +21,11 @@ dev = [
   "hypothesis>=6.155.5",
 ]
 docs = [
-  "mkdocs>=1.6.1",
-  "mkdocs-material>=9.6.18",
-  "mkdocstrings[python]>=0.30.0",
-  "mkdocs-autorefs>=1.4.3",
+  "sphinx>=8.0",
+  "furo>=2024.1.29",
+  "myst-parser>=4.0",
+  "sphinx-copybutton>=0.5",
+  "sphinx-autodoc-typehints>=2.0",
 ]
 
 [build-system]
@@ -45,6 +46,7 @@ extend-exclude = [
   "build",
   ".mypy_cache",
   ".ruff_cache",
+  "docs",
 ]
 fix = true
 unsafe-fixes = false

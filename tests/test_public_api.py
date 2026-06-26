@@ -36,6 +36,7 @@ _EAGER = {
     "SyncReport",
     "SyncFailedError",
     "Failure",
+    "TableRunStatus",
 }
 _LAZY = {"build_databricks_engine", "configure_logging"}
 
