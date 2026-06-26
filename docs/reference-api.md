@@ -54,6 +54,13 @@ tags:
    :members:
 ```
 
+### TableRunStatus
+
+```{eval-rst}
+.. autoclass:: delta_engine.TableRunStatus
+   :members:
+```
+
 ### SyncFailedError
 
 ```{eval-rst}

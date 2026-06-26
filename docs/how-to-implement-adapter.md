@@ -15,14 +15,14 @@ Both live in `delta_engine.application.ports`. Both are `runtime_checkable` Prot
 
 ```python
 from delta_engine.application.ports import CatalogStateReader
-from delta_engine.application.results import CatalogState, ReadFailed, TableAbsent, ReadFailure
+from delta_engine.application.results import CatalogState, ReadFailed, TableAbsent, TablePresent, ReadFailure
 from delta_engine.domain.model import QualifiedName
 
 class MyReader:
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         try:
-            # Return TableAbsent if the table does not exist.
-            # Return an ObservedTable if it does.
+            # Return TableAbsent() if the table does not exist.
+            # Return TablePresent(table=...) if it does.
             ...
         except Exception as exc:
             # MUST catch all exceptions and return ReadFailed — never raise.

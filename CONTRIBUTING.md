@@ -16,7 +16,7 @@ This installs all development dependencies (pytest, ruff, mypy, pyspark, delta-s
 uv run pytest
 ```
 
-Tests require a local Spark session. The test suite spins one up automatically via the `spark` fixture in `tests/conftest.py`. Expect the first run to take 30–60 seconds while Spark initialises.
+Tests require a local Spark session. The test suite spins one up automatically via the `spark` fixture in `tests/conftest.py`. Expect the first run to take 30–60 seconds while Spark initializes.
 
 Coverage must stay above 90%. The build fails if it drops below.
 

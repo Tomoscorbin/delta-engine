@@ -25,6 +25,8 @@ class UpdateComment(Action):
         return self.column_name
 ```
 
+> Note: `SetColumnComment` is already implemented — this is a hypothetical example showing the pattern.
+
 `Action.subject` determines alphabetical sort order within a phase. `ActionPhase` is an `IntEnum` — lower values run first.
 
 ## 2. Add a phase constant if needed
