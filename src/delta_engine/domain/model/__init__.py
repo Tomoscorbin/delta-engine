@@ -1,4 +1,5 @@
 from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.data_type import (
     Array,
     Boolean,
@@ -26,6 +27,7 @@ __all__ = [
     "DesiredTable",
     "Double",
     "Float",
+    "ForeignKeyConstraint",
     "Integer",
     "Long",
     "Map",
