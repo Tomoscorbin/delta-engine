@@ -23,6 +23,9 @@ class FakeDataFrame:
     def first(self):
         return self._rows[0] if self._rows else None
 
+    def collect(self):
+        return list(self._rows)
+
 
 class FakeCatalog:
     def __init__(
@@ -102,6 +105,36 @@ class FakeSparkForFetchState:
         return FakeDataFrame(self._describe_rows or [])
 
 
+class FakeSparkWithPrimaryKey:
+    """
+    Spark fake that handles both DESCRIBE DETAIL (properties) and the
+    INFORMATION_SCHEMA primary key query.
+
+    sql() is called for both queries; this fake distinguishes them by
+    the presence of 'information_schema' in the query string.
+    """
+
+    def __init__(
+        self,
+        *,
+        catalog: FakeCatalog,
+        describe_rows=None,
+        pk_column_rows=None,
+    ):
+        self._catalog = catalog
+        self._describe_rows = describe_rows or [{"properties": {}}]
+        self._pk_column_rows = pk_column_rows or []
+
+    @property
+    def catalog(self):
+        return self._catalog
+
+    def sql(self, query: str):
+        if "information_schema" in query.lower():
+            return FakeDataFrame(self._pk_column_rows)
+        return FakeDataFrame(self._describe_rows)
+
+
 def make_catalog_col(
     name: str,
     *,
@@ -143,7 +176,7 @@ def test_columns_maps_name_nullability_and_comment(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -167,7 +200,7 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
             ]
         }
     )
-    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -191,7 +224,7 @@ def test_partition_columns_ignores_missing_or_false_flags():
             ]
         }
     )
-    spark = FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
 
     # When we fetch state for the table
     result = DatabricksReader(spark).fetch_state(qn)
@@ -299,7 +332,7 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     ]
 
     reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_rows=describe_rows),
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows),
     )
 
     # When we fetch state
@@ -327,7 +360,7 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
         table_comments={fq: ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_rows=[]),
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[]),
     )
 
     # When we fetch state
@@ -381,7 +414,7 @@ def test_fetch_state_returns_failed_when_all_columns_are_unsupported():
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
     )
 
     # When we fetch state
@@ -406,7 +439,7 @@ def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact():
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
     )
 
     # When we fetch state
@@ -430,7 +463,7 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_rows=[{"properties": {}}])
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
     )
 
     # When we fetch state
@@ -440,3 +473,102 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
     assert isinstance(result, TablePresent)
     assert [c.name for c in result.table.columns] == ["eventid", "username"]
     assert result.table.partitioned_by == ("username",)
+
+
+# ---------- tests: primary key ----------
+
+
+def test_fetch_primary_key_returns_column_names_from_information_schema():
+    # Given: information_schema returns one column name for the PK
+    qn = QualifiedName("c", "s", "t")
+    spark = FakeSparkWithPrimaryKey(
+        catalog=FakeCatalog(),
+        pk_column_rows=[{"column_name": "id"}],
+    )
+
+    # When
+    reader = DatabricksReader(spark)
+    pk = reader._fetch_primary_key(qn)
+
+    # Then: the primary key column names are returned
+    assert pk == ("id",)
+
+
+def test_fetch_primary_key_returns_empty_when_no_pk_defined():
+    # Given: information_schema returns no rows (no PK)
+    qn = QualifiedName("c", "s", "t")
+    spark = FakeSparkWithPrimaryKey(
+        catalog=FakeCatalog(),
+        pk_column_rows=[],
+    )
+
+    # When
+    reader = DatabricksReader(spark)
+    pk = reader._fetch_primary_key(qn)
+
+    # Then: empty tuple
+    assert pk == ()
+
+
+def test_fetch_primary_key_lowercases_column_names():
+    # Given: information_schema returns a mixed-case column name
+    qn = QualifiedName("c", "s", "t")
+    spark = FakeSparkWithPrimaryKey(
+        catalog=FakeCatalog(),
+        pk_column_rows=[{"column_name": "OrderID"}],
+    )
+
+    # When
+    reader = DatabricksReader(spark)
+    pk = reader._fetch_primary_key(qn)
+
+    # Then: name is normalised to lowercase
+    assert pk == ("orderid",)
+
+
+def test_fetch_state_includes_primary_key_in_observed_table():
+    # Given: a table with a PK
+    qn = QualifiedName("c", "s", "t")
+    fq = str(qn)
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [make_catalog_col("id", dataType=T.IntegerType(), nullable=False)],
+        },
+        table_comments={fq: ""},
+    )
+    spark = FakeSparkWithPrimaryKey(
+        catalog=catalog,
+        describe_rows=[{"properties": {}}],
+        pk_column_rows=[{"column_name": "id"}],
+    )
+
+    # When
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then: primary_key is populated on the ObservedTable
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key == ("id",)
+
+
+def test_fetch_state_primary_key_is_empty_when_none_defined():
+    # Given: a table with no PK
+    qn = QualifiedName("c", "s", "t")
+    fq = str(qn)
+    catalog = FakeCatalog(
+        columns_by_table={
+            fq: [make_catalog_col("id", dataType=T.IntegerType())],
+        },
+        table_comments={fq: ""},
+    )
+    spark = FakeSparkWithPrimaryKey(
+        catalog=catalog,
+        describe_rows=[{"properties": {}}],
+        pk_column_rows=[],
+    )
+
+    # When
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then: primary_key is empty
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key == ()

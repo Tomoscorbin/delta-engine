@@ -14,6 +14,7 @@ from delta_engine.adapters.databricks.sql import (
     domain_type_from_spark,
     error_preview,
     exception_type_name,
+    quote_literal,
 )
 from delta_engine.application.results import (
     CatalogState,
@@ -119,6 +120,7 @@ class DatabricksReader:
             comment=self._fetch_table_comment(qualified_name),
             properties=self._fetch_properties(qualified_name),
             partitioned_by=partition_columns,
+            primary_key=self._fetch_primary_key(qualified_name),
         )
         return TablePresent(table=observed)
 
@@ -146,6 +148,24 @@ class DatabricksReader:
         if not row:
             return MappingProxyType({})
         return MappingProxyType(dict(row["properties"]))
+
+    def _fetch_primary_key(self, qualified_name: QualifiedName) -> tuple[str, ...]:
+        """Return the primary key column names from Unity Catalog information_schema.
+
+        Returns an empty tuple when no primary key is defined. Column names are
+        normalised to lowercase at the adapter boundary.
+        """
+        query = (
+            f"SELECT ccu.column_name"
+            f" FROM `{qualified_name.catalog}`.information_schema.constraint_column_usage AS ccu"
+            f" JOIN `{qualified_name.catalog}`.information_schema.table_constraints AS tc"
+            f" USING (constraint_catalog, constraint_schema, constraint_name)"
+            f" WHERE ccu.table_schema = {quote_literal(qualified_name.schema)}"
+            f" AND ccu.table_name = {quote_literal(qualified_name.name)}"
+            f" AND tc.constraint_type = 'PRIMARY KEY'"
+        )
+        rows = self.spark.sql(query).collect()
+        return tuple(row["column_name"].casefold() for row in rows)
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""
