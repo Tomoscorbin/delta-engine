@@ -8,6 +8,7 @@ from types import MappingProxyType
 
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
+from pyspark.errors.exceptions.base import AnalysisException
 
 from delta_engine.adapters.databricks.sql import (
     backtick,
@@ -171,7 +172,13 @@ class DatabricksReader:
             f" {quote_literal(qualified_name.name)}"
             f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
         )
-        rows = self.spark.sql(query).collect()
+        try:
+            rows = self.spark.sql(query).collect()
+        except AnalysisException:
+            # information_schema is only available in Unity Catalog. On plain
+            # Spark (e.g. local tests), the table does not exist and there are
+            # no PK constraints to observe.
+            return ()
         return tuple(row["column_name"].casefold() for row in rows)
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:

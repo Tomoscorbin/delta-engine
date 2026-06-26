@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pyspark.sql.types as T
-from pyspark.sql.utils import AnalysisException
+from pyspark.errors.exceptions.base import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
@@ -120,10 +120,12 @@ class FakeSparkWithPrimaryKey:
         catalog: FakeCatalog,
         describe_rows=None,
         pk_column_rows=None,
+        pk_exc: Exception | None = None,
     ):
         self._catalog = catalog
         self._describe_rows = describe_rows or [{"properties": {}}]
         self._pk_column_rows = pk_column_rows or []
+        self._pk_exc = pk_exc
 
     @property
     def catalog(self):
@@ -131,6 +133,8 @@ class FakeSparkWithPrimaryKey:
 
     def sql(self, query: str):
         if "information_schema" in query.lower():
+            if self._pk_exc is not None:
+                raise self._pk_exc
             return FakeDataFrame(self._pk_column_rows)
         return FakeDataFrame(self._describe_rows)
 
@@ -570,5 +574,27 @@ def test_fetch_state_primary_key_is_empty_when_none_defined():
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then: primary_key is empty
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key == ()
+
+
+def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
+    # Given: information_schema raises AnalysisException (non-Unity Catalog Spark)
+    qn = QualifiedName("c", "s", "t")
+    fq = str(qn)
+    catalog = FakeCatalog(
+        columns_by_table={fq: [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={fq: ""},
+    )
+    spark = FakeSparkWithPrimaryKey(
+        catalog=catalog,
+        describe_rows=[{"properties": {}}],
+        pk_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
+    )
+
+    # When
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then: the read succeeds and primary_key is empty (no UC = no PK constraints)
     assert isinstance(result, TablePresent)
     assert result.table.primary_key == ()
