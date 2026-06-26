@@ -8,12 +8,15 @@ from types import MappingProxyType
 
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
+from pyspark.errors.exceptions.base import AnalysisException
 
 from delta_engine.adapters.databricks.sql import (
+    backtick,
     backtick_qualified_name,
     domain_type_from_spark,
     error_preview,
     exception_type_name,
+    quote_literal,
 )
 from delta_engine.application.results import (
     CatalogState,
@@ -119,6 +122,7 @@ class DatabricksReader:
             comment=self._fetch_table_comment(qualified_name),
             properties=self._fetch_properties(qualified_name),
             partitioned_by=partition_columns,
+            primary_key=self._fetch_primary_key(qualified_name),
         )
         return TablePresent(table=observed)
 
@@ -146,6 +150,36 @@ class DatabricksReader:
         if not row:
             return MappingProxyType({})
         return MappingProxyType(dict(row["properties"]))
+
+    def _fetch_primary_key(self, qualified_name: QualifiedName) -> tuple[str, ...]:
+        """
+        Return the primary key column names from Unity Catalog information_schema.
+
+        Returns an empty tuple when no primary key is defined. Column names are
+        normalised to lowercase at the adapter boundary.
+        """
+        catalog = backtick(qualified_name.catalog)
+        query = (
+            f"SELECT constraint_columns.column_name"
+            f" FROM {catalog}.information_schema.constraint_column_usage"
+            f" AS constraint_columns"
+            f" JOIN {catalog}.information_schema.table_constraints"
+            f" AS table_constraints_info"
+            f" USING (constraint_catalog, constraint_schema, constraint_name)"
+            f" WHERE constraint_columns.table_schema ="
+            f" {quote_literal(qualified_name.schema)}"
+            f" AND constraint_columns.table_name ="
+            f" {quote_literal(qualified_name.name)}"
+            f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
+        )
+        try:
+            rows = self.spark.sql(query).collect()
+        except AnalysisException:
+            # information_schema is only available in Unity Catalog. On plain
+            # Spark (e.g. local tests), the table does not exist and there are
+            # no PK constraints to observe.
+            return ()
+        return tuple(row["column_name"].casefold() for row in rows)
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""

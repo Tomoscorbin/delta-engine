@@ -6,9 +6,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -21,9 +23,11 @@ __all__ = [
     "ColumnTypeChange",
     "CreateTable",
     "DropColumn",
+    "DropPrimaryKey",
     "PartitioningChange",
     "SetColumnComment",
     "SetColumnNullability",
+    "SetPrimaryKey",
     "SetProperty",
     "SetTableComment",
 ]

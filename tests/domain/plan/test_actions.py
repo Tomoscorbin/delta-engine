@@ -8,8 +8,10 @@ from delta_engine.domain.plan.actions import (
     AddColumn,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -156,3 +158,87 @@ def test_actionplan_order_is_independent_of_input_permutation(
 
     # Then: both plans hold the same actions in the same execution order
     assert tuple(result) == tuple(canonical)
+
+
+# ----- DropPrimaryKey / SetPrimaryKey
+
+
+def test_drop_primary_key_has_no_subject():
+    # Given a DropPrimaryKey action (whole-table operation)
+    action = DropPrimaryKey()
+
+    # Then it has no within-phase subject
+    assert action.subject == ""
+
+
+def test_set_primary_key_has_no_subject():
+    # Given a SetPrimaryKey action
+    action = SetPrimaryKey(
+        columns=(Column(name="id", data_type=Integer(), nullable=False),),
+        constraint_name="orders_pk",
+    )
+
+    # Then it has no within-phase subject
+    assert action.subject == ""
+
+
+def test_plan_orders_drop_primary_key_before_add_column():
+    # Given a DropPrimaryKey and an AddColumn in the same plan
+    plan = ActionPlan(
+        (
+            AddColumn(column=_column("new_col")),
+            DropPrimaryKey(),
+        )
+    )
+
+    # Then DropPrimaryKey runs first
+    assert [type(a) for a in plan] == [DropPrimaryKey, AddColumn]
+
+
+def test_plan_orders_set_primary_key_after_set_column_nullability():
+    # Given a SetPrimaryKey and a SetColumnNullability in the same plan
+    plan = ActionPlan(
+        (
+            SetPrimaryKey(
+                columns=(Column(name="id", data_type=Integer(), nullable=False),),
+                constraint_name="t_pk",
+            ),
+            SetColumnNullability(column_name="id", nullable=False),
+        )
+    )
+
+    # Then SetColumnNullability runs first
+    assert [type(a) for a in plan] == [SetColumnNullability, SetPrimaryKey]
+
+
+def test_plan_full_phase_order_with_all_action_types():
+    # Given one action from each phase, handed to the plan in scrambled order
+    plan = ActionPlan(
+        (
+            SetPrimaryKey(
+                columns=(Column(name="id", data_type=Integer(), nullable=False),),
+                constraint_name="t_pk",
+            ),
+            SetTableComment(comment="tbl comment"),
+            AddColumn(column=_column("a_col")),
+            SetProperty(name="p_set", value="1"),
+            SetColumnNullability(column_name="nn_col", nullable=False),
+            DropPrimaryKey(),
+            DropColumn(column_name="d_col"),
+            SetColumnComment(column_name="c_col", comment="c"),
+            _create_table_action(),
+        )
+    )
+
+    # Then the plan holds them in the documented phase precedence
+    assert [type(a) for a in plan] == [
+        CreateTable,
+        SetProperty,
+        DropPrimaryKey,
+        AddColumn,
+        DropColumn,
+        SetColumnComment,
+        SetTableComment,
+        SetColumnNullability,
+        SetPrimaryKey,
+    ]

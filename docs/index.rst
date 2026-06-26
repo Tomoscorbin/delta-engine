@@ -15,6 +15,7 @@ Declarative schema management for Delta Lake tables on Databricks.
 
    how-to-handle-sync-failures
    how-to-declare-partitioned-tables
+   how-to-declare-primary-keys
    how-to-configure-properties
 
 .. toctree::

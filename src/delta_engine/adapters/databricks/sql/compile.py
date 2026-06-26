@@ -24,9 +24,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -46,9 +48,17 @@ def _compile_action(action: Action, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: CreateTable, backticked_table_name: str) -> str:
-    """Compile a CREATE TABLE statement including columns, comment, and properties."""
+    """Compile a CREATE TABLE statement including columns, comment, properties, and optional PK."""
     table = action.table
-    columns = ", ".join(_column_definition(column) for column in table.columns)
+    column_defs = [_column_definition(column) for column in table.columns]
+
+    if table.primary_key and table.primary_key_constraint_name:
+        pk_cols = ", ".join(backtick(name) for name in table.primary_key)
+        column_defs.append(
+            f"CONSTRAINT {backtick(table.primary_key_constraint_name)} PRIMARY KEY ({pk_cols})"
+        )
+
+    columns_clause = ", ".join(column_defs)
     table_comment = _set_table_comment(table.comment)
     properties = _set_properties(table.properties)
     partition_by = _set_partitioned_by(table.partitioned_by)
@@ -62,7 +72,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     # non-goals.
     parts = [
         f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
-        f"({columns})",
+        f"({columns_clause})",
         "USING delta",
         table_comment,
         properties,
@@ -129,6 +139,23 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
     sign = "DROP" if action.nullable else "SET"
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
+
+
+@_compile_action.register
+def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
+    """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
+    return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY IF EXISTS"
+
+
+@_compile_action.register
+def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
+    """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
+    column_list = ", ".join(backtick(column.name) for column in action.columns)
+    constraint = backtick(action.constraint_name)
+    return (
+        f"ALTER TABLE {backticked_table_name}"
+        f" ADD CONSTRAINT {constraint} PRIMARY KEY ({column_list})"
+    )
 
 
 @_compile_action.register

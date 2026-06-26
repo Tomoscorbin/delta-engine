@@ -2,16 +2,20 @@ from delta_engine.application.validation import (
     DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
+    PrimaryKeyColumnsNullable,
     UnsupportedColumnTypeChange,
     validate_plan,
 )
-from delta_engine.domain.model import Column, Integer, Long, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     ColumnTypeChange,
+    CreateTable,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnNullability,
+    SetPrimaryKey,
 )
 
 
@@ -230,3 +234,122 @@ def test_validation_passes_when_empty_rule_set_is_supplied():
 
     assert not result.failed
     assert result.failures == ()
+
+
+_QN = QualifiedName("c", "s", "t")
+
+
+def _set_pk(*columns: Column) -> SetPrimaryKey:
+    return SetPrimaryKey(columns=columns, constraint_name="t_pk")
+
+
+def _create_table_with_pk(*columns: Column) -> CreateTable:
+    return CreateTable(
+        table=DesiredTable(
+            qualified_name=_QN,
+            columns=columns,
+            primary_key=tuple(c.name for c in columns if not c.nullable),
+        )
+    )
+
+
+# ---- PrimaryKeyColumnsNullable
+
+
+def test_rejects_set_primary_key_with_nullable_column():
+    # Given a SetPrimaryKey carrying a nullable column
+    rule = PrimaryKeyColumnsNullable()
+
+    failures = rule.evaluate(_plan(_set_pk(Column("id", Integer(), nullable=True))))
+
+    assert len(failures) == 1
+    assert "id" in failures[0].message
+    assert failures[0].rule_name == "PrimaryKeyColumnsNullable"
+
+
+def test_rejects_all_nullable_pk_columns_in_a_single_pass():
+    # Given a SetPrimaryKey carrying two nullable columns
+    rule = PrimaryKeyColumnsNullable()
+
+    failures = rule.evaluate(
+        _plan(
+            _set_pk(
+                Column("id", Integer(), nullable=True),
+                Column("tenant_id", Integer(), nullable=True),
+            )
+        )
+    )
+
+    assert len(failures) == 2
+    messages = [f.message for f in failures]
+    for name in ("id", "tenant_id"):
+        assert any(name in m for m in messages)
+
+
+def test_allows_set_primary_key_with_all_non_nullable_columns():
+    # Given a SetPrimaryKey where every column is NOT NULL
+    rule = PrimaryKeyColumnsNullable()
+
+    failures = rule.evaluate(_plan(_set_pk(Column("id", Integer(), nullable=False))))
+
+    assert failures == ()
+
+
+def test_rejects_create_table_with_nullable_pk_column():
+    # Given a CreateTable whose PK column is nullable
+    rule = PrimaryKeyColumnsNullable()
+
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("id", Integer(), nullable=True),),
+            primary_key=("id",),
+        )
+    )
+
+    failures = rule.evaluate(_plan(action))
+
+    assert len(failures) == 1
+    assert "id" in failures[0].message
+
+
+def test_allows_create_table_with_no_primary_key():
+    # Given a CreateTable with no primary key defined
+    rule = PrimaryKeyColumnsNullable()
+
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("id", Integer()),),
+        )
+    )
+
+    failures = rule.evaluate(_plan(action))
+
+    assert failures == ()
+
+
+def test_allows_create_table_with_non_nullable_pk_column():
+    # Given a CreateTable with a NOT NULL PK column
+    rule = PrimaryKeyColumnsNullable()
+
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("id", Integer(), nullable=False),),
+            primary_key=("id",),
+        )
+    )
+
+    failures = rule.evaluate(_plan(action))
+
+    assert failures == ()
+
+
+def test_pk_nullable_rule_ignores_non_pk_actions():
+    # Given a plan with only column-level actions
+    rule = PrimaryKeyColumnsNullable()
+
+    failures = rule.evaluate(_plan(AddColumn(Column("x", Integer())), DropPrimaryKey()))
+
+    assert failures == ()

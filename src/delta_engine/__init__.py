@@ -14,14 +14,6 @@ planned without a Spark install.
 
 from typing import TYPE_CHECKING
 
-from delta_engine.application import (
-    Engine,
-    Failure,
-    Registry,
-    SyncFailedError,
-    SyncReport,
-    TableRunStatus,
-)
 from delta_engine.api import (
     Array,
     Boolean,
@@ -37,6 +29,14 @@ from delta_engine.api import (
     Property,
     String,
     Timestamp,
+)
+from delta_engine.application import (
+    Engine,
+    Failure,
+    Registry,
+    SyncFailedError,
+    SyncReport,
+    TableRunStatus,
 )
 
 # Lazily-exposed names. These live in the Databricks adapter, which imports

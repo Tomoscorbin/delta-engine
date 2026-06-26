@@ -16,6 +16,9 @@ class Column:
         name: Column name (normalized to lowercase).
         data_type: Logical data type of the column.
         nullable: Whether the column accepts ``NULL`` values.
+        comment: Optional column comment.
+        primary_key: Whether this column is part of the table's primary key.
+            Used by the API layer to derive the table-level primary key tuple.
 
     """
 
@@ -23,6 +26,7 @@ class Column:
     data_type: DataType
     nullable: bool = True
     comment: str = ""
+    primary_key: bool = False
 
     def __post_init__(self) -> None:
         """Raise if the name is blank or contains uppercase characters."""

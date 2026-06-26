@@ -20,9 +20,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -48,6 +50,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
+            + _diff_primary_key(desired, observed)
         )
     return ActionPlan(actions)
 
@@ -120,3 +123,35 @@ def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, .
     if desired == observed:
         return ()
     return (SetTableComment(comment=desired),)
+
+
+def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+    """
+    Return the primary key actions to align observed with desired.
+
+    Uses frozenset comparison so column order does not trigger spurious changes.
+    Declaration order from desired is preserved in SetPrimaryKey.columns.
+    """
+    desired_set = frozenset(desired.primary_key)
+    observed_set = frozenset(observed.primary_key)
+
+    if desired_set == observed_set:
+        return ()
+
+    actions: list[Action] = []
+
+    if observed_set:
+        actions.append(DropPrimaryKey())
+
+    if desired_set:
+        pk_columns = tuple(column for column in desired.columns if column.name in desired_set)
+        constraint_name = desired.primary_key_constraint_name
+        assert constraint_name is not None  # guaranteed: desired_set is non-empty
+        actions.append(
+            SetPrimaryKey(
+                columns=pk_columns,
+                constraint_name=constraint_name,
+            )
+        )
+
+    return tuple(actions)

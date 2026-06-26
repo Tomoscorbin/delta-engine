@@ -1,3 +1,5 @@
+from delta_engine.api.properties import Property
+from delta_engine.api.table import DeltaTable
 from delta_engine.domain.model import (
     Array,
     Boolean,
@@ -12,8 +14,6 @@ from delta_engine.domain.model import (
     String,
     Timestamp,
 )
-from delta_engine.api.properties import Property
-from delta_engine.api.table import DeltaTable
 
 __all__ = [
     "Array",

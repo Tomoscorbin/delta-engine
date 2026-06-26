@@ -19,6 +19,8 @@ class TableSnapshot:
         columns: Ordered tuple of ``Column`` definitions.
         comment: Optional table-level comment (empty string when unset).
         properties: Read-only mapping of table properties.
+        partitioned_by: Ordered tuple of partition column names.
+        primary_key: Ordered tuple of primary key column names (empty when none).
 
     """
 
@@ -27,6 +29,7 @@ class TableSnapshot:
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
+    primary_key: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """
@@ -34,6 +37,7 @@ class TableSnapshot:
 
         Columns must be non-empty and unique; partition columns must be
         lowercase, must each exist in ``columns``, and must be unique.
+        Primary key columns must each exist in ``columns``.
         """
         if not self.columns:
             raise ValueError("Table requires at least one column")
@@ -59,10 +63,28 @@ class TableSnapshot:
                     raise ValueError(f"Duplicate partition column: {name}")
                 seen_partitions.add(name)
 
+        if self.primary_key:
+            missing_pk = [name for name in self.primary_key if name not in seen_names]
+            if missing_pk:
+                raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
+
+            seen_pk: set[str] = set()
+            for name in self.primary_key:
+                if name in seen_pk:
+                    raise ValueError(f"Duplicate primary key column: {name}")
+                seen_pk.add(name)
+
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
+
+    @property
+    def primary_key_constraint_name(self) -> str | None:
+        """Return the constraint name for this table's primary key, or None if no PK is defined."""
+        if not self.primary_key:
+            return None
+        return f"{self.qualified_name.name}_pk"
 
 
 @dataclass(frozen=True, slots=True)

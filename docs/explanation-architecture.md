@@ -44,7 +44,7 @@ The `delta_engine.adapters.databricks` package implements both ports for Databri
 
 ## Planning and determinism
 
-`compute_plan(desired, observed)` diffs the desired declaration against the observed catalog state and returns an `ActionPlan`. Actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order: creates run before adds, adds before drops.
+`compute_plan(desired, observed)` diffs the desired declaration against the observed catalog state and returns an `ActionPlan`. Actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order. The phase ordering encodes dependency constraints: primary key drops run before column mutations (so no constraint references a column being dropped), and primary key sets run after nullability changes (so columns are guaranteed non-nullable before the constraint is applied).
 
 ## Sentinel actions
 

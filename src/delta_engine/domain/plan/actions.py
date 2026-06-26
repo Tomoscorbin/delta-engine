@@ -25,11 +25,13 @@ class ActionPhase(IntEnum):
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
+    SET_PRIMARY_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()
 
@@ -152,6 +154,36 @@ class SetColumnNullability(Action):
     @property
     def subject(self) -> str:
         return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class DropPrimaryKey(Action):
+    """Drop the existing primary key constraint from a table."""
+
+    phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
+
+    @property
+    def subject(self) -> str:
+        return ""
+
+
+@dataclass(frozen=True, slots=True)
+class SetPrimaryKey(Action):
+    """
+    Add a primary key constraint to a table.
+
+    Carries the full Column objects so the validation rule can check
+    nullability without requiring a DesiredTable reference.
+    """
+
+    columns: tuple[Column, ...]
+    constraint_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
+
+    @property
+    def subject(self) -> str:
+        return ""
 
 
 @dataclass(frozen=True, slots=True)
