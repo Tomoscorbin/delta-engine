@@ -21,9 +21,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -87,12 +89,18 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
             st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
         ).map(tuple)
     )
+    primary_key = draw(
+        st.lists(
+            st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
+        ).map(tuple)
+    )
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=tuple(columns),
         comment=draw(st.text(max_size=40)),
         properties=draw(_PROPERTIES),
         partitioned_by=partitioned_by,
+        primary_key=primary_key,
     )
 
 
@@ -106,6 +114,7 @@ def _desired(
     comment="",
     properties=None,
     partitioned_by=(),
+    primary_key=(),
 ) -> DesiredTable:
     """Build a DesiredTable, defaulting every dimension to a no-op baseline."""
     return DesiredTable(
@@ -114,6 +123,7 @@ def _desired(
         comment=comment,
         properties=properties or {},
         partitioned_by=partitioned_by,
+        primary_key=primary_key,
     )
 
 
@@ -123,6 +133,7 @@ def _observed(
     comment="",
     properties=None,
     partitioned_by=(),
+    primary_key=(),
 ) -> ObservedTable:
     """Build an ObservedTable matching `_desired`'s baseline so a single dimension can vary."""
     return ObservedTable(
@@ -131,6 +142,7 @@ def _observed(
         comment=comment,
         properties=properties or {},
         partitioned_by=partitioned_by,
+        primary_key=primary_key,
     )
 
 
@@ -476,6 +488,7 @@ def test_compute_plan_produces_no_actions_when_desired_equals_observed(
         comment=desired.comment,
         properties=desired.properties,
         partitioned_by=desired.partitioned_by,
+        primary_key=desired.primary_key,
     )
 
     # When: computing the plan
@@ -483,3 +496,153 @@ def test_compute_plan_produces_no_actions_when_desired_equals_observed(
 
     # Then: there is nothing to do — the differ is reflexive
     assert plan.actions == ()
+
+
+# ---------- primary key diffs ----------
+
+
+def _desired_with_pk(pk_columns: list[str]) -> DesiredTable:
+    """Build a DesiredTable whose listed columns are NOT NULL and in the primary key."""
+    all_columns = tuple(
+        Column(name, Integer(), nullable=name not in pk_columns)
+        for name in (["id", "name"] if not pk_columns else pk_columns + ["name"])
+    )
+    return DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=all_columns,
+        primary_key=tuple(pk_columns),
+    )
+
+
+def _observed_with_pk(pk_columns: list[str]) -> ObservedTable:
+    """Build an ObservedTable with a given primary key (columns default to nullable=True)."""
+    all_columns = (Column("id", Integer()), Column("name", String()))
+    return ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=all_columns,
+        primary_key=tuple(pk_columns),
+    )
+
+
+def test_no_pk_actions_when_both_desired_and_observed_have_no_pk():
+    # Given: no primary key on either side
+    plan = compute_plan(_desired(columns=(Column("id", Integer()),)), _observed())
+
+    # Then: no PK actions
+    assert not any(isinstance(a, (DropPrimaryKey, SetPrimaryKey)) for a in plan.actions)
+
+
+def test_emits_set_primary_key_when_desired_has_pk_and_observed_has_none():
+    # Given: desired declares a PK; observed has none
+    desired = _desired_with_pk(["id"])
+    observed = _observed_with_pk([])
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then: a SetPrimaryKey is emitted; no DropPrimaryKey
+    pk_actions = [a for a in plan.actions if isinstance(a, SetPrimaryKey)]
+    assert len(pk_actions) == 1
+    assert pk_actions[0].columns == (Column("id", Integer(), nullable=False),)
+    assert pk_actions[0].constraint_name == "test_pk"
+    assert not any(isinstance(a, DropPrimaryKey) for a in plan.actions)
+
+
+def test_emits_drop_primary_key_when_desired_has_no_pk_and_observed_has_one():
+    # Given: desired removes the PK; observed had one
+    desired = _desired(columns=(Column("id", Integer()),))
+    observed = _observed_with_pk(["id"])
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then: a DropPrimaryKey is emitted; no SetPrimaryKey
+    assert any(isinstance(a, DropPrimaryKey) for a in plan.actions)
+    assert not any(isinstance(a, SetPrimaryKey) for a in plan.actions)
+
+
+def test_emits_drop_and_set_when_pk_columns_change():
+    # Given: desired changes the PK columns
+    desired = _desired_with_pk(["id"])
+    observed = _observed_with_pk(["name"])
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then: both DropPrimaryKey and SetPrimaryKey are emitted
+    assert any(isinstance(a, DropPrimaryKey) for a in plan.actions)
+    assert any(isinstance(a, SetPrimaryKey) for a in plan.actions)
+
+
+def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
+    # Given: desired and observed have the same PK columns in different order
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("tenant_id", Integer(), nullable=False),
+        ),
+        primary_key=("id", "tenant_id"),
+    )
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("tenant_id", Integer(), nullable=False),
+        ),
+        primary_key=("tenant_id", "id"),
+    )
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then: order difference alone does not trigger a PK change
+    assert not any(isinstance(a, (DropPrimaryKey, SetPrimaryKey)) for a in plan.actions)
+
+
+def test_drop_primary_key_runs_before_add_column_in_plan():
+    # Given: a plan that both drops the PK and adds a column
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), nullable=False), Column("new_col", String())),
+        primary_key=(),
+    )
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=("id",),
+    )
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    types = [type(a) for a in plan.actions]
+    drop_idx = types.index(DropPrimaryKey)
+    add_idx = types.index(AddColumn)
+
+    # Then: DropPrimaryKey comes before AddColumn
+    assert drop_idx < add_idx
+
+
+def test_set_primary_key_runs_after_set_column_nullability_in_plan():
+    # Given: a plan that sets nullability and adds a PK in the same sync
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=("id",),
+    )
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), nullable=True),),
+        primary_key=(),
+    )
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    types = [type(a) for a in plan.actions]
+    null_idx = types.index(SetColumnNullability)
+    pk_idx = types.index(SetPrimaryKey)
+
+    # Then: SetColumnNullability runs before SetPrimaryKey
+    assert null_idx < pk_idx
