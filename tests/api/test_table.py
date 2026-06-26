@@ -195,3 +195,110 @@ def test_to_desired_table_defaults_partitioning_to_empty_tuple():
 
     # Then partitioned_by is a stable empty tuple, never None
     assert desired.partitioned_by == ()
+
+
+def test_column_with_primary_key_flag():
+    # Given a Column with primary_key=True
+    col = Column("id", Integer(), nullable=False, primary_key=True)
+
+    # Then the flag is readable
+    assert col.primary_key is True
+
+
+def test_column_primary_key_defaults_to_false():
+    # Given a Column without the primary_key flag
+    col = Column("id", Integer())
+
+    # Then it defaults to False
+    assert col.primary_key is False
+
+
+def test_delta_table_primary_key_returns_pk_column_names():
+    # Given a DeltaTable with one PK column
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("name", String()),
+        ],
+    )
+
+    # Then primary_key returns the PK column names in declaration order
+    assert table.primary_key == ("id",)
+
+
+def test_delta_table_primary_key_returns_empty_when_no_pk_declared():
+    # Given a DeltaTable with no PK columns
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then primary_key is an empty tuple
+    assert table.primary_key == ()
+
+
+def test_delta_table_primary_key_constraint_name_returns_table_name_pk():
+    # Given a DeltaTable with a PK column
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
+
+    # Then the constraint name is {table_name}_pk
+    assert table.primary_key_constraint_name == "orders_pk"
+
+
+def test_delta_table_primary_key_constraint_name_returns_none_when_no_pk():
+    # Given a DeltaTable with no PK
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then the constraint name is None
+    assert table.primary_key_constraint_name is None
+
+
+def test_delta_table_passes_pk_to_desired_table():
+    # Given a DeltaTable where "id" is PK
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("ds", String()),
+        ],
+    )
+
+    # When converting to domain
+    desired = table.to_desired_table()
+
+    # Then primary_key is set on the domain DesiredTable
+    assert desired.primary_key == ("id",)
+
+
+def test_delta_table_pk_column_order_matches_declaration_order():
+    # Given two PK columns declared in a specific order
+    table = DeltaTable(
+        catalog="c",
+        schema="s",
+        name="orders",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False, primary_key=True),
+            Column("order_id", Integer(), nullable=False, primary_key=True),
+            Column("ds", String()),
+        ],
+    )
+
+    # Then the order in primary_key matches declaration order
+    assert table.primary_key == ("tenant_id", "order_id")

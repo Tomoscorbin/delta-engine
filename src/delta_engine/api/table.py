@@ -48,21 +48,35 @@ class DeltaTable:
 
         effective = {**self.default_properties, **user_properties}
 
+        columns_tuple = tuple(columns)
+        primary_key = tuple(col.name for col in columns_tuple if col.primary_key)
+
         # Building DesiredTable here enforces all domain invariants (non-empty
         # columns, unique names, partition columns must exist) at construction
         # time rather than deferring them to to_desired_table().
         self._desired_table = DesiredTable(
             qualified_name=QualifiedName(catalog, schema, name),
-            columns=tuple(columns),
+            columns=columns_tuple,
             comment=comment,
             properties=effective,
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
+            primary_key=primary_key,
         )
 
     @property
     def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
         return self._desired_table.properties
+
+    @property
+    def primary_key(self) -> tuple[str, ...]:
+        """Column names declared as the primary key, in declaration order."""
+        return self._desired_table.primary_key
+
+    @property
+    def primary_key_constraint_name(self) -> str | None:
+        """The constraint name for this table's primary key, or None if no PK is defined."""
+        return self._desired_table.primary_key_constraint_name
 
     def to_desired_table(self) -> DesiredTable:
         """Return the domain :class:`DesiredTable` for this table definition."""
