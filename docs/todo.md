@@ -14,3 +14,6 @@
 - [ ] should all of the sql statements live in a dedicated file and be imported into reader/exeecutor?
 - [ ] should databricks rules live in validator?
 - [ ] add clarifying comments to differ functions
+- [ ] add clarifying comments to validation rules
+- [ ] make each CI step independently in parallel
+- [ ] review except AnalysisException in reader's _fetch_primary_key()
