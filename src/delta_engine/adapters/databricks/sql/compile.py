@@ -135,15 +135,15 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
-    """Compile an ALTER TABLE ... DROP PRIMARY KEY statement."""
-    return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY"
+    """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
+    return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY IF EXISTS"
 
 
 @_compile_action.register
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_list = ", ".join(backtick(column.name) for column in action.columns)
-    constraint_name = backtick(action.constraint_name)
+    constraint_name = action.constraint_name
     return f"ALTER TABLE {backticked_table_name} ADD CONSTRAINT {constraint_name} PRIMARY KEY ({column_list})"
 
 

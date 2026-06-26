@@ -265,8 +265,8 @@ def test_drop_primary_key_renders_alter_drop_primary_key():
     # When compiling a DropPrimaryKey action
     statement = _compile_single(DropPrimaryKey())
 
-    # Then it renders ALTER TABLE ... DROP PRIMARY KEY
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY"
+    # Then it renders ALTER TABLE ... DROP PRIMARY KEY IF EXISTS
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS"
 
 
 def test_set_primary_key_renders_add_constraint_primary_key():
@@ -285,5 +285,5 @@ def test_set_primary_key_renders_add_constraint_primary_key():
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+        " ADD CONSTRAINT orders_pk PRIMARY KEY (`tenant_id`, `order_id`)"
     )
