@@ -12,9 +12,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -257,3 +259,31 @@ def test_partitioning_change_compiler_raises_on_invariant_violation():
     # Then reaching the compiler is an internal-invariant violation -- AssertionError
     with pytest.raises(AssertionError, match=r"[Pp]artitioning"):
         _compile_single(action)
+
+
+def test_drop_primary_key_renders_alter_drop_primary_key():
+    # When compiling a DropPrimaryKey action
+    statement = _compile_single(DropPrimaryKey())
+
+    # Then it renders ALTER TABLE ... DROP PRIMARY KEY
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY"
+
+
+def test_set_primary_key_renders_add_constraint_primary_key():
+    # Given a SetPrimaryKey with two columns and a constraint name
+    action = SetPrimaryKey(
+        columns=(
+            Column(name="tenant_id", data_type=Integer(), nullable=False),
+            Column(name="order_id", data_type=Integer(), nullable=False),
+        ),
+        constraint_name="orders_pk",
+    )
+
+    # When compiling the action
+    statement = _compile_single(action)
+
+    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl`"
+        " ADD CONSTRAINT `orders_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+    )

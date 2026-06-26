@@ -24,9 +24,11 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetPrimaryKey,
     SetProperty,
     SetTableComment,
 )
@@ -129,6 +131,20 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
     sign = "DROP" if action.nullable else "SET"
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
+
+
+@_compile_action.register
+def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
+    """Compile an ALTER TABLE ... DROP PRIMARY KEY statement."""
+    return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY"
+
+
+@_compile_action.register
+def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
+    """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
+    column_list = ", ".join(backtick(column.name) for column in action.columns)
+    constraint_name = backtick(action.constraint_name)
+    return f"ALTER TABLE {backticked_table_name} ADD CONSTRAINT {constraint_name} PRIMARY KEY ({column_list})"
 
 
 @_compile_action.register
