@@ -27,11 +27,9 @@ napoleon_use_ivar = True
 
 exclude_patterns = ["_build", "superpowers"]
 
-# Suppress mermaid lexer warnings until sphinxcontrib-mermaid is added.
 # Suppress toctree and cross-reference warnings for docs not yet wired into nav
 # (navigation is assembled in a later task).
 suppress_warnings = [
-    "misc.highlighting_failure",
     "toc.not_included",
     "myst.xref_missing",
 ]

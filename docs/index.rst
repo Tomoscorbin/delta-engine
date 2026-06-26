@@ -5,4 +5,4 @@ delta-engine
    :hidden:
    :maxdepth: 2
 
-   architecture
+   explanation-architecture
