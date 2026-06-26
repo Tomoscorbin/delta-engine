@@ -43,3 +43,6 @@ htmlcov/
 # --- Local env files
 .env
 .env.*
+.superpowers/
+docs/superpowers/
+docs/_build/
