@@ -111,16 +111,6 @@ class DatabricksReader:
             for c in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(m for m in all_mappings if m is not None)
-        if not mappings:
-            # Every column was skipped as unmappable. State this here rather than
-            # leaning on ObservedTable's "at least one column" invariant to raise:
-            # the failure belongs to the reader's skip policy, and naming it gives
-            # operators a message about unmappable types instead of a generic
-            # domain error. fetch_state wraps this into ReadFailed for the table.
-            raise ValueError(
-                f"All columns in {qualified_name} have unmappable Spark types; "
-                "cannot represent the table"
-            )
         columns = tuple(m.column for m in mappings)
         partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(

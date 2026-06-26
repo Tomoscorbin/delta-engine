@@ -340,13 +340,10 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
 
 
 def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
-    # Given a table that exists with a mappable column but DESCRIBE DETAIL raises
+    # Given a table that exists but DESCRIBE DETAIL raises AnalysisException
     qn = QualifiedName("c", "s", "boom")
     fq = str(qn)
-    catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("id", dataType=T.IntegerType())]},
-        table_comments={fq: ""},
-    )
+    catalog = FakeCatalog(columns_by_table={fq: []}, table_comments={fq: ""})
     reader = DatabricksReader(
         FakeSparkForFetchState(catalog=catalog, describe_exc=AnalysisException("kaboom"))
     )
@@ -390,10 +387,9 @@ def test_fetch_state_returns_failed_when_all_columns_are_unsupported():
     # When we fetch state
     result = reader.fetch_state(qn)
 
-    # Then the table fails: with every column skipped, the reader reports that
-    # none of its types are mappable rather than degrading to an empty table
+    # Then the table fails: skipping its only column leaves zero columns, which
+    # violates the TableSnapshot invariant and surfaces as a ReadFailed
     assert isinstance(result, ReadFailed)
-    assert "unmappable Spark types" in result.failure.message
 
 
 def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact():

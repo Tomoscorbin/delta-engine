@@ -83,7 +83,8 @@ def domain_type_from_spark(spark_type: str | SparkType) -> DataType | None:
     ``STRUCT``, ``VARIANT``, ``TIMESTAMP_NTZ``). An unmappable element inside an
     ``ARRAY`` or ``MAP`` makes the whole type unmappable. An unmappable type is a
     routine, expected condition -- new Spark types appear over time -- so it is a
-    ``None`` return, not an exception. Callers decide what to do with ``None``.
+    ``None`` return, not an exception. Callers decide what to do with ``None``
+    (the reader skips the column and logs a warning).
     """
     if isinstance(spark_type, str):
         spark_type = SparkType.fromDDL(spark_type)
