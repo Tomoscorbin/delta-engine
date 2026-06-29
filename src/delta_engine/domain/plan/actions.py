@@ -26,6 +26,10 @@ class ActionPhase(IntEnum):
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    # Foreign keys are dropped first: a FK may reference a column or primary key
+    # that a later phase drops, and Databricks rejects dropping a column or key
+    # still referenced by an active FK constraint.
+    DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
@@ -33,7 +37,8 @@ class ActionPhase(IntEnum):
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
-    DROP_FOREIGN_KEY = auto()
+    # Foreign keys are set last among key operations: a FK references a primary
+    # or unique key, so that key must exist before the FK can point at it.
     SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()

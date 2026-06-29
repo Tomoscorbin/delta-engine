@@ -217,16 +217,23 @@ def test_plan_orders_set_primary_key_after_set_column_nullability():
 
 def test_plan_full_phase_order_with_all_action_types():
     # Given one action from each phase, handed to the plan in scrambled order
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
     plan = ActionPlan(
         (
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
                 constraint_name="t_pk",
             ),
+            SetForeignKey(fk=fk, constraint_name="t_customer_id_fk"),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
             SetColumnNullability(column_name="nn_col", nullable=False),
+            DropForeignKey(constraint_name="t_old_fk"),
             DropPrimaryKey(),
             DropColumn(column_name="d_col"),
             SetColumnComment(column_name="c_col", comment="c"),
@@ -238,6 +245,7 @@ def test_plan_full_phase_order_with_all_action_types():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        DropForeignKey,
         DropPrimaryKey,
         AddColumn,
         DropColumn,
@@ -245,14 +253,29 @@ def test_plan_full_phase_order_with_all_action_types():
         SetTableComment,
         SetColumnNullability,
         SetPrimaryKey,
+        SetForeignKey,
     ]
 
 
 # ----- DropForeignKey / SetForeignKey
 
 
-def test_drop_foreign_key_phase_is_after_set_primary_key():
-    assert ActionPhase.DROP_FOREIGN_KEY > ActionPhase.SET_PRIMARY_KEY
+def test_drop_foreign_key_phase_is_before_drop_primary_key():
+    # A self-referential FK references the table's own primary key, so the FK
+    # must be dropped before the primary key it depends on can be dropped.
+    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
+
+
+def test_drop_foreign_key_phase_is_before_drop_column():
+    # Databricks rejects dropping a column still referenced by an active FK, so
+    # the FK must be dropped first.
+    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_COLUMN
+
+
+def test_set_foreign_key_phase_is_after_set_primary_key():
+    # A FK references a primary/unique key, so the referenced key must be set
+    # before the FK that points at it.
+    assert ActionPhase.SET_FOREIGN_KEY > ActionPhase.SET_PRIMARY_KEY
 
 
 def test_set_foreign_key_phase_is_after_drop_foreign_key():
@@ -261,6 +284,32 @@ def test_set_foreign_key_phase_is_after_drop_foreign_key():
 
 def test_set_foreign_key_phase_is_before_column_type_change():
     assert ActionPhase.SET_FOREIGN_KEY < ActionPhase.COLUMN_TYPE_CHANGE
+
+
+def test_plan_orders_drop_foreign_key_before_drop_column():
+    # Given a DropColumn and the DropForeignKey for a constraint on that column
+    plan = ActionPlan(
+        (
+            DropColumn(column_name="customer_id"),
+            DropForeignKey(constraint_name="orders_customer_id_fk"),
+        )
+    )
+
+    # Then the foreign key is dropped before the column it references
+    assert [type(a) for a in plan] == [DropForeignKey, DropColumn]
+
+
+def test_plan_orders_drop_foreign_key_before_drop_primary_key():
+    # Given a DropPrimaryKey and a DropForeignKey in the same plan
+    plan = ActionPlan(
+        (
+            DropPrimaryKey(),
+            DropForeignKey(constraint_name="employees_manager_id_fk"),
+        )
+    )
+
+    # Then the foreign key is dropped before the primary key it may reference
+    assert [type(a) for a in plan] == [DropForeignKey, DropPrimaryKey]
 
 
 def test_drop_foreign_key_subject_is_constraint_name():
