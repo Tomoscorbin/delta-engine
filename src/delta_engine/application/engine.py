@@ -6,10 +6,9 @@ deterministic ordering), validates it against rules, executes it via provided
 adapters, and aggregates results into a `SyncReport`. If any table fails,
 `SyncFailedError` is raised with a formatted summary.
 
-Before the four phases, foreign key dependencies are resolved: tables are
-ordered so that referenced tables sync before their dependents, and any table
-with an unresolvable, cyclic, or dependency-blocked FK is classified as failed
-and excluded from execution.
+Before the four phases, FK dependencies are resolved: `resolve()` returns
+tables in dependency-first order as `SyncCandidate` objects. Each candidate
+carries its own FK failures; a blocked candidate is excluded from execution.
 
 The sync runs four phases across all tables in sequence:
   1. Read     — fetch current catalog state for every table
@@ -28,7 +27,7 @@ from datetime import UTC, datetime
 import logging
 
 from delta_engine.application.errors import SyncFailedError
-from delta_engine.application.foreign_key_planning import resolve
+from delta_engine.application.foreign_key_planning import SyncCandidate, resolve
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
@@ -42,12 +41,10 @@ from delta_engine.application.results import (
 )
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
 from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
-
 
 
 def _utc_now() -> datetime:
@@ -82,10 +79,9 @@ class Engine:
         phase is skipped in later phases; its partial result is included in
         the final report.
 
-        Before the phases, FK dependencies are resolved: tables are ordered so
-        referenced tables sync first, and a table whose foreign key cannot be
-        applied (cycle, unresolvable reference, or a dependency that itself
-        failed) is excluded from execution entirely and reported as
+        FK dependencies are resolved before the phases: `resolve()` returns
+        candidates in dependency-first order. A blocked candidate (one with FK
+        failures) is excluded from execution entirely and reported as
         FOREIGN_KEY_FAILED.
 
         Returns:
@@ -99,29 +95,27 @@ class Engine:
         run_started = _utc_now()
         logger.info("Starting sync for %d table(s)", len(registry))
 
-        tables = tuple(registry)
-        resolution = resolve(tables)
+        candidates = resolve(tuple(registry))
 
-        catalog_states = self._read(resolution.ordered_tables)
-        plans = self._plan(resolution.ordered_tables, catalog_states)
+        catalog_states = self._read(candidates)
+        plans = self._plan(candidates, catalog_states)
         validations = self._validate(plans)
         plans_to_execute = {
-            qualified_name: plan
-            for qualified_name, plan in plans.items()
-            if not validations[qualified_name].failed
-            and not resolution.fails(qualified_name)
+            c.table.qualified_name: plans[c.table.qualified_name]
+            for c in candidates
+            if not c.blocked and not validations[c.table.qualified_name].failed
         }
         executions = self._execute(plans_to_execute)
 
         table_reports = tuple(
             TableRunReport(
-                qualified_name=table.qualified_name,
-                read=catalog_states[table.qualified_name],
-                validation=validations[table.qualified_name],
-                execution=executions.get(table.qualified_name, ExecutionSummary()),
-                foreign_key_failures=resolution.failures_for(table.qualified_name),
+                qualified_name=c.table.qualified_name,
+                read=catalog_states[c.table.qualified_name],
+                validation=validations[c.table.qualified_name],
+                execution=executions.get(c.table.qualified_name, ExecutionSummary()),
+                foreign_key_failures=c.failures,
             )
-            for table in resolution.ordered_tables
+            for c in candidates
         )
 
         report = SyncReport(
@@ -138,31 +132,32 @@ class Engine:
 
     def _read(
         self,
-        tables: tuple[DesiredTable, ...],
+        candidates: tuple[SyncCandidate, ...],
     ) -> dict[QualifiedName, CatalogState]:
         """Fetch current catalog state for every table."""
         catalog_states: dict[QualifiedName, CatalogState] = {}
-        for table in tables:
-            catalog_state = self.reader.fetch_state(table.qualified_name)
-            catalog_states[table.qualified_name] = catalog_state
+        for candidate in candidates:
+            qualified_name = candidate.table.qualified_name
+            catalog_state = self.reader.fetch_state(qualified_name)
+            catalog_states[qualified_name] = catalog_state
             if isinstance(catalog_state, ReadFailed):
                 logger.error(
                     "Read failed for %s: %s - %s",
-                    table.qualified_name,
+                    qualified_name,
                     catalog_state.failure.exception_type,
                     catalog_state.failure.message,
                 )
             else:
                 logger.info(
                     "Read state for %s: %s",
-                    table.qualified_name,
+                    qualified_name,
                     "present" if isinstance(catalog_state, TablePresent) else "absent",
                 )
         return catalog_states
 
     def _plan(
         self,
-        tables: tuple[DesiredTable, ...],
+        candidates: tuple[SyncCandidate, ...],
         catalog_states: dict[QualifiedName, CatalogState],
     ) -> dict[QualifiedName, ActionPlan]:
         """
@@ -171,16 +166,17 @@ class Engine:
         Tables that failed to read get an empty plan.
         """
         plans: dict[QualifiedName, ActionPlan] = {}
-        for table in tables:
-            catalog_state = catalog_states[table.qualified_name]
+        for candidate in candidates:
+            qualified_name = candidate.table.qualified_name
+            catalog_state = catalog_states[qualified_name]
             if isinstance(catalog_state, ReadFailed):
-                plans[table.qualified_name] = ActionPlan()
+                plans[qualified_name] = ActionPlan()
                 continue
 
             observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
-            plan = compute_plan(desired=table, observed=observed)
-            plans[table.qualified_name] = plan
-            logger.info("Planned %d action(s) for %s", len(plan), table.qualified_name)
+            plan = compute_plan(desired=candidate.table, observed=observed)
+            plans[qualified_name] = plan
+            logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
 
         return plans
 
