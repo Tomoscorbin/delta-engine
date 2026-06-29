@@ -77,9 +77,11 @@ class Engine:
         phase is skipped in later phases; its partial result is included in
         the final report.
 
-        Before the phases, FK dependencies are resolved: tables are reordered
-        so referenced tables sync first, and FK actions for cycles or
-        unresolvable references are stripped from plans before validation.
+        Before the phases, FK dependencies are resolved: tables are ordered so
+        referenced tables sync first, and a table whose foreign key cannot be
+        applied (cycle, unresolvable reference, or a dependency that itself
+        failed) is excluded from execution entirely and reported as
+        FOREIGN_KEY_FAILED.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.

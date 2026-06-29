@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
 
 # A table dependency graph is small (tens of tables, shallow chains), so the
@@ -204,7 +205,9 @@ def _classify_failures(
     """
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
-    def record(table: DesiredTable, fk, reason: ForeignKeyFailureReason) -> None:
+    def record(
+        table: DesiredTable, fk: ForeignKeyConstraint, reason: ForeignKeyFailureReason
+    ) -> None:
         failures.setdefault(table.qualified_name, []).append(
             ForeignKeyFailure(
                 table=table.qualified_name,

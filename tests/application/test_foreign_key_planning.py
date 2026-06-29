@@ -237,6 +237,48 @@ def test_resolve_treats_self_referential_fk_as_applicable():
     assert {str(t.qualified_name) for t in resolution.ordered_tables} == {"cat.sch.employees"}
 
 
+def test_resolve_propagates_block_through_a_diamond():
+    # Given a diamond: d depends on b and c; both b and c depend on a;
+    # a references an unregistered table
+    table_d = DeltaTable(
+        "cat",
+        "sch",
+        "d",
+        columns=(Column("id", String()), Column("b_id", String()), Column("c_id", String())),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
+            ),
+            ForeignKeyConstraint(
+                local_columns=("c_id",), references="cat.sch.c", referenced_columns=("id",)
+            ),
+        ],
+    ).to_desired_table()
+    tables = (
+        table_d,
+        _table_with_fk("cat.sch.b", "cat.sch.a"),
+        _table_with_fk("cat.sch.c", "cat.sch.a"),
+        _table_with_fk("cat.sch.a", "cat.sch.missing"),
+    )
+
+    # When
+    resolution = resolve(tables)
+
+    # Then a fails directly; b, c, and the fan-in node d are all blocked exactly once
+    assert (
+        resolution.failures_for(_qn("cat.sch.a"))[0].reason
+        == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    )
+    for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
+        failures = resolution.failures_for(_qn(blocked))
+        assert all(
+            failure.reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+            for failure in failures
+        )
+    # And d is recorded once per blocking FK (two), with no duplicate entries beyond that
+    assert len(resolution.failures_for(_qn("cat.sch.d"))) == 2
+
+
 def test_resolve_with_empty_tables_returns_empty_resolution():
     # Given / When
     resolution = resolve(())
