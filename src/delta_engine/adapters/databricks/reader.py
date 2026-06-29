@@ -6,9 +6,9 @@ from dataclasses import dataclass
 import logging
 from types import MappingProxyType
 
+from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
-from pyspark.errors.exceptions.base import AnalysisException
 
 from delta_engine.adapters.databricks.sql import (
     backtick,

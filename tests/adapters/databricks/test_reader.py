@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pyspark.sql.types as T
 from pyspark.errors.exceptions.base import AnalysisException
+import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
