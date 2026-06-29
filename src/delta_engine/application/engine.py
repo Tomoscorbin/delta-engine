@@ -101,21 +101,21 @@ class Engine:
         plans = self._plan(candidates, catalog_states)
         validations = self._validate(plans)
         plans_to_execute = {
-            c.table.qualified_name: plans[c.table.qualified_name]
-            for c in candidates
-            if not c.blocked and not validations[c.table.qualified_name].failed
+            candidate.table.qualified_name: plans[candidate.table.qualified_name]
+            for candidate in candidates
+            if not candidate.blocked and not validations[candidate.table.qualified_name].failed
         }
         executions = self._execute(plans_to_execute)
 
         table_reports = tuple(
             TableRunReport(
-                qualified_name=c.table.qualified_name,
-                read=catalog_states[c.table.qualified_name],
-                validation=validations[c.table.qualified_name],
-                execution=executions.get(c.table.qualified_name, ExecutionSummary()),
-                foreign_key_failures=c.failures,
+                qualified_name=candidate.table.qualified_name,
+                read=catalog_states[candidate.table.qualified_name],
+                validation=validations[candidate.table.qualified_name],
+                execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
+                foreign_key_failures=candidate.failures,
             )
-            for c in candidates
+            for candidate in candidates
         )
 
         report = SyncReport(
