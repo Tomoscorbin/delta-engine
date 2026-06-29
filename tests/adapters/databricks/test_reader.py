@@ -75,6 +75,7 @@ class FakeSpark:
                 raise self._fk_raises
             rows = next(iter(self._fk_rows.values()), []) if self._fk_rows else []
             return FakeDataFrame(rows)
+        raise NotImplementedError(query)
 
 
 class FakeSparkProps:
@@ -115,7 +116,9 @@ class FakeSparkForFetchState:
     def catalog(self):
         return self._catalog
 
-    def sql(self, _query: str):
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            return FakeDataFrame([])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
