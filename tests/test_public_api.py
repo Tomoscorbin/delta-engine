@@ -24,6 +24,7 @@ _EAGER = {
     "Decimal",
     "Double",
     "Float",
+    "ForeignKey",
     "Integer",
     "Long",
     "Map",
