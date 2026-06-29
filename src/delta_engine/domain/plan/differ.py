@@ -20,10 +20,12 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -43,7 +45,11 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
     """
     if observed is None:
-        actions: tuple[Action, ...] = (CreateTable(desired),)
+        fk_actions = tuple(
+            SetForeignKey(fk=fk, constraint_name=desired.foreign_key_constraint_name(fk))
+            for fk in desired.foreign_keys
+        )
+        actions: tuple[Action, ...] = (CreateTable(desired),) + fk_actions
     else:
         actions = (
             _diff_columns(desired.columns, observed.columns)
@@ -51,6 +57,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
             + _diff_primary_key(desired, observed)
+            + _diff_foreign_keys(desired, observed)
         )
     return ActionPlan(actions)
 
@@ -153,5 +160,35 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
                 constraint_name=constraint_name,
             )
         )
+
+    return tuple(actions)
+
+
+def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+    """
+    Return the FK actions to align observed with desired.
+
+    Each FK is keyed by its resolved constraint name. When a FK exists under the
+    same name in both desired and observed but its definition has changed, a
+    DropForeignKey is emitted for the old name followed by a SetForeignKey for the
+    new definition. A FK that is identical on both sides produces no actions.
+    """
+    desired_by_name = {
+        desired.foreign_key_constraint_name(fk): fk for fk in desired.foreign_keys
+    }
+    observed_by_name = {
+        fk.resolved_constraint_name(observed.qualified_name.name): fk
+        for fk in observed.foreign_keys
+    }
+
+    actions: list[Action] = []
+
+    for name, fk in observed_by_name.items():
+        if name not in desired_by_name or desired_by_name[name] != fk:
+            actions.append(DropForeignKey(constraint_name=name))
+
+    for name, fk in desired_by_name.items():
+        if name not in observed_by_name or observed_by_name[name] != fk:
+            actions.append(SetForeignKey(fk=fk, constraint_name=name))
 
     return tuple(actions)
