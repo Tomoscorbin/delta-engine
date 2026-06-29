@@ -1,14 +1,13 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPhase,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
