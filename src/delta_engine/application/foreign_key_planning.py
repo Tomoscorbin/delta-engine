@@ -186,7 +186,7 @@ def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[str],
     cycle_members: set[str],
-) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
+) -> dict[QualifiedName, tuple[Failure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.
 

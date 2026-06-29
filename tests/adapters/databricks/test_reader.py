@@ -75,6 +75,7 @@ class FakeSpark:
                 raise self._fk_raises
             rows = next(iter(self._fk_rows.values()), []) if self._fk_rows else []
             return FakeDataFrame(rows)
+        raise NotImplementedError(f"unexpected query: {query!r}")
 
 
 class FakeSparkProps:
