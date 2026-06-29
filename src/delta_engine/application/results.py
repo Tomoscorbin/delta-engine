@@ -28,6 +28,34 @@ class TableRunStatus(StrEnum):
     EXECUTION_FAILED = "EXECUTION_FAILED"
 
 
+class SkipReason(StrEnum):
+    """Why a foreign key constraint was skipped during sync."""
+
+    CYCLE = "CYCLE"
+    UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedForeignKey:
+    """A foreign key constraint that was not applied due to a graph-level reason."""
+
+    table: QualifiedName
+    constraint_name: str
+    reason: SkipReason
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyValidationReport:
+    """Cross-table FK graph analysis results."""
+
+    skipped: tuple[SkippedForeignKey, ...] = ()
+
+    @property
+    def has_skipped(self) -> bool:
+        """True when any FK constraints were skipped."""
+        return bool(self.skipped)
+
+
 # ---------- Failure value objects ----------
 
 
@@ -225,6 +253,9 @@ class SyncReport:
     started_at: datetime
     ended_at: datetime
     table_reports: tuple[TableRunReport, ...]
+    foreign_key_validation: ForeignKeyValidationReport = field(
+        default_factory=ForeignKeyValidationReport
+    )
 
     @property
     def any_failures(self) -> bool:
