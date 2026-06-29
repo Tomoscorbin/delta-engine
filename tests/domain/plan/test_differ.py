@@ -793,7 +793,10 @@ def test_fk_changed_emits_drop_and_set():
     drop_actions = [a for a in plan if isinstance(a, DropForeignKey)]
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(drop_actions) == 1
+    assert drop_actions[0].constraint_name == "orders_customer_id_fk"
     assert len(set_actions) == 1
+    assert set_actions[0].fk == new_fk
+    assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_new_table_with_fk_includes_set_foreign_key_in_plan():
@@ -804,9 +807,36 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     plan = compute_plan(desired, None)
 
     # Then plan contains CreateTable — and a SetForeignKey (FK applied after creation)
-    action_types = {type(a).__name__ for a in plan}
-    assert "CreateTable" in action_types
-    assert "SetForeignKey" in action_types
+    assert any(isinstance(a, CreateTable) for a in plan)
+    set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
+    assert len(set_actions) == 1
+    assert set_actions[0].fk == _FK
+    assert set_actions[0].constraint_name == "orders_customer_id_fk"
+
+
+def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
+    # Given: desired FK has no explicit name (derives orders_customer_id_fk);
+    #        observed has the same relationship but a name chosen outside this engine
+    desired_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    observed_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="fk_made_in_the_console",
+    )
+    desired = _orders_with_fk(desired_fk)
+    observed = _observed_orders((observed_fk,))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then no FK actions — the relationship already exists, name notwithstanding
+    fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
+    assert fk_actions == []
 
 
 def test_sync_is_idempotent_when_fk_already_exists_in_catalog():

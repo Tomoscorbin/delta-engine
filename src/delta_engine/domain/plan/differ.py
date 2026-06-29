@@ -50,7 +50,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             SetForeignKey(fk=fk, constraint_name=desired.resolve_foreign_key_constraint_name(fk))
             for fk in desired.foreign_keys
         )
-        actions: tuple[Action, ...] = (CreateTable(desired),) + fk_actions
+        actions: tuple[Action, ...] = (CreateTable(desired), *fk_actions)
     else:
         actions = (
             _diff_columns(desired.columns, observed.columns)
@@ -184,27 +184,37 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
     """
     Return the FK actions to align observed with desired.
 
-    Each FK is keyed by its resolved constraint name. When a FK exists under the
-    same name in both desired and observed but its definition has changed, a
-    DropForeignKey is emitted for the old name followed by a SetForeignKey for the
-    new definition. A FK that is identical on both sides produces no actions.
+    Foreign keys are matched by *content* (local columns, referenced table, and
+    referenced columns), not by constraint name. An observed FK whose content is
+    not desired is dropped; a desired FK whose content is not observed is set.
+    A FK present on both sides — even under a different constraint name, e.g. one
+    created outside this engine — produces no actions, so a sync over an
+    unchanged catalog stays idempotent.
+
+    Dropping an observed FK uses its catalog-stored constraint name so the
+    correct constraint is removed; setting a desired FK uses its resolved name.
     """
-    desired_by_name = {
-        desired.resolve_foreign_key_constraint_name(fk): fk for fk in desired.foreign_keys
-    }
-    observed_by_name = {
-        fk.resolve_constraint_name(observed.qualified_name.name): fk
-        for fk in observed.foreign_keys
-    }
+    observed_unmatched = list(observed.foreign_keys)
 
     actions: list[Action] = []
+    for desired_fk in desired.foreign_keys:
+        match = next(
+            (fk for fk in observed_unmatched if _fk_content_equal(desired_fk, fk)),
+            None,
+        )
+        if match is None:
+            actions.append(
+                SetForeignKey(
+                    fk=desired_fk,
+                    constraint_name=desired.resolve_foreign_key_constraint_name(desired_fk),
+                )
+            )
+        else:
+            observed_unmatched.remove(match)
 
-    for name, fk in observed_by_name.items():
-        if name not in desired_by_name or not _fk_content_equal(desired_by_name[name], fk):
-            actions.append(DropForeignKey(constraint_name=name))
+    drop_actions = [
+        DropForeignKey(constraint_name=fk.resolve_constraint_name(observed.qualified_name.name))
+        for fk in observed_unmatched
+    ]
 
-    for name, fk in desired_by_name.items():
-        if name not in observed_by_name or not _fk_content_equal(observed_by_name[name], fk):
-            actions.append(SetForeignKey(fk=fk, constraint_name=name))
-
-    return tuple(actions)
+    return tuple(drop_actions) + tuple(actions)
