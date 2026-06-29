@@ -9,6 +9,7 @@ import pytest
 from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 # ---------- fakes & helpers ----------
 
@@ -57,8 +58,23 @@ class FakeCatalog:
 class FakeSpark:
     """Spark fake whose catalog.* calls delegate to the provided FakeCatalog."""
 
-    def __init__(self, *, catalog: FakeCatalog | None = None):
+    def __init__(
+        self,
+        *,
+        catalog: FakeCatalog | None = None,
+        fk_rows: dict | None = None,
+        fk_raises: Exception | None = None,
+    ):
         self.catalog = catalog or FakeCatalog()
+        self._fk_rows = fk_rows or {}
+        self._fk_raises = fk_raises
+
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            if self._fk_raises is not None:
+                raise self._fk_raises
+            rows = next(iter(self._fk_rows.values()), []) if self._fk_rows else []
+            return FakeDataFrame(rows)
 
 
 class FakeSparkProps:
@@ -132,6 +148,9 @@ class FakeSparkWithPrimaryKey:
         return self._catalog
 
     def sql(self, query: str):
+        if "referential_constraints" in query:
+            # FK query — always return empty; these tests focus on PK behaviour
+            return FakeDataFrame([])
         if "information_schema" in query.lower():
             if self._pk_exc is not None:
                 raise self._pk_exc
@@ -598,3 +617,93 @@ def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
     # Then: the read succeeds and primary_key is empty (no UC = no PK constraints)
     assert isinstance(result, TablePresent)
     assert result.table.primary_key == ()
+
+
+# ---------- tests: foreign keys ----------
+
+
+def test_fetch_foreign_keys_returns_single_column_fk():
+    # Given rows from information_schema describing one FK
+    rows = [
+        SimpleNamespace(
+            constraint_name="orders_customer_id_fk",
+            local_column="customer_id",
+            ordinal_position=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        )
+    ]
+    spark = FakeSpark(fk_rows={"cat.sch.orders": rows})
+    reader = DatabricksReader(spark)
+
+    # When
+    fks = reader._fetch_foreign_keys(QualifiedName("cat", "sch", "orders"))
+
+    # Then
+    assert len(fks) == 1
+    assert fks[0] == ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
+
+
+def test_fetch_foreign_keys_returns_composite_fk_in_ordinal_order():
+    # Given rows for a composite FK (ordinal order: tenant_id first, then customer_id)
+    rows = [
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="tenant_id",
+            ordinal_position=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="tenant_id",
+        ),
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="customer_id",
+            ordinal_position=2,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        ),
+    ]
+    spark = FakeSpark(fk_rows={"cat.sch.orders": rows})
+    reader = DatabricksReader(spark)
+
+    # When
+    fks = reader._fetch_foreign_keys(QualifiedName("cat", "sch", "orders"))
+
+    # Then columns are preserved in ordinal order
+    assert len(fks) == 1
+    assert fks[0].local_columns == ("tenant_id", "customer_id")
+    assert fks[0].referenced_columns == ("tenant_id", "id")
+
+
+def test_fetch_foreign_keys_returns_empty_when_no_fks():
+    # Given no FK rows for this table
+    spark = FakeSpark(fk_rows={})
+    reader = DatabricksReader(spark)
+
+    # When
+    fks = reader._fetch_foreign_keys(QualifiedName("cat", "sch", "orders"))
+
+    # Then
+    assert fks == ()
+
+
+def test_fetch_foreign_keys_returns_empty_on_analysis_exception():
+    # Given Spark raises AnalysisException (non-UC environment without information_schema)
+    spark = FakeSpark(fk_raises=AnalysisException("no information_schema"))
+    reader = DatabricksReader(spark)
+
+    # When
+    fks = reader._fetch_foreign_keys(QualifiedName("cat", "sch", "orders"))
+
+    # Then falls back gracefully
+    assert fks == ()
