@@ -49,10 +49,10 @@ def test_resolve_with_no_fks_preserves_registry_order():
     # When
     candidates = resolve(tables)
 
-    # Then order is unchanged and nothing is blocked
+    # Then order is unchanged and all candidates can execute
     names = [str(candidate.table.qualified_name) for candidate in candidates]
     assert names == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
-    assert all(not candidate.blocked for candidate in candidates)
+    assert all(candidate.can_execute for candidate in candidates)
 
 
 def test_resolve_orders_referenced_table_before_dependent():
@@ -65,10 +65,10 @@ def test_resolve_orders_referenced_table_before_dependent():
     # When
     candidates = resolve(tables)
 
-    # Then customers appears before orders and neither is blocked
+    # Then customers appears before orders and all candidates can execute
     names = [str(candidate.table.qualified_name) for candidate in candidates]
     assert names.index("cat.sch.customers") < names.index("cat.sch.orders")
-    assert all(not candidate.blocked for candidate in candidates)
+    assert all(candidate.can_execute for candidate in candidates)
 
 
 def test_resolve_handles_chain_of_dependencies():
@@ -94,9 +94,9 @@ def test_resolve_fails_table_with_unresolvable_reference():
     # When
     candidates = resolve(tables)
 
-    # Then orders is blocked with UNRESOLVABLE_REFERENCE
+    # Then orders cannot execute, with UNRESOLVABLE_REFERENCE
     [candidate] = candidates
-    assert candidate.blocked
+    assert not candidate.can_execute
     assert len(candidate.failures) == 1
     assert candidate.failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert candidate.failures[0].constraint_name == "orders_ref_id_fk"
@@ -112,10 +112,10 @@ def test_resolve_fails_both_members_of_a_cycle():
     # When
     candidates = resolve(tables)
 
-    # Then both tables are blocked with CYCLE
+    # Then both tables cannot execute, each with CYCLE
     by_name = _candidates_by_name(candidates)
-    assert by_name["cat.sch.a"].blocked
-    assert by_name["cat.sch.b"].blocked
+    assert not by_name["cat.sch.a"].can_execute
+    assert not by_name["cat.sch.b"].can_execute
     assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.CYCLE
     assert by_name["cat.sch.b"].failures[0].reason == ForeignKeyFailureReason.CYCLE
 
@@ -130,7 +130,7 @@ def test_resolve_includes_failed_tables_in_candidates():
     # When
     candidates = resolve(tables)
 
-    # Then both tables still appear as candidates (the engine gates them out via .blocked)
+    # Then both tables still appear as candidates (the engine gates them out via can_execute)
     names = {str(candidate.table.qualified_name) for candidate in candidates}
     assert names == {"cat.sch.a", "cat.sch.b"}
 
@@ -145,7 +145,7 @@ def test_resolve_blocks_table_that_references_an_unresolvable_table():
     # When
     candidates = resolve(tables)
 
-    # Then customers fails directly, and orders is blocked because customers won't build
+    # Then customers fails directly, and orders cannot execute because customers will not build
     by_name = _candidates_by_name(candidates)
     assert (
         by_name["cat.sch.customers"].failures[0].reason
@@ -192,7 +192,7 @@ def test_resolve_blocks_table_that_depends_on_a_cycle():
     # When
     candidates = resolve(tables)
 
-    # Then b and c fail as CYCLE, and a is blocked (its dependency b won't build)
+    # Then b and c fail as CYCLE, and a cannot execute because b will not build
     by_name = _candidates_by_name(candidates)
     assert by_name["cat.sch.b"].failures[0].reason == ForeignKeyFailureReason.CYCLE
     assert by_name["cat.sch.c"].failures[0].reason == ForeignKeyFailureReason.CYCLE
@@ -212,10 +212,10 @@ def test_resolve_does_not_block_an_unrelated_sibling():
     # When
     candidates = resolve(tables)
 
-    # Then only orders is blocked; the unrelated table is fine
+    # Then only orders cannot execute; the unrelated table is fine
     by_name = _candidates_by_name(candidates)
-    assert by_name["cat.sch.orders"].blocked
-    assert not by_name["cat.sch.unrelated"].blocked
+    assert not by_name["cat.sch.orders"].can_execute
+    assert by_name["cat.sch.unrelated"].can_execute
 
 
 def test_resolve_treats_self_referential_fk_as_applicable():
@@ -237,9 +237,9 @@ def test_resolve_treats_self_referential_fk_as_applicable():
     # When
     candidates = resolve((table,))
 
-    # Then the self-referencing FK does not block the table
+    # Then the self-referencing FK does not prevent execution
     [candidate] = candidates
-    assert not candidate.blocked
+    assert candidate.can_execute
     assert str(candidate.table.qualified_name) == "cat.sch.employees"
 
 

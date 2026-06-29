@@ -33,6 +33,7 @@ from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     CatalogState,
     ExecutionSummary,
+    ForeignKeyFailure,
     ReadFailed,
     SyncReport,
     TablePresent,
@@ -103,7 +104,7 @@ class Engine:
         plans_to_execute = {
             candidate.table.qualified_name: plans[candidate.table.qualified_name]
             for candidate in candidates
-            if not candidate.blocked and not validations[candidate.table.qualified_name].failed
+            if candidate.can_execute and not validations[candidate.table.qualified_name].failed
         }
         executions = self._execute(plans_to_execute)
 
@@ -113,7 +114,9 @@ class Engine:
                 read=catalog_states[candidate.table.qualified_name],
                 validation=validations[candidate.table.qualified_name],
                 execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
-                foreign_key_failures=candidate.failures,
+                foreign_key_failures=tuple(
+                    f for f in candidate.failures if isinstance(f, ForeignKeyFailure)
+                ),
             )
             for candidate in candidates
         )

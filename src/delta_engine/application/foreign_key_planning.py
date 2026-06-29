@@ -7,8 +7,8 @@ order — referenced tables before their dependents.
 
 Each candidate carries the table it represents and any foreign key failures
 that prevent the table from being executed (CYCLE, UNRESOLVABLE_REFERENCE, or
-BLOCKED_BY_FAILED_DEPENDENCY). A candidate with no failures is ready to sync;
-one with failures is blocked and must be excluded from execution.
+BLOCKED_BY_FAILED_DEPENDENCY). A candidate whose `failures` list is empty may
+be executed; one with failures must be excluded.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm, reverse-reachability propagation) are
@@ -17,9 +17,9 @@ hidden behind that interface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.application.results import Failure, ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
@@ -28,25 +28,26 @@ from delta_engine.domain.model.table import DesiredTable
 # recursion depth of the SCC traversal below stays far under Python's limit.
 
 
-@dataclass(frozen=True)
+@dataclass
 class SyncCandidate:
     """
-    A table prepared for the sync loop, together with its FK failure verdict.
+    A table prepared for the sync loop, together with its pre-execution failure verdict.
 
     Attributes:
         table: The desired table to sync.
-        failures: Foreign key failures that block this table from executing.
-            Empty when the table is safe to sync.
+        failures: All failures that block this table from executing — initially
+            FK failures from dependency resolution; the engine may append
+            validation failures before gating execution.
 
     """
 
     table: DesiredTable
-    failures: tuple[ForeignKeyFailure, ...]
+    failures: list[Failure] = field(default_factory=list)
 
     @property
-    def blocked(self) -> bool:
-        """Return True when this table cannot be executed because of a foreign key problem."""
-        return bool(self.failures)
+    def can_execute(self) -> bool:
+        """True when the table has no pre-execution failures and may be executed."""
+        return not self.failures
 
 
 def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
@@ -62,8 +63,9 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
 
     Returns:
         A tuple of :class:`SyncCandidate` objects in dependency-first order.
-        Each candidate carries its table and any FK failures. A table with no
-        failures is ready to sync; a blocked table must be excluded from execution.
+        Each candidate carries its table and any FK failures. A candidate with
+        an empty failures list is ready to sync; one with failures must be
+        excluded from execution.
 
     """
     registered_names = {str(table.qualified_name) for table in tables}
@@ -79,7 +81,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
     return tuple(
         SyncCandidate(
             table=table,
-            failures=failures_by_table.get(table.qualified_name, ()),
+            failures=list(failures_by_table.get(table.qualified_name, ())),
         )
         for table in ordered
     )
@@ -173,8 +175,8 @@ def _order_tables(
 
     Tarjan emits components dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
-    Blocked tables (cycles, unresolvable, blocked) appear too — the engine gates
-    them out of execution via the candidate's blocked property.
+    Candidates that cannot execute (FK failures) appear too — the engine gates
+    them out via can_execute.
     """
     table_by_name = {str(table.qualified_name): table for table in tables}
     return [table_by_name[name] for component in components for name in component]
