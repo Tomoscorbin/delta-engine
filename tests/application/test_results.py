@@ -8,6 +8,8 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
     ForeignKeyValidationReport,
     ReadFailed,
     ReadFailure,
@@ -335,3 +337,53 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure)
         for f in mapping[failed_name]
     )
+
+
+def test_foreign_key_failure_renders_a_descriptive_line():
+    # Given an unresolvable-reference FK failure
+    failure = ForeignKeyFailure(
+        table=QualifiedName("cat", "sch", "orders"),
+        constraint_name="orders_customer_id_fk",
+        reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+    )
+
+    # Then it renders one line naming the constraint and explaining the reason
+    lines = failure.format_lines()
+    assert len(lines) == 1
+    assert "orders_customer_id_fk" in lines[0]
+    assert "not registered" in lines[0]
+
+
+def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
+    # Given a table that read and validated cleanly but has an FK failure
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        read=TablePresent(table=_an_observed_table()),
+        validation=ValidationResult(),
+        foreign_key_failures=(
+            ForeignKeyFailure(
+                table=QualifiedName("cat", "sch", "orders"),
+                constraint_name="orders_customer_id_fk",
+                reason=ForeignKeyFailureReason.CYCLE,
+            ),
+        ),
+    )
+
+    # Then its status reflects the FK failure and it counts as a failure
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert report.has_failures is True
+    assert report.all_failures[0].format_lines()[0].startswith("Foreign key")
+
+
+def test_table_run_report_with_no_fk_failures_is_success():
+    # Given a clean table with no FK failures
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "sch", "ok"),
+        read=TablePresent(table=_an_observed_table()),
+        validation=ValidationResult(),
+        execution=ExecutionSummary((_ok_exec(0),)),
+    )
+
+    # Then it is a success and carries no FK failures
+    assert report.status is TableRunStatus.SUCCESS
+    assert report.foreign_key_failures == ()

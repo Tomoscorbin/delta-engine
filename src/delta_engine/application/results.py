@@ -25,6 +25,7 @@ class TableRunStatus(StrEnum):
     SUCCESS = "SUCCESS"
     READ_FAILED = "READ_FAILED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
+    FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
 
 
@@ -33,6 +34,25 @@ class SkipReason(StrEnum):
 
     CYCLE = "CYCLE"
     UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
+
+
+class ForeignKeyFailureReason(StrEnum):
+    """Why a foreign key constraint could not be applied, failing its whole table."""
+
+    CYCLE = "CYCLE"
+    UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
+    BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
+
+
+_FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
+    ForeignKeyFailureReason.CYCLE: "it is part of a foreign key dependency cycle",
+    ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE: (
+        "it references a table that is not registered"
+    ),
+    ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY: (
+        "it references a table that failed to sync"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +124,21 @@ class ExecutionFailure(Failure):
             f"Execution failed at action {self.action_index}: "
             f"{self.exception_type} - {self.message}",
             f"    SQL preview: {self.statement_preview}",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyFailure(Failure):
+    """A foreign key constraint that could not be applied, failing its whole table."""
+
+    table: QualifiedName
+    constraint_name: str
+    reason: ForeignKeyFailureReason
+
+    def format_lines(self) -> tuple[str, ...]:
+        return (
+            f"Foreign key '{self.constraint_name}' on {self.table} was not applied: "
+            f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
         )
 
 
@@ -218,14 +253,17 @@ class TableRunReport:
     read: CatalogState
     validation: ValidationResult
     execution: ExecutionSummary = field(default_factory=ExecutionSummary)
+    foreign_key_failures: tuple[ForeignKeyFailure, ...] = ()
 
     @property
     def status(self) -> TableRunStatus:
-        """Aggregate table status across read, validation, and execution phases."""
+        """Aggregate table status across read, validation, FK, and execution phases."""
         if isinstance(self.read, ReadFailed):
             return TableRunStatus.READ_FAILED
         if self.validation.failed:
             return TableRunStatus.VALIDATION_FAILED
+        if self.foreign_key_failures:
+            return TableRunStatus.FOREIGN_KEY_FAILED
         if self.execution.failed:
             return TableRunStatus.EXECUTION_FAILED
         return TableRunStatus.SUCCESS
@@ -237,11 +275,12 @@ class TableRunReport:
 
     @property
     def all_failures(self) -> tuple[Failure, ...]:
-        """All failures for this table (read, validation, execution)."""
+        """All failures for this table (read, validation, foreign key, execution)."""
         out: list[Failure] = []
         if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
         out.extend(self.validation.failures)
+        out.extend(self.foreign_key_failures)
         out.extend(self.execution.failures)
         return tuple(out)
 
