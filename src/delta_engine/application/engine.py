@@ -39,7 +39,7 @@ from delta_engine.application.results import (
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan, DropForeignKey, SetForeignKey
+from delta_engine.domain.plan.actions import ActionPlan, SetForeignKey
 from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
@@ -49,17 +49,22 @@ def _strip_foreign_key_actions(
     plan: ActionPlan,
     names_to_skip: frozenset[str],
 ) -> ActionPlan:
-    """Return a copy of the plan with skipped FK actions removed."""
+    """
+    Return a copy of the plan with skipped SetForeignKey actions removed.
+
+    Only ``SetForeignKey`` actions are stripped: ``names_to_skip`` holds desired
+    constraints that cannot be applied (cycle or unresolvable reference), so we
+    must not *create* them. ``DropForeignKey`` actions always pass through —
+    removing a stale observed constraint is valid regardless of skip
+    classification, and dropping one never depends on the skipped reference.
+    """
     if not names_to_skip:
         return plan
     return ActionPlan(
         tuple(
             action
             for action in plan
-            if not (
-                isinstance(action, (DropForeignKey, SetForeignKey))
-                and action.constraint_name in names_to_skip
-            )
+            if not (isinstance(action, SetForeignKey) and action.constraint_name in names_to_skip)
         )
     )
 

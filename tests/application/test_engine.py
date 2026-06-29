@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.api import Column, DeltaTable, String
-from delta_engine.application.engine import Engine
+from delta_engine.application.engine import Engine, _strip_foreign_key_actions
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
@@ -22,7 +22,12 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan import (
+    ActionPlan,
+    DropColumn,
+    DropForeignKey,
+    SetForeignKey,
+)
 
 # --------- helpers/fakes
 
@@ -457,3 +462,61 @@ def test_sync_skips_fk_actions_in_detected_cycle():
     # Then both FKs are skipped with CYCLE reason
     assert report.foreign_key_validation.has_skipped
     assert all(s.reason == SkipReason.CYCLE for s in report.foreign_key_validation.skipped)
+
+
+# --------- _strip_foreign_key_actions
+
+
+def _fk(references: str = "cat.sch.customers") -> ForeignKeyConstraint:
+    """Build a single-column FK for action construction in stripping tests."""
+    return ForeignKeyConstraint(
+        local_columns=("ref_id",),
+        references=references,
+        referenced_columns=("id",),
+    )
+
+
+def test_strip_removes_set_foreign_key_for_a_skipped_constraint():
+    # Given a plan that sets a FK whose constraint name is skipped
+    plan = ActionPlan((SetForeignKey(fk=_fk(), constraint_name="orders_ref_id_fk"),))
+
+    # When the skipped name is stripped
+    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
+
+    # Then the SetForeignKey is gone
+    assert tuple(stripped) == ()
+
+
+def test_strip_keeps_drop_foreign_key_even_when_its_name_is_skipped():
+    # Given a plan that drops a stale observed constraint sharing a skipped name
+    drop = DropForeignKey(constraint_name="orders_ref_id_fk")
+    plan = ActionPlan((drop,))
+
+    # When the same name is in the skip set
+    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
+
+    # Then the DropForeignKey survives — a stale constraint must still be removed
+    assert tuple(stripped) == (drop,)
+
+
+def test_strip_leaves_non_foreign_key_actions_untouched():
+    # Given a plan with a non-FK action whose subject matches a skipped name
+    drop_column = DropColumn(column_name="orders_ref_id_fk")
+    plan = ActionPlan((drop_column,))
+
+    # When that name is in the skip set
+    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
+
+    # Then the non-FK action is untouched
+    assert tuple(stripped) == (drop_column,)
+
+
+def test_strip_with_empty_skip_set_returns_plan_unchanged():
+    # Given a plan and no names to skip
+    plan = ActionPlan((SetForeignKey(fk=_fk(), constraint_name="orders_ref_id_fk"),))
+
+    # When stripping with an empty set
+    stripped = _strip_foreign_key_actions(plan, frozenset())
+
+    # Then the plan is returned unchanged
+    assert stripped is plan
