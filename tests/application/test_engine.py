@@ -15,14 +15,13 @@ from delta_engine.application.results import (
     ReadFailed,
     ReadFailure,
     SkipReason,
-    SkippedForeignKey,
     SyncReport,
     TableAbsent,
     TablePresent,
     TableRunStatus,
 )
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
@@ -432,21 +431,21 @@ def test_sync_processes_tables_in_fk_dependency_order():
 
 def test_sync_skips_fk_actions_in_detected_cycle():
     # Given A → B and B → A (cycle)
-    fk_a_to_b = ForeignKeyConstraint(
+    constraint_a_to_b = ForeignKeyConstraint(
         local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
     )
-    fk_b_to_a = ForeignKeyConstraint(
+    constraint_b_to_a = ForeignKeyConstraint(
         local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
     )
     table_a = DeltaTable(
         "cat", "sch", "a",
         columns=(Column("id", String()), Column("b_id", String())),
-        foreign_keys=[fk_a_to_b],
+        foreign_keys=[constraint_a_to_b],
     )
     table_b = DeltaTable(
         "cat", "sch", "b",
         columns=(Column("id", String()), Column("a_id", String())),
-        foreign_keys=[fk_b_to_a],
+        foreign_keys=[constraint_b_to_a],
     )
     registry = Registry()
     registry.register(table_a, table_b)
