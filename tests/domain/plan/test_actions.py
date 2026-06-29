@@ -1,16 +1,21 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPhase,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -242,3 +247,39 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnNullability,
         SetPrimaryKey,
     ]
+
+
+# ----- DropForeignKey / SetForeignKey
+
+
+def test_drop_foreign_key_phase_is_after_set_primary_key():
+    assert ActionPhase.DROP_FOREIGN_KEY > ActionPhase.SET_PRIMARY_KEY
+
+
+def test_set_foreign_key_phase_is_after_drop_foreign_key():
+    assert ActionPhase.SET_FOREIGN_KEY > ActionPhase.DROP_FOREIGN_KEY
+
+
+def test_set_foreign_key_phase_is_before_column_type_change():
+    assert ActionPhase.SET_FOREIGN_KEY < ActionPhase.COLUMN_TYPE_CHANGE
+
+
+def test_drop_foreign_key_subject_is_constraint_name():
+    # Given
+    action = DropForeignKey(constraint_name="orders_customer_id_fk")
+
+    # Then subject is the constraint name (for deterministic ordering within the phase)
+    assert action.subject == "orders_customer_id_fk"
+
+
+def test_set_foreign_key_subject_is_constraint_name():
+    # Given
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    action = SetForeignKey(fk=fk, constraint_name="orders_customer_id_fk")
+
+    # Then subject is the constraint name
+    assert action.subject == "orders_customer_id_fk"
