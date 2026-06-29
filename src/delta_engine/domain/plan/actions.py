@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable
 from delta_engine.domain.model.data_type import DataType
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
 class ActionPhase(IntEnum):
@@ -32,6 +33,8 @@ class ActionPhase(IntEnum):
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
+    DROP_FOREIGN_KEY = auto()
+    SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()
 
@@ -184,6 +187,33 @@ class SetPrimaryKey(Action):
     @property
     def subject(self) -> str:
         return ""
+
+
+@dataclass(frozen=True, slots=True)
+class DropForeignKey(Action):
+    """Drop a named foreign key constraint from a table."""
+
+    constraint_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
+
+    @property
+    def subject(self) -> str:
+        return self.constraint_name
+
+
+@dataclass(frozen=True, slots=True)
+class SetForeignKey(Action):
+    """Add a foreign key constraint to a table."""
+
+    fk: ForeignKeyConstraint
+    constraint_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
+
+    @property
+    def subject(self) -> str:
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)
