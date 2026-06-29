@@ -184,11 +184,9 @@ class ExecutionSummary:
 
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
-    """Per-table report with timings, outcomes, and failures."""
+    """Per-table report with outcomes and failures."""
 
     qualified_name: QualifiedName
-    started_at: datetime
-    ended_at: datetime
     read: CatalogState
     validation: ValidationResult
     execution: ExecutionSummary = field(default_factory=ExecutionSummary)

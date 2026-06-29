@@ -293,3 +293,64 @@ def test_syncing_an_empty_registry_returns_an_empty_report_without_raising():
     assert isinstance(report, SyncReport)
     assert report.any_failures is False
     assert tuple(report) == ()
+
+
+def test_read_phase_attempts_all_tables_before_any_execution():
+    # Given three tables; the middle one fails to read
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"), _spec("c.s.c"))
+    read_order: list[str] = []
+
+    class _TrackingReader:
+        def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
+            read_order.append(str(qualified_name))
+            if str(qualified_name) == "c.s.b":
+                return ReadFailed(ReadFailure("IOError", "boom"))
+            return TableAbsent()
+
+    executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(0)))
+    engine = Engine(_TrackingReader(), executor)
+
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
+
+    # Then all three reads happened before any execution
+    assert read_order == ["c.s.a", "c.s.b", "c.s.c"]
+    statuses = [tr.status for tr in err.value.report]
+    assert statuses == [
+        TableRunStatus.SUCCESS,
+        TableRunStatus.READ_FAILED,
+        TableRunStatus.SUCCESS,
+    ]
+
+
+def test_validate_phase_validates_all_tables_before_any_execution():
+    # Given two tables; 'a' fails validation, 'b' is clean
+    reg = Registry()
+    reg.register(_spec_adding_not_null("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader(
+        {
+            "c.s.a": _existing_id_table("c.s.a"),
+            "c.s.b": TableAbsent(),
+        }
+    )
+    execute_order: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            execute_order.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader, _TrackingExecutor())
+
+    # When
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(reg)
+
+    # Then only 'b' was executed (validation failed for 'a')
+    # and execution only started after both tables were validated
+    assert execute_order == ["c.s.b"]
+    [tr_a, tr_b] = list(err.value.report)
+    assert tr_a.status is TableRunStatus.VALIDATION_FAILED
+    assert tr_b.status is TableRunStatus.SUCCESS

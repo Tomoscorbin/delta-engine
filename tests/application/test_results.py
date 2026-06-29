@@ -195,8 +195,6 @@ def test_table_status_success_when_all_actions_succeed():
     # When aggregating
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "tbl"),
-        started_at=_t0(),
-        ended_at=_t1(),
         read=read,
         validation=validation,
         execution=execution,
@@ -212,16 +210,12 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "a"),
-        started_at=_t0(),
-        ended_at=_t1(),
         read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "b"),
-        started_at=_t0(),
-        ended_at=_t1(),
         read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_failed_exec(0),)),
@@ -278,16 +272,12 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     failed_name = QualifiedName("cat", "s", "y")
     t_ok = TableRunReport(
         qualified_name=ok_name,
-        started_at=_t0(),
-        ended_at=_t1(),
         read=TablePresent(table=_an_observed_table()),
         validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=failed_name,
-        started_at=_t0(),
-        ended_at=_t1(),
         read=TableAbsent(),
         validation=ValidationResult(failures=(ValidationFailure("R", "v"),)),
         execution=ExecutionSummary(),
