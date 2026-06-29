@@ -57,8 +57,24 @@ class FakeCatalog:
 class FakeSpark:
     """Spark fake whose catalog.* calls delegate to the provided FakeCatalog."""
 
-    def __init__(self, *, catalog: FakeCatalog | None = None):
+    def __init__(
+        self,
+        *,
+        catalog: FakeCatalog | None = None,
+        fk_rows: dict | None = None,
+        fk_raises: Exception | None = None,
+    ):
         self.catalog = catalog or FakeCatalog()
+        self._fk_rows = fk_rows or {}
+        self._fk_raises = fk_raises
+
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            if self._fk_raises is not None:
+                raise self._fk_raises
+            rows = next(iter(self._fk_rows.values()), []) if self._fk_rows else []
+            return FakeDataFrame(rows)
+        raise NotImplementedError(query)
 
 
 class FakeSparkProps:
@@ -99,7 +115,9 @@ class FakeSparkForFetchState:
     def catalog(self):
         return self._catalog
 
-    def sql(self, _query: str):
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            return FakeDataFrame([])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
