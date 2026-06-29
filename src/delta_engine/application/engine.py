@@ -129,14 +129,11 @@ class Engine:
             for qualified_name, plan in plans.items()
         }
 
-        plans_to_validate = {
-            qualified_name: plan for qualified_name, plan in plans.items() if plan
-        }
-        validations = self._validate(plans_to_validate)
+        validations = self._validate(plans)
         plans_to_execute = {
-            qualified_name: plans_to_validate[qualified_name]
-            for qualified_name, validation in validations.items()
-            if not validation.failed
+            qualified_name: plan
+            for qualified_name, plan in plans.items()
+            if not validations[qualified_name].failed
         }
         executions = self._execute(plans_to_execute)
 
@@ -240,6 +237,8 @@ class Engine:
         """Execute every plan in the given dict."""
         executions: dict[QualifiedName, ExecutionSummary] = {}
         for qualified_name, plan in plans.items():
+            if not plan:
+                continue
             execution = self.executor.execute(qualified_name, plan)
             executions[qualified_name] = execution
             logger.info(

@@ -66,6 +66,26 @@ def _existing_id_table(fqn: str) -> TablePresent:
     )
 
 
+def _existing_id_table_synced(fqn: str) -> TablePresent:
+    """
+    Build the present-state read of a table that is already fully in sync with _spec.
+
+    Includes the default Delta properties that _spec produces so that diffing
+    against _spec yields an empty plan.
+    """
+    catalog, schema, name = fqn.split(".")
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, name),
+            columns=(Column("id", String()),),
+            properties={
+                "delta.columnMapping.mode": "name",
+                "delta.enableDeletionVectors": "true",
+            },
+        )
+    )
+
+
 class _FakeReader:
     def __init__(self, mapping: dict[str, CatalogState]) -> None:
         self.mapping = mapping
@@ -520,3 +540,28 @@ def test_strip_with_empty_skip_set_returns_plan_unchanged():
 
     # Then the plan is returned unchanged
     assert stripped is plan
+
+
+def test_unchanged_table_is_not_executed():
+    # Given a table whose observed state already matches desired (empty plan)
+    reg = Registry()
+    reg.register(_spec("c.s.same"))
+    reader = _FakeReader({"c.s.same": _existing_id_table_synced("c.s.same")})
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader, _TrackingExecutor())
+
+    # When syncing
+    report = engine.sync(reg)
+
+    # Then the no-op table is reported SUCCESS but the executor was never called
+    assert executed == []
+    [tr] = list(report)
+    assert tr.status is TableRunStatus.SUCCESS
+    assert tr.execution.results == ()
