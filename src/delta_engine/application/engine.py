@@ -87,19 +87,21 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(registry))
 
         tables = tuple(registry)
-        catalog_states = self._read_phase(tables)
-        plans = self._plan_phase(tables, catalog_states)
-        validations = self._validate_phase(tables, plans)
-        executions = self._execute_phase(tables, plans, validations)
+        catalog_states = self._read(tables)
+        plans = self._plan(tables, catalog_states)
+        plans_to_validate = {qn: plan for qn, plan in plans.items() if plan}
+        validations = self._validate(plans_to_validate)
+        plans_to_execute = {
+            qn: plans_to_validate[qn] for qn, v in validations.items() if not v.failed
+        }
+        executions = self._execute(plans_to_execute)
 
         table_reports = tuple(
             TableRunReport(
                 qualified_name=table.qualified_name,
-                started_at=run_started,
-                ended_at=_utc_now(),
                 read=catalog_states[table.qualified_name],
-                validation=validations[table.qualified_name],
-                execution=executions[table.qualified_name],
+                validation=validations.get(table.qualified_name, ValidationResult()),
+                execution=executions.get(table.qualified_name, ExecutionSummary()),
             )
             for table in tables
         )
@@ -116,7 +118,7 @@ class Engine:
         logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
         return report
 
-    def _read_phase(
+    def _read(
         self,
         tables: tuple[DesiredTable, ...],
     ) -> dict[QualifiedName, CatalogState]:
@@ -140,21 +142,21 @@ class Engine:
                 )
         return catalog_states
 
-    def _plan_phase(
+    def _plan(
         self,
         tables: tuple[DesiredTable, ...],
         catalog_states: dict[QualifiedName, CatalogState],
-    ) -> dict[QualifiedName, ActionPlan | None]:
+    ) -> dict[QualifiedName, ActionPlan]:
         """
-        Compute an action plan for each table that was read successfully.
+        Compute an action plan for each table.
 
-        Returns None for tables that failed to read.
+        Tables that failed to read get an empty plan.
         """
-        plans: dict[QualifiedName, ActionPlan | None] = {}
+        plans: dict[QualifiedName, ActionPlan] = {}
         for table in tables:
             catalog_state = catalog_states[table.qualified_name]
             if isinstance(catalog_state, ReadFailed):
-                plans[table.qualified_name] = None
+                plans[table.qualified_name] = ActionPlan()
                 continue
 
             observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
@@ -164,59 +166,39 @@ class Engine:
 
         return plans
 
-    def _validate_phase(
+    def _validate(
         self,
-        tables: tuple[DesiredTable, ...],
-        plans: dict[QualifiedName, ActionPlan | None],
+        plans: dict[QualifiedName, ActionPlan],
     ) -> dict[QualifiedName, ValidationResult]:
-        """Validate every plan. Tables with no plan (read failed) get an empty result."""
+        """Validate every plan in the given dict."""
         validations: dict[QualifiedName, ValidationResult] = {}
-        for table in tables:
-            plan = plans[table.qualified_name]
-            if plan is None:
-                validations[table.qualified_name] = ValidationResult()
-                continue
-
+        for qualified_name, plan in plans.items():
             validation = validate_plan(plan)
-            validations[table.qualified_name] = validation
+            validations[qualified_name] = validation
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
-                    table.qualified_name,
+                    qualified_name,
                     len(validation.failures),
                 )
             else:
-                logger.info("Validation passed for %s", table.qualified_name)
+                logger.info("Validation passed for %s", qualified_name)
 
         return validations
 
-    def _execute_phase(
+    def _execute(
         self,
-        tables: tuple[DesiredTable, ...],
-        plans: dict[QualifiedName, ActionPlan | None],
-        validations: dict[QualifiedName, ValidationResult],
+        plans: dict[QualifiedName, ActionPlan],
     ) -> dict[QualifiedName, ExecutionSummary]:
-        """
-        Execute every plan that passed validation.
-
-        Tables that failed to read or failed validation are skipped.
-        """
+        """Execute every plan in the given dict."""
         executions: dict[QualifiedName, ExecutionSummary] = {}
-        for table in tables:
-            plan = plans[table.qualified_name]
-            validation = validations[table.qualified_name]
-
-            if plan is None or validation.failed:
-                executions[table.qualified_name] = ExecutionSummary()
-                continue
-
-            execution = self.executor.execute(table.qualified_name, plan)
-            executions[table.qualified_name] = execution
+        for qualified_name, plan in plans.items():
+            execution = self.executor.execute(qualified_name, plan)
+            executions[qualified_name] = execution
             logger.info(
                 "Executed %d action(s) for %s (%d failed)",
                 len(execution.results),
-                table.qualified_name,
+                qualified_name,
                 execution.failed_count,
             )
-
         return executions

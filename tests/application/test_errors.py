@@ -29,8 +29,6 @@ def _table_report(
 ) -> TableRunReport:
     return TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
-        started_at=_AT,
-        ended_at=_AT,
         read=read,
         validation=validation,
         execution=execution,
