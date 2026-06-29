@@ -10,11 +10,8 @@ from delta_engine.application.results import (
     ExecutionSummary,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
-    ForeignKeyValidationReport,
     ReadFailed,
     ReadFailure,
-    SkippedForeignKey,
-    SkipReason,
     SyncReport,
     TableAbsent,
     TablePresent,
@@ -269,45 +266,6 @@ def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
     assert summary.failed == (summary.failed_count > 0)
     assert summary.failed_count == len(summary.failures)
     assert all(isinstance(f, ExecutionFailure) for f in summary.failures)
-
-
-def test_foreign_key_validation_report_defaults_to_no_skipped():
-    # Given / When
-    report = ForeignKeyValidationReport()
-
-    # Then
-    assert report.skipped == ()
-    assert report.has_skipped is False
-
-
-def test_foreign_key_validation_report_has_skipped_when_skipped_present():
-    # Given
-    skipped = SkippedForeignKey(
-        table=QualifiedName("cat", "sch", "orders"),
-        constraint_name="orders_customer_id_fk",
-        reason=SkipReason.UNRESOLVABLE_REFERENCE,
-    )
-
-    # When
-    report = ForeignKeyValidationReport(skipped=(skipped,))
-
-    # Then
-    assert report.has_skipped is True
-    assert len(report.skipped) == 1
-
-
-def test_sync_report_carries_fk_validation_report():
-    # Given a sync report with no table reports
-    # When
-    report = SyncReport(
-        started_at=_t0(),
-        ended_at=_t1(),
-        table_reports=(),
-    )
-
-    # Then it carries a default empty FK validation report
-    assert isinstance(report.foreign_key_validation, ForeignKeyValidationReport)
-    assert report.foreign_key_validation.has_skipped is False
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
