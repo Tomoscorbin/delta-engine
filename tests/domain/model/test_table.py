@@ -159,7 +159,7 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
         )
 
 
-def test_desired_table_foreign_key_constraint_name_delegates_to_fk():
+def test_desired_table_resolve_foreign_key_constraint_name_delegates_to_fk():
     # Given a DesiredTable with a FK with no explicit name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -173,7 +173,7 @@ def test_desired_table_foreign_key_constraint_name_delegates_to_fk():
     )
 
     # When resolving the constraint name
-    name = table.foreign_key_constraint_name(fk)
+    name = table.resolve_foreign_key_constraint_name(fk)
 
     # Then it is derived from table name + local columns
     assert name == "orders_customer_id_fk"

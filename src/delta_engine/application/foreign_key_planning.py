@@ -150,7 +150,7 @@ def _compute_skipped_foreign_keys(
                 skipped.append(
                     SkippedForeignKey(
                         table=table.qualified_name,
-                        constraint_name=table.foreign_key_constraint_name(fk),
+                        constraint_name=table.resolve_foreign_key_constraint_name(fk),
                         reason=SkipReason.UNRESOLVABLE_REFERENCE,
                     )
                 )
@@ -158,7 +158,7 @@ def _compute_skipped_foreign_keys(
                 skipped.append(
                     SkippedForeignKey(
                         table=table.qualified_name,
-                        constraint_name=table.foreign_key_constraint_name(fk),
+                        constraint_name=table.resolve_foreign_key_constraint_name(fk),
                         reason=SkipReason.CYCLE,
                     )
                 )

@@ -16,7 +16,7 @@ class ForeignKeyConstraint:
         referenced_columns: Ordered tuple of column names in the referenced table,
             positionally aligned with ``local_columns``.
         constraint_name: Optional explicit constraint name. When omitted, the name
-            is derived as ``{table_name}_{local_cols}_fk`` via ``resolved_constraint_name``.
+            is derived as ``{table_name}_{local_cols}_fk`` via ``resolve_constraint_name``.
     """
 
     local_columns: tuple[str, ...]
@@ -39,7 +39,7 @@ class ForeignKeyConstraint:
                 f"references must be a fully qualified 'catalog.schema.table' name; got: {self.references!r}"
             )
 
-    def resolved_constraint_name(self, table_name: str) -> str:
+    def resolve_constraint_name(self, table_name: str) -> str:
         """Return the constraint name to use in SQL, deriving it when not explicitly set."""
         if self.constraint_name is not None:
             return self.constraint_name

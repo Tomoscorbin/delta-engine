@@ -2,7 +2,7 @@ import pytest
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
-def test_resolved_constraint_name_uses_explicit_name_when_provided():
+def test_resolve_constraint_name_uses_explicit_name_when_provided():
     # Given a constraint with an explicit name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -12,13 +12,13 @@ def test_resolved_constraint_name_uses_explicit_name_when_provided():
     )
 
     # When resolving the constraint name
-    name = fk.resolved_constraint_name("orders")
+    name = fk.resolve_constraint_name("orders")
 
     # Then the explicit name is returned
     assert name == "my_explicit_fk"
 
 
-def test_resolved_constraint_name_derives_from_table_and_columns_when_not_provided():
+def test_resolve_constraint_name_derives_from_table_and_columns_when_not_provided():
     # Given a constraint with no explicit name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -27,13 +27,13 @@ def test_resolved_constraint_name_derives_from_table_and_columns_when_not_provid
     )
 
     # When resolving the constraint name
-    name = fk.resolved_constraint_name("orders")
+    name = fk.resolve_constraint_name("orders")
 
     # Then the name is derived deterministically
     assert name == "orders_customer_id_fk"
 
 
-def test_resolved_constraint_name_joins_multiple_local_columns_with_underscore():
+def test_resolve_constraint_name_joins_multiple_local_columns_with_underscore():
     # Given a composite FK with no explicit name
     fk = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
@@ -42,7 +42,7 @@ def test_resolved_constraint_name_joins_multiple_local_columns_with_underscore()
     )
 
     # When resolving
-    name = fk.resolved_constraint_name("orders")
+    name = fk.resolve_constraint_name("orders")
 
     # Then all local columns are joined
     assert name == "orders_tenant_id_customer_id_fk"

@@ -47,7 +47,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
     """
     if observed is None:
         fk_actions = tuple(
-            SetForeignKey(fk=fk, constraint_name=desired.foreign_key_constraint_name(fk))
+            SetForeignKey(fk=fk, constraint_name=desired.resolve_foreign_key_constraint_name(fk))
             for fk in desired.foreign_keys
         )
         actions: tuple[Action, ...] = (CreateTable(desired),) + fk_actions
@@ -190,10 +190,10 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
     new definition. A FK that is identical on both sides produces no actions.
     """
     desired_by_name = {
-        desired.foreign_key_constraint_name(fk): fk for fk in desired.foreign_keys
+        desired.resolve_foreign_key_constraint_name(fk): fk for fk in desired.foreign_keys
     }
     observed_by_name = {
-        fk.resolved_constraint_name(observed.qualified_name.name): fk
+        fk.resolve_constraint_name(observed.qualified_name.name): fk
         for fk in observed.foreign_keys
     }
 
