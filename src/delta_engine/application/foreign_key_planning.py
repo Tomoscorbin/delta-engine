@@ -95,9 +95,13 @@ def _build_dependency_graph(
     """
     graph: dict[str, set[str]] = {str(table.qualified_name): set() for table in tables}
     for table in tables:
+        table_name = str(table.qualified_name)
         for fk in table.foreign_keys:
-            if fk.references in registered_names:
-                graph[str(table.qualified_name)].add(fk.references)
+            # A self-referential FK (references the owning table) is applicable:
+            # create the table, then add the constraint. Excluding the self-edge
+            # keeps the table a non-cyclic single-node component.
+            if fk.references in registered_names and fk.references != table_name:
+                graph[table_name].add(fk.references)
     return graph
 
 

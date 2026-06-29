@@ -155,13 +155,12 @@ def test_resolve_orders_table_after_the_cycle_member_it_depends_on():
     assert names.index("cat.sch.b") < names.index("cat.sch.a")
 
 
-def test_resolve_classifies_self_referential_fk_as_cycle():
+def test_resolve_treats_self_referential_fk_as_applicable():
     # Given a table whose foreign key references itself (a self-loop)
-    catalog, schema, name = "cat", "sch", "employees"
     table = DeltaTable(
-        catalog,
-        schema,
-        name,
+        "cat",
+        "sch",
+        "employees",
         columns=(Column("id", String()), Column("manager_id", String())),
         foreign_keys=[
             ForeignKeyConstraint(
@@ -175,9 +174,9 @@ def test_resolve_classifies_self_referential_fk_as_cycle():
     # When
     plan = resolve((table,))
 
-    # Then the self-referencing FK is skipped as a cycle, and the table still syncs
-    assert len(plan.skipped_foreign_keys) == 1
-    assert plan.skipped_foreign_keys[0].reason == SkipReason.CYCLE
+    # Then the self-referencing FK is NOT skipped — it is applied after the table
+    # is created — and the table still appears in the ordered output
+    assert plan.skipped_foreign_keys == ()
     assert {str(t.qualified_name) for t in plan.ordered_tables} == {"cat.sch.employees"}
 
 
