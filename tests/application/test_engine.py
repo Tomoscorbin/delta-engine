@@ -19,6 +19,7 @@ from delta_engine.application.results import (
     TableAbsent,
     TablePresent,
     TableRunStatus,
+    ValidationFailure,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
@@ -544,6 +545,58 @@ def test_fk_failed_table_executes_no_actions():
     with pytest.raises(SyncFailedError):
         engine.sync(registry)
     assert executed == []
+
+
+def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
+    """Build a spec with a NOT NULL FK column — adding it to an existing table trips validation."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("ref_id", String(), nullable=False)),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_id",),
+                references=references,
+                referenced_columns=("id",),
+            )
+        ],
+    )
+
+
+def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
+    # Given orders has an unresolvable FK AND would fail validation (adds NOT NULL to existing)
+    registry = Registry()
+    registry.register(_spec_with_fk_and_not_null_col("cat.sch.orders", "cat.sch.missing"))
+    # Make the existing table have only 'id' so that adding 'ref_id' as NOT NULL triggers validation
+    reader = _FakeReader(
+        {
+            "cat.sch.orders": TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName("cat", "sch", "orders"),
+                    columns=(Column("id", String()),),
+                )
+            )
+        }
+    )
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    # Then the job fails with both FK and validation failures surfaced together
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(registry)
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
+    fk_failures = [
+        f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)
+    ]
+    val_failures = [
+        f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)
+    ]
+    assert len(fk_failures) == 1
+    assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
 
 
 def test_unchanged_table_is_not_executed():

@@ -8,13 +8,15 @@ adapters, and aggregates results into a `SyncReport`. If any table fails,
 
 Before the four phases, FK dependencies are resolved: `resolve()` returns
 tables in dependency-first order as `SyncCandidate` objects. Each candidate
-carries its own FK failures; a blocked candidate is excluded from execution.
+carries a `failures` list; `_apply_validation` appends any validation failures
+to it. A candidate whose `failures` list is non-empty cannot execute and is
+reported with all its pre-execution failures together.
 
 The sync runs four phases across all tables in sequence:
   1. Read     — fetch current catalog state for every table
   2. Plan     — compute action plans from desired vs observed state
-  3. Validate — run validation rules against each plan
-  4. Execute  — run passing plans against the catalog
+  3. Validate — append validation failures to each candidate's failure list
+  4. Execute  — run plans for candidates with no failures
 
 A table that fails in an early phase is carried forward as a partial result
 and skipped in later phases, so all tables are attempted and the report is
@@ -37,7 +39,6 @@ from delta_engine.application.results import (
     SyncReport,
     TablePresent,
     TableRunReport,
-    ValidationResult,
 )
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
@@ -80,9 +81,10 @@ class Engine:
         the final report.
 
         FK dependencies are resolved before the phases: `resolve()` returns
-        candidates in dependency-first order. A blocked candidate (one with FK
-        failures) is excluded from execution entirely and reported as
-        FOREIGN_KEY_FAILED.
+        candidates in dependency-first order. Validation failures are appended
+        to each candidate's failures list alongside any FK failures. A candidate
+        with any failures is excluded from execution entirely and reported with
+        all its failures together.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -99,11 +101,11 @@ class Engine:
 
         catalog_states = self._read(candidates)
         plans = self._plan(candidates, catalog_states)
-        validations = self._validate(plans)
+        self._apply_validation(candidates, plans)
         plans_to_execute = {
             candidate.table.qualified_name: plans[candidate.table.qualified_name]
             for candidate in candidates
-            if candidate.can_execute and not validations[candidate.table.qualified_name].failed
+            if candidate.can_execute
         }
         executions = self._execute(plans_to_execute)
 
@@ -111,10 +113,7 @@ class Engine:
             TableRunReport(
                 qualified_name=candidate.table.qualified_name,
                 read=catalog_states[candidate.table.qualified_name],
-                pre_execution_failures=(
-                    tuple(candidate.failures)
-                    + tuple(validations[candidate.table.qualified_name].failures)
-                ),
+                pre_execution_failures=tuple(candidate.failures),
                 execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
             )
             for candidate in candidates
@@ -137,9 +136,9 @@ class Engine:
         candidates: tuple[SyncCandidate, ...],
     ) -> dict[QualifiedName, CatalogState]:
         """
-        Fetch current catalog state for every table, including blocked candidates.
+        Fetch current catalog state for every table, including candidates with FK failures.
 
-        Blocked candidates are still read so every table appears in the final report.
+        Candidates with FK failures are still read so every table appears in the final report.
         """
         catalog_states: dict[QualifiedName, CatalogState] = {}
         for candidate in candidates:
@@ -186,15 +185,21 @@ class Engine:
 
         return plans
 
-    def _validate(
+    def _apply_validation(
         self,
+        candidates: tuple[SyncCandidate, ...],
         plans: dict[QualifiedName, ActionPlan],
-    ) -> dict[QualifiedName, ValidationResult]:
-        """Validate every plan in the given dict."""
-        validations: dict[QualifiedName, ValidationResult] = {}
-        for qualified_name, plan in plans.items():
-            validation = validate_plan(plan)
-            validations[qualified_name] = validation
+    ) -> None:
+        """
+        Validate every plan and append any validation failures to the candidate.
+
+        All candidates are validated — including those already carrying FK failures
+        — so the report surfaces all pre-execution problems together.
+        """
+        for candidate in candidates:
+            qualified_name = candidate.table.qualified_name
+            validation = validate_plan(plans[qualified_name])
+            candidate.failures.extend(validation.failures)
             if validation.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
@@ -203,8 +208,6 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", qualified_name)
-
-        return validations
 
     def _execute(
         self,
