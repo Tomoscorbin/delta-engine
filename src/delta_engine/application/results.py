@@ -2,8 +2,9 @@
 Result and reporting types for engine runs.
 
 Defines status enums, lightweight failure value objects, and aggregates used to
-propagate outcomes from the read, validation, and execution phases. Provides
-table- and run-level reports that summarize status, failures, and timing.
+propagate outcomes from the foreign-key resolution, read, validation, and
+execution phases. Provides table- and run-level reports that summarize status,
+failures, and timing.
 """
 
 from __future__ import annotations

@@ -292,7 +292,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     mapping = sr.failures_by_table
     assert list(mapping.keys()) == [failed_name]
     assert all(
-        isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure)
+        isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure | ForeignKeyFailure)
         for f in mapping[failed_name]
     )
 

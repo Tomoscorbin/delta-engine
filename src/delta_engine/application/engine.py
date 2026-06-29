@@ -6,6 +6,11 @@ deterministic ordering), validates it against rules, executes it via provided
 adapters, and aggregates results into a `SyncReport`. If any table fails,
 `SyncFailedError` is raised with a formatted summary.
 
+Before the four phases, foreign key dependencies are resolved: tables are
+ordered so that referenced tables sync before their dependents, and any table
+with an unresolvable, cyclic, or dependency-blocked FK is classified as failed
+and excluded from execution.
+
 The sync runs four phases across all tables in sequence:
   1. Read     — fetch current catalog state for every table
   2. Plan     — compute action plans from desired vs observed state

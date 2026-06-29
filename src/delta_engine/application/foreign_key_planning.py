@@ -81,7 +81,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeyResolution:
     components = _strongly_connected_components(graph)
 
     cycle_members = {
-        name for component in components if _is_cycle(component, graph) for name in component
+        name for component in components if _is_cycle(component) for name in component
     }
     ordered = _order_tables(tables, components)
     failures_by_table = _classify_failures(tables, registered_names, cycle_members)
@@ -166,7 +166,7 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
     return components
 
 
-def _is_cycle(component: list[str], graph: dict[str, set[str]]) -> bool:
+def _is_cycle(component: list[str]) -> bool:
     """Return True if the component is a true multi-node dependency cycle."""
     return len(component) > 1
 

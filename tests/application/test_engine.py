@@ -483,7 +483,41 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
         for failure in tr.foreign_key_failures
     }
     assert reasons == {ForeignKeyFailureReason.CYCLE}
+    assert all(tr.execution.results == () for tr in err.value.report)
 
+
+def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
+    # Given orders -> customers (registered) and customers -> archive (NOT registered)
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    registry.register(_spec_with_fk("cat.sch.customers", "cat.sch.archive"))
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(_FakeReader({}), _TrackingExecutor())
+
+    # When syncing
+    # Then the job fails: customers is UNRESOLVABLE_REFERENCE, orders is blocked by it,
+    # and neither table executes (all-or-nothing)
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert (
+        reports["cat.sch.customers"].foreign_key_failures[0].reason
+        == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    )
+    assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert (
+        reports["cat.sch.orders"].foreign_key_failures[0].reason
+        == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    )
+    assert executed == []
 
 
 def test_fk_failed_table_executes_no_actions():
