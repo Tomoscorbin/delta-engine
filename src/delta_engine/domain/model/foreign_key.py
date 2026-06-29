@@ -17,6 +17,7 @@ class ForeignKeyConstraint:
             positionally aligned with ``local_columns``.
         constraint_name: Optional explicit constraint name. When omitted, the name
             is derived as ``{table_name}_{local_cols}_fk`` via ``resolve_constraint_name``.
+
     """
 
     local_columns: tuple[str, ...]
@@ -32,12 +33,23 @@ class ForeignKeyConstraint:
         if len(self.local_columns) != len(self.referenced_columns):
             raise ValueError(
                 "local_columns and referenced_columns must have the same number of entries;"
-                f" got {len(self.local_columns)} local and {len(self.referenced_columns)} referenced"
+                f" got {len(self.local_columns)} local and"
+                f" {len(self.referenced_columns)} referenced"
             )
         if self.references.count(".") != 2:
             raise ValueError(
-                f"references must be a fully qualified 'catalog.schema.table' name; got: {self.references!r}"
+                "references must be a fully qualified 'catalog.schema.table' name;"
+                f" got: {self.references!r}"
             )
+        for part in self.references.split("."):
+            if not part.strip():
+                raise ValueError(
+                    f"references must not have a blank part; got: {self.references!r}"
+                )
+            if part != part.casefold():
+                raise ValueError(f"references must be lowercase; got: {self.references!r}")
+        if self.constraint_name is not None and not self.constraint_name.strip():
+            raise ValueError("constraint_name must not be blank when provided")
 
     def resolve_constraint_name(self, table_name: str) -> str:
         """Return the constraint name to use in SQL, deriving it when not explicitly set."""
