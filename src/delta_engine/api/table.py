@@ -6,6 +6,7 @@ from typing import ClassVar
 
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
 class DeltaTable:
@@ -35,6 +36,7 @@ class DeltaTable:
         comment: str = "",
         properties: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
+        foreign_keys: Iterable[ForeignKeyConstraint] | None = None,
     ) -> None:
         user_properties = dict(properties or {})
 
@@ -50,10 +52,12 @@ class DeltaTable:
 
         columns_tuple = tuple(columns)
         primary_key = tuple(col.name for col in columns_tuple if col.primary_key)
+        foreign_keys_tuple = tuple(foreign_keys) if foreign_keys is not None else ()
 
         # Building DesiredTable here enforces all domain invariants (non-empty
-        # columns, unique names, partition columns must exist) at construction
-        # time rather than deferring them to to_desired_table().
+        # columns, unique names, partition columns must exist, FK local columns
+        # must exist) at construction time rather than deferring them to
+        # to_desired_table().
         self._desired_table = DesiredTable(
             qualified_name=QualifiedName(catalog, schema, name),
             columns=columns_tuple,
@@ -61,6 +65,7 @@ class DeltaTable:
             properties=effective,
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
             primary_key=primary_key,
+            foreign_keys=foreign_keys_tuple,
         )
 
     @property
@@ -77,6 +82,11 @@ class DeltaTable:
     def primary_key_constraint_name(self) -> str | None:
         """The constraint name for this table's primary key, or None if no PK is defined."""
         return self._desired_table.primary_key_constraint_name
+
+    @property
+    def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
+        """Foreign key constraints declared on this table."""
+        return self._desired_table.foreign_keys
 
     def to_desired_table(self) -> DesiredTable:
         """Return the domain :class:`DesiredTable` for this table definition."""
