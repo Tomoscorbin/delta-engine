@@ -8,8 +8,11 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
+    ForeignKeyValidationReport,
     ReadFailed,
     ReadFailure,
+    SkipReason,
+    SkippedForeignKey,
     SyncReport,
     TableAbsent,
     TablePresent,
@@ -270,6 +273,31 @@ def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
     assert summary.failed == (summary.failed_count > 0)
     assert summary.failed_count == len(summary.failures)
     assert all(isinstance(f, ExecutionFailure) for f in summary.failures)
+
+
+def test_foreign_key_validation_report_defaults_to_no_skipped():
+    # Given no skipped FKs
+    report = ForeignKeyValidationReport()
+
+    # Then skipped is empty and has_skipped is False
+    assert report.skipped == ()
+    assert not report.has_skipped
+
+
+def test_foreign_key_validation_report_reports_skipped_count():
+    # Given a single skipped FK with UNRESOLVABLE_REFERENCE reason
+    skipped = SkippedForeignKey(
+        table=QualifiedName("cat", "sch", "orders"),
+        constraint_name="orders_customer_id_fk",
+        reason=SkipReason.UNRESOLVABLE_REFERENCE,
+    )
+
+    # When building the report
+    report = ForeignKeyValidationReport(skipped=(skipped,))
+
+    # Then has_skipped is True and the skipped list is populated
+    assert report.has_skipped
+    assert len(report.skipped) == 1
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
