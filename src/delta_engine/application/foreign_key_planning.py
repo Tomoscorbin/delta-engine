@@ -2,18 +2,13 @@
 Foreign key dependency resolution for sync ordering and failure classification.
 
 The public entry point is `resolve`, which takes the registered tables and
-returns a `ForeignKeyResolution` containing:
+returns them as a tuple of :class:`SyncCandidate` objects in dependency-first
+order — referenced tables before their dependents.
 
-- The tables in dependency-first order (referenced tables before their
-  dependents).
-- A per-table verdict: which tables cannot be built because of a foreign key
-  problem, and why.
-
-A table fails when a foreign key references a table outside the registry
-(UNRESOLVABLE_REFERENCE), when it is part of a true dependency cycle (CYCLE), or
-when it (transitively) references a table that itself failed
-(BLOCKED_BY_FAILED_DEPENDENCY). A failed table is not built at all — the engine
-excludes it from execution and reports the failure.
+Each candidate carries the table it represents and any foreign key failures
+that prevent the table from being executed (CYCLE, UNRESOLVABLE_REFERENCE, or
+BLOCKED_BY_FAILED_DEPENDENCY). A candidate with no failures is ready to sync;
+one with failures is blocked and must be excluded from execution.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm, reverse-reachability propagation) are
@@ -22,7 +17,6 @@ hidden behind that interface.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
@@ -35,32 +29,27 @@ from delta_engine.domain.model.table import DesiredTable
 
 
 @dataclass(frozen=True)
-class ForeignKeyResolution:
+class SyncCandidate:
     """
-    The result of resolving cross-table foreign key dependencies.
+    A table prepared for the sync loop, together with its FK failure verdict.
 
     Attributes:
-        ordered_tables: All tables in dependency-first sync order. Referenced
-            tables precede their dependents; cycle members appear positioned by
-            where their component falls in the order.
-        failures_by_table: Per-table foreign key failures, keyed by qualified
-            name. A table absent from this mapping has no foreign key problem.
+        table: The desired table to sync.
+        failures: Foreign key failures that block this table from executing.
+            Empty when the table is safe to sync.
 
     """
 
-    ordered_tables: tuple[DesiredTable, ...]
-    failures_by_table: Mapping[QualifiedName, tuple[ForeignKeyFailure, ...]]
+    table: DesiredTable
+    failures: tuple[ForeignKeyFailure, ...]
 
-    def fails(self, qualified_name: QualifiedName) -> bool:
+    @property
+    def blocked(self) -> bool:
         """Return True when this table cannot be executed because of a foreign key problem."""
-        return qualified_name in self.failures_by_table
-
-    def failures_for(self, qualified_name: QualifiedName) -> tuple[ForeignKeyFailure, ...]:
-        """Return the foreign key failures recorded for this table (empty when none)."""
-        return self.failures_by_table.get(qualified_name, ())
+        return bool(self.failures)
 
 
-def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeyResolution:
+def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
     """
     Resolve foreign key dependencies across all registered tables.
 
@@ -72,8 +61,9 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeyResolution:
         tables: All desired tables from the registry, in registry order.
 
     Returns:
-        A :class:`ForeignKeyResolution` with ordered tables and the per-table
-        failure verdict.
+        A tuple of :class:`SyncCandidate` objects in dependency-first order.
+        Each candidate carries its table and any FK failures. A table with no
+        failures is ready to sync; a blocked table must be excluded from execution.
 
     """
     registered_names = {str(table.qualified_name) for table in tables}
@@ -86,9 +76,12 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeyResolution:
     ordered = _order_tables(tables, components)
     failures_by_table = _classify_failures(tables, registered_names, cycle_members)
 
-    return ForeignKeyResolution(
-        ordered_tables=tuple(ordered),
-        failures_by_table=failures_by_table,
+    return tuple(
+        SyncCandidate(
+            table=table,
+            failures=failures_by_table.get(table.qualified_name, ()),
+        )
+        for table in ordered
     )
 
 
@@ -180,8 +173,8 @@ def _order_tables(
 
     Tarjan emits components dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
-    Failed tables (cycles, unresolvable, blocked) appear too — the engine gates
-    them out of execution by consulting the resolution's failure verdict.
+    Blocked tables (cycles, unresolvable, blocked) appear too — the engine gates
+    them out of execution via the candidate's blocked property.
     """
     table_by_name = {str(table.qualified_name): table for table in tables}
     return [table_by_name[name] for component in components for name in component]
