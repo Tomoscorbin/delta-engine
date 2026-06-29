@@ -1,23 +1,32 @@
 """
-Foreign key dependency resolution for sync ordering and constraint skipping.
+Foreign key dependency resolution for sync ordering and failure classification.
 
 The public entry point is `resolve`, which takes the registered tables and
-returns a `ForeignKeySyncPlan` containing:
+returns a `ForeignKeyResolution` containing:
 
 - The tables in dependency-first order (referenced tables before their
-  dependents), with cycle members appended at the end.
-- The FK constraints that cannot be applied, with their skip reason.
-- A per-table index of skipped constraint names, ready for plan filtering.
+  dependents).
+- A per-table verdict: which tables cannot be built because of a foreign key
+  problem, and why.
+
+A table fails when a foreign key references a table outside the registry
+(UNRESOLVABLE_REFERENCE), when it is part of a true dependency cycle (CYCLE), or
+when it (transitively) references a table that itself failed
+(BLOCKED_BY_FAILED_DEPENDENCY). A failed table is not built at all — the engine
+excludes it from execution and reports the failure.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
-strongly-connected-components algorithm) are hidden behind that interface.
+strongly-connected-components algorithm, reverse-reachability propagation) are
+hidden behind that interface.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from delta_engine.application.results import SkippedForeignKey, SkipReason
+from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 
 # A table dependency graph is small (tens of tables, shallow chains), so the
@@ -25,43 +34,45 @@ from delta_engine.domain.model.table import DesiredTable
 
 
 @dataclass(frozen=True)
-class ForeignKeySyncPlan:
+class ForeignKeyResolution:
     """
-    The result of resolving cross-table FK dependencies.
+    The result of resolving cross-table foreign key dependencies.
 
     Attributes:
-        ordered_tables: All tables in dependency-first sync order. Cycle
-            members are appended after all resolvable tables; their FK
-            actions will be stripped before execution.
-        skipped_foreign_keys: FK constraints that cannot be applied, with
-            their skip reason.
-        skipped_names_by_table: Per-table frozenset of constraint names to
-            suppress. Passed to plan filtering so the engine does not need
-            to rebuild this index.
+        ordered_tables: All tables in dependency-first sync order. Referenced
+            tables precede their dependents; cycle members appear positioned by
+            where their component falls in the order.
+        failures_by_table: Per-table foreign key failures, keyed by qualified
+            name. A table absent from this mapping has no foreign key problem.
 
     """
 
     ordered_tables: tuple[DesiredTable, ...]
-    skipped_foreign_keys: tuple[SkippedForeignKey, ...]
-    skipped_names_by_table: dict[str, frozenset[str]]
+    failures_by_table: Mapping[QualifiedName, tuple[ForeignKeyFailure, ...]]
+
+    def fails(self, qualified_name: QualifiedName) -> bool:
+        """Return True when this table cannot be executed because of a foreign key problem."""
+        return qualified_name in self.failures_by_table
+
+    def failures_for(self, qualified_name: QualifiedName) -> tuple[ForeignKeyFailure, ...]:
+        """Return the foreign key failures recorded for this table (empty when none)."""
+        return self.failures_by_table.get(qualified_name, ())
 
 
-def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeySyncPlan:
+def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeyResolution:
     """
-    Resolve FK dependencies across all registered tables.
+    Resolve foreign key dependencies across all registered tables.
 
     Builds a dependency graph, runs Tarjan's strongly-connected-components
     algorithm to find the safe sync order and detect true cycles, then
-    classifies every FK constraint as either applicable or skipped
-    (CYCLE / UNRESOLVABLE_REFERENCE). A table that merely depends on a cycle is
-    not itself a cycle member — its FK is applied normally.
+    classifies every table as buildable or failed.
 
     Args:
         tables: All desired tables from the registry, in registry order.
 
     Returns:
-        A :class:`ForeignKeySyncPlan` with ordered tables, skipped FKs,
-        and a per-table lookup of constraint names to suppress.
+        A :class:`ForeignKeyResolution` with ordered tables and the per-table
+        failure verdict.
 
     """
     registered_names = {str(table.qualified_name) for table in tables}
@@ -72,14 +83,11 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeySyncPlan:
         name for component in components if _is_cycle(component, graph) for name in component
     }
     ordered = _order_tables(tables, components)
+    failures_by_table = _classify_failures(tables, registered_names, cycle_members)
 
-    skipped_foreign_keys = _compute_skipped_foreign_keys(tables, registered_names, cycle_members)
-    skipped_names_by_table = _index_skipped_names_by_table(skipped_foreign_keys)
-
-    return ForeignKeySyncPlan(
+    return ForeignKeyResolution(
         ordered_tables=tuple(ordered),
-        skipped_foreign_keys=skipped_foreign_keys,
-        skipped_names_by_table=skipped_names_by_table,
+        failures_by_table=failures_by_table,
     )
 
 
@@ -92,14 +100,14 @@ def _build_dependency_graph(
 
     Only in-registry references are included; FK references to tables outside
     the registry are omitted here and classified as UNRESOLVABLE_REFERENCE later.
+    A self-referential FK (references the owning table) is applicable:
+    create the table, then add the constraint. Excluding the self-edge
+    keeps the table a non-cyclic single-node component.
     """
     graph: dict[str, set[str]] = {str(table.qualified_name): set() for table in tables}
     for table in tables:
         table_name = str(table.qualified_name)
         for fk in table.foreign_keys:
-            # A self-referential FK (references the owning table) is applicable:
-            # create the table, then add the constraint. Excluding the self-edge
-            # keeps the table a non-cyclic single-node component.
             if fk.references in registered_names and fk.references != table_name:
                 graph[table_name].add(fk.references)
     return graph
@@ -115,9 +123,8 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
     nodes in graph (registry) insertion order, making the result deterministic
     regardless of set-iteration order or hash seed.
 
-    A component of more than one node is a true dependency cycle; a single node
-    that references itself is a self-loop cycle. Any other component is a single
-    acyclic table.
+    A component of more than one node is a true dependency cycle. (Self-loops are
+    excluded from the graph, so a single node is never cyclic.)
     """
     index_counter = 0
     indices: dict[str, int] = {}
@@ -159,8 +166,8 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
 
 
 def _is_cycle(component: list[str], graph: dict[str, set[str]]) -> bool:
-    """Return True if the component is a dependency cycle (multi-node or self-loop)."""
-    return len(component) > 1 or component[0] in graph[component[0]]
+    """Return True if the component is a true multi-node dependency cycle."""
+    return len(component) > 1
 
 
 def _order_tables(
@@ -172,56 +179,63 @@ def _order_tables(
 
     Tarjan emits components dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
-    Cycle members appear too — their non-FK changes still sync once their FK
-    actions are stripped — positioned by where their component falls in the
-    dependency order.
+    Failed tables (cycles, unresolvable, blocked) appear too — the engine gates
+    them out of execution by consulting the resolution's failure verdict.
     """
     table_by_name = {str(table.qualified_name): table for table in tables}
     return [table_by_name[name] for component in components for name in component]
 
 
-def _compute_skipped_foreign_keys(
+def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[str],
     cycle_members: set[str],
-) -> tuple[SkippedForeignKey, ...]:
+) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
-    Classify every FK constraint as skipped or applicable.
+    Classify every table as buildable or failed because of a foreign key.
 
-    A FK is skipped when its referenced table is not in the registry
-    (UNRESOLVABLE_REFERENCE) or its owning table is part of a cycle (CYCLE).
+    Two passes:
+
+    1. Direct failures — a foreign key to an unregistered table
+       (UNRESOLVABLE_REFERENCE) or any foreign key on a cycle member (CYCLE).
+    2. Propagation — a table that references a table which will not be built
+       cannot be built either (its foreign key would target a missing table).
+       This repeats to a fixpoint so the block flows along chains of dependents.
     """
-    skipped: list[SkippedForeignKey] = []
+    failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
+
+    def record(table: DesiredTable, fk, reason: ForeignKeyFailureReason) -> None:
+        failures.setdefault(table.qualified_name, []).append(
+            ForeignKeyFailure(
+                table=table.qualified_name,
+                constraint_name=table.resolve_foreign_key_constraint_name(fk),
+                reason=reason,
+            )
+        )
+
+    # Pass 1 — direct failures.
     for table in tables:
         table_name = str(table.qualified_name)
         for fk in table.foreign_keys:
             if fk.references not in registered_names:
-                skipped.append(
-                    SkippedForeignKey(
-                        table=table.qualified_name,
-                        constraint_name=table.resolve_foreign_key_constraint_name(fk),
-                        reason=SkipReason.UNRESOLVABLE_REFERENCE,
-                    )
-                )
+                record(table, fk, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
             elif table_name in cycle_members:
-                skipped.append(
-                    SkippedForeignKey(
-                        table=table.qualified_name,
-                        constraint_name=table.resolve_foreign_key_constraint_name(fk),
-                        reason=SkipReason.CYCLE,
-                    )
-                )
-    return tuple(skipped)
+                record(table, fk, ForeignKeyFailureReason.CYCLE)
 
+    # Pass 2 — propagate to dependents until no new table is blocked.
+    failed_names = {str(qualified_name) for qualified_name in failures}
+    changed = True
+    while changed:
+        changed = False
+        for table in tables:
+            table_name = str(table.qualified_name)
+            if table_name in failed_names:
+                continue
+            blocking = [fk for fk in table.foreign_keys if fk.references in failed_names]
+            if blocking:
+                for fk in blocking:
+                    record(table, fk, ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY)
+                failed_names.add(table_name)
+                changed = True
 
-def _index_skipped_names_by_table(
-    skipped_foreign_keys: tuple[SkippedForeignKey, ...],
-) -> dict[str, frozenset[str]]:
-    """Build a per-table index of skipped constraint names for O(1) plan filtering."""
-    index: dict[str, set[str]] = {}
-    for skipped in skipped_foreign_keys:
-        key = str(skipped.table)
-        if key not in index:
-            index[key] = set()
-        index[key].add(skipped.constraint_name)
-    return {key: frozenset(names) for key, names in index.items()}
+    return {qualified_name: tuple(items) for qualified_name, items in failures.items()}

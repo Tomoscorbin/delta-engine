@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.api import Column, DeltaTable, String
-from delta_engine.application.engine import Engine, _strip_foreign_key_actions
+from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
@@ -11,10 +11,9 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
-    ForeignKeyValidationReport,
+    ForeignKeyFailureReason,
     ReadFailed,
     ReadFailure,
-    SkipReason,
     SyncReport,
     TableAbsent,
     TablePresent,
@@ -22,12 +21,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.plan import (
-    ActionPlan,
-    DropColumn,
-    DropForeignKey,
-    SetForeignKey,
-)
+from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
 
@@ -402,7 +396,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
     )
 
 
-def test_sync_report_carries_empty_fk_validation_when_no_fks_declared():
+def test_sync_report_has_no_fk_failures_when_no_fks_declared():
     # Given a registry with no FKs
     registry = Registry()
     registry.register(_spec("cat.sch.tbl"))
@@ -411,25 +405,26 @@ def test_sync_report_carries_empty_fk_validation_when_no_fks_declared():
     # When
     report = engine.sync(registry)
 
-    # Then report carries an FK validation report (empty)
-    assert isinstance(report.foreign_key_validation, ForeignKeyValidationReport)
-    assert not report.foreign_key_validation.has_skipped
+    # Then the single table has no FK failures and succeeds
+    [tr] = list(report)
+    assert tr.foreign_key_failures == ()
+    assert tr.status is TableRunStatus.SUCCESS
 
 
-def test_sync_skips_fk_referencing_table_not_in_registry():
+def test_sync_fails_table_whose_fk_references_table_not_in_registry():
     # Given orders references customers, but customers is not registered
     registry = Registry()
     registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
 
-    # When
-    report = engine.sync(registry)
-
-    # Then the FK is skipped with UNRESOLVABLE_REFERENCE reason
-    assert report.foreign_key_validation.has_skipped
-    skipped = report.foreign_key_validation.skipped[0]
-    assert skipped.reason == SkipReason.UNRESOLVABLE_REFERENCE
-    assert skipped.table.name == "orders"
+    # When syncing
+    # Then the job fails and orders is reported FOREIGN_KEY_FAILED
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert tr.foreign_key_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert tr.execution.results == ()  # all-or-nothing: the table was not built
 
 
 def test_sync_processes_tables_in_fk_dependency_order():
@@ -454,8 +449,8 @@ def test_sync_processes_tables_in_fk_dependency_order():
     assert synced_order.index("cat.sch.customers") < synced_order.index("cat.sch.orders")
 
 
-def test_sync_skips_fk_actions_in_detected_cycle():
-    # Given A → B and B → A (cycle)
+def test_sync_fails_all_tables_in_a_detected_cycle():
+    # Given A -> B and B -> A (cycle)
     constraint_a_to_b = ForeignKeyConstraint(
         local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
     )
@@ -476,70 +471,40 @@ def test_sync_skips_fk_actions_in_detected_cycle():
     registry.register(table_a, table_b)
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
 
-    # When
-    report = engine.sync(registry)
-
-    # Then both FKs are skipped with CYCLE reason
-    assert report.foreign_key_validation.has_skipped
-    assert all(s.reason == SkipReason.CYCLE for s in report.foreign_key_validation.skipped)
-
-
-# --------- _strip_foreign_key_actions
-
-
-def _fk(references: str = "cat.sch.customers") -> ForeignKeyConstraint:
-    """Build a single-column FK for action construction in stripping tests."""
-    return ForeignKeyConstraint(
-        local_columns=("ref_id",),
-        references=references,
-        referenced_columns=("id",),
-    )
+    # When syncing
+    # Then the job fails and both tables are FOREIGN_KEY_FAILED with CYCLE
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    statuses = {tr.status for tr in err.value.report}
+    assert statuses == {TableRunStatus.FOREIGN_KEY_FAILED}
+    reasons = {
+        failure.reason
+        for tr in err.value.report
+        for failure in tr.foreign_key_failures
+    }
+    assert reasons == {ForeignKeyFailureReason.CYCLE}
 
 
-def test_strip_removes_set_foreign_key_for_a_skipped_constraint():
-    # Given a plan that sets a FK whose constraint name is skipped
-    plan = ActionPlan((SetForeignKey(fk=_fk(), constraint_name="orders_ref_id_fk"),))
 
-    # When the skipped name is stripped
-    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
+def test_fk_failed_table_executes_no_actions():
+    # Given orders has an unresolvable FK and would otherwise be created
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.missing"))
 
-    # Then the SetForeignKey is gone
-    assert tuple(stripped) == ()
+    executed: list[str] = []
 
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
 
-def test_strip_keeps_drop_foreign_key_even_when_its_name_is_skipped():
-    # Given a plan that drops a stale observed constraint sharing a skipped name
-    drop = DropForeignKey(constraint_name="orders_ref_id_fk")
-    plan = ActionPlan((drop,))
+    engine = Engine(_FakeReader({}), _TrackingExecutor())
 
-    # When the same name is in the skip set
-    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
-
-    # Then the DropForeignKey survives — a stale constraint must still be removed
-    assert tuple(stripped) == (drop,)
-
-
-def test_strip_leaves_non_foreign_key_actions_untouched():
-    # Given a plan with a non-FK action whose subject matches a skipped name
-    drop_column = DropColumn(column_name="orders_ref_id_fk")
-    plan = ActionPlan((drop_column,))
-
-    # When that name is in the skip set
-    stripped = _strip_foreign_key_actions(plan, frozenset({"orders_ref_id_fk"}))
-
-    # Then the non-FK action is untouched
-    assert tuple(stripped) == (drop_column,)
-
-
-def test_strip_with_empty_skip_set_returns_plan_unchanged():
-    # Given a plan and no names to skip
-    plan = ActionPlan((SetForeignKey(fk=_fk(), constraint_name="orders_ref_id_fk"),))
-
-    # When stripping with an empty set
-    stripped = _strip_foreign_key_actions(plan, frozenset())
-
-    # Then the plan is returned unchanged
-    assert stripped is plan
+    # When syncing
+    # Then the executor is never called for the FK-failed table (all-or-nothing)
+    with pytest.raises(SyncFailedError):
+        engine.sync(registry)
+    assert executed == []
 
 
 def test_unchanged_table_is_not_executed():

@@ -29,7 +29,6 @@ from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     CatalogState,
     ExecutionSummary,
-    ForeignKeyValidationReport,
     ReadFailed,
     SyncReport,
     TablePresent,
@@ -39,34 +38,11 @@ from delta_engine.application.results import (
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan, SetForeignKey
+from delta_engine.domain.plan.actions import ActionPlan
 from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
 
-
-def _strip_foreign_key_actions(
-    plan: ActionPlan,
-    names_to_skip: frozenset[str],
-) -> ActionPlan:
-    """
-    Return a copy of the plan with skipped SetForeignKey actions removed.
-
-    Only ``SetForeignKey`` actions are stripped: ``names_to_skip`` holds desired
-    constraints that cannot be applied (cycle or unresolvable reference), so we
-    must not *create* them. ``DropForeignKey`` actions always pass through —
-    removing a stale observed constraint is valid regardless of skip
-    classification, and dropping one never depends on the skipped reference.
-    """
-    if not names_to_skip:
-        return plan
-    return ActionPlan(
-        tuple(
-            action
-            for action in plan
-            if not (isinstance(action, SetForeignKey) and action.constraint_name in names_to_skip)
-        )
-    )
 
 
 def _utc_now() -> datetime:
@@ -117,23 +93,16 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(registry))
 
         tables = tuple(registry)
-        foreign_key_plan = resolve(tables)
+        resolution = resolve(tables)
 
-        catalog_states = self._read(foreign_key_plan.ordered_tables)
-        plans = self._plan(foreign_key_plan.ordered_tables, catalog_states)
-        plans = {
-            qualified_name: _strip_foreign_key_actions(
-                plan,
-                foreign_key_plan.skipped_names_by_table.get(str(qualified_name), frozenset()),
-            )
-            for qualified_name, plan in plans.items()
-        }
-
+        catalog_states = self._read(resolution.ordered_tables)
+        plans = self._plan(resolution.ordered_tables, catalog_states)
         validations = self._validate(plans)
         plans_to_execute = {
             qualified_name: plan
             for qualified_name, plan in plans.items()
             if not validations[qualified_name].failed
+            and not resolution.fails(qualified_name)
         }
         executions = self._execute(plans_to_execute)
 
@@ -141,19 +110,17 @@ class Engine:
             TableRunReport(
                 qualified_name=table.qualified_name,
                 read=catalog_states[table.qualified_name],
-                validation=validations.get(table.qualified_name, ValidationResult()),
+                validation=validations[table.qualified_name],
                 execution=executions.get(table.qualified_name, ExecutionSummary()),
+                foreign_key_failures=resolution.failures_for(table.qualified_name),
             )
-            for table in foreign_key_plan.ordered_tables
+            for table in resolution.ordered_tables
         )
 
         report = SyncReport(
             started_at=run_started,
             ended_at=_utc_now(),
             table_reports=table_reports,
-            foreign_key_validation=ForeignKeyValidationReport(
-                skipped=foreign_key_plan.skipped_foreign_keys
-            ),
         )
 
         if report.any_failures:
