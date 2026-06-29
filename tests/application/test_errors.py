@@ -6,6 +6,7 @@ from delta_engine.application.results import (
     ExecutionFailed,
     ExecutionFailure,
     ExecutionSummary,
+    Failure,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailed,
@@ -25,7 +26,7 @@ _QN = QualifiedName("cat", "sch", "tbl")
 def _table_report(
     *,
     read: CatalogState,
-    pre_execution_failures: tuple = (),
+    pre_execution_failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary = _NO_EXECUTION,
 ) -> TableRunReport:
     return TableRunReport(
