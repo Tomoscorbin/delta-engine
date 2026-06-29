@@ -189,16 +189,14 @@ def test_execution_outcome_variants_carry_the_right_payload():
 
 
 def test_table_status_success_when_all_actions_succeed():
-    # Given successful read, no validation failures, and only successful actions
+    # Given successful read, no pre-execution failures, and only successful actions
     read = TablePresent(table=_an_observed_table())
-    validation = ValidationResult()
     execution = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
 
     # When aggregating
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "tbl"),
         read=read,
-        validation=validation,
         execution=execution,
     )
 
@@ -213,13 +211,11 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     t_ok = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "a"),
         read=TablePresent(table=_an_observed_table()),
-        validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "b"),
         read=TablePresent(table=_an_observed_table()),
-        validation=ValidationResult(),
         execution=ExecutionSummary((_failed_exec(0),)),
     )
 
@@ -275,13 +271,12 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     t_ok = TableRunReport(
         qualified_name=ok_name,
         read=TablePresent(table=_an_observed_table()),
-        validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=failed_name,
         read=TableAbsent(),
-        validation=ValidationResult(failures=(ValidationFailure("R", "v"),)),
+        pre_execution_failures=(ValidationFailure("R", "v"),),
         execution=ExecutionSummary(),
     )
 
@@ -313,12 +308,11 @@ def test_foreign_key_failure_renders_a_descriptive_line():
 
 
 def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
-    # Given a table that read and validated cleanly but has an FK failure
+    # Given a table that read cleanly but has an FK failure in pre_execution_failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         read=TablePresent(table=_an_observed_table()),
-        validation=ValidationResult(),
-        foreign_key_failures=(
+        pre_execution_failures=(
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 constraint_name="orders_customer_id_fk",
@@ -333,15 +327,53 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     assert report.all_failures[0].format_lines()[0].startswith("Foreign key")
 
 
-def test_table_run_report_with_no_fk_failures_is_success():
-    # Given a clean table with no FK failures
+def test_table_run_report_status_is_validation_failed_when_only_validation_failure_present():
+    # Given a table that read cleanly but has a validation failure and no FK failure
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "sch", "tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        pre_execution_failures=(
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
+        ),
+    )
+
+    # Then its status is VALIDATION_FAILED (no FK failure takes priority)
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert report.has_failures is True
+
+
+def test_table_run_report_status_is_fk_failed_when_both_fk_and_validation_failures_present():
+    # Given a table with both an FK failure and a validation failure
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        read=TablePresent(table=_an_observed_table()),
+        pre_execution_failures=(
+            ForeignKeyFailure(
+                table=QualifiedName("cat", "sch", "orders"),
+                constraint_name="orders_customer_id_fk",
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
+        ),
+    )
+
+    # Then FOREIGN_KEY_FAILED takes priority, and both failures are surfaced
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert len(report.pre_execution_failures) == 2
+    fk_failures = [f for f in report.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    val_failures = [f for f in report.pre_execution_failures if isinstance(f, ValidationFailure)]
+    assert len(fk_failures) == 1
+    assert len(val_failures) == 1
+
+
+def test_table_run_report_with_no_pre_execution_failures_is_success():
+    # Given a clean table with no pre-execution failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "ok"),
         read=TablePresent(table=_an_observed_table()),
-        validation=ValidationResult(),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
 
-    # Then it is a success and carries no FK failures
+    # Then it is a success and carries no pre-execution failures
     assert report.status is TableRunStatus.SUCCESS
-    assert report.foreign_key_failures == ()
+    assert report.pre_execution_failures == ()

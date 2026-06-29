@@ -11,6 +11,7 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
+    ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailed,
     ReadFailure,
@@ -405,9 +406,9 @@ def test_sync_report_has_no_fk_failures_when_no_fks_declared():
     # When
     report = engine.sync(registry)
 
-    # Then the single table has no FK failures and succeeds
+    # Then the single table has no pre-execution failures and succeeds
     [tr] = list(report)
-    assert tr.foreign_key_failures == ()
+    assert tr.pre_execution_failures == ()
     assert tr.status is TableRunStatus.SUCCESS
 
 
@@ -423,7 +424,8 @@ def test_sync_fails_table_whose_fk_references_table_not_in_registry():
         engine.sync(registry)
     [tr] = list(err.value.report)
     assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert tr.foreign_key_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert tr.execution.results == ()  # all-or-nothing: the table was not built
 
 
@@ -480,7 +482,8 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
     reasons = {
         failure.reason
         for tr in err.value.report
-        for failure in tr.foreign_key_failures
+        for failure in tr.pre_execution_failures
+        if isinstance(failure, ForeignKeyFailure)
     }
     assert reasons == {ForeignKeyFailureReason.CYCLE}
     assert all(tr.execution.results == () for tr in err.value.report)
@@ -508,15 +511,17 @@ def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
         engine.sync(registry)
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert (
-        reports["cat.sch.customers"].foreign_key_failures[0].reason
-        == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    )
+    customers_fk_failures = [
+        f for f in reports["cat.sch.customers"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert customers_fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert (
-        reports["cat.sch.orders"].foreign_key_failures[0].reason
-        == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-    )
+    orders_fk_failures = [
+        f for f in reports["cat.sch.orders"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     assert executed == []
 
 

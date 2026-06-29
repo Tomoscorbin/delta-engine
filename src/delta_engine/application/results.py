@@ -224,19 +224,18 @@ class TableRunReport:
 
     qualified_name: QualifiedName
     read: CatalogState
-    validation: ValidationResult
+    pre_execution_failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary = field(default_factory=ExecutionSummary)
-    foreign_key_failures: tuple[ForeignKeyFailure, ...] = ()
 
     @property
     def status(self) -> TableRunStatus:
-        """Aggregate table status across read, validation, FK, and execution phases."""
+        """Aggregate table status across read, pre-execution, and execution phases."""
         if isinstance(self.read, ReadFailed):
             return TableRunStatus.READ_FAILED
-        if self.validation.failed:
-            return TableRunStatus.VALIDATION_FAILED
-        if self.foreign_key_failures:
+        if any(isinstance(f, ForeignKeyFailure) for f in self.pre_execution_failures):
             return TableRunStatus.FOREIGN_KEY_FAILED
+        if any(isinstance(f, ValidationFailure) for f in self.pre_execution_failures):
+            return TableRunStatus.VALIDATION_FAILED
         if self.execution.failed:
             return TableRunStatus.EXECUTION_FAILED
         return TableRunStatus.SUCCESS
@@ -248,12 +247,11 @@ class TableRunReport:
 
     @property
     def all_failures(self) -> tuple[Failure, ...]:
-        """All failures for this table (read, validation, foreign key, execution)."""
+        """All failures for this table (read, pre-execution, execution)."""
         out: list[Failure] = []
         if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
-        out.extend(self.validation.failures)
-        out.extend(self.foreign_key_failures)
+        out.extend(self.pre_execution_failures)
         out.extend(self.execution.failures)
         return tuple(out)
 

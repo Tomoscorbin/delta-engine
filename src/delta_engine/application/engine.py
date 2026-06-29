@@ -33,7 +33,6 @@ from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     CatalogState,
     ExecutionSummary,
-    ForeignKeyFailure,
     ReadFailed,
     SyncReport,
     TablePresent,
@@ -112,11 +111,11 @@ class Engine:
             TableRunReport(
                 qualified_name=candidate.table.qualified_name,
                 read=catalog_states[candidate.table.qualified_name],
-                validation=validations[candidate.table.qualified_name],
-                execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
-                foreign_key_failures=tuple(
-                    f for f in candidate.failures if isinstance(f, ForeignKeyFailure)
+                pre_execution_failures=(
+                    tuple(candidate.failures)
+                    + tuple(validations[candidate.table.qualified_name].failures)
                 ),
+                execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
             )
             for candidate in candidates
         )

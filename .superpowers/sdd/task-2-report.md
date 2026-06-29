@@ -1,51 +1,47 @@
-## Status
-DONE_WITH_CONCERNS
+# Task 2 Report: Replace `validation`/`foreign_key_failures` with `pre_execution_failures` on `TableRunReport`
 
-## Commits
-ac5b219 feat: add DropPrimaryKey and SetPrimaryKey action types with DROP_PRIMARY_KEY and SET_PRIMARY_KEY phases
+## Files Changed
 
-## Tests
-191 passed (7 new in test_actions.py, 2 new in test_compile.py). Pre-existing coverage threshold failure at 89.82% vs 90% — was 89.58% before this task; the gap is in unrelated pre-existing files (executor.py, log_config.py, preview.py, types.py).
+- `src/delta_engine/application/results.py` — Replaced `TableRunReport` dataclass fields `validation: ValidationResult` and `foreign_key_failures: tuple[ForeignKeyFailure, ...]` with `pre_execution_failures: tuple[Failure, ...] = ()`. Updated `status` property to inspect `pre_execution_failures` with `isinstance` (FK failures take priority over validation failures). Updated `all_failures` to extend from `pre_execution_failures` directly.
+
+- `src/delta_engine/application/engine.py` — Updated `TableRunReport` construction in `sync()` to merge `candidate.failures` (FK failures from resolution) with `validations[...].failures` (validation failures) into `pre_execution_failures`. Removed `ForeignKeyFailure` from imports (no longer needed after removing the `isinstance` filter). `ValidationResult` import retained — still used as return type annotation on `_validate`.
+
+- `tests/application/test_results.py` — Replaced the three `TableRunReport` construction tests (lines 191–348) with seven new tests covering the unified field. Added tests for: FK-only failure, validation-only failure, mixed FK+validation failure with priority checking, and no-pre-execution-failures success. Removed `validation=` and `foreign_key_failures=` from all `TableRunReport` constructions. `ValidationResult` import retained (still used by `test_validation_result_failed_property_reflects_presence_of_failures`).
+
+- `tests/application/test_errors.py` — Replaced entirely. Switched helper `_table_report()` from `validation: ValidationResult` to `pre_execution_failures: tuple`. Added `test_message_renders_fk_failure_detail` covering the `FOREIGN_KEY_FAILED` status path. Removed `ValidationResult` import.
+
+- `tests/application/test_engine.py` — Updated four tests that accessed `tr.foreign_key_failures` directly to use `tr.pre_execution_failures` filtered by `isinstance(f, ForeignKeyFailure)`. Added `ForeignKeyFailure` to imports.
+
+## Test Commands and Output
+
+### Target tests
+
+```
+$ uv run pytest tests/application/test_results.py tests/application/test_errors.py --no-cov -v
+26 passed in 0.30s
+```
+
+### Full suite
+
+```
+$ uv run pytest --no-cov -q
+305 passed, 16 errors in 4.92s
+```
+
+The 16 errors are all `PySparkRuntimeError: [JAVA_GATEWAY_EXITED]` — PySpark integration tests that require a running JVM. Pre-existing and unrelated to this change.
+
+### Ruff
+
+```
+$ uv run ruff check src/ tests/
+All checks passed!
+```
+
+## Deviations from Brief
+
+- `test_table_run_report_status_is_foreign_key_failed_when_both_fk_and_validation_failures_present` was shortened to `test_table_run_report_status_is_fk_failed_when_both_fk_and_validation_failures_present` to satisfy the project's 100-character line-length limit (ruff E501).
+- `test_engine.py` was not listed in the brief's file list but required updates to four FK-related assertions. All changes are mechanical: `tr.foreign_key_failures` → filtered comprehension over `tr.pre_execution_failures`.
 
 ## Concerns
-**Out-of-brief scope addition:** The brief specified changes to `actions.py`, `__init__.py`, and `test_actions.py` only. However, `test_every_action_type_has_a_registered_compiler` in `test_compile.py` is a hard guard that immediately fails when any new `Action` subclass lacks a registered SQL compiler. Without also registering compilers, the full suite had 1 failure.
 
-To keep the suite green, I added:
-- SQL compilers for `DropPrimaryKey` and `SetPrimaryKey` to `src/delta_engine/adapters/databricks/sql/compile.py`
-- Corresponding tests to `tests/adapters/databricks/sql/test_compile.py`
-
-SQL emitted:
-- `DropPrimaryKey` → `ALTER TABLE <tbl> DROP PRIMARY KEY`
-- `SetPrimaryKey` → `ALTER TABLE <tbl> ADD CONSTRAINT <name> PRIMARY KEY (<col1>, <col2>, ...)`
-
-If a follow-on task was intended to own SQL compilation for these types, those files will need revision. The implementations are correct Databricks SQL syntax and consistent with the rest of the compiler module.
-
----
-
-## Bug Fix (follow-on)
-
-### What changed
-**Fix 1 — `DropPrimaryKey` compiler** (`compile.py` line 139):
-- `DROP PRIMARY KEY` → `DROP PRIMARY KEY IF EXISTS` (idempotent; avoids error when no PK exists)
-
-**Fix 2 — `SetPrimaryKey` compiler** (`compile.py` line 146):
-- Removed `backtick()` wrapping from `constraint_name`; constraint names are named identifiers, not column names, and should not be backtick-quoted.
-
-**Fix 3 — `test_drop_primary_key_renders_alter_drop_primary_key`** (`test_compile.py` line 269):
-- Assertion updated to expect `DROP PRIMARY KEY IF EXISTS`
-
-**Fix 4 — `test_set_primary_key_renders_add_constraint_primary_key`** (`test_compile.py` line 288):
-- Assertion updated: `orders_pk` (unquoted) instead of `` `orders_pk` ``
-
-### Test command run
-```
-uv run pytest tests/adapters/databricks/sql/test_compile.py -v -k "primary_key"
-```
-
-### Test output
-```
-tests/adapters/databricks/sql/test_compile.py::test_drop_primary_key_renders_alter_drop_primary_key PASSED
-tests/adapters/databricks/sql/test_compile.py::test_set_primary_key_renders_add_constraint_primary_key PASSED
-2 passed, 19 deselected
-```
-(Coverage failure is a pre-existing issue from running only 2/21 tests via `-k` filter, not introduced by this fix.)
+None. All application tests pass. Linting is clean.
