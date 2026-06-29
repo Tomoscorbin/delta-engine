@@ -125,6 +125,62 @@ def test_resolve_includes_cycle_tables_in_ordered_tables():
     assert names == {"cat.sch.a", "cat.sch.b"}
 
 
+def test_resolve_does_not_skip_fk_of_table_that_merely_depends_on_a_cycle():
+    # Given b <-> c form a mutual cycle, and a depends on b (a is not in the cycle)
+    table_a = _table_with_fk("cat.sch.a", "cat.sch.b")
+    table_b = _table_with_fk("cat.sch.b", "cat.sch.c")
+    table_c = _table_with_fk("cat.sch.c", "cat.sch.b")
+
+    # When
+    plan = resolve((table_a, table_b, table_c))
+
+    # Then only the true cycle members b and c are skipped; a's FK survives
+    skipped_tables = {str(skipped.table) for skipped in plan.skipped_foreign_keys}
+    assert skipped_tables == {"cat.sch.b", "cat.sch.c"}
+    assert all(skipped.reason == SkipReason.CYCLE for skipped in plan.skipped_foreign_keys)
+
+
+def test_resolve_orders_table_after_the_cycle_member_it_depends_on():
+    # Given b <-> c (cycle) and a depends on b
+    table_a = _table_with_fk("cat.sch.a", "cat.sch.b")
+    table_b = _table_with_fk("cat.sch.b", "cat.sch.c")
+    table_c = _table_with_fk("cat.sch.c", "cat.sch.b")
+
+    # When
+    plan = resolve((table_a, table_b, table_c))
+
+    # Then all three tables are ordered, and b (a's valid dependency) precedes a
+    names = [str(table.qualified_name) for table in plan.ordered_tables]
+    assert set(names) == {"cat.sch.a", "cat.sch.b", "cat.sch.c"}
+    assert names.index("cat.sch.b") < names.index("cat.sch.a")
+
+
+def test_resolve_classifies_self_referential_fk_as_cycle():
+    # Given a table whose foreign key references itself (a self-loop)
+    catalog, schema, name = "cat", "sch", "employees"
+    table = DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("manager_id", String())),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("manager_id",),
+                references="cat.sch.employees",
+                referenced_columns=("id",),
+            )
+        ],
+    ).to_desired_table()
+
+    # When
+    plan = resolve((table,))
+
+    # Then the self-referencing FK is skipped as a cycle, and the table still syncs
+    assert len(plan.skipped_foreign_keys) == 1
+    assert plan.skipped_foreign_keys[0].reason == SkipReason.CYCLE
+    assert {str(t.qualified_name) for t in plan.ordered_tables} == {"cat.sch.employees"}
+
+
 def test_resolve_builds_skipped_names_by_table_index():
     # Given orders has an unresolvable FK
     tables = (_table_with_fk("cat.sch.orders", "cat.sch.customers"),)

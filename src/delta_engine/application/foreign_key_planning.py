@@ -9,17 +9,19 @@ returns a `ForeignKeySyncPlan` containing:
 - The FK constraints that cannot be applied, with their skip reason.
 - A per-table index of skipped constraint names, ready for plan filtering.
 
-All graph-traversal implementation details (adjacency map, in-degree tracking,
-Kahn's algorithm) are hidden behind that interface.
+All graph-traversal implementation details (adjacency map, Tarjan's
+strongly-connected-components algorithm) are hidden behind that interface.
 """
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
-from delta_engine.application.results import SkipReason, SkippedForeignKey
+from delta_engine.application.results import SkippedForeignKey, SkipReason
 from delta_engine.domain.model.table import DesiredTable
+
+# A table dependency graph is small (tens of tables, shallow chains), so the
+# recursion depth of the SCC traversal below stays far under Python's limit.
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,7 @@ class ForeignKeySyncPlan:
         skipped_names_by_table: Per-table frozenset of constraint names to
             suppress. Passed to plan filtering so the engine does not need
             to rebuild this index.
+
     """
 
     ordered_tables: tuple[DesiredTable, ...]
@@ -47,9 +50,11 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeySyncPlan:
     """
     Resolve FK dependencies across all registered tables.
 
-    Builds a dependency graph, runs Kahn's topological sort to find the
-    safe sync order and detect cycles, then classifies every FK constraint
-    as either applicable or skipped (CYCLE / UNRESOLVABLE_REFERENCE).
+    Builds a dependency graph, runs Tarjan's strongly-connected-components
+    algorithm to find the safe sync order and detect true cycles, then
+    classifies every FK constraint as either applicable or skipped
+    (CYCLE / UNRESOLVABLE_REFERENCE). A table that merely depends on a cycle is
+    not itself a cycle member — its FK is applied normally.
 
     Args:
         tables: All desired tables from the registry, in registry order.
@@ -57,20 +62,22 @@ def resolve(tables: tuple[DesiredTable, ...]) -> ForeignKeySyncPlan:
     Returns:
         A :class:`ForeignKeySyncPlan` with ordered tables, skipped FKs,
         and a per-table lookup of constraint names to suppress.
+
     """
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
-    ordered, cycle_members = _toposort(tables, graph)
+    components = _strongly_connected_components(graph)
 
-    all_tables_in_order = ordered + [
-        table for table in tables if str(table.qualified_name) in cycle_members
-    ]
+    cycle_members = {
+        name for component in components if _is_cycle(component, graph) for name in component
+    }
+    ordered = _order_tables(tables, components)
 
     skipped_foreign_keys = _compute_skipped_foreign_keys(tables, registered_names, cycle_members)
     skipped_names_by_table = _index_skipped_names_by_table(skipped_foreign_keys)
 
     return ForeignKeySyncPlan(
-        ordered_tables=tuple(all_tables_in_order),
+        ordered_tables=tuple(ordered),
         skipped_foreign_keys=skipped_foreign_keys,
         skipped_names_by_table=skipped_names_by_table,
     )
@@ -94,41 +101,79 @@ def _build_dependency_graph(
     return graph
 
 
-def _toposort(
-    tables: tuple[DesiredTable, ...],
-    graph: dict[str, set[str]],
-) -> tuple[list[DesiredTable], set[str]]:
+def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]]:
     """
-    Kahn's topological sort.
+    Return the graph's strongly-connected components in dependency-first order.
 
-    Returns (ordered_tables, cycle_member_names). Tables not involved in a
-    cycle appear in dependency-first order. cycle_member_names contains the
-    qualified name strings of tables that are part of a cycle (they never
-    reached in-degree 0 before the queue was exhausted).
+    Uses Tarjan's algorithm, which emits each component only after every
+    component it depends on has been emitted — so a referenced table's component
+    always precedes its dependents'. Neighbours are visited in sorted order and
+    nodes in graph (registry) insertion order, making the result deterministic
+    regardless of set-iteration order or hash seed.
+
+    A component of more than one node is a true dependency cycle; a single node
+    that references itself is a self-loop cycle. Any other component is a single
+    acyclic table.
+    """
+    index_counter = 0
+    indices: dict[str, int] = {}
+    low_links: dict[str, int] = {}
+    on_stack: dict[str, bool] = {}
+    stack: list[str] = []
+    components: list[list[str]] = []
+
+    def strong_connect(node: str) -> None:
+        nonlocal index_counter
+        indices[node] = index_counter
+        low_links[node] = index_counter
+        index_counter += 1
+        stack.append(node)
+        on_stack[node] = True
+
+        for neighbour in sorted(graph[node]):
+            if neighbour not in indices:
+                strong_connect(neighbour)
+                low_links[node] = min(low_links[node], low_links[neighbour])
+            elif on_stack.get(neighbour):
+                low_links[node] = min(low_links[node], indices[neighbour])
+
+        if low_links[node] == indices[node]:
+            component: list[str] = []
+            while True:
+                member = stack.pop()
+                on_stack[member] = False
+                component.append(member)
+                if member == node:
+                    break
+            components.append(component)
+
+    for node in graph:
+        if node not in indices:
+            strong_connect(node)
+
+    return components
+
+
+def _is_cycle(component: list[str], graph: dict[str, set[str]]) -> bool:
+    """Return True if the component is a dependency cycle (multi-node or self-loop)."""
+    return len(component) > 1 or component[0] in graph[component[0]]
+
+
+def _order_tables(
+    tables: tuple[DesiredTable, ...],
+    components: list[list[str]],
+) -> list[DesiredTable]:
+    """
+    Flatten the SCC components into tables in dependency-first sync order.
+
+    Tarjan emits components dependency-first, so concatenating their members
+    yields an order in which every referenced table precedes its dependents.
+    Cycle members appear too — their non-FK changes still sync once their FK
+    actions are stripped — positioned by where their component falls in the
+    dependency order.
     """
     table_by_name = {str(table.qualified_name): table for table in tables}
-    in_degree: dict[str, int] = {name: 0 for name in table_by_name}
-
-    dependents: dict[str, set[str]] = {name: set() for name in table_by_name}
-    for name, dependencies in graph.items():
-        for dependency in dependencies:
-            if dependency in dependents:
-                dependents[dependency].add(name)
-                in_degree[name] += 1
-
-    queue: deque[str] = deque(name for name, degree in in_degree.items() if degree == 0)
-    ordered: list[DesiredTable] = []
-
-    while queue:
-        name = queue.popleft()
-        ordered.append(table_by_name[name])
-        for dependent in dependents[name]:
-            in_degree[dependent] -= 1
-            if in_degree[dependent] == 0:
-                queue.append(dependent)
-
-    cycle_members = {name for name, degree in in_degree.items() if degree > 0}
-    return ordered, cycle_members
+    return [table_by_name[name] for component in components for name in component]
 
 
 def _compute_skipped_foreign_keys(
