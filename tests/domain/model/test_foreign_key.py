@@ -76,6 +76,16 @@ def test_rejects_mismatched_column_counts():
         )
 
 
+def test_rejects_references_without_three_parts():
+    # Given / When / Then
+    with pytest.raises(ValueError, match="catalog.schema.table"):
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            references="schema.table",  # missing catalog
+            referenced_columns=("id",),
+        )
+
+
 def test_foreign_key_constraint_is_frozen():
     # Given
     fk = ForeignKeyConstraint(

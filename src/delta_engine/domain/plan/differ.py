@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -164,6 +165,21 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     return tuple(actions)
 
 
+def _fk_content_equal(a: ForeignKeyConstraint, b: ForeignKeyConstraint) -> bool:
+    """
+    Compare two FK constraints by content only, ignoring constraint_name.
+
+    This is necessary because a desired FK may have constraint_name=None while
+    the catalog-observed FK carries the derived name. Using dataclass __eq__
+    would treat them as different and cause spurious Drop+Set on every sync.
+    """
+    return (
+        a.local_columns == b.local_columns
+        and a.references == b.references
+        and a.referenced_columns == b.referenced_columns
+    )
+
+
 def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
     """
     Return the FK actions to align observed with desired.
@@ -184,11 +200,11 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
     actions: list[Action] = []
 
     for name, fk in observed_by_name.items():
-        if name not in desired_by_name or desired_by_name[name] != fk:
+        if name not in desired_by_name or not _fk_content_equal(desired_by_name[name], fk):
             actions.append(DropForeignKey(constraint_name=name))
 
     for name, fk in desired_by_name.items():
-        if name not in observed_by_name or observed_by_name[name] != fk:
+        if name not in observed_by_name or not _fk_content_equal(observed_by_name[name], fk):
             actions.append(SetForeignKey(fk=fk, constraint_name=name))
 
     return tuple(actions)

@@ -807,3 +807,37 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     action_types = {type(a).__name__ for a in plan}
     assert "CreateTable" in action_types
     assert "SetForeignKey" in action_types
+
+
+def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
+    # Given: desired has a FK with no explicit constraint_name;
+    #        observed has the same FK but with the catalog-stored derived name
+    desired_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        # no constraint_name — user did not specify one
+    )
+    observed_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",  # catalog stored the derived name
+    )
+    desired = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(desired_fk,),
+    )
+    observed = ObservedTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(observed_fk,),
+    )
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then no FK actions are emitted — the FK is already in the right state
+    fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
+    assert fk_actions == []
