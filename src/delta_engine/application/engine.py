@@ -134,7 +134,11 @@ class Engine:
         self,
         candidates: tuple[SyncCandidate, ...],
     ) -> dict[QualifiedName, CatalogState]:
-        """Fetch current catalog state for every table."""
+        """
+        Fetch current catalog state for every table, including blocked candidates.
+
+        Blocked candidates are still read so every table appears in the final report.
+        """
         catalog_states: dict[QualifiedName, CatalogState] = {}
         for candidate in candidates:
             qualified_name = candidate.table.qualified_name

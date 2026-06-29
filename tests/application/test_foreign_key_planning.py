@@ -50,9 +50,9 @@ def test_resolve_with_no_fks_preserves_registry_order():
     candidates = resolve(tables)
 
     # Then order is unchanged and nothing is blocked
-    names = [str(c.table.qualified_name) for c in candidates]
+    names = [str(candidate.table.qualified_name) for candidate in candidates]
     assert names == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
-    assert all(not c.blocked for c in candidates)
+    assert all(not candidate.blocked for candidate in candidates)
 
 
 def test_resolve_orders_referenced_table_before_dependent():
@@ -66,9 +66,9 @@ def test_resolve_orders_referenced_table_before_dependent():
     candidates = resolve(tables)
 
     # Then customers appears before orders and neither is blocked
-    names = [str(c.table.qualified_name) for c in candidates]
+    names = [str(candidate.table.qualified_name) for candidate in candidates]
     assert names.index("cat.sch.customers") < names.index("cat.sch.orders")
-    assert all(not c.blocked for c in candidates)
+    assert all(not candidate.blocked for candidate in candidates)
 
 
 def test_resolve_handles_chain_of_dependencies():
@@ -83,7 +83,7 @@ def test_resolve_handles_chain_of_dependencies():
     candidates = resolve(tables)
 
     # Then a before b before c
-    names = [str(c.table.qualified_name) for c in candidates]
+    names = [str(candidate.table.qualified_name) for candidate in candidates]
     assert names.index("cat.sch.a") < names.index("cat.sch.b") < names.index("cat.sch.c")
 
 
@@ -131,7 +131,7 @@ def test_resolve_includes_failed_tables_in_candidates():
     candidates = resolve(tables)
 
     # Then both tables still appear as candidates (the engine gates them out via .blocked)
-    names = {str(c.table.qualified_name) for c in candidates}
+    names = {str(candidate.table.qualified_name) for candidate in candidates}
     assert names == {"cat.sch.a", "cat.sch.b"}
 
 
