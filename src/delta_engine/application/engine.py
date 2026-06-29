@@ -89,10 +89,12 @@ class Engine:
         tables = tuple(registry)
         catalog_states = self._read(tables)
         plans = self._plan(tables, catalog_states)
-        plans_to_validate = {qn: plan for qn, plan in plans.items() if plan}
+        plans_to_validate = {qualified_name: plan for qualified_name, plan in plans.items() if plan}
         validations = self._validate(plans_to_validate)
         plans_to_execute = {
-            qn: plans_to_validate[qn] for qn, v in validations.items() if not v.failed
+            qualified_name: plans_to_validate[qualified_name]
+            for qualified_name, validation in validations.items()
+            if not validation.failed
         }
         executions = self._execute(plans_to_execute)
 
