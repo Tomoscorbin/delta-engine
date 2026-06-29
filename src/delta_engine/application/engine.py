@@ -93,7 +93,6 @@ def _toposort_tables(
 
 def _compute_skipped_fks(
     tables: tuple[DesiredTable, ...],
-    graph: dict[str, set[str]],
     cycle_members: set[str],
 ) -> tuple[SkippedForeignKey, ...]:
     """
@@ -198,7 +197,7 @@ class Engine:
         all_tables_in_order = ordered_tables + [
             t for t in tables if str(t.qualified_name) in cycle_members
         ]
-        skipped_fks = _compute_skipped_fks(tables, graph, cycle_members)
+        skipped_fks = _compute_skipped_fks(tables, cycle_members)
         fk_validation = ForeignKeyValidationReport(skipped=skipped_fks)
 
         skipped_names_by_table: dict[str, frozenset[str]] = {}
