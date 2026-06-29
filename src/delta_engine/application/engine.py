@@ -23,11 +23,13 @@ from datetime import UTC, datetime
 import logging
 
 from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.foreign_key_planning import resolve
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     CatalogState,
     ExecutionSummary,
+    ForeignKeyValidationReport,
     ReadFailed,
     SyncReport,
     TablePresent,
@@ -37,10 +39,29 @@ from delta_engine.application.results import (
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan.actions import ActionPlan, DropForeignKey, SetForeignKey
 from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_foreign_key_actions(
+    plan: ActionPlan,
+    names_to_skip: frozenset[str],
+) -> ActionPlan:
+    """Return a copy of the plan with skipped FK actions removed."""
+    if not names_to_skip:
+        return plan
+    return ActionPlan(
+        tuple(
+            action
+            for action in plan
+            if not (
+                isinstance(action, (DropForeignKey, SetForeignKey))
+                and action.constraint_name in names_to_skip
+            )
+        )
+    )
 
 
 def _utc_now() -> datetime:
@@ -75,6 +96,10 @@ class Engine:
         phase is skipped in later phases; its partial result is included in
         the final report.
 
+        Before the phases, FK dependencies are resolved: tables are reordered
+        so referenced tables sync first, and FK actions for cycles or
+        unresolvable references are stripped from plans before validation.
+
         Returns:
             The aggregate :class:`SyncReport` for the run.
 
@@ -87,9 +112,21 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(registry))
 
         tables = tuple(registry)
-        catalog_states = self._read(tables)
-        plans = self._plan(tables, catalog_states)
-        plans_to_validate = {qualified_name: plan for qualified_name, plan in plans.items() if plan}
+        foreign_key_plan = resolve(tables)
+
+        catalog_states = self._read(foreign_key_plan.ordered_tables)
+        plans = self._plan(foreign_key_plan.ordered_tables, catalog_states)
+        plans = {
+            qualified_name: _strip_foreign_key_actions(
+                plan,
+                foreign_key_plan.skipped_names_by_table.get(str(qualified_name), frozenset()),
+            )
+            for qualified_name, plan in plans.items()
+        }
+
+        plans_to_validate = {
+            qualified_name: plan for qualified_name, plan in plans.items() if plan
+        }
         validations = self._validate(plans_to_validate)
         plans_to_execute = {
             qualified_name: plans_to_validate[qualified_name]
@@ -105,13 +142,16 @@ class Engine:
                 validation=validations.get(table.qualified_name, ValidationResult()),
                 execution=executions.get(table.qualified_name, ExecutionSummary()),
             )
-            for table in tables
+            for table in foreign_key_plan.ordered_tables
         )
 
         report = SyncReport(
             started_at=run_started,
             ended_at=_utc_now(),
             table_reports=table_reports,
+            foreign_key_validation=ForeignKeyValidationReport(
+                skipped=foreign_key_plan.skipped_foreign_keys
+            ),
         )
 
         if report.any_failures:

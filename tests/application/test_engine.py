@@ -11,13 +11,17 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
+    ForeignKeyValidationReport,
     ReadFailed,
     ReadFailure,
+    SkipReason,
+    SkippedForeignKey,
     SyncReport,
     TableAbsent,
     TablePresent,
     TableRunStatus,
 )
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
@@ -354,3 +358,103 @@ def test_validate_phase_validates_all_tables_before_any_execution():
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.VALIDATION_FAILED
     assert tr_b.status is TableRunStatus.SUCCESS
+
+
+def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
+    """Build a table spec with a single FK to another table."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("ref_id", String())),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_id",),
+                references=references,
+                referenced_columns=("id",),
+            )
+        ],
+    )
+
+
+def test_sync_report_carries_empty_fk_validation_when_no_fks_declared():
+    # Given a registry with no FKs
+    registry = Registry()
+    registry.register(_spec("cat.sch.tbl"))
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When
+    report = engine.sync(registry)
+
+    # Then report carries an FK validation report (empty)
+    assert isinstance(report.foreign_key_validation, ForeignKeyValidationReport)
+    assert not report.foreign_key_validation.has_skipped
+
+
+def test_sync_skips_fk_referencing_table_not_in_registry():
+    # Given orders references customers, but customers is not registered
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When
+    report = engine.sync(registry)
+
+    # Then the FK is skipped with UNRESOLVABLE_REFERENCE reason
+    assert report.foreign_key_validation.has_skipped
+    skipped = report.foreign_key_validation.skipped[0]
+    assert skipped.reason == SkipReason.UNRESOLVABLE_REFERENCE
+    assert skipped.table.name == "orders"
+
+
+def test_sync_processes_tables_in_fk_dependency_order():
+    # Given customers is referenced by orders; customers registered second
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    registry.register(_spec("cat.sch.customers"))
+
+    synced_order: list[str] = []
+
+    class _OrderCapturingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            synced_order.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(),))
+
+    engine = Engine(_FakeReader({}), _OrderCapturingExecutor())
+
+    # When
+    engine.sync(registry)
+
+    # Then customers syncs before orders regardless of registration order
+    assert synced_order.index("cat.sch.customers") < synced_order.index("cat.sch.orders")
+
+
+def test_sync_skips_fk_actions_in_detected_cycle():
+    # Given A → B and B → A (cycle)
+    fk_a_to_b = ForeignKeyConstraint(
+        local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
+    )
+    fk_b_to_a = ForeignKeyConstraint(
+        local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
+    )
+    table_a = DeltaTable(
+        "cat", "sch", "a",
+        columns=(Column("id", String()), Column("b_id", String())),
+        foreign_keys=[fk_a_to_b],
+    )
+    table_b = DeltaTable(
+        "cat", "sch", "b",
+        columns=(Column("id", String()), Column("a_id", String())),
+        foreign_keys=[fk_b_to_a],
+    )
+    registry = Registry()
+    registry.register(table_a, table_b)
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When
+    report = engine.sync(registry)
+
+    # Then both FKs are skipped with CYCLE reason
+    assert report.foreign_key_validation.has_skipped
+    assert all(s.reason == SkipReason.CYCLE for s in report.foreign_key_validation.skipped)
