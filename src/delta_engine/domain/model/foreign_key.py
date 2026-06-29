@@ -34,6 +34,10 @@ class ForeignKeyConstraint:
                 "local_columns and referenced_columns must have the same number of entries;"
                 f" got {len(self.local_columns)} local and {len(self.referenced_columns)} referenced"
             )
+        if self.references.count(".") != 2:
+            raise ValueError(
+                f"references must be a fully qualified 'catalog.schema.table' name; got: {self.references!r}"
+            )
 
     def resolved_constraint_name(self, table_name: str) -> str:
         """Return the constraint name to use in SQL, deriving it when not explicitly set."""
