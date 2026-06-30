@@ -30,9 +30,14 @@
 - [ ] consider replacing typle comps in validation with regular loops for readability
 - [ ] clean up claude documentation
 - [ ] make sure tests have full given, when, then comments (Not the words Give, When, Then on their own without explanation)
+- [ ] Test hygiene sweep (low-risk, deferred from FK PR review): (1) rename ~60 abbreviated test locals — `reg`→registry, `fq`→fully_qualified_name, the `qn` fixture in test_reader.py→qualified_name, `tr`→table_run, `vf`/`sr`/`col`/`t`/`d`, module consts `_QN`/`_COL`; (2) fill in ~25 bare wordless Given/When/Then markers; (3) rename 4 meta-label/stale-class test names (`_happy_path` suffixes, `test_table_snapshot_...` that actually tests DesiredTable); (4) add GWT structure to ~12 tests in test_preview/test_dialect/test_types that lack it. (Themes 3/4/5 — private-method coupling, IntEnum-value asserts, implementation-string asserts — already fixed in the FK PR.)
 - [ ] Review AnalysisException catches in executor and reader
 - [ ] Review foreign key logic
 - [ ] Review failure logic and whether we can unify execution, validation, and FK failures. Also external_failures
 - [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row
 - [ ] Make the create-table branch in `compute_plan` symmetric with the else branch: the `if observed is None` branch inlines its `SetForeignKey` construction as a tuple comp while the else branch delegates to `_diff_*` helpers. Extract `_set_all_foreign_keys(desired)` so both branches read the same way
 - [ ] Architectural question for the FK PR: should foreign keys be declared inside the `CREATE TABLE` statement the way the primary key already is (compile.py inlines `CONSTRAINT ... PRIMARY KEY`), rather than tacked on as separate `SetForeignKey` actions? Current answer is no — self-referential FKs can't be inlined (table doesn't exist yet) and the late-resolution failure-propagation model relies on each FK being an independently-applicable step. Revisit alongside the FK graph/dependency rework
+- [ ] utilise __init__ __all__ so that we can reduce the number of import line
+- [ ] given that resolve() is a phase of sync() on the engine, should it live on the engine?
+- [ ] Do we need some kind of container linking QualifiedName to ActionPlan so that engine methods dont keep having to construct dictionaries? Seems like we keep building dictionaries and discarding them only to build them again
+- [ ] Add more to architecture documentation, including visualisations

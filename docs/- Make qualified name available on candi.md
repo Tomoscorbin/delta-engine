@@ -19,6 +19,6 @@
 - [x] Can we simplify _fetch_foreign_keys? seems quite complicated **→ captured in docs/todo.md (groupby + _foreign_key_from_rows helper); deferred**
 - [x] make foreign_key_actions a regular loop for readability. Also, it is still different from the rest. Why are we doing this tuple comp? **→ captured in docs/todo.md (extract _set_all_foreign_keys; plus inline-FK-in-CREATE architectural question); deferred to FK PR**
 - [x] Does this need to be a frozenset as opposed to just a set? desired_primary_key = frozenset(desired.primary_key) **→ no; changed to set in differ + validation, matches _diff_columns**
-- [ ] rename foreign_key_planning.py
-- [ ] review test suite
-- [ ] update documentation
+- [x] rename foreign_key_planning.py **→ dependency_resolution.py**
+- [x] review test suite **→ audited all ~313 tests (9-agent workflow); no Detroit/mock/correctness issues. Fixed fragility themes 3 (reader private-method coupling, +FK read coverage), 4 (IntEnum-value asserts), 5 (implementation-string asserts). Readability themes 1/2/6/7 captured in docs/todo.md**
+- [x] update documentation **→ new how-to-declare-foreign-keys.md; fixed stale FOREIGN_KEY_FAILED status table, ForeignKey API surface, ActionPhase example, index.rst. (Deeper architecture/visualisation work tracked separately in todo.md)**
