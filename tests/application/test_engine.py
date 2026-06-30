@@ -599,6 +599,40 @@ def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
     assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
 
 
+def test_validation_failure_in_upstream_blocks_fk_dependent():
+    # Given customers fails validation (adds NOT NULL to existing table),
+    # and orders has a FK on customers
+    registry = Registry()
+    registry.register(_spec_adding_not_null("cat.sch.customers"))
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    reader = _FakeReader(
+        {
+            "cat.sch.customers": _existing_id_table("cat.sch.customers"),
+            "cat.sch.orders": TableAbsent(),
+        }
+    )
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    # Then customers is VALIDATION_FAILED and orders is FOREIGN_KEY_FAILED
+    # with BLOCKED_BY_FAILED_DEPENDENCY — because customers won't reach desired state
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(registry)
+
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.customers"].status is TableRunStatus.VALIDATION_FAILED
+    assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    orders_fk_failures = [
+        f for f in reports["cat.sch.orders"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert len(orders_fk_failures) == 1
+    assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    # Neither table executes
+    assert reports["cat.sch.customers"].execution.results == ()
+    assert reports["cat.sch.orders"].execution.results == ()
+
+
 def test_unchanged_table_is_not_executed():
     # Given a table whose observed state already matches desired (empty plan)
     reg = Registry()
