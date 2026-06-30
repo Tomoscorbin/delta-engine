@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
 from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.plan.actions import ActionPlan
 
 # ---------- Status enums ----------
 
@@ -224,6 +225,7 @@ class TableRunReport:
 
     qualified_name: QualifiedName
     read: CatalogState
+    plan: ActionPlan = field(default_factory=ActionPlan)
     pre_execution_failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary | None = None
 

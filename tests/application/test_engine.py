@@ -24,6 +24,7 @@ from delta_engine.application.results import (
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan.actions import CreateTable
 
 # --------- helpers/fakes
 
@@ -669,6 +670,35 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     assert executed == []
 
 
+def test_dry_run_does_not_execute_and_reports_no_execution():
+    # Given two tables that would otherwise be created (absent -> real plans)
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader({"c.s.a": TableAbsent(), "c.s.b": TableAbsent()})
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader, _TrackingExecutor())
+
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
+
+    # Then the executor was never called and no table carries an execution result
+    assert executed == []
+    assert isinstance(report, SyncReport)
+    assert [tr.execution for tr in report] == [None, None]
+    # And the tables still report SUCCESS, since read/validate/resolve all passed
+    assert [tr.status for tr in report] == [
+        TableRunStatus.SUCCESS,
+        TableRunStatus.SUCCESS,
+    ]
+
+
 def test_unchanged_table_is_not_executed():
     # Given a table whose observed state already matches desired (empty plan)
     reg = Registry()
@@ -692,3 +722,61 @@ def test_unchanged_table_is_not_executed():
     [tr] = list(report)
     assert tr.status is TableRunStatus.SUCCESS
     assert tr.execution is None
+
+
+def test_dry_run_returns_report_instead_of_raising_when_a_table_would_fail():
+    # Given an existing table whose desired spec adds a NOT NULL column
+    # (a real validation failure that a normal sync would raise on)
+    reg = Registry()
+    reg.register(_spec_adding_not_null("c.s.val_fail"))
+    reader = _FakeReader({"c.s.val_fail": _existing_id_table("c.s.val_fail")})
+    # The executor must never be reached on a dry run; an empty result set makes
+    # an accidental call fail loudly rather than pass silently.
+    executor = _FakeExecutor(results=())
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
+
+    # Then no SyncFailedError is raised; the report is returned for inspection
+    # and surfaces the failure that a real run would have hit
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is True
+    [tr] = list(report)
+    assert tr.status is TableRunStatus.VALIDATION_FAILED
+    assert tr.execution is None
+
+
+def test_dry_run_exposes_the_planned_actions_on_the_report():
+    # Given a table that would be created (absent -> a CreateTable plan)
+    reg = Registry()
+    reg.register(_spec("c.s.new_table"))
+    reader = _FakeReader({"c.s.new_table": TableAbsent()})
+    # The executor must never be reached on a dry run; an empty result set makes
+    # an accidental call fail loudly rather than pass silently.
+    executor = _FakeExecutor(results=())
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
+
+    # Then the table's report carries the plan that would have been applied
+    [tr] = list(report)
+    assert [type(action) for action in tr.plan] == [CreateTable]
+
+
+def test_real_run_records_the_planned_actions_on_the_report():
+    # Given a table that is created on a normal sync (absent -> CreateTable plan)
+    reg = Registry()
+    reg.register(_spec("c.s.new_table"))
+    reader = _FakeReader({"c.s.new_table": TableAbsent()})
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing for real
+    report = engine.sync(reg)
+
+    # Then the report still records the plan that was applied
+    [tr] = list(report)
+    assert [type(action) for action in tr.plan] == [CreateTable]
+    assert tr.status is TableRunStatus.SUCCESS

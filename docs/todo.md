@@ -44,4 +44,7 @@
 - [ ] Do we need some kind of container linking QualifiedName to ActionPlan so that engine methods dont keep having to construct dictionaries? Seems like we keep building dictionaries and discarding them only to build them again
 - [ ] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
-- [ ] add dry run flag
+- [x] add dry run flag
+- [ ] is there a more natural alternative to tuple(registry) in engine?
+- [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
+- [ ] should report.any_failures be report.has_any_failures?

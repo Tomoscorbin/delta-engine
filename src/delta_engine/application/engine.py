@@ -71,7 +71,7 @@ class Engine:
         self.reader = reader
         self.executor = executor
 
-    def sync(self, registry: Registry) -> SyncReport:
+    def sync(self, registry: Registry, *, dry_run: bool = False) -> SyncReport:
         """
         Synchronize all registered tables to their desired state.
 
@@ -83,12 +83,22 @@ class Engine:
         A table that fails in an early phase is skipped in later phases;
         its partial result is included in the final report.
 
+        Args:
+            registry: The tables to synchronize.
+            dry_run: When True, run read → plan → validate → resolve but skip
+                execution entirely (zero catalog mutations). Every table's
+                ``execution`` is ``None`` while its ``plan`` still records the
+                actions that would be applied, and the report is returned
+                instead of raising ``SyncFailedError`` even when a table would
+                fail — so the caller can inspect what would happen.
+
         Returns:
             The aggregate :class:`SyncReport` for the run.
 
         Raises:
-            SyncFailedError: If any table fails to read, validate, or execute.
-                The report is available on the exception's ``report`` attribute.
+            SyncFailedError: On a real run (``dry_run=False``), if any table
+                fails to read, validate, or execute. The report is available on
+                the exception's ``report`` attribute. A dry run never raises.
 
         """
         run_started = datetime.now(UTC)
@@ -116,12 +126,15 @@ class Engine:
             for candidate in candidates
             if candidate.can_execute
         }
-        executions = self._execute(plans_to_execute)
+        executions: dict[QualifiedName, ExecutionSummary] = (
+            {} if dry_run else self._execute(plans_to_execute)
+        )
 
         table_reports = tuple(
             TableRunReport(
                 qualified_name=candidate.qualified_name,
                 read=catalog_states[candidate.qualified_name],
+                plan=plans[candidate.qualified_name],
                 pre_execution_failures=tuple(candidate.failures),
                 execution=executions.get(candidate.qualified_name),
             )
@@ -134,10 +147,18 @@ class Engine:
             table_reports=table_reports,
         )
 
-        if report.any_failures:
+        if not dry_run and report.any_failures:
             raise SyncFailedError(report)
 
-        logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
+        if dry_run:
+            logger.info(
+                "Dry run complete for %d table(s); no changes were applied",
+                len(report.table_reports),
+            )
+        else:
+            logger.info(
+                "Sync completed successfully for %d table(s)", len(report.table_reports)
+            )
         return report
 
     def _read(
