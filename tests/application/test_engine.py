@@ -730,7 +730,9 @@ def test_dry_run_returns_report_instead_of_raising_when_a_table_would_fail():
     reg = Registry()
     reg.register(_spec_adding_not_null("c.s.val_fail"))
     reader = _FakeReader({"c.s.val_fail": _existing_id_table("c.s.val_fail")})
-    executor = _FakeExecutor(results=(_ok_exec(0),))
+    # The executor must never be reached on a dry run; an empty result set makes
+    # an accidental call fail loudly rather than pass silently.
+    executor = _FakeExecutor(results=())
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -750,7 +752,9 @@ def test_dry_run_exposes_the_planned_actions_on_the_report():
     reg = Registry()
     reg.register(_spec("c.s.new_table"))
     reader = _FakeReader({"c.s.new_table": TableAbsent()})
-    executor = _FakeExecutor(results=(_ok_exec(0),))
+    # The executor must never be reached on a dry run; an empty result set makes
+    # an accidental call fail loudly rather than pass silently.
+    executor = _FakeExecutor(results=())
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
