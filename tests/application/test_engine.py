@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from delta_engine.api import Column, DeltaTable, String
@@ -669,6 +671,35 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     assert executed == []
 
 
+def test_dry_run_does_not_execute_and_reports_no_execution():
+    # Given two tables that would otherwise be created (absent -> real plans)
+    reg = Registry()
+    reg.register(_spec("c.s.a"), _spec("c.s.b"))
+    reader = _FakeReader({"c.s.a": TableAbsent(), "c.s.b": TableAbsent()})
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader, _TrackingExecutor())
+
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
+
+    # Then the executor was never called and no table carries an execution result
+    assert executed == []
+    assert isinstance(report, SyncReport)
+    assert [tr.execution for tr in report] == [None, None]
+    # And the tables still report SUCCESS, since read/validate/resolve all passed
+    assert [tr.status for tr in report] == [
+        TableRunStatus.SUCCESS,
+        TableRunStatus.SUCCESS,
+    ]
+
+
 def test_unchanged_table_is_not_executed():
     # Given a table whose observed state already matches desired (empty plan)
     reg = Registry()
@@ -692,3 +723,43 @@ def test_unchanged_table_is_not_executed():
     [tr] = list(report)
     assert tr.status is TableRunStatus.SUCCESS
     assert tr.execution is None
+
+
+def test_dry_run_returns_report_instead_of_raising_when_a_table_would_fail():
+    # Given an existing table whose desired spec adds a NOT NULL column
+    # (a real validation failure that a normal sync would raise on)
+    reg = Registry()
+    reg.register(_spec_adding_not_null("c.s.val_fail"))
+    reader = _FakeReader({"c.s.val_fail": _existing_id_table("c.s.val_fail")})
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
+
+    # Then no SyncFailedError is raised; the report is returned for inspection
+    # and surfaces the failure that a real run would have hit
+    assert isinstance(report, SyncReport)
+    assert report.any_failures is True
+    [tr] = list(report)
+    assert tr.status is TableRunStatus.VALIDATION_FAILED
+    assert tr.execution is None
+
+
+def test_dry_run_logs_the_planned_actions_for_each_table(caplog):
+    # Given a table that would be created (absent -> a CreateTable plan)
+    reg = Registry()
+    reg.register(_spec("c.s.new_table"))
+    reader = _FakeReader({"c.s.new_table": TableAbsent()})
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode with INFO logging captured
+    with caplog.at_level(logging.INFO, logger="delta_engine.application.engine"):
+        engine.sync(reg, dry_run=True)
+
+    # Then a dry-run line names the table and the action that would be applied
+    dry_run_lines = [r.message for r in caplog.records if "[dry-run] would apply" in r.message]
+    assert len(dry_run_lines) == 1
+    assert "c.s.new_table" in dry_run_lines[0]
+    assert "CreateTable" in dry_run_lines[0]

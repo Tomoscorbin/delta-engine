@@ -71,7 +71,7 @@ class Engine:
         self.reader = reader
         self.executor = executor
 
-    def sync(self, registry: Registry) -> SyncReport:
+    def sync(self, registry: Registry, *, dry_run: bool = False) -> SyncReport:
         """
         Synchronize all registered tables to their desired state.
 
@@ -116,7 +116,11 @@ class Engine:
             for candidate in candidates
             if candidate.can_execute
         }
-        executions = self._execute(plans_to_execute)
+        if dry_run:
+            self._log_planned_actions(plans_to_execute)
+            executions: dict[QualifiedName, ExecutionSummary] = {}
+        else:
+            executions = self._execute(plans_to_execute)
 
         table_reports = tuple(
             TableRunReport(
@@ -134,10 +138,18 @@ class Engine:
             table_reports=table_reports,
         )
 
-        if report.any_failures:
+        if not dry_run and report.any_failures:
             raise SyncFailedError(report)
 
-        logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
+        if dry_run:
+            logger.info(
+                "Dry run complete for %d table(s); no changes were applied",
+                len(report.table_reports),
+            )
+        else:
+            logger.info(
+                "Sync completed successfully for %d table(s)", len(report.table_reports)
+            )
         return report
 
     def _read(
@@ -213,6 +225,27 @@ class Engine:
             else:
                 logger.info("Validation passed for %s", qualified_name)
         return validation_failures
+
+    def _log_planned_actions(self, plans: dict[QualifiedName, ActionPlan]) -> None:
+        """
+        Log the actions a dry run would apply, one line per non-empty plan.
+
+        Renders each action as ``ClassName(subject)`` using the action type's
+        name and its ``subject`` (the column/constraint it targets, or empty for
+        table-level actions). Empty plans are skipped: they would apply nothing.
+        """
+        for qualified_name, plan in plans.items():
+            if not plan:
+                continue
+            rendered_actions = ", ".join(
+                f"{type(action).__name__}({action.subject})" for action in plan
+            )
+            logger.info(
+                "[dry-run] would apply %d action(s) to %s: %s",
+                len(plan),
+                qualified_name,
+                rendered_actions,
+            )
 
     def _execute(
         self,
