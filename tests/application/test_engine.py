@@ -244,7 +244,7 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     # Then the report shows a VALIDATION_FAILED and a SUCCESS
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.VALIDATION_FAILED
-    assert tr_a.execution.results == ()  # a was not executed
+    assert tr_a.execution is None  # a was not executed
     assert tr_b.status is TableRunStatus.SUCCESS
     assert tr_b.execution.results != ()  # b was executed
 
@@ -427,7 +427,7 @@ def test_sync_fails_table_whose_fk_references_table_not_in_registry():
     assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
     fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
     assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    assert tr.execution.results == ()  # all-or-nothing: the table was not built
+    assert tr.execution is None  # all-or-nothing: the table was not built
 
 
 def test_sync_processes_tables_in_fk_dependency_order():
@@ -487,7 +487,7 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
         if isinstance(failure, ForeignKeyFailure)
     }
     assert reasons == {ForeignKeyFailureReason.CYCLE}
-    assert all(tr.execution.results == () for tr in err.value.report)
+    assert all(tr.execution is None for tr in err.value.report)
 
 
 def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
@@ -629,8 +629,8 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert len(orders_fk_failures) == 1
     assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     # Neither table executes
-    assert reports["cat.sch.customers"].execution.results == ()
-    assert reports["cat.sch.orders"].execution.results == ()
+    assert reports["cat.sch.customers"].execution is None
+    assert reports["cat.sch.orders"].execution is None
 
 
 def test_read_failure_in_upstream_blocks_fk_dependent():
@@ -691,4 +691,4 @@ def test_unchanged_table_is_not_executed():
     assert executed == []
     [tr] = list(report)
     assert tr.status is TableRunStatus.SUCCESS
-    assert tr.execution.results == ()
+    assert tr.execution is None

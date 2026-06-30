@@ -123,7 +123,7 @@ class Engine:
                 qualified_name=candidate.qualified_name,
                 read=catalog_states[candidate.qualified_name],
                 pre_execution_failures=tuple(candidate.failures),
-                execution=executions.get(candidate.qualified_name, ExecutionSummary()),
+                execution=executions.get(candidate.qualified_name),
             )
             for candidate in candidates
         )

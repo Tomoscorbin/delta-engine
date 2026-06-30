@@ -19,7 +19,6 @@ from delta_engine.application.results import (
 from delta_engine.domain.model import QualifiedName
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-_NO_EXECUTION = ExecutionSummary()
 _QN = QualifiedName("cat", "sch", "tbl")
 
 
@@ -27,7 +26,7 @@ def _table_report(
     *,
     read: CatalogState,
     pre_execution_failures: tuple[Failure, ...] = (),
-    execution: ExecutionSummary = _NO_EXECUTION,
+    execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
     return TableRunReport(
         qualified_name=_QN,

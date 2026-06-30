@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
@@ -225,7 +225,7 @@ class TableRunReport:
     qualified_name: QualifiedName
     read: CatalogState
     pre_execution_failures: tuple[Failure, ...] = ()
-    execution: ExecutionSummary = field(default_factory=ExecutionSummary)
+    execution: ExecutionSummary | None = None
 
     @property
     def status(self) -> TableRunStatus:
@@ -236,7 +236,7 @@ class TableRunReport:
             return TableRunStatus.FOREIGN_KEY_FAILED
         if any(isinstance(f, ValidationFailure) for f in self.pre_execution_failures):
             return TableRunStatus.VALIDATION_FAILED
-        if self.execution.failed:
+        if self.execution is not None and self.execution.failed:
             return TableRunStatus.EXECUTION_FAILED
         return TableRunStatus.SUCCESS
 
@@ -252,7 +252,8 @@ class TableRunReport:
         if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
         out.extend(self.pre_execution_failures)
-        out.extend(self.execution.failures)
+        if self.execution is not None:
+            out.extend(self.execution.failures)
         return tuple(out)
 
 
