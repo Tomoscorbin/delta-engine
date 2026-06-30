@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -170,56 +169,38 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     return tuple(actions)
 
 
-def _fk_content_equal(a: ForeignKeyConstraint, b: ForeignKeyConstraint) -> bool:
-    """
-    Compare two FK constraints by content only, ignoring constraint_name.
-
-    This is necessary because a desired FK may have constraint_name=None while
-    the catalog-observed FK carries the derived name. Using dataclass __eq__
-    would treat them as different and cause spurious Drop+Set on every sync.
-    """
-    return (
-        a.local_columns == b.local_columns
-        and a.references == b.references
-        and a.referenced_columns == b.referenced_columns
-    )
-
-
 def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
     """
     Return the FK actions to align observed with desired.
 
-    Foreign keys are matched by *content* (local columns, referenced table, and
-    referenced columns), not by constraint name. An observed FK whose content is
-    not desired is dropped; a desired FK whose content is not observed is set.
-    A FK present on both sides — even under a different constraint name, e.g. one
-    created outside this engine — produces no actions, so a sync over an
-    unchanged catalog stays idempotent.
+    Foreign keys are matched by their content signature (local columns,
+    referenced table, and referenced columns), not by constraint name: a
+    desired FK whose signature is not observed is set; an observed FK whose
+    signature is not desired is dropped; a FK on both sides — even under a
+    different constraint name, e.g. one created outside this engine — produces
+    no action, so a sync over an unchanged catalog stays idempotent.
 
-    Dropping an observed FK uses its catalog-stored constraint name so the
-    correct constraint is removed; setting a desired FK uses its resolved name.
+    Setting a desired FK uses its resolved name; dropping an observed FK uses
+    its catalog-stored name, so the correct constraint is removed. The order
+    actions are returned in does not matter — ActionPlan sorts every plan by
+    execution phase.
     """
-    observed_unmatched = list(observed.foreign_keys)
+    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
 
-    actions: list[Action] = []
-    for desired_fk in desired.foreign_keys:
-        match = next(
-            (fk for fk in observed_unmatched if _fk_content_equal(desired_fk, fk)),
-            None,
+    set_actions = tuple(
+        SetForeignKey(
+            foreign_key=foreign_key,
+            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name),
         )
-        if match is None:
-            actions.append(
-                SetForeignKey(
-                    foreign_key=desired_fk,
-                    constraint_name=desired_fk.resolve_constraint_name(desired.qualified_name.name),
-                )
-            )
-        else:
-            observed_unmatched.remove(match)
-
-    drop_actions = [
-        DropForeignKey(constraint_name=fk.resolve_constraint_name(observed.qualified_name.name))
-        for fk in observed_unmatched
-    ]
-
-    return tuple(drop_actions) + tuple(actions)
+        for signature, foreign_key in desired_by_signature.items()
+        if signature not in observed_by_signature
+    )
+    drop_actions = tuple(
+        DropForeignKey(
+            constraint_name=foreign_key.resolve_constraint_name(observed.qualified_name.name)
+        )
+        for signature, foreign_key in observed_by_signature.items()
+        if signature not in desired_by_signature
+    )
+    return set_actions + drop_actions

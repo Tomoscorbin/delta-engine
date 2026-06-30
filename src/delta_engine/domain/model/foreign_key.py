@@ -57,3 +57,16 @@ class ForeignKeyConstraint:
             return self.constraint_name
         cols = "_".join(self.local_columns)
         return f"{table_name}_{cols}_fk"
+
+    @property
+    def signature(self) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+        """
+        Content identity: local columns, referenced table, referenced columns.
+
+        Excludes ``constraint_name``, so a desired foreign key (which may be
+        unnamed) and a catalog-observed one (which always carries a name)
+        compare equal when they describe the same relationship. The differ
+        matches foreign keys by this signature, which keeps repeated syncs over
+        an unchanged catalog idempotent.
+        """
+        return (self.local_columns, self.references, self.referenced_columns)
