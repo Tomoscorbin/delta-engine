@@ -6,9 +6,9 @@ from dataclasses import dataclass
 import logging
 from types import MappingProxyType
 
+from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
-from pyspark.errors.exceptions.base import AnalysisException
 
 from delta_engine.adapters.databricks.sql import (
     backtick,
@@ -26,6 +26,7 @@ from delta_engine.application.results import (
     TablePresent,
 )
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,7 @@ class DatabricksReader:
             properties=self._fetch_properties(qualified_name),
             partitioned_by=partition_columns,
             primary_key=self._fetch_primary_key(qualified_name),
+            foreign_keys=self._fetch_foreign_keys(qualified_name),
         )
         return TablePresent(table=observed)
 
@@ -180,6 +182,75 @@ class DatabricksReader:
             # no PK constraints to observe.
             return ()
         return tuple(row["column_name"].casefold() for row in rows)
+
+    def _fetch_foreign_keys(
+        self, qualified_name: QualifiedName
+    ) -> tuple[ForeignKeyConstraint, ...]:
+        """
+        Return foreign key constraints from Unity Catalog information_schema.
+
+        Returns an empty tuple when no FKs are defined, or on AnalysisException
+        (plain Spark / non-Unity Catalog environment).
+
+        Constraint names are read from the catalog so the differ can compare them
+        directly without re-deriving them. Column names are lowercased at the
+        adapter boundary, consistent with how primary key and column names are
+        normalised throughout this reader.
+        """
+        catalog = backtick(qualified_name.catalog)
+        query = (
+            f"SELECT rc.constraint_name,"
+            f" kcu.column_name AS local_column,"
+            f" kcu.ordinal_position,"
+            f" ccu.table_catalog AS ref_catalog,"
+            f" ccu.table_schema AS ref_schema,"
+            f" ccu.table_name AS ref_table,"
+            f" ccu.column_name AS ref_column"
+            f" FROM {catalog}.information_schema.referential_constraints AS rc"
+            f" JOIN {catalog}.information_schema.key_column_usage AS kcu"
+            f" USING (constraint_catalog, constraint_schema, constraint_name)"
+            f" JOIN {catalog}.information_schema.constraint_column_usage AS ccu"
+            f" ON rc.unique_constraint_name = ccu.constraint_name"
+            f" AND rc.unique_constraint_catalog = ccu.constraint_catalog"
+            f" AND rc.unique_constraint_schema = ccu.constraint_schema"
+            f" WHERE kcu.table_schema = {quote_literal(qualified_name.schema)}"
+            f" AND kcu.table_name = {quote_literal(qualified_name.name)}"
+            f" ORDER BY rc.constraint_name, kcu.ordinal_position"
+        )
+        try:
+            rows = self.spark.sql(query).collect()
+        except AnalysisException:
+            # information_schema is only available in Unity Catalog. On plain
+            # Spark (e.g. local tests without UC), the view does not exist and
+            # there are no FK constraints to observe.
+            return ()
+
+        # Group rows by constraint_name, preserving ordinal order from the query.
+        # Using a plain dict keeps insertion order (Python 3.7+), so constraints
+        # appear in the same order as the first row for each name.
+        grouped: dict[str, dict] = {}
+        for row in rows:
+            constraint_name = row.constraint_name
+            if constraint_name not in grouped:
+                grouped[constraint_name] = {
+                    "local_columns": [],
+                    "ref_catalog": row.ref_catalog,
+                    "ref_schema": row.ref_schema,
+                    "ref_table": row.ref_table,
+                    "referenced_columns": [],
+                }
+            grouped[constraint_name]["local_columns"].append(row.local_column.casefold())
+            grouped[constraint_name]["referenced_columns"].append(row.ref_column.casefold())
+
+        return tuple(
+            ForeignKeyConstraint(
+                local_columns=tuple(data["local_columns"]),
+                references=f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold(),
+                referenced_columns=tuple(data["referenced_columns"]),
+                constraint_name=constraint_name,
+            )
+            for constraint_name, data in grouped.items()
+        )
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""

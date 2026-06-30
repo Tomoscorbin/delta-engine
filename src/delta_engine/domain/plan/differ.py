@@ -20,10 +20,12 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -43,7 +45,14 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
     """
     if observed is None:
-        actions: tuple[Action, ...] = (CreateTable(desired),)
+        foreign_key_actions = tuple(
+            SetForeignKey(
+                foreign_key=fk,
+                constraint_name=fk.resolve_constraint_name(desired.qualified_name.name),
+            )
+            for fk in desired.foreign_keys
+        )
+        actions: tuple[Action, ...] = (CreateTable(desired), *foreign_key_actions)
     else:
         actions = (
             _diff_columns(desired.columns, observed.columns)
@@ -51,6 +60,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
             + _diff_primary_key(desired, observed)
+            + _diff_foreign_keys(desired, observed)
         )
     return ActionPlan(actions)
 
@@ -129,29 +139,68 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     """
     Return the primary key actions to align observed with desired.
 
-    Uses frozenset comparison so column order does not trigger spurious changes.
+    Uses set comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns.
     """
-    desired_set = frozenset(desired.primary_key)
-    observed_set = frozenset(observed.primary_key)
+    desired_primary_key = set(desired.primary_key)
+    observed_primary_key = set(observed.primary_key)
 
-    if desired_set == observed_set:
+    if desired_primary_key == observed_primary_key:
         return ()
 
     actions: list[Action] = []
 
-    if observed_set:
+    if observed_primary_key:
         actions.append(DropPrimaryKey())
 
-    if desired_set:
-        pk_columns = tuple(column for column in desired.columns if column.name in desired_set)
+    if desired_primary_key:
+        primary_key_columns = tuple(
+            column for column in desired.columns if column.name in desired_primary_key
+        )
         constraint_name = desired.primary_key_constraint_name
-        assert constraint_name is not None  # guaranteed: desired_set is non-empty
+        assert constraint_name is not None  # guaranteed: desired_primary_key is non-empty
         actions.append(
             SetPrimaryKey(
-                columns=pk_columns,
+                columns=primary_key_columns,
                 constraint_name=constraint_name,
             )
         )
 
     return tuple(actions)
+
+
+def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+    """
+    Return the FK actions to align observed with desired.
+
+    Foreign keys are matched by their content signature (local columns,
+    referenced table, and referenced columns), not by constraint name: a
+    desired FK whose signature is not observed is set; an observed FK whose
+    signature is not desired is dropped; a FK on both sides — even under a
+    different constraint name, e.g. one created outside this engine — produces
+    no action, so a sync over an unchanged catalog stays idempotent.
+
+    Setting a desired FK uses its resolved name; dropping an observed FK uses
+    its catalog-stored name, so the correct constraint is removed. The order
+    actions are returned in does not matter — ActionPlan sorts every plan by
+    execution phase.
+    """
+    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+
+    set_actions = tuple(
+        SetForeignKey(
+            foreign_key=foreign_key,
+            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name),
+        )
+        for signature, foreign_key in desired_by_signature.items()
+        if signature not in observed_by_signature
+    )
+    drop_actions = tuple(
+        DropForeignKey(
+            constraint_name=foreign_key.resolve_constraint_name(observed.qualified_name.name)
+        )
+        for signature, foreign_key in observed_by_signature.items()
+        if signature not in desired_by_signature
+    )
+    return set_actions + drop_actions

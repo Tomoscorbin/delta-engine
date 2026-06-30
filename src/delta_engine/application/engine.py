@@ -2,15 +2,23 @@
 High-level orchestration of planning, validation, and execution.
 
 `Engine.sync` reads current catalog state, computes a plan (schema diff +
-deterministic ordering), validates it against rules, executes it via provided
-adapters, and aggregates results into a `SyncReport`. If any table fails,
+deterministic ordering), validates it against rules, resolves FK dependencies
+with full failure context, then executes passing plans. If any table fails,
 `SyncFailedError` is raised with a formatted summary.
 
-The sync runs four phases across all tables in sequence:
+The sync runs five phases across all tables in sequence:
   1. Read     — fetch current catalog state for every table
   2. Plan     — compute action plans from desired vs observed state
-  3. Validate — run validation rules against each plan
-  4. Execute  — run passing plans against the catalog
+  3. Validate — check every plan against rules; collect per-table failures
+  4. Resolve  — order tables by FK dependency; propagate all failures
+                (FK-structural and validation) to dependents
+  5. Execute  — run plans for candidates with no pre-execution failures
+
+Running `resolve()` after validation means a table that fails validation
+blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
+with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). The rule is
+uniform: if a dependency won't reach desired state this sync, its dependents
+don't execute either.
 
 A table that fails in an early phase is carried forward as a partial result
 and skipped in later phases, so all tables are attempted and the report is
@@ -22,17 +30,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 
+from delta_engine.application.dependency_resolution import resolve
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
     CatalogState,
     ExecutionSummary,
+    Failure,
     ReadFailed,
     SyncReport,
     TablePresent,
     TableRunReport,
-    ValidationResult,
 )
 from delta_engine.application.validation import validate_plan
 from delta_engine.domain.model import QualifiedName
@@ -43,18 +52,14 @@ from delta_engine.domain.plan.differ import compute_plan
 logger = logging.getLogger(__name__)
 
 
-def _utc_now() -> datetime:
-    """Return current UTC time as a timezone-aware datetime."""
-    return datetime.now(UTC)
-
-
 class Engine:
     """
     High-level orchestrator to plan, validate, and execute changes.
 
     The engine coordinates reading current state from a catalog, computing a
-    plan to reach desired state, validating that plan, and executing it using
-    the provided adapter implementations.
+    plan to reach desired state, validating that plan, resolving FK dependencies
+    with full failure context, and executing passing plans using the provided
+    adapter implementations.
     """
 
     def __init__(
@@ -70,10 +75,13 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs four phases across all tables in sequence:
-        read → plan → validate → execute. A table that fails in an early
-        phase is skipped in later phases; its partial result is included in
-        the final report.
+        Runs five phases across all tables in sequence:
+        read → plan → validate → resolve → execute. Resolve runs after
+        validate so that validation failures propagate to FK dependents the
+        same way FK-structural failures do.
+
+        A table that fails in an early phase is skipped in later phases;
+        its partial result is included in the final report.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -83,34 +91,46 @@ class Engine:
                 The report is available on the exception's ``report`` attribute.
 
         """
-        run_started = _utc_now()
+        run_started = datetime.now(UTC)
         logger.info("Starting sync for %d table(s)", len(registry))
 
         tables = tuple(registry)
         catalog_states = self._read(tables)
         plans = self._plan(tables, catalog_states)
-        plans_to_validate = {qualified_name: plan for qualified_name, plan in plans.items() if plan}
-        validations = self._validate(plans_to_validate)
+        validation_failures = self._validate_plans(plans)
+
+        # Merge read failures into external_failures so read-failed tables are
+        # treated as "won't build" during FK propagation, blocking their dependents
+        # with BLOCKED_BY_FAILED_DEPENDENCY just as validation-failed tables do.
+        external_failures: dict[QualifiedName, tuple[Failure, ...]] = dict(validation_failures)
+        for table in tables:
+            qn = table.qualified_name
+            state = catalog_states[qn]
+            if isinstance(state, ReadFailed) and not external_failures.get(qn):
+                external_failures[qn] = (state.failure,)
+
+        candidates = resolve(tables, external_failures=external_failures)
+
         plans_to_execute = {
-            qualified_name: plans_to_validate[qualified_name]
-            for qualified_name, validation in validations.items()
-            if not validation.failed
+            candidate.qualified_name: plans[candidate.qualified_name]
+            for candidate in candidates
+            if candidate.can_execute
         }
         executions = self._execute(plans_to_execute)
 
         table_reports = tuple(
             TableRunReport(
-                qualified_name=table.qualified_name,
-                read=catalog_states[table.qualified_name],
-                validation=validations.get(table.qualified_name, ValidationResult()),
-                execution=executions.get(table.qualified_name, ExecutionSummary()),
+                qualified_name=candidate.qualified_name,
+                read=catalog_states[candidate.qualified_name],
+                pre_execution_failures=tuple(candidate.failures),
+                execution=executions.get(candidate.qualified_name),
             )
-            for table in tables
+            for candidate in candidates
         )
 
         report = SyncReport(
             started_at=run_started,
-            ended_at=_utc_now(),
+            ended_at=datetime.now(UTC),
             table_reports=table_reports,
         )
 
@@ -127,19 +147,20 @@ class Engine:
         """Fetch current catalog state for every table."""
         catalog_states: dict[QualifiedName, CatalogState] = {}
         for table in tables:
-            catalog_state = self.reader.fetch_state(table.qualified_name)
-            catalog_states[table.qualified_name] = catalog_state
+            qualified_name = table.qualified_name
+            catalog_state = self.reader.fetch_state(qualified_name)
+            catalog_states[qualified_name] = catalog_state
             if isinstance(catalog_state, ReadFailed):
                 logger.error(
                     "Read failed for %s: %s - %s",
-                    table.qualified_name,
+                    qualified_name,
                     catalog_state.failure.exception_type,
                     catalog_state.failure.message,
                 )
             else:
                 logger.info(
                     "Read state for %s: %s",
-                    table.qualified_name,
+                    qualified_name,
                     "present" if isinstance(catalog_state, TablePresent) else "absent",
                 )
         return catalog_states
@@ -156,37 +177,42 @@ class Engine:
         """
         plans: dict[QualifiedName, ActionPlan] = {}
         for table in tables:
-            catalog_state = catalog_states[table.qualified_name]
+            qualified_name = table.qualified_name
+            catalog_state = catalog_states[qualified_name]
             if isinstance(catalog_state, ReadFailed):
-                plans[table.qualified_name] = ActionPlan()
+                plans[qualified_name] = ActionPlan()
                 continue
 
             observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
             plan = compute_plan(desired=table, observed=observed)
-            plans[table.qualified_name] = plan
-            logger.info("Planned %d action(s) for %s", len(plan), table.qualified_name)
+            plans[qualified_name] = plan
+            logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
 
         return plans
 
-    def _validate(
+    def _validate_plans(
         self,
         plans: dict[QualifiedName, ActionPlan],
-    ) -> dict[QualifiedName, ValidationResult]:
-        """Validate every plan in the given dict."""
-        validations: dict[QualifiedName, ValidationResult] = {}
+    ) -> dict[QualifiedName, tuple[Failure, ...]]:
+        """
+        Validate every plan and return per-table failures.
+
+        All tables are validated. The returned dict is passed to `resolve()` so
+        that validation-failed tables block their FK dependents.
+        """
+        validation_failures: dict[QualifiedName, tuple[Failure, ...]] = {}
         for qualified_name, plan in plans.items():
-            validation = validate_plan(plan)
-            validations[qualified_name] = validation
-            if validation.failed:
+            result = validate_plan(plan)
+            validation_failures[qualified_name] = tuple(result.failures)
+            if result.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
                     qualified_name,
-                    len(validation.failures),
+                    len(result.failures),
                 )
             else:
                 logger.info("Validation passed for %s", qualified_name)
-
-        return validations
+        return validation_failures
 
     def _execute(
         self,
@@ -195,6 +221,8 @@ class Engine:
         """Execute every plan in the given dict."""
         executions: dict[QualifiedName, ExecutionSummary] = {}
         for qualified_name, plan in plans.items():
+            if not plan:
+                continue
             execution = self.executor.execute(qualified_name, plan)
             executions[qualified_name] = execution
             logger.info(

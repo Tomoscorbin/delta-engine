@@ -37,6 +37,7 @@ If the action belongs to a new execution phase, add it to the `ActionPhase` enum
 class ActionPhase(IntEnum):
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
@@ -44,6 +45,7 @@ class ActionPhase(IntEnum):
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
+    SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()
     # ADD_YOUR_NEW_PHASE = auto()

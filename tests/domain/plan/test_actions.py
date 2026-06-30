@@ -2,15 +2,20 @@ from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -213,16 +218,25 @@ def test_plan_orders_set_primary_key_after_set_column_nullability():
 
 def test_plan_full_phase_order_with_all_action_types():
     # Given one action from each phase, handed to the plan in scrambled order
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
     plan = ActionPlan(
         (
+            ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
+            PartitioningChange(desired_partitioning=("p",), observed_partitioning=()),
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
                 constraint_name="t_pk",
             ),
+            SetForeignKey(foreign_key=fk, constraint_name="t_customer_id_fk"),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
             SetColumnNullability(column_name="nn_col", nullable=False),
+            DropForeignKey(constraint_name="t_old_fk"),
             DropPrimaryKey(),
             DropColumn(column_name="d_col"),
             SetColumnComment(column_name="c_col", comment="c"),
@@ -234,6 +248,7 @@ def test_plan_full_phase_order_with_all_action_types():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        DropForeignKey,
         DropPrimaryKey,
         AddColumn,
         DropColumn,
@@ -241,4 +256,57 @@ def test_plan_full_phase_order_with_all_action_types():
         SetTableComment,
         SetColumnNullability,
         SetPrimaryKey,
+        SetForeignKey,
+        ColumnTypeChange,
+        PartitioningChange,
     ]
+
+
+# ----- DropForeignKey / SetForeignKey
+
+
+def test_plan_orders_drop_foreign_key_before_drop_column():
+    # Given a DropColumn and the DropForeignKey for a constraint on that column
+    plan = ActionPlan(
+        (
+            DropColumn(column_name="customer_id"),
+            DropForeignKey(constraint_name="orders_customer_id_fk"),
+        )
+    )
+
+    # Then the foreign key is dropped before the column it references
+    assert [type(a) for a in plan] == [DropForeignKey, DropColumn]
+
+
+def test_plan_orders_drop_foreign_key_before_drop_primary_key():
+    # Given a DropPrimaryKey and a DropForeignKey in the same plan
+    plan = ActionPlan(
+        (
+            DropPrimaryKey(),
+            DropForeignKey(constraint_name="employees_manager_id_fk"),
+        )
+    )
+
+    # Then the foreign key is dropped before the primary key it may reference
+    assert [type(a) for a in plan] == [DropForeignKey, DropPrimaryKey]
+
+
+def test_drop_foreign_key_subject_is_constraint_name():
+    # Given
+    action = DropForeignKey(constraint_name="orders_customer_id_fk")
+
+    # Then subject is the constraint name (for deterministic ordering within the phase)
+    assert action.subject == "orders_customer_id_fk"
+
+
+def test_set_foreign_key_subject_is_constraint_name():
+    # Given
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
+
+    # Then subject is the constraint name
+    assert action.subject == "orders_customer_id_fk"

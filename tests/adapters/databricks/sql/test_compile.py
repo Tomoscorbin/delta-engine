@@ -4,6 +4,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
@@ -12,10 +13,12 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -344,3 +347,57 @@ def test_create_table_without_pk_omits_constraint_clause():
     # Then no CONSTRAINT clause appears
     assert "PRIMARY KEY" not in statement
     assert "CONSTRAINT" not in statement
+
+
+def test_drop_foreign_key_renders_drop_constraint_if_exists():
+    # Given
+    action = DropForeignKey(constraint_name="orders_customer_id_fk")
+
+    # When
+    statement = _compile_single(action)
+
+    # Then
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`"
+    )
+
+
+def test_set_foreign_key_renders_add_constraint_foreign_key():
+    # Given
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
+
+    # When
+    statement = _compile_single(action)
+
+    # Then
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl`"
+        " ADD CONSTRAINT `orders_customer_id_fk`"
+        " FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
+    )
+
+
+def test_set_foreign_key_renders_composite_fk():
+    # Given a composite FK (two local columns, two referenced columns)
+    fk = ForeignKeyConstraint(
+        local_columns=("tenant_id", "customer_id"),
+        references="cat.sch.customers",
+        referenced_columns=("tenant_id", "id"),
+    )
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_tenant_id_customer_id_fk")
+
+    # When
+    statement = _compile_single(action)
+
+    # Then both column pairs appear
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl`"
+        " ADD CONSTRAINT `orders_tenant_id_customer_id_fk`"
+        " FOREIGN KEY (`tenant_id`, `customer_id`)"
+        " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
+    )

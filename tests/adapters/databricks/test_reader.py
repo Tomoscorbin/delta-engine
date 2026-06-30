@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pyspark.sql.types as T
 from pyspark.errors.exceptions.base import AnalysisException
+import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 # ---------- fakes & helpers ----------
 
@@ -54,28 +55,6 @@ class FakeCatalog:
         return SimpleNamespace(description=self._table_comments.get(fully_qualified_name, ""))
 
 
-class FakeSpark:
-    """Spark fake whose catalog.* calls delegate to the provided FakeCatalog."""
-
-    def __init__(self, *, catalog: FakeCatalog | None = None):
-        self.catalog = catalog or FakeCatalog()
-
-
-class FakeSparkProps:
-    """
-    Spark fake for _fetch_properties() unit tests.
-
-    - sql(query) returns a dataframe built from `rows`
-    """
-
-    def __init__(self, rows):
-        self._rows = rows
-        self.catalog = SimpleNamespace()  # not used in these tests
-
-    def sql(self, _query: str):
-        return FakeDataFrame(self._rows)
-
-
 class FakeSparkForFetchState:
     """
     Spark fake for fetch_state().
@@ -99,7 +78,9 @@ class FakeSparkForFetchState:
     def catalog(self):
         return self._catalog
 
-    def sql(self, _query: str):
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            return FakeDataFrame([])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
@@ -107,11 +88,13 @@ class FakeSparkForFetchState:
 
 class FakeSparkWithPrimaryKey:
     """
-    Spark fake that handles both DESCRIBE DETAIL (properties) and the
-    INFORMATION_SCHEMA primary key query.
+    Spark fake that handles the three queries `fetch_state` issues against a
+    present table: DESCRIBE DETAIL (properties), the information_schema primary
+    key query, and the information_schema foreign key query.
 
-    sql() is called for both queries; this fake distinguishes them by
-    the presence of 'information_schema' in the query string.
+    sql() distinguishes them by query text: the FK query references
+    'referential_constraints'; the PK query is the other 'information_schema'
+    query; everything else is treated as DESCRIBE DETAIL.
     """
 
     def __init__(
@@ -121,17 +104,25 @@ class FakeSparkWithPrimaryKey:
         describe_rows=None,
         pk_column_rows=None,
         pk_exc: Exception | None = None,
+        fk_rows=None,
+        fk_exc: Exception | None = None,
     ):
         self._catalog = catalog
         self._describe_rows = describe_rows or [{"properties": {}}]
         self._pk_column_rows = pk_column_rows or []
         self._pk_exc = pk_exc
+        self._fk_rows = fk_rows or []
+        self._fk_exc = fk_exc
 
     @property
     def catalog(self):
         return self._catalog
 
     def sql(self, query: str):
+        if "referential_constraints" in query:
+            if self._fk_exc is not None:
+                raise self._fk_exc
+            return FakeDataFrame(self._fk_rows)
         if "information_schema" in query.lower():
             if self._pk_exc is not None:
                 raise self._pk_exc
@@ -241,22 +232,32 @@ def test_partition_columns_ignores_missing_or_false_flags():
 # ---------- tests: properties ----------
 
 
-def test_fetch_properties_returns_empty_readonly_when_describe_has_no_rows(qn):
-    # Given DESCRIBE DETAIL yields no rows
-    reader = DatabricksReader(FakeSparkProps(rows=[]))
+def test_observed_properties_are_empty_and_read_only_when_describe_has_no_rows(qn):
+    # Given a present table whose DESCRIBE DETAIL yields no rows
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[]))
 
-    # When we fetch properties
-    props = reader._fetch_properties(qn)
+    # When we fetch state
+    result = reader.fetch_state(qn)
 
-    # Then we get an empty mapping
-    assert dict(props) == {}
+    # Then the observed table carries an empty, read-only property mapping
+    assert isinstance(result, TablePresent)
+    properties = result.table.properties
+    assert dict(properties) == {}
     with pytest.raises(TypeError):
-        props["x"] = "y"  # type: ignore[index]
+        properties["x"] = "y"  # type: ignore[index]
 
 
-def test_fetch_properties_returns_full_catalog_map_unfiltered(qn):
-    # Given DESCRIBE DETAIL returns properties including ones the engine does not manage
-    rows = [
+def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
+    # Given a present table whose DESCRIBE DETAIL returns properties the engine does not manage
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    describe_rows = [
         {
             "properties": {
                 "delta.columnMapping.mode": "name",
@@ -265,19 +266,23 @@ def test_fetch_properties_returns_full_catalog_map_unfiltered(qn):
             }
         }
     ]
-    reader = DatabricksReader(FakeSparkProps(rows=rows))
+    reader = DatabricksReader(
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows)
+    )
 
-    # When we fetch properties
-    props = reader._fetch_properties(qn)
+    # When we fetch state
+    result = reader.fetch_state(qn)
 
     # Then the full catalog map passes through unfiltered, as a read-only mapping
-    assert dict(props) == {
+    assert isinstance(result, TablePresent)
+    properties = result.table.properties
+    assert dict(properties) == {
         "delta.columnMapping.mode": "name",
         "delta.minReaderVersion": "2",
         "custom.unlisted": "kept",
     }
     with pytest.raises(TypeError):
-        props["x"] = "y"
+        properties["x"] = "y"  # type: ignore[index]
 
 
 # ---------- tests: table comment ----------
@@ -286,17 +291,21 @@ def test_fetch_properties_returns_full_catalog_map_unfiltered(qn):
 @pytest.mark.parametrize(
     "desc_value, expected", [("orders table", "orders table"), (None, ""), ("", "")]
 )
-def test_fetch_table_comment_returns_description_or_empty(desc_value, expected):
-    # Given a catalog that may or may not have a description
+def test_observed_comment_is_description_or_empty_string(desc_value, expected):
+    # Given a present table whose catalog description may be set, None, or empty
     qualified_name = QualifiedName("c", "s", "t")
-    catalog = FakeCatalog(table_comments={str(qualified_name): desc_value})
-    reader = DatabricksReader(FakeSpark(catalog=catalog))
+    catalog = FakeCatalog(
+        columns_by_table={str(qualified_name): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qualified_name): desc_value},
+    )
+    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog))
 
-    # When we fetch the table comment
-    comment = reader._fetch_table_comment(qualified_name)
+    # When we fetch state
+    result = reader.fetch_state(qualified_name)
 
-    # Then we get the description or an empty string
-    assert comment == expected
+    # Then the observed comment is the description, or an empty string when unset
+    assert isinstance(result, TablePresent)
+    assert result.table.comment == expected
 
 
 def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
@@ -482,52 +491,26 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
 # ---------- tests: primary key ----------
 
 
-def test_fetch_primary_key_returns_column_names_from_information_schema():
-    # Given: information_schema returns one column name for the PK
+def test_fetch_state_lowercases_primary_key_column_names_from_catalog():
+    # Given a present table whose information_schema reports a mixed-case PK column
     qn = QualifiedName("c", "s", "t")
-    spark = FakeSparkWithPrimaryKey(
-        catalog=FakeCatalog(),
-        pk_column_rows=[{"column_name": "id"}],
+    fq = str(qn)
+    catalog = FakeCatalog(
+        columns_by_table={fq: [make_catalog_col("orderid", dataType=T.IntegerType())]},
+        table_comments={fq: ""},
     )
-
-    # When
-    reader = DatabricksReader(spark)
-    pk = reader._fetch_primary_key(qn)
-
-    # Then: the primary key column names are returned
-    assert pk == ("id",)
-
-
-def test_fetch_primary_key_returns_empty_when_no_pk_defined():
-    # Given: information_schema returns no rows (no PK)
-    qn = QualifiedName("c", "s", "t")
     spark = FakeSparkWithPrimaryKey(
-        catalog=FakeCatalog(),
-        pk_column_rows=[],
-    )
-
-    # When
-    reader = DatabricksReader(spark)
-    pk = reader._fetch_primary_key(qn)
-
-    # Then: empty tuple
-    assert pk == ()
-
-
-def test_fetch_primary_key_lowercases_column_names():
-    # Given: information_schema returns a mixed-case column name
-    qn = QualifiedName("c", "s", "t")
-    spark = FakeSparkWithPrimaryKey(
-        catalog=FakeCatalog(),
+        catalog=catalog,
+        describe_rows=[{"properties": {}}],
         pk_column_rows=[{"column_name": "OrderID"}],
     )
 
-    # When
-    reader = DatabricksReader(spark)
-    pk = reader._fetch_primary_key(qn)
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then: name is normalised to lowercase
-    assert pk == ("orderid",)
+    # Then the primary key column is normalised to lowercase at the adapter boundary
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key == ("orderid",)
 
 
 def test_fetch_state_includes_primary_key_in_observed_table():
@@ -598,3 +581,115 @@ def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
     # Then: the read succeeds and primary_key is empty (no UC = no PK constraints)
     assert isinstance(result, TablePresent)
     assert result.table.primary_key == ()
+
+
+# ---------- tests: foreign keys ----------
+
+
+def _orders_catalog() -> FakeCatalog:
+    """Build a present 'cat.sch.orders' table with the columns the FK tests reference."""
+    fq = "cat.sch.orders"
+    return FakeCatalog(
+        columns_by_table={
+            fq: [
+                make_catalog_col("tenant_id", dataType=T.IntegerType()),
+                make_catalog_col("customer_id", dataType=T.IntegerType()),
+            ]
+        },
+        table_comments={fq: ""},
+    )
+
+
+def test_fetch_state_includes_single_column_foreign_key_in_observed_table():
+    # Given a present table whose information_schema describes one FK
+    qn = QualifiedName("cat", "sch", "orders")
+    fk_rows = [
+        SimpleNamespace(
+            constraint_name="orders_customer_id_fk",
+            local_column="customer_id",
+            ordinal_position=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        )
+    ]
+    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=fk_rows)
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the observed table carries the foreign key, named from the catalog
+    assert isinstance(result, TablePresent)
+    assert result.table.foreign_keys == (
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            references="cat.sch.customers",
+            referenced_columns=("id",),
+            constraint_name="orders_customer_id_fk",
+        ),
+    )
+
+
+def test_fetch_state_preserves_composite_foreign_key_columns_in_ordinal_order():
+    # Given a composite FK whose rows arrive in ordinal order (tenant_id, then customer_id)
+    qn = QualifiedName("cat", "sch", "orders")
+    fk_rows = [
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="tenant_id",
+            ordinal_position=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="tenant_id",
+        ),
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="customer_id",
+            ordinal_position=2,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        ),
+    ]
+    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=fk_rows)
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the FK's columns are preserved in ordinal order
+    assert isinstance(result, TablePresent)
+    [foreign_key] = result.table.foreign_keys
+    assert foreign_key.local_columns == ("tenant_id", "customer_id")
+    assert foreign_key.referenced_columns == ("tenant_id", "id")
+
+
+def test_fetch_state_foreign_keys_are_empty_when_none_defined():
+    # Given a present table whose information_schema returns no FK rows
+    qn = QualifiedName("cat", "sch", "orders")
+    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=[])
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then no foreign keys are observed
+    assert isinstance(result, TablePresent)
+    assert result.table.foreign_keys == ()
+
+
+def test_fetch_state_foreign_keys_are_empty_when_information_schema_unavailable():
+    # Given the FK information_schema query raises (non-UC environment)
+    qn = QualifiedName("cat", "sch", "orders")
+    spark = FakeSparkWithPrimaryKey(
+        catalog=_orders_catalog(),
+        fk_exc=AnalysisException("no information_schema"),
+    )
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the read still succeeds with no foreign keys (no UC = no FK constraints)
+    assert isinstance(result, TablePresent)
+    assert result.table.foreign_keys == ()

@@ -14,6 +14,7 @@ _EXPECTED = {
     "Decimal",
     "Double",
     "Float",
+    "ForeignKey",
     "Integer",
     "Long",
     "Map",

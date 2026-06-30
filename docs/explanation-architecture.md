@@ -44,7 +44,14 @@ The `delta_engine.adapters.databricks` package implements both ports for Databri
 
 ## Planning and determinism
 
-`compute_plan(desired, observed)` diffs the desired declaration against the observed catalog state and returns an `ActionPlan`. Actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order. The phase ordering encodes dependency constraints: primary key drops run before column mutations (so no constraint references a column being dropped), and primary key sets run after nullability changes (so columns are guaranteed non-nullable before the constraint is applied).
+`compute_plan(desired, observed)` diffs the desired declaration against the observed catalog state and returns an `ActionPlan`. Actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
+
+The phase ordering encodes dependency constraints. Each ordering below exists because Databricks rejects the operation otherwise:
+
+- **Foreign keys are dropped first** (before primary key and column drops): a foreign key may reference a column or primary key that a later phase drops, and Databricks rejects dropping anything still referenced by an active foreign key constraint.
+- **Primary key drops run before column mutations**, so no constraint references a column being dropped.
+- **Primary key sets run after nullability changes**, so columns are guaranteed non-nullable before the constraint is applied.
+- **Foreign keys are set last** (after the primary key is set): a foreign key references a primary or unique key, so that key must exist before the foreign key can point at it.
 
 ## Sentinel actions
 

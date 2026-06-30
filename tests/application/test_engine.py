@@ -11,14 +11,18 @@ from delta_engine.application.results import (
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
     ReadFailed,
     ReadFailure,
     SyncReport,
     TableAbsent,
     TablePresent,
     TableRunStatus,
+    ValidationFailure,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 
 # --------- helpers/fakes
@@ -54,6 +58,26 @@ def _existing_id_table(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String()),),
+        )
+    )
+
+
+def _existing_id_table_synced(fqn: str) -> TablePresent:
+    """
+    Build the present-state read of a table that is already fully in sync with _spec.
+
+    Includes the default Delta properties that _spec produces so that diffing
+    against _spec yields an empty plan.
+    """
+    catalog, schema, name = fqn.split(".")
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, name),
+            columns=(Column("id", String()),),
+            properties={
+                "delta.columnMapping.mode": "name",
+                "delta.enableDeletionVectors": "true",
+            },
         )
     )
 
@@ -220,7 +244,7 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     # Then the report shows a VALIDATION_FAILED and a SUCCESS
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.VALIDATION_FAILED
-    assert tr_a.execution.results == ()  # a was not executed
+    assert tr_a.execution is None  # a was not executed
     assert tr_b.status is TableRunStatus.SUCCESS
     assert tr_b.execution.results != ()  # b was executed
 
@@ -354,3 +378,317 @@ def test_validate_phase_validates_all_tables_before_any_execution():
     [tr_a, tr_b] = list(err.value.report)
     assert tr_a.status is TableRunStatus.VALIDATION_FAILED
     assert tr_b.status is TableRunStatus.SUCCESS
+
+
+def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
+    """Build a table spec with a single FK to another table."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("ref_id", String())),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_id",),
+                references=references,
+                referenced_columns=("id",),
+            )
+        ],
+    )
+
+
+def test_sync_report_has_no_fk_failures_when_no_fks_declared():
+    # Given a registry with no FKs
+    registry = Registry()
+    registry.register(_spec("cat.sch.tbl"))
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When
+    report = engine.sync(registry)
+
+    # Then the single table has no pre-execution failures and succeeds
+    [tr] = list(report)
+    assert tr.pre_execution_failures == ()
+    assert tr.status is TableRunStatus.SUCCESS
+
+
+def test_sync_fails_table_whose_fk_references_table_not_in_registry():
+    # Given orders references customers, but customers is not registered
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When syncing
+    # Then the job fails and orders is reported FOREIGN_KEY_FAILED
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
+    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert tr.execution is None  # all-or-nothing: the table was not built
+
+
+def test_sync_processes_tables_in_fk_dependency_order():
+    # Given customers is referenced by orders; customers registered second
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    registry.register(_spec("cat.sch.customers"))
+
+    synced_order: list[str] = []
+
+    class _OrderCapturingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            synced_order.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(),))
+
+    engine = Engine(_FakeReader({}), _OrderCapturingExecutor())
+
+    # When
+    engine.sync(registry)
+
+    # Then customers syncs before orders regardless of registration order
+    assert synced_order.index("cat.sch.customers") < synced_order.index("cat.sch.orders")
+
+
+def test_sync_fails_all_tables_in_a_detected_cycle():
+    # Given A -> B and B -> A (cycle)
+    constraint_a_to_b = ForeignKeyConstraint(
+        local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
+    )
+    constraint_b_to_a = ForeignKeyConstraint(
+        local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
+    )
+    table_a = DeltaTable(
+        "cat", "sch", "a",
+        columns=(Column("id", String()), Column("b_id", String())),
+        foreign_keys=[constraint_a_to_b],
+    )
+    table_b = DeltaTable(
+        "cat", "sch", "b",
+        columns=(Column("id", String()), Column("a_id", String())),
+        foreign_keys=[constraint_b_to_a],
+    )
+    registry = Registry()
+    registry.register(table_a, table_b)
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When syncing
+    # Then the job fails and both tables are FOREIGN_KEY_FAILED with CYCLE
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    statuses = {tr.status for tr in err.value.report}
+    assert statuses == {TableRunStatus.FOREIGN_KEY_FAILED}
+    reasons = {
+        failure.reason
+        for tr in err.value.report
+        for failure in tr.pre_execution_failures
+        if isinstance(failure, ForeignKeyFailure)
+    }
+    assert reasons == {ForeignKeyFailureReason.CYCLE}
+    assert all(tr.execution is None for tr in err.value.report)
+
+
+def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
+    # Given orders -> customers (registered) and customers -> archive (NOT registered)
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    registry.register(_spec_with_fk("cat.sch.customers", "cat.sch.archive"))
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(_FakeReader({}), _TrackingExecutor())
+
+    # When syncing
+    # Then the job fails: customers is UNRESOLVABLE_REFERENCE, orders is blocked by it,
+    # and neither table executes (all-or-nothing)
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    customers_fk_failures = [
+        f for f in reports["cat.sch.customers"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert customers_fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    orders_fk_failures = [
+        f for f in reports["cat.sch.orders"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    assert executed == []
+
+
+def test_fk_failed_table_executes_no_actions():
+    # Given orders has an unresolvable FK and would otherwise be created
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.missing"))
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(_FakeReader({}), _TrackingExecutor())
+
+    # When syncing
+    # Then the executor is never called for the FK-failed table (all-or-nothing)
+    with pytest.raises(SyncFailedError):
+        engine.sync(registry)
+    assert executed == []
+
+
+def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
+    """Build a spec with a NOT NULL FK column — adding it to an existing table trips validation."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String()), Column("ref_id", String(), nullable=False)),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_id",),
+                references=references,
+                referenced_columns=("id",),
+            )
+        ],
+    )
+
+
+def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
+    # Given orders has an unresolvable FK AND would fail validation (adds NOT NULL to existing)
+    registry = Registry()
+    registry.register(_spec_with_fk_and_not_null_col("cat.sch.orders", "cat.sch.missing"))
+    # Make the existing table have only 'id' so that adding 'ref_id' as NOT NULL triggers validation
+    reader = _FakeReader(
+        {
+            "cat.sch.orders": TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName("cat", "sch", "orders"),
+                    columns=(Column("id", String()),),
+                )
+            )
+        }
+    )
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    # Then the job fails with both FK and validation failures surfaced together
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(registry)
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
+    fk_failures = [
+        f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)
+    ]
+    val_failures = [
+        f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)
+    ]
+    assert len(fk_failures) == 1
+    assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
+
+
+def test_validation_failure_in_upstream_blocks_fk_dependent():
+    # Given customers fails validation (adds NOT NULL to existing table),
+    # and orders has a FK on customers
+    registry = Registry()
+    registry.register(_spec_adding_not_null("cat.sch.customers"))
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    reader = _FakeReader(
+        {
+            "cat.sch.customers": _existing_id_table("cat.sch.customers"),
+            "cat.sch.orders": TableAbsent(),
+        }
+    )
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    # Then customers is VALIDATION_FAILED and orders is FOREIGN_KEY_FAILED
+    # with BLOCKED_BY_FAILED_DEPENDENCY — because customers won't reach desired state
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(registry)
+
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.customers"].status is TableRunStatus.VALIDATION_FAILED
+    assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    orders_fk_failures = [
+        f for f in reports["cat.sch.orders"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert len(orders_fk_failures) == 1
+    assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    # Neither table executes
+    assert reports["cat.sch.customers"].execution is None
+    assert reports["cat.sch.orders"].execution is None
+
+
+def test_read_failure_in_upstream_blocks_fk_dependent():
+    # Given table A fails to read, and table B has a FK referencing A
+    registry = Registry()
+    registry.register(_spec("cat.sch.a"))
+    registry.register(_spec_with_fk("cat.sch.b", "cat.sch.a"))
+    reader = _FakeReader(
+        {"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))}
+    )
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader=reader, executor=_TrackingExecutor())
+
+    # When syncing
+    # Then the job fails; B is FOREIGN_KEY_FAILED with BLOCKED_BY_FAILED_DEPENDENCY
+    # and the executor is never called for either table
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.a"].status is TableRunStatus.READ_FAILED
+    assert reports["cat.sch.b"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    b_fk_failures = [
+        f for f in reports["cat.sch.b"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert len(b_fk_failures) == 1
+    assert b_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    assert executed == []
+
+
+def test_unchanged_table_is_not_executed():
+    # Given a table whose observed state already matches desired (empty plan)
+    reg = Registry()
+    reg.register(_spec("c.s.same"))
+    reader = _FakeReader({"c.s.same": _existing_id_table_synced("c.s.same")})
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader, _TrackingExecutor())
+
+    # When syncing
+    report = engine.sync(reg)
+
+    # Then the no-op table is reported SUCCESS but the executor was never called
+    assert executed == []
+    [tr] = list(report)
+    assert tr.status is TableRunStatus.SUCCESS
+    assert tr.execution is None

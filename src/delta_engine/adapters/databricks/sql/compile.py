@@ -24,10 +24,12 @@ from delta_engine.domain.plan.actions import (
     ColumnTypeChange,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -150,11 +152,34 @@ def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
-    column_list = ", ".join(backtick(column.name) for column in action.columns)
+    column_clause = ", ".join(backtick(column.name) for column in action.columns)
     constraint = backtick(action.constraint_name)
     return (
         f"ALTER TABLE {backticked_table_name}"
-        f" ADD CONSTRAINT {constraint} PRIMARY KEY ({column_list})"
+        f" ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
+    )
+
+
+@_compile_action.register
+def _(action: DropForeignKey, backticked_table_name: str) -> str:
+    """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
+    constraint = backtick(action.constraint_name)
+    return f"ALTER TABLE {backticked_table_name} DROP CONSTRAINT IF EXISTS {constraint}"
+
+
+@_compile_action.register
+def _(action: SetForeignKey, backticked_table_name: str) -> str:
+    """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
+    foreign_key = action.foreign_key
+    constraint = backtick(action.constraint_name)
+    local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
+    ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
+    # references is a dotted qualified name — split and backtick each part
+    backticked_ref = ".".join(backtick(part) for part in foreign_key.references.split("."))
+    return (
+        f"ALTER TABLE {backticked_table_name}"
+        f" ADD CONSTRAINT {constraint}"
+        f" FOREIGN KEY ({local_cols}) REFERENCES {backticked_ref} ({ref_cols})"
     )
 
 

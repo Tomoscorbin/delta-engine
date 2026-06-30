@@ -10,6 +10,7 @@ from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable
 from delta_engine.domain.model.data_type import DataType
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
 class ActionPhase(IntEnum):
@@ -17,14 +18,16 @@ class ActionPhase(IntEnum):
     Relative execution order of plan actions.
 
     Members are declared in execution order (lower runs first); the order
-    encodes dependencies between operations -- e.g. a table must be created
-    before columns are added, and tightened nullability is applied last.
-    Centralising the order here keeps the full precedence readable in one
-    place while each action declares its own phase by name.
+    encodes dependencies between operations. Centralising the order here keeps
+    the full precedence readable in one place while each action declares its
+    own phase by name. See the "Planning and determinism" section of
+    ``docs/explanation-architecture.md`` for the rationale behind each
+    dependency-driven ordering.
     """
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
@@ -32,6 +35,7 @@ class ActionPhase(IntEnum):
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
+    SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()
 
@@ -184,6 +188,33 @@ class SetPrimaryKey(Action):
     @property
     def subject(self) -> str:
         return ""
+
+
+@dataclass(frozen=True, slots=True)
+class DropForeignKey(Action):
+    """Drop a named foreign key constraint from a table."""
+
+    constraint_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
+
+    @property
+    def subject(self) -> str:
+        return self.constraint_name
+
+
+@dataclass(frozen=True, slots=True)
+class SetForeignKey(Action):
+    """Add a foreign key constraint to a table."""
+
+    foreign_key: ForeignKeyConstraint
+    constraint_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
+
+    @property
+    def subject(self) -> str:
+        return self.constraint_name
 
 
 @dataclass(frozen=True, slots=True)

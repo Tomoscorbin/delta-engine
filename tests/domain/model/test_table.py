@@ -10,6 +10,7 @@ from delta_engine.domain.model import (
     String,
     TableSnapshot,
 )
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
@@ -110,4 +111,99 @@ def test_table_snapshot_rejects_duplicate_pk_column_names():
             qualified_name=_QN,
             columns=(Column("id", Integer(), nullable=False),),
             primary_key=("id", "id"),
+        )
+
+
+def test_table_snapshot_defaults_to_no_foreign_keys():
+    # Given a minimal table definition
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()),),
+    )
+
+    # Then foreign_keys defaults to empty
+    assert table.foreign_keys == ()
+
+
+def test_table_snapshot_stores_foreign_keys():
+    # Given a foreign key referencing another table
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+
+    # Then the FK is stored
+    assert table.foreign_keys == (fk,)
+
+
+def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
+    # Given a FK whose local column is not declared
+    fk = ForeignKeyConstraint(
+        local_columns=("nonexistent",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+
+    # When / Then
+    with pytest.raises(ValueError, match="nonexistent"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(Column("id", Integer()),),
+            foreign_keys=(fk,),
+        )
+
+
+def test_table_snapshot_rejects_foreign_keys_with_duplicate_explicit_names():
+    # Given two FKs sharing one explicit constraint name
+    first = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="shared_name",
+    )
+    second = ForeignKeyConstraint(
+        local_columns=("product_id",),
+        references="cat.sch.products",
+        referenced_columns=("id",),
+        constraint_name="shared_name",
+    )
+
+    # When / Then — the differ keys FKs by name, so a collision would drop one
+    with pytest.raises(ValueError, match="shared_name"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(
+                Column("id", Integer()),
+                Column("customer_id", Integer()),
+                Column("product_id", Integer()),
+            ),
+            foreign_keys=(first, second),
+        )
+
+
+def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
+    # Given two FKs on the same local columns, neither with an explicit name
+    first = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    second = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.vips",
+        referenced_columns=("id",),
+    )
+
+    # When / Then — both derive orders_customer_id_fk, which would collide
+    with pytest.raises(ValueError, match="orders_customer_id_fk"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(Column("id", Integer()), Column("customer_id", Integer())),
+            foreign_keys=(first, second),
         )

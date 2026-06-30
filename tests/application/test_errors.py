@@ -6,31 +6,32 @@ from delta_engine.application.results import (
     ExecutionFailed,
     ExecutionFailure,
     ExecutionSummary,
+    Failure,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
     ReadFailed,
     ReadFailure,
     SyncReport,
     TableAbsent,
     TableRunReport,
     ValidationFailure,
-    ValidationResult,
 )
 from delta_engine.domain.model import QualifiedName
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-_NO_VALIDATION_FAILURES = ValidationResult()
-_NO_EXECUTION = ExecutionSummary()
+_QN = QualifiedName("cat", "sch", "tbl")
 
 
 def _table_report(
     *,
     read: CatalogState,
-    validation: ValidationResult = _NO_VALIDATION_FAILURES,
-    execution: ExecutionSummary = _NO_EXECUTION,
+    pre_execution_failures: tuple[Failure, ...] = (),
+    execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
     return TableRunReport(
-        qualified_name=QualifiedName("cat", "sch", "tbl"),
+        qualified_name=_QN,
         read=read,
-        validation=validation,
+        pre_execution_failures=pre_execution_failures,
         execution=execution,
     )
 
@@ -68,8 +69,8 @@ def test_message_renders_validation_failure_detail():
     # Given a table whose validation phase failed
     report = _table_report(
         read=TableAbsent(),
-        validation=ValidationResult(
-            failures=(ValidationFailure("DisallowPartitioningChange", "cannot repartition"),)
+        pre_execution_failures=(
+            ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
         ),
     )
 
@@ -85,11 +86,9 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
     # Given a table whose plan tripped two rules at once
     report = _table_report(
         read=TableAbsent(),
-        validation=ValidationResult(
-            failures=(
-                ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
-                ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
-            )
+        pre_execution_failures=(
+            ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
+            ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
         ),
     )
 
@@ -122,3 +121,25 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
     assert "❌ cat.sch.tbl [EXECUTION_FAILED]" in message
     assert "Execution failed at action 2: SparkException - boom" in message
     assert "ALTER TABLE cat.sch.tbl ADD COLUMN x INT" in message
+
+
+def test_message_renders_fk_failure_detail():
+    # Given a table with an FK failure
+    report = _table_report(
+        read=TableAbsent(),
+        pre_execution_failures=(
+            ForeignKeyFailure(
+                table=_QN,
+                constraint_name="tbl_ref_id_fk",
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    # When building the error message
+    message = _message_for(report)
+
+    # Then the FK failure line is present
+    assert "❌ cat.sch.tbl [FOREIGN_KEY_FAILED]" in message
+    assert "tbl_ref_id_fk" in message
+    assert "not registered" in message

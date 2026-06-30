@@ -14,6 +14,7 @@ from delta_engine.domain.model import (
     String,
     Timestamp,
 )
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint as ForeignKey
 
 __all__ = [
     "Array",
@@ -24,6 +25,7 @@ __all__ = [
     "DeltaTable",
     "Double",
     "Float",
+    "ForeignKey",
     "Integer",
     "Long",
     "Map",

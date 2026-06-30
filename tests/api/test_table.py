@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, Integer, String
+from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
 from delta_engine.domain.model import Column as DomainColumn
 
@@ -302,3 +302,56 @@ def test_delta_table_pk_column_order_matches_declaration_order():
 
     # Then the order in primary_key matches declaration order
     assert table.primary_key == ("tenant_id", "order_id")
+
+
+def test_delta_table_accepts_foreign_keys_parameter():
+    # Given a FK referencing another table
+    fk = ForeignKey(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+
+    # When constructing the table
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer()), Column("customer_id", Integer())],
+        foreign_keys=[fk],
+    )
+
+    # Then the FK is accessible
+    assert table.foreign_keys == (fk,)
+
+
+def test_delta_table_defaults_to_no_foreign_keys():
+    # Given a table with no foreign_keys argument
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then
+    assert table.foreign_keys == ()
+
+
+def test_delta_table_rejects_fk_with_unknown_local_column():
+    # Given a FK whose local column is not declared in the table
+    fk = ForeignKey(
+        local_columns=("nonexistent",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+
+    # When / Then — domain validation fires at construction time
+    with pytest.raises(ValueError, match="nonexistent"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("id", Integer())],
+            foreign_keys=[fk],
+        )

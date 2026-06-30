@@ -9,6 +9,7 @@ from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.registry import Registry
+from delta_engine.application.results import TableRunStatus, ValidationFailure
 from tests.config import TEST_CATALOG
 
 
@@ -155,12 +156,14 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(registry)
 
-    # Then validation failed for non-nullable add and schema unchanged (no 'age' column)
-    msg = str(excinfo.value)
-    assert "VALIDATION_FAILED" in msg
-    assert "NonNullableColumnAdd" in msg
-    assert "age" in msg
+    # Then the table is reported VALIDATION_FAILED with a validation failure,
+    # and the error message names the offending column so an operator can act
+    [table_report] = excinfo.value.report.table_reports
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert any(isinstance(f, ValidationFailure) for f in table_report.all_failures)
+    assert "age" in str(excinfo.value)
 
+    # And the schema is unchanged: the invalid 'age' column was never added
     cols = {f.name for f in spark.table(fq).schema.fields}
     assert "age" not in cols
 
@@ -189,7 +192,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
     second_report = engine.sync(reg)
 
     # Then no actions were executed (true no-op, not just a schema-equal re-apply)
-    assert all(len(t.execution.results) == 0 for t in second_report.table_reports)
+    assert all(t.execution is None for t in second_report.table_reports)
     assert spark.catalog.getTable(fq).description == "idempotency test"
 
 

@@ -2,15 +2,16 @@
 Result and reporting types for engine runs.
 
 Defines status enums, lightweight failure value objects, and aggregates used to
-propagate outcomes from the read, validation, and execution phases. Provides
-table- and run-level reports that summarize status, failures, and timing.
+propagate outcomes from the foreign-key resolution, read, validation, and
+execution phases. Provides table- and run-level reports that summarize status,
+failures, and timing.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
@@ -25,7 +26,27 @@ class TableRunStatus(StrEnum):
     SUCCESS = "SUCCESS"
     READ_FAILED = "READ_FAILED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
+    FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
+
+
+class ForeignKeyFailureReason(StrEnum):
+    """Why a foreign key constraint could not be applied, failing its whole table."""
+
+    CYCLE = "CYCLE"
+    UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
+    BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
+
+
+_FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
+    ForeignKeyFailureReason.CYCLE: "it is part of a foreign key dependency cycle",
+    ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE: (
+        "it references a table that is not registered"
+    ),
+    ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY: (
+        "it references a table that failed to sync"
+    ),
+}
 
 
 # ---------- Failure value objects ----------
@@ -76,6 +97,21 @@ class ExecutionFailure(Failure):
             f"Execution failed at action {self.action_index}: "
             f"{self.exception_type} - {self.message}",
             f"    SQL preview: {self.statement_preview}",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyFailure(Failure):
+    """A foreign key constraint that could not be applied, failing its whole table."""
+
+    table: QualifiedName
+    constraint_name: str
+    reason: ForeignKeyFailureReason
+
+    def format_lines(self) -> tuple[str, ...]:
+        return (
+            f"Foreign key '{self.constraint_name}' on {self.table} was not applied: "
+            f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
         )
 
 
@@ -188,17 +224,19 @@ class TableRunReport:
 
     qualified_name: QualifiedName
     read: CatalogState
-    validation: ValidationResult
-    execution: ExecutionSummary = field(default_factory=ExecutionSummary)
+    pre_execution_failures: tuple[Failure, ...] = ()
+    execution: ExecutionSummary | None = None
 
     @property
     def status(self) -> TableRunStatus:
-        """Aggregate table status across read, validation, and execution phases."""
+        """Aggregate table status across read, pre-execution, and execution phases."""
         if isinstance(self.read, ReadFailed):
             return TableRunStatus.READ_FAILED
-        if self.validation.failed:
+        if any(isinstance(f, ForeignKeyFailure) for f in self.pre_execution_failures):
+            return TableRunStatus.FOREIGN_KEY_FAILED
+        if any(isinstance(f, ValidationFailure) for f in self.pre_execution_failures):
             return TableRunStatus.VALIDATION_FAILED
-        if self.execution.failed:
+        if self.execution is not None and self.execution.failed:
             return TableRunStatus.EXECUTION_FAILED
         return TableRunStatus.SUCCESS
 
@@ -209,12 +247,13 @@ class TableRunReport:
 
     @property
     def all_failures(self) -> tuple[Failure, ...]:
-        """All failures for this table (read, validation, execution)."""
+        """All failures for this table (read, pre-execution, execution)."""
         out: list[Failure] = []
         if isinstance(self.read, ReadFailed):
             out.append(self.read.failure)
-        out.extend(self.validation.failures)
-        out.extend(self.execution.failures)
+        out.extend(self.pre_execution_failures)
+        if self.execution is not None:
+            out.extend(self.execution.failures)
         return tuple(out)
 
 
