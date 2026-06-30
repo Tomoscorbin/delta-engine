@@ -92,8 +92,9 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     # When we execute the statements against the plan
     summary = _execute_statements(spark, plan, statements)
 
-    # Then execution stops at the failure: the third statement never runs
-    assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
+    # Then execution stops at the failure: only the first two statements run,
+    # and the third (after the failure) never does
+    assert spark.executed == statements[:2]
 
     # And the report covers only the attempted actions, ending at the failure
     results = summary.results

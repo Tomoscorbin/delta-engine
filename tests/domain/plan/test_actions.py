@@ -5,13 +5,14 @@ from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedNa
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
-    ActionPhase,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
@@ -224,6 +225,8 @@ def test_plan_full_phase_order_with_all_action_types():
     )
     plan = ActionPlan(
         (
+            ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
+            PartitioningChange(desired_partitioning=("p",), observed_partitioning=()),
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
                 constraint_name="t_pk",
@@ -254,36 +257,12 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnNullability,
         SetPrimaryKey,
         SetForeignKey,
+        ColumnTypeChange,
+        PartitioningChange,
     ]
 
 
 # ----- DropForeignKey / SetForeignKey
-
-
-def test_drop_foreign_key_phase_is_before_drop_primary_key():
-    # A self-referential FK references the table's own primary key, so the FK
-    # must be dropped before the primary key it depends on can be dropped.
-    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
-
-
-def test_drop_foreign_key_phase_is_before_drop_column():
-    # Databricks rejects dropping a column still referenced by an active FK, so
-    # the FK must be dropped first.
-    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_COLUMN
-
-
-def test_set_foreign_key_phase_is_after_set_primary_key():
-    # A FK references a primary/unique key, so the referenced key must be set
-    # before the FK that points at it.
-    assert ActionPhase.SET_FOREIGN_KEY > ActionPhase.SET_PRIMARY_KEY
-
-
-def test_set_foreign_key_phase_is_after_drop_foreign_key():
-    assert ActionPhase.SET_FOREIGN_KEY > ActionPhase.DROP_FOREIGN_KEY
-
-
-def test_set_foreign_key_phase_is_before_column_type_change():
-    assert ActionPhase.SET_FOREIGN_KEY < ActionPhase.COLUMN_TYPE_CHANGE
 
 
 def test_plan_orders_drop_foreign_key_before_drop_column():
