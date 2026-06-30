@@ -49,7 +49,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
         foreign_key_actions = tuple(
             SetForeignKey(
                 foreign_key=fk,
-                constraint_name=desired.resolve_foreign_key_constraint_name(fk),
+                constraint_name=fk.resolve_constraint_name(desired.qualified_name.name),
             )
             for fk in desired.foreign_keys
         )
@@ -211,7 +211,7 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
             actions.append(
                 SetForeignKey(
                     foreign_key=desired_fk,
-                    constraint_name=desired.resolve_foreign_key_constraint_name(desired_fk),
+                    constraint_name=desired_fk.resolve_constraint_name(desired.qualified_name.name),
                 )
             )
         else:

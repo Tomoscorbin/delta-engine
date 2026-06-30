@@ -207,23 +207,3 @@ def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
             columns=(Column("id", Integer()), Column("customer_id", Integer())),
             foreign_keys=(first, second),
         )
-
-
-def test_desired_table_resolve_foreign_key_constraint_name_delegates_to_fk():
-    # Given a DesiredTable with a FK with no explicit name
-    fk = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        references="cat.sch.customers",
-        referenced_columns=("id",),
-    )
-    table = DesiredTable(
-        qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("id", Integer()), Column("customer_id", Integer())),
-        foreign_keys=(fk,),
-    )
-
-    # When resolving the constraint name
-    name = table.resolve_foreign_key_constraint_name(fk)
-
-    # Then it is derived from table name + local columns
-    assert name == "orders_customer_id_fk"

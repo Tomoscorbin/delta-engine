@@ -106,10 +106,6 @@ class DesiredTable(TableSnapshot):
             return None
         return f"{self.qualified_name.name}_pk"
 
-    def resolve_foreign_key_constraint_name(self, fk: ForeignKeyConstraint) -> str:
-        """Return the resolved constraint name for the given foreign key."""
-        return fk.resolve_constraint_name(self.qualified_name.name)
-
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
