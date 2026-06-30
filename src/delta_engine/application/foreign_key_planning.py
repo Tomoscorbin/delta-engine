@@ -50,7 +50,10 @@ class SyncCandidate:
         return not self.failures
 
 
-def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
+def resolve(
+    tables: tuple[DesiredTable, ...],
+    external_failures: dict[QualifiedName, tuple[Failure, ...]] | None = None,
+) -> tuple[SyncCandidate, ...]:
     """
     Resolve foreign key dependencies across all registered tables.
 
@@ -60,14 +63,27 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
 
     Args:
         tables: All desired tables from the registry, in registry order.
+        external_failures: Failures already known before FK resolution — typically
+            validation failures computed by the engine. Tables with non-empty
+            external failures are treated as will-not-build when propagating
+            BLOCKED_BY_FAILED_DEPENDENCY to their FK dependents. Their failures
+            are prepended to the candidate's failure list so all pre-execution
+            failures appear together.
 
     Returns:
         A tuple of :class:`SyncCandidate` objects in dependency-first order.
-        Each candidate carries its table and any FK failures. A candidate with
-        an empty failures list is ready to sync; one with failures must be
-        excluded from execution.
+        Each candidate carries its table and any pre-execution failures (external
+        failures first, then FK failures). A candidate with an empty failures
+        list is ready to sync; one with failures must be excluded from execution.
 
     """
+    external = external_failures or {}
+    already_failed = frozenset(
+        str(qualified_name)
+        for qualified_name, failures in external.items()
+        if failures
+    )
+
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
     components = _strongly_connected_components(graph)
@@ -76,12 +92,17 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[SyncCandidate, ...]:
         name for component in components if _is_cycle(component) for name in component
     }
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(tables, registered_names, cycle_members)
+    failures_by_table = _classify_failures(
+        tables, registered_names, cycle_members, already_failed
+    )
 
     return tuple(
         SyncCandidate(
             table=table,
-            failures=list(failures_by_table.get(table.qualified_name, ())),
+            failures=(
+                list(external.get(table.qualified_name, ()))
+                + list(failures_by_table.get(table.qualified_name, ()))
+            ),
         )
         for table in ordered
     )
@@ -186,6 +207,7 @@ def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[str],
     cycle_members: set[str],
+    already_failed: frozenset[str] = frozenset(),
 ) -> dict[QualifiedName, tuple[Failure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.
@@ -197,6 +219,8 @@ def _classify_failures(
     2. Propagation — a table that references a table which will not be built
        cannot be built either (its foreign key would target a missing table).
        This repeats to a fixpoint so the block flows along chains of dependents.
+       `already_failed` seeds this pass with names that failed for external
+       reasons (e.g. validation), so their FK dependents are also blocked.
     """
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
@@ -221,7 +245,8 @@ def _classify_failures(
                 record(table, fk, ForeignKeyFailureReason.CYCLE)
 
     # Pass 2 — propagate to dependents until no new table is blocked.
-    failed_names = {str(qualified_name) for qualified_name in failures}
+    # Seed with both FK direct failures and any externally supplied failed names.
+    failed_names = {str(qualified_name) for qualified_name in failures} | already_failed
     changed = True
     while changed:
         changed = False

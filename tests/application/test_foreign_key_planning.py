@@ -290,3 +290,51 @@ def test_resolve_with_empty_tables_returns_empty_tuple():
 
     # Then
     assert candidates == ()
+
+
+def test_resolve_blocks_table_passed_in_external_failures():
+    # Given one table with no FKs, passed as externally failed
+    table = _table("cat.sch.orders")
+    from delta_engine.application.results import ValidationFailure
+    from delta_engine.domain.model import QualifiedName
+
+    external_failures = {
+        QualifiedName("cat", "sch", "orders"): (
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
+        )
+    }
+
+    # When
+    candidates = resolve((table,), external_failures=external_failures)
+
+    # Then orders cannot execute and carries the validation failure
+    [candidate] = candidates
+    assert not candidate.can_execute
+    assert len(candidate.failures) == 1
+    assert isinstance(candidate.failures[0], ValidationFailure)
+
+
+def test_resolve_blocks_fk_dependent_of_externally_failed_table():
+    # Given orders (no FKs) is externally failed, and shipments has a FK on orders
+    orders = _table("cat.sch.orders")
+    shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
+    from delta_engine.application.results import ForeignKeyFailureReason, ValidationFailure
+    from delta_engine.domain.model import QualifiedName
+
+    external_failures = {
+        QualifiedName("cat", "sch", "orders"): (
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
+        )
+    }
+
+    # When
+    candidates = resolve((orders, shipments), external_failures=external_failures)
+
+    # Then orders carries the validation failure; shipments is blocked by failed dependency
+    by_name = _candidates_by_name(candidates)
+    assert not by_name["cat.sch.orders"].can_execute
+    assert not by_name["cat.sch.shipments"].can_execute
+    assert (
+        by_name["cat.sch.shipments"].failures[0].reason
+        == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    )
