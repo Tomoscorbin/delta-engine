@@ -24,6 +24,14 @@ tags:
    :undoc-members:
 ```
 
+### ForeignKey
+
+```{eval-rst}
+.. autoclass:: delta_engine.ForeignKey
+   :members:
+   :undoc-members:
+```
+
 ### Property
 
 ```{eval-rst}

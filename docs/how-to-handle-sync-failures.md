@@ -27,13 +27,14 @@ for table_report in report:
     print(table_report.qualified_name, table_report.status)
 ```
 
-`table_report.status` is one of four `TableRunStatus` values:
+`table_report.status` is one of five `TableRunStatus` values:
 
 | Status | Meaning |
 |---|---|
 | `SUCCESS` | Table synced without issues |
 | `READ_FAILED` | Could not read current catalog state |
 | `VALIDATION_FAILED` | Plan was rejected before any SQL ran |
+| `FOREIGN_KEY_FAILED` | A foreign key could not be applied, or a dependency won't build |
 | `EXECUTION_FAILED` | SQL ran but a statement failed |
 
 ## Read failure details
@@ -74,6 +75,19 @@ for table_report in report:
 ```
 
 See [reference-safe-change-rules.md](reference-safe-change-rules.md) for the full list of validation rules and how to resolve each one.
+
+## Act on foreign key failures
+
+A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an unregistered table, a dependency cycle, or a dependency that won't reach its desired state this sync. When a dependency fails, every table downstream of it is blocked too — so fix the upstream table first, then re-run.
+
+```python
+for table_report in report:
+    if table_report.status == TableRunStatus.FOREIGN_KEY_FAILED:
+        for failure in table_report.all_failures:
+            print(failure.format_lines()[0])
+```
+
+See [how-to-declare-foreign-keys.md](how-to-declare-foreign-keys.md) for how dependency ordering and all-or-nothing blocking work.
 
 ## Act on execution failures
 
