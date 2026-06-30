@@ -3,7 +3,7 @@
 - [ ] Decide whether to remove `ENABLE_DELETION_VECTORS` from the default properties applied to every `DeltaTable`
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet declared in the registry)
-- [ ] Add support for foreign keys
+- [x] Add support for foreign keys
 - [ ] Add support for tags
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
@@ -12,23 +12,23 @@
 - [ ] where does backticked_table_name belong? Should it be constructed inside the compiler dispatches?
 - [ ] should all of the sql statements live in a dedicated file and be imported into reader/exeecutor?
 - [ ] should databricks rules live in validator?
-- [ ] add clarifying comments to differ functions
-- [ ] add clarifying comments to validation rules
+- [x] add clarifying comments to differ functions
+- [x] add clarifying comments to validation rules
 - [ ] make each CI step independently in parallel
 - [ ] review except AnalysisException in reader's _fetch_primary_key()
 - [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
 - [ ] Document that DBR runtime & delta table version issues are for the user to resolve. If they want to use Databricks unique constraints or CDF, they have to make sure they are on the right runtime/Delta version. The way the engine is designed, it will fail and return the relevant error.
 - [ ] make the nested if else statments in engine more readable
-- [ ] remove utc_now() from engine?
+- [x] remove utc_now() from engine?
 - [ ] do we need backticked things in sql compiler or can we do without?
 - [ ] allow a way for existing constraint names (PK/FK) to be passed to DeltaTable
 - [ ] Test that table order is kept from resolve through to execute on engine
-- [ ] Delete redundant Claude documentation
+- [x] Delete redundant Claude documentation
 - [ ] Do we need action_index?
 - [ ] Add quick code example to README
 - [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
 - [ ] consider replacing typle comps in validation with regular loops for readability
-- [ ] clean up claude documentation
+- [x] clean up claude documentation
 - [ ] make sure tests have full given, when, then comments (Not the words Give, When, Then on their own without explanation)
 - [ ] Test hygiene sweep (low-risk, deferred from FK PR review): (1) rename ~60 abbreviated test locals — `reg`→registry, `fq`→fully_qualified_name, the `qn` fixture in test_reader.py→qualified_name, `tr`→table_run, `vf`/`sr`/`col`/`t`/`d`, module consts `_QN`/`_COL`; (2) fill in ~25 bare wordless Given/When/Then markers; (3) rename 4 meta-label/stale-class test names (`_happy_path` suffixes, `test_table_snapshot_...` that actually tests DesiredTable); (4) add GWT structure to ~12 tests in test_preview/test_dialect/test_types that lack it. (Themes 3/4/5 — private-method coupling, IntEnum-value asserts, implementation-string asserts — already fixed in the FK PR.)
 - [ ] Review AnalysisException catches in executor and reader
