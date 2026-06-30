@@ -1,5 +1,3 @@
-import logging
-
 import pytest
 
 from delta_engine.api import Column, DeltaTable, String
@@ -26,6 +24,7 @@ from delta_engine.application.results import (
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan.actions import CreateTable
 
 # --------- helpers/fakes
 
@@ -746,7 +745,7 @@ def test_dry_run_returns_report_instead_of_raising_when_a_table_would_fail():
     assert tr.execution is None
 
 
-def test_dry_run_logs_the_planned_actions_for_each_table(caplog):
+def test_dry_run_exposes_the_planned_actions_on_the_report():
     # Given a table that would be created (absent -> a CreateTable plan)
     reg = Registry()
     reg.register(_spec("c.s.new_table"))
@@ -754,12 +753,26 @@ def test_dry_run_logs_the_planned_actions_for_each_table(caplog):
     executor = _FakeExecutor(results=(_ok_exec(0),))
     engine = Engine(reader=reader, executor=executor)
 
-    # When syncing in dry-run mode with INFO logging captured
-    with caplog.at_level(logging.INFO, logger="delta_engine.application.engine"):
-        engine.sync(reg, dry_run=True)
+    # When syncing in dry-run mode
+    report = engine.sync(reg, dry_run=True)
 
-    # Then a dry-run line names the table and the action that would be applied
-    dry_run_lines = [r.message for r in caplog.records if "[dry-run] would apply" in r.message]
-    assert len(dry_run_lines) == 1
-    assert "c.s.new_table" in dry_run_lines[0]
-    assert "CreateTable" in dry_run_lines[0]
+    # Then the table's report carries the plan that would have been applied
+    [tr] = list(report)
+    assert [type(action) for action in tr.plan] == [CreateTable]
+
+
+def test_real_run_records_the_planned_actions_on_the_report():
+    # Given a table that is created on a normal sync (absent -> CreateTable plan)
+    reg = Registry()
+    reg.register(_spec("c.s.new_table"))
+    reader = _FakeReader({"c.s.new_table": TableAbsent()})
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing for real
+    report = engine.sync(reg)
+
+    # Then the report still records the plan that was applied
+    [tr] = list(report)
+    assert [type(action) for action in tr.plan] == [CreateTable]
+    assert tr.status is TableRunStatus.SUCCESS

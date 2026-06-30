@@ -116,16 +116,15 @@ class Engine:
             for candidate in candidates
             if candidate.can_execute
         }
-        if dry_run:
-            self._log_planned_actions(plans_to_execute)
-            executions: dict[QualifiedName, ExecutionSummary] = {}
-        else:
-            executions = self._execute(plans_to_execute)
+        executions: dict[QualifiedName, ExecutionSummary] = (
+            {} if dry_run else self._execute(plans_to_execute)
+        )
 
         table_reports = tuple(
             TableRunReport(
                 qualified_name=candidate.qualified_name,
                 read=catalog_states[candidate.qualified_name],
+                plan=plans[candidate.qualified_name],
                 pre_execution_failures=tuple(candidate.failures),
                 execution=executions.get(candidate.qualified_name),
             )
@@ -225,27 +224,6 @@ class Engine:
             else:
                 logger.info("Validation passed for %s", qualified_name)
         return validation_failures
-
-    def _log_planned_actions(self, plans: dict[QualifiedName, ActionPlan]) -> None:
-        """
-        Log the actions a dry run would apply, one line per non-empty plan.
-
-        Renders each action as ``ClassName(subject)`` using the action type's
-        name and its ``subject`` (the column/constraint it targets, or empty for
-        table-level actions). Empty plans are skipped: they would apply nothing.
-        """
-        for qualified_name, plan in plans.items():
-            if not plan:
-                continue
-            rendered_actions = ", ".join(
-                f"{type(action).__name__}({action.subject})" for action in plan
-            )
-            logger.info(
-                "[dry-run] would apply %d action(s) to %s: %s",
-                len(plan),
-                qualified_name,
-                rendered_actions,
-            )
 
     def _execute(
         self,
