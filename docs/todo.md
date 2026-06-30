@@ -28,3 +28,9 @@
 - [ ] Add quick code example to README
 - [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
 - [ ] consider replacing typle comps in validation with regular loops for readability
+- [ ] clean up claude documentation
+- [ ] make sure tests have full given, when, then comments (Not the words Give, When, Then on their own without explanation)
+- [ ] Review AnalysisException catches in executor and reader
+- [ ] Review foreign key logic
+- [ ] Review failure logic and whether we can unify execution, validation, and FK failures. Also external_failures
+- [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row

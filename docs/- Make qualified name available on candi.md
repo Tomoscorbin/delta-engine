@@ -5,17 +5,20 @@
 - [x] remove _utc_now()
 - [x] TableRunReport.execution should be Optional, rather than passing ExecutionSummary()
 - [ ] ~~should execution failures be bundled up with validation failures as one failures attribute?~~ **DEFERRED** — involves a redesign
-- [ ] differ doesnt need to order foreign keys??? **→ folded into the _diff_foreign_keys rework (points 10–12); ActionPlan owns ordering**
+- [x] differ doesnt need to order foreign keys??? **→ done in the _diff_foreign_keys rework; ActionPlan owns ordering**
 - [x] make sure we use full names and not fk (unless in a listcomp or similar)
 - [x] Don't think I like resolve_foreign_key_constraint_name()
 - [x] remove comments from ActionPhase. Order of actions should be documented properly
-- [ ] the tuple comprehension FK differ is hard to read and doesnt match the established pattern
-- [ ] review _fk_content_equal and make it easier to understand what the logic is logic
-- [ ] review foreign key differ in totality
-- [ ] should we remove the PK and FK AnalysisException catch and instead change the tests?
-- [ ] Can we simplify or improve the fk graph & dependency logic?
-- [ ] is there a clearer, simpler, more natural way to do this bit in engine: `if isinstance(state, ReadFailed) and not external_failures.get(qn): ...` Like do we need external_failures
-- [ ] should we do the same thing as candidate.table.qualified_name with catalog_state? we are doing things like catalog_state.failure.exception_type
-- [ ] Can we simplify _fetch_foreign_keys? seems quite complicated
+- [x] the tuple comprehension FK differ is hard to read and doesnt match the established pattern
+- [x] review _fk_content_equal and make it easier to understand what the logic is logic
+- [x] review foreign key differ in totality
+- [x] should we remove the PK and FK AnalysisException catch and instead change the tests? **→ no change; catch is correctly adapter-scoped, app/domain are clean, no clean way to narrow in PySpark 4.x**
+- [ ] ~~Can we simplify or improve the fk graph & dependency logic?~~ **DEFERRED to a separate PR**
+- [ ] ~~is there a clearer, simpler, more natural way to do this bit in engine: `if isinstance(state, ReadFailed) and not external_failures.get(qn): ...` Like do we need external_failures~~ **DEFERRED to a separate PR** (note: the `not external_failures.get(qn)` guard is dead code — a ReadFailed table always has empty validation failures)
+- [x] should we do the same thing as candidate.table.qualified_name with catalog_state? we are doing things like catalog_state.failure.exception_type **→ no change; single call site on transparent data records, a property would be a shallow wrapper**
+- [x] Can we simplify _fetch_foreign_keys? seems quite complicated **→ captured in docs/todo.md (groupby + _foreign_key_from_rows helper); deferred**
+- [ ] make foreign_key_actions a regular loop for readability. Also, it is still different from the rest. Why are we doing this tuple comp?
+- [ ] Does this need to be a frozenset as opposed to just a set? desired_primary_key = frozenset(desired.primary_key)
+- [ ] rename foreign_key_planning.py
 - [ ] review test suite
 - [ ] update documentation
