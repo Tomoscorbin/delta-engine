@@ -689,7 +689,7 @@ def test_fetch_foreign_keys_returns_composite_fk_in_ordinal_order():
 
 def test_fetch_foreign_keys_returns_empty_when_no_fks():
     # Given no FK rows for this table
-    spark = FakeSpark(fk_rows={})
+    spark = FakeSpark(fk_rows=None)
     reader = DatabricksReader(spark)
 
     # When
