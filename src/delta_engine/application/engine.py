@@ -83,12 +83,22 @@ class Engine:
         A table that fails in an early phase is skipped in later phases;
         its partial result is included in the final report.
 
+        Args:
+            registry: The tables to synchronize.
+            dry_run: When True, run read → plan → validate → resolve but skip
+                execution entirely (zero catalog mutations). Every table's
+                ``execution`` is ``None`` while its ``plan`` still records the
+                actions that would be applied, and the report is returned
+                instead of raising ``SyncFailedError`` even when a table would
+                fail — so the caller can inspect what would happen.
+
         Returns:
             The aggregate :class:`SyncReport` for the run.
 
         Raises:
-            SyncFailedError: If any table fails to read, validate, or execute.
-                The report is available on the exception's ``report`` attribute.
+            SyncFailedError: On a real run (``dry_run=False``), if any table
+                fails to read, validate, or execute. The report is available on
+                the exception's ``report`` attribute. A dry run never raises.
 
         """
         run_started = datetime.now(UTC)
