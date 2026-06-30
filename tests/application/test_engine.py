@@ -633,6 +633,42 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.orders"].execution.results == ()
 
 
+def test_read_failure_in_upstream_blocks_fk_dependent():
+    # Given table A fails to read, and table B has a FK referencing A
+    registry = Registry()
+    registry.register(_spec("cat.sch.a"))
+    registry.register(_spec_with_fk("cat.sch.b", "cat.sch.a"))
+    reader = _FakeReader(
+        {"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))}
+    )
+
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(reader=reader, executor=_TrackingExecutor())
+
+    # When syncing
+    # Then the job fails; B is FOREIGN_KEY_FAILED with BLOCKED_BY_FAILED_DEPENDENCY
+    # and the executor is never called for either table
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    assert reports["cat.sch.a"].status is TableRunStatus.READ_FAILED
+    assert reports["cat.sch.b"].status is TableRunStatus.FOREIGN_KEY_FAILED
+    b_fk_failures = [
+        f for f in reports["cat.sch.b"].pre_execution_failures
+        if isinstance(f, ForeignKeyFailure)
+    ]
+    assert len(b_fk_failures) == 1
+    assert b_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    assert executed == []
+
+
 def test_unchanged_table_is_not_executed():
     # Given a table whose observed state already matches desired (empty plan)
     reg = Registry()

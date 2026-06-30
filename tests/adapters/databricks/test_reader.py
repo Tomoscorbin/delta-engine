@@ -62,19 +62,18 @@ class FakeSpark:
         self,
         *,
         catalog: FakeCatalog | None = None,
-        fk_rows: dict | None = None,
+        fk_rows: list | None = None,
         fk_raises: Exception | None = None,
     ):
         self.catalog = catalog or FakeCatalog()
-        self._fk_rows = fk_rows or {}
+        self._fk_rows = fk_rows
         self._fk_raises = fk_raises
 
     def sql(self, query: str):
         if "referential_constraints" in query:
             if self._fk_raises is not None:
                 raise self._fk_raises
-            rows = next(iter(self._fk_rows.values()), []) if self._fk_rows else []
-            return FakeDataFrame(rows)
+            return FakeDataFrame(self._fk_rows or [])
         raise NotImplementedError(f"unexpected query: {query!r}")
 
 
@@ -638,7 +637,7 @@ def test_fetch_foreign_keys_returns_single_column_fk():
             ref_column="id",
         )
     ]
-    spark = FakeSpark(fk_rows={"cat.sch.orders": rows})
+    spark = FakeSpark(fk_rows=rows)
     reader = DatabricksReader(spark)
 
     # When
@@ -676,7 +675,7 @@ def test_fetch_foreign_keys_returns_composite_fk_in_ordinal_order():
             ref_column="id",
         ),
     ]
-    spark = FakeSpark(fk_rows={"cat.sch.orders": rows})
+    spark = FakeSpark(fk_rows=rows)
     reader = DatabricksReader(spark)
 
     # When

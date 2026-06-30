@@ -103,7 +103,18 @@ class Engine:
         catalog_states = self._read(tables)
         plans = self._plan(tables, catalog_states)
         validation_failures = self._validate_plans(plans)
-        candidates = resolve(tables, external_failures=validation_failures)
+
+        # Merge read failures into external_failures so read-failed tables are
+        # treated as "won't build" during FK propagation, blocking their dependents
+        # with BLOCKED_BY_FAILED_DEPENDENCY just as validation-failed tables do.
+        external_failures: dict[QualifiedName, tuple[Failure, ...]] = dict(validation_failures)
+        for table in tables:
+            qn = table.qualified_name
+            state = catalog_states[qn]
+            if isinstance(state, ReadFailed) and not external_failures.get(qn):
+                external_failures[qn] = (state.failure,)
+
+        candidates = resolve(tables, external_failures=external_failures)
 
         plans_to_execute = {
             candidate.table.qualified_name: plans[candidate.table.qualified_name]

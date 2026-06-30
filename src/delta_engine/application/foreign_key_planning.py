@@ -35,9 +35,9 @@ class SyncCandidate:
 
     Attributes:
         table: The desired table to sync.
-        failures: All failures that block this table from executing — initially
-            FK failures from dependency resolution; the engine may append
-            validation failures before gating execution.
+        failures: All pre-execution failures — external failures (e.g. validation)
+            prepended, FK structural failures appended. Assembled by `resolve()`;
+            the engine does not modify this after construction.
 
     """
 
