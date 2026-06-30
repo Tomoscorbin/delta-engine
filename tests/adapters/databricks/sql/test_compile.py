@@ -369,7 +369,7 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
         references="cat.sch.customers",
         referenced_columns=("id",),
     )
-    action = SetForeignKey(fk=fk, constraint_name="orders_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
 
     # When
     statement = _compile_single(action)
@@ -389,7 +389,7 @@ def test_set_foreign_key_renders_composite_fk():
         references="cat.sch.customers",
         referenced_columns=("tenant_id", "id"),
     )
-    action = SetForeignKey(fk=fk, constraint_name="orders_tenant_id_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_tenant_id_customer_id_fk")
 
     # When
     statement = _compile_single(action)

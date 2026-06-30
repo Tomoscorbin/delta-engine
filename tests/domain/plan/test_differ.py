@@ -721,7 +721,7 @@ def test_new_fk_on_desired_only_emits_set_foreign_key():
     # Then exactly one SetForeignKey action is emitted
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].fk == _FK
+    assert set_actions[0].foreign_key == _FK
     assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
@@ -795,7 +795,7 @@ def test_fk_changed_emits_drop_and_set():
     assert len(drop_actions) == 1
     assert drop_actions[0].constraint_name == "orders_customer_id_fk"
     assert len(set_actions) == 1
-    assert set_actions[0].fk == new_fk
+    assert set_actions[0].foreign_key == new_fk
     assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
@@ -810,7 +810,7 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     assert any(isinstance(a, CreateTable) for a in plan)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].fk == _FK
+    assert set_actions[0].foreign_key == _FK
     assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 

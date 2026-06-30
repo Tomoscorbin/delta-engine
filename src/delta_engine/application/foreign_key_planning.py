@@ -129,9 +129,9 @@ def _build_dependency_graph(
     graph: dict[str, set[str]] = {str(table.qualified_name): set() for table in tables}
     for table in tables:
         table_name = str(table.qualified_name)
-        for fk in table.foreign_keys:
-            if fk.references in registered_names and fk.references != table_name:
-                graph[table_name].add(fk.references)
+        for foreign_key in table.foreign_keys:
+            if foreign_key.references in registered_names and foreign_key.references != table_name:
+                graph[table_name].add(foreign_key.references)
     return graph
 
 
@@ -230,12 +230,12 @@ def _classify_failures(
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
     def record(
-        table: DesiredTable, fk: ForeignKeyConstraint, reason: ForeignKeyFailureReason
+        table: DesiredTable, foreign_key: ForeignKeyConstraint, reason: ForeignKeyFailureReason
     ) -> None:
         failures.setdefault(table.qualified_name, []).append(
             ForeignKeyFailure(
                 table=table.qualified_name,
-                constraint_name=table.resolve_foreign_key_constraint_name(fk),
+                constraint_name=table.resolve_foreign_key_constraint_name(foreign_key),
                 reason=reason,
             )
         )
@@ -243,11 +243,11 @@ def _classify_failures(
     # Pass 1 — direct failures.
     for table in tables:
         table_name = str(table.qualified_name)
-        for fk in table.foreign_keys:
-            if fk.references not in registered_names:
-                record(table, fk, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
+        for foreign_key in table.foreign_keys:
+            if foreign_key.references not in registered_names:
+                record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
             elif table_name in cycle_members:
-                record(table, fk, ForeignKeyFailureReason.CYCLE)
+                record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 
     # Pass 2 — propagate to dependents until no new table is blocked.
     # Seed with both FK direct failures and any externally supplied failed names.
@@ -261,8 +261,8 @@ def _classify_failures(
                 continue
             blocking = [fk for fk in table.foreign_keys if fk.references in failed_names]
             if blocking:
-                for fk in blocking:
-                    record(table, fk, ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY)
+                for foreign_key in blocking:
+                    record(table, foreign_key, ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY)
                 failed_names.add(table_name)
                 changed = True
 

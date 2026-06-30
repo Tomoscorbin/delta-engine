@@ -170,12 +170,12 @@ def _(action: DropForeignKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    fk = action.fk
+    foreign_key = action.foreign_key
     constraint = backtick(action.constraint_name)
-    local_cols = ", ".join(backtick(col) for col in fk.local_columns)
-    ref_cols = ", ".join(backtick(col) for col in fk.referenced_columns)
+    local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
+    ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
     # references is a dotted qualified name — split and backtick each part
-    backticked_ref = ".".join(backtick(part) for part in fk.references.split("."))
+    backticked_ref = ".".join(backtick(part) for part in foreign_key.references.split("."))
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint}"

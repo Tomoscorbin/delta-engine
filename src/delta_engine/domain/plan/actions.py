@@ -211,7 +211,7 @@ class DropForeignKey(Action):
 class SetForeignKey(Action):
     """Add a foreign key constraint to a table."""
 
-    fk: ForeignKeyConstraint
+    foreign_key: ForeignKeyConstraint
     constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY

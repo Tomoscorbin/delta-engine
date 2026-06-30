@@ -228,7 +228,7 @@ def test_plan_full_phase_order_with_all_action_types():
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
                 constraint_name="t_pk",
             ),
-            SetForeignKey(fk=fk, constraint_name="t_customer_id_fk"),
+            SetForeignKey(foreign_key=fk, constraint_name="t_customer_id_fk"),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
@@ -327,7 +327,7 @@ def test_set_foreign_key_subject_is_constraint_name():
         references="cat.sch.customers",
         referenced_columns=("id",),
     )
-    action = SetForeignKey(fk=fk, constraint_name="orders_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
 
     # Then subject is the constraint name
     assert action.subject == "orders_customer_id_fk"
