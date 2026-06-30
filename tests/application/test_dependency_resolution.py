@@ -1,5 +1,5 @@
 """
-Unit tests for foreign_key_planning.resolve().
+Unit tests for dependency_resolution.resolve().
 
 These exercise resolve() directly: dependency-first ordering, cycle detection,
 self-reference handling, and the per-table fail-closed verdict
@@ -8,7 +8,7 @@ transitive propagation to dependents.
 """
 
 from delta_engine.api import Column, DeltaTable, String
-from delta_engine.application.foreign_key_planning import SyncCandidate, resolve
+from delta_engine.application.dependency_resolution import SyncCandidate, resolve
 from delta_engine.application.results import ForeignKeyFailureReason, ValidationFailure
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint

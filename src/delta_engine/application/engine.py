@@ -30,8 +30,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 
+from delta_engine.application.dependency_resolution import resolve
 from delta_engine.application.errors import SyncFailedError
-from delta_engine.application.foreign_key_planning import resolve
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
