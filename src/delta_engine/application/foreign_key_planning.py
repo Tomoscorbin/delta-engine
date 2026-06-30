@@ -45,6 +45,11 @@ class SyncCandidate:
     failures: list[Failure] = field(default_factory=list)
 
     @property
+    def qualified_name(self) -> QualifiedName:
+        """The fully qualified name of the table this candidate represents."""
+        return self.table.qualified_name
+
+    @property
     def can_execute(self) -> bool:
         """True when the table has no pre-execution failures and may be executed."""
         return not self.failures

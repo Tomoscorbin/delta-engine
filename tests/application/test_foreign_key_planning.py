@@ -40,7 +40,7 @@ def _table_with_fk(fqn: str, references: str) -> DesiredTable:
 def _candidates_by_name(
     candidates: tuple[SyncCandidate, ...],
 ) -> dict[str, SyncCandidate]:
-    return {str(c.table.qualified_name): c for c in candidates}
+    return {str(candidate.qualified_name): candidate for candidate in candidates}
 
 
 def test_resolve_with_no_fks_preserves_registry_order():
@@ -51,7 +51,7 @@ def test_resolve_with_no_fks_preserves_registry_order():
     candidates = resolve(tables)
 
     # Then order is unchanged and all candidates can execute
-    names = [str(candidate.table.qualified_name) for candidate in candidates]
+    names = [str(candidate.qualified_name) for candidate in candidates]
     assert names == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
     assert all(candidate.can_execute for candidate in candidates)
 
@@ -67,7 +67,7 @@ def test_resolve_orders_referenced_table_before_dependent():
     candidates = resolve(tables)
 
     # Then customers appears before orders and all candidates can execute
-    names = [str(candidate.table.qualified_name) for candidate in candidates]
+    names = [str(candidate.qualified_name) for candidate in candidates]
     assert names.index("cat.sch.customers") < names.index("cat.sch.orders")
     assert all(candidate.can_execute for candidate in candidates)
 
@@ -84,7 +84,7 @@ def test_resolve_handles_chain_of_dependencies():
     candidates = resolve(tables)
 
     # Then a before b before c
-    names = [str(candidate.table.qualified_name) for candidate in candidates]
+    names = [str(candidate.qualified_name) for candidate in candidates]
     assert names.index("cat.sch.a") < names.index("cat.sch.b") < names.index("cat.sch.c")
 
 
@@ -132,7 +132,7 @@ def test_resolve_includes_failed_tables_in_candidates():
     candidates = resolve(tables)
 
     # Then both tables still appear as candidates (the engine gates them out via can_execute)
-    names = {str(candidate.table.qualified_name) for candidate in candidates}
+    names = {str(candidate.qualified_name) for candidate in candidates}
     assert names == {"cat.sch.a", "cat.sch.b"}
 
 
@@ -241,7 +241,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
     # Then the self-referencing FK does not prevent execution
     [candidate] = candidates
     assert candidate.can_execute
-    assert str(candidate.table.qualified_name) == "cat.sch.employees"
+    assert str(candidate.qualified_name) == "cat.sch.employees"
 
 
 def test_resolve_propagates_block_through_a_diamond():

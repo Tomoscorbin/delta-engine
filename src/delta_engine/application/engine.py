@@ -117,7 +117,7 @@ class Engine:
         candidates = resolve(tables, external_failures=external_failures)
 
         plans_to_execute = {
-            candidate.table.qualified_name: plans[candidate.table.qualified_name]
+            candidate.qualified_name: plans[candidate.qualified_name]
             for candidate in candidates
             if candidate.can_execute
         }
@@ -125,10 +125,10 @@ class Engine:
 
         table_reports = tuple(
             TableRunReport(
-                qualified_name=candidate.table.qualified_name,
-                read=catalog_states[candidate.table.qualified_name],
+                qualified_name=candidate.qualified_name,
+                read=catalog_states[candidate.qualified_name],
                 pre_execution_failures=tuple(candidate.failures),
-                execution=executions.get(candidate.table.qualified_name, ExecutionSummary()),
+                execution=executions.get(candidate.qualified_name, ExecutionSummary()),
             )
             for candidate in candidates
         )
