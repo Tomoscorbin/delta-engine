@@ -44,3 +44,4 @@
 - [ ] Do we need some kind of container linking QualifiedName to ActionPlan so that engine methods dont keep having to construct dictionaries? Seems like we keep building dictionaries and discarding them only to build them again
 - [ ] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
+- [ ] add dry run flag
