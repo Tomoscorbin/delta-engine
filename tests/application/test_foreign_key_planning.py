@@ -9,7 +9,8 @@ transitive propagation to dependents.
 
 from delta_engine.api import Column, DeltaTable, String
 from delta_engine.application.foreign_key_planning import SyncCandidate, resolve
-from delta_engine.application.results import ForeignKeyFailureReason
+from delta_engine.application.results import ForeignKeyFailureReason, ValidationFailure
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
 
@@ -295,9 +296,6 @@ def test_resolve_with_empty_tables_returns_empty_tuple():
 def test_resolve_blocks_table_passed_in_external_failures():
     # Given one table with no FKs, passed as externally failed
     table = _table("cat.sch.orders")
-    from delta_engine.application.results import ValidationFailure
-    from delta_engine.domain.model import QualifiedName
-
     external_failures = {
         QualifiedName("cat", "sch", "orders"): (
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
@@ -318,9 +316,6 @@ def test_resolve_blocks_fk_dependent_of_externally_failed_table():
     # Given orders (no FKs) is externally failed, and shipments has a FK on orders
     orders = _table("cat.sch.orders")
     shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
-    from delta_engine.application.results import ForeignKeyFailureReason, ValidationFailure
-    from delta_engine.domain.model import QualifiedName
-
     external_failures = {
         QualifiedName("cat", "sch", "orders"): (
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
