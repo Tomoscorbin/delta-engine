@@ -14,3 +14,4 @@
 - Can we simplify or improve the fk graph & dependency logic?
 - is there a clearer, simpler, more natural way to do this bit in engine:             if isinstance(state, ReadFailed) and not external_failures.get(qn): ... Like do we need external_failures
 - should we do the same thing s candidate.table.qualified_name with catalog_state? we are doing things like catalog_state.failure.exception_type
+- Can we simplify _fetch_foreign_keys? seems quite complicated

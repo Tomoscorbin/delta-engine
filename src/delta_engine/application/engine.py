@@ -52,11 +52,6 @@ from delta_engine.domain.plan.differ import compute_plan
 logger = logging.getLogger(__name__)
 
 
-def _utc_now() -> datetime:
-    """Return current UTC time as a timezone-aware datetime."""
-    return datetime.now(UTC)
-
-
 class Engine:
     """
     High-level orchestrator to plan, validate, and execute changes.
@@ -96,7 +91,7 @@ class Engine:
                 The report is available on the exception's ``report`` attribute.
 
         """
-        run_started = _utc_now()
+        run_started = datetime.now(UTC)
         logger.info("Starting sync for %d table(s)", len(registry))
 
         tables = tuple(registry)
@@ -135,7 +130,7 @@ class Engine:
 
         report = SyncReport(
             started_at=run_started,
-            ended_at=_utc_now(),
+            ended_at=datetime.now(UTC),
             table_reports=table_reports,
         )
 
