@@ -17,7 +17,7 @@
 - [ ] ~~is there a clearer, simpler, more natural way to do this bit in engine: `if isinstance(state, ReadFailed) and not external_failures.get(qn): ...` Like do we need external_failures~~ **DEFERRED to a separate PR** (note: the `not external_failures.get(qn)` guard is dead code — a ReadFailed table always has empty validation failures)
 - [x] should we do the same thing as candidate.table.qualified_name with catalog_state? we are doing things like catalog_state.failure.exception_type **→ no change; single call site on transparent data records, a property would be a shallow wrapper**
 - [x] Can we simplify _fetch_foreign_keys? seems quite complicated **→ captured in docs/todo.md (groupby + _foreign_key_from_rows helper); deferred**
-- [ ] make foreign_key_actions a regular loop for readability. Also, it is still different from the rest. Why are we doing this tuple comp?
+- [x] make foreign_key_actions a regular loop for readability. Also, it is still different from the rest. Why are we doing this tuple comp? **→ captured in docs/todo.md (extract _set_all_foreign_keys; plus inline-FK-in-CREATE architectural question); deferred to FK PR**
 - [ ] Does this need to be a frozenset as opposed to just a set? desired_primary_key = frozenset(desired.primary_key)
 - [ ] rename foreign_key_planning.py
 - [ ] review test suite

@@ -139,11 +139,11 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     """
     Return the primary key actions to align observed with desired.
 
-    Uses frozenset comparison so column order does not trigger spurious changes.
+    Uses set comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns.
     """
-    desired_primary_key = frozenset(desired.primary_key)
-    observed_primary_key = frozenset(observed.primary_key)
+    desired_primary_key = set(desired.primary_key)
+    observed_primary_key = set(observed.primary_key)
 
     if desired_primary_key == observed_primary_key:
         return ()
