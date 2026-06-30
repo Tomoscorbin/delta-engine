@@ -45,3 +45,5 @@
 - [ ] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
 - [ ] add dry run flag
+- [ ] is there a more natural alternative to tuple(registry) in engine?
+- [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
