@@ -47,3 +47,4 @@
 - [x] add dry run flag
 - [ ] is there a more natural alternative to tuple(registry) in engine?
 - [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
+- [ ] should report.any_failures be report.has_any_failures?
