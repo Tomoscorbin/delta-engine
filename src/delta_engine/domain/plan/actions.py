@@ -18,17 +18,15 @@ class ActionPhase(IntEnum):
     Relative execution order of plan actions.
 
     Members are declared in execution order (lower runs first); the order
-    encodes dependencies between operations -- e.g. a table must be created
-    before columns are added, and tightened nullability is applied last.
-    Centralising the order here keeps the full precedence readable in one
-    place while each action declares its own phase by name.
+    encodes dependencies between operations. Centralising the order here keeps
+    the full precedence readable in one place while each action declares its
+    own phase by name. See the "Planning and determinism" section of
+    ``docs/explanation-architecture.md`` for the rationale behind each
+    dependency-driven ordering.
     """
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
-    # Foreign keys are dropped first: a FK may reference a column or primary key
-    # that a later phase drops, and Databricks rejects dropping a column or key
-    # still referenced by an active FK constraint.
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
@@ -37,8 +35,6 @@ class ActionPhase(IntEnum):
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
-    # Foreign keys are set last among key operations: a FK references a primary
-    # or unique key, so that key must exist before the FK can point at it.
     SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()

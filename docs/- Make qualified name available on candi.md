@@ -7,7 +7,7 @@
 - [ ] ~~should execution failures be bundled up with validation failures as one failures attribute?~~ **DEFERRED** — involves a redesign
 - [ ] differ doesnt need to order foreign keys??? **→ folded into the _diff_foreign_keys rework (points 10–12); ActionPlan owns ordering**
 - [x] make sure we use full names and not fk (unless in a listcomp or similar)
-- [ ] Don't think I like resolve_foreign_key_constraint_name()
+- [x] Don't think I like resolve_foreign_key_constraint_name()
 - [ ] remove comments from ActionPhase. Order of actions should be documented properly
 - [ ] the tuple comprehension FK differ is hard to read and doesnt match the established pattern
 - [ ] review _fk_content_equal and make it easier to understand what the logic is logic
