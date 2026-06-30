@@ -1,13 +1,12 @@
 # Open questions and decisions
 
 - [ ] Decide whether to remove `ENABLE_DELETION_VECTORS` from the default properties applied to every `DeltaTable`
-- [ ] Determine whether Delta table properties and/or liquid clustering need to be tied to specific Delta / DBR versions (compatibility matrix)
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet declared in the registry)
 - [ ] Add support for foreign keys
 - [ ] Add support for tags
 - [ ] Add support for clustering
-- [ ] make partitioned_by a Column-level thing
+- [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
 - [ ] add scripts/example.ipynb for example notebook
 - [ ] where does backticked_table_name belong? Should it be constructed inside the compiler dispatches?
@@ -20,3 +19,12 @@
 - [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
 - [ ] Document that DBR runtime & delta table version issues are for the user to resolve. If they want to use Databricks unique constraints or CDF, they have to make sure they are on the right runtime/Delta version. The way the engine is designed, it will fail and return the relevant error.
 - [ ] make the nested if else statments in engine more readable
+- [ ] remove utc_now() from engine?
+- [ ] do we need backticked things in sql compiler or can we do without?
+- [ ] allow a way for existing constraint names (PK/FK) to be passed to DeltaTable
+- [ ] Test that table order is kept from resolve through to execute on engine
+- [ ] Delete redundant Claude documentation
+- [ ] Do we need action_index?
+- [ ] Add quick code example to README
+- [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
+- [ ] consider replacing typle comps in validation with regular loops for readability

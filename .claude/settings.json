@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls -la)",
+      "Bash(rg -rn \"validate_plan\\\\|compile_plan\" /Users/tomos.corbin/Projects/delta-engine/src)",
+      "Bash(xargs rg -l \"ValidationFailure\")",
+      "Bash(rg -rn \"class ObservedTable\" /Users/tomos.corbin/Projects/delta-engine/src/)",
+      "Bash(rg -rn \"domain_type_from_spark\\\\|SparkType\\\\|fromDDL\" /Users/tomos.corbin/Projects/delta-engine/src/)",
+      "Bash(rg -rn \"class Integer\" /Users/tomos.corbin/Projects/delta-engine/src/)",
+      "Bash(rg -rn \"class TablePresent|class TableRunReport|partitioned_by\" /Users/tomos.corbin/Projects/delta-engine/src/delta_engine/application/results.py)"
+    ]
+  }
+}

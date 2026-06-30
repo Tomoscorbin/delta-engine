@@ -184,9 +184,9 @@ class PrimaryKeyColumnsNullable:
                         )
             elif isinstance(action, CreateTable):
                 if action.table.primary_key:
-                    pk_set = frozenset(action.table.primary_key)
+                    primary_key_columns = frozenset(action.table.primary_key)
                     for column in action.table.columns:
-                        if column.name in pk_set and column.nullable:
+                        if column.name in primary_key_columns and column.nullable:
                             failures.append(
                                 ValidationFailure(
                                     rule_name=self.name,

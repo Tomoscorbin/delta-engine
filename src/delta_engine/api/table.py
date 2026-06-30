@@ -50,9 +50,9 @@ class DeltaTable:
 
         effective = {**self.default_properties, **user_properties}
 
-        columns_tuple = tuple(columns)
-        primary_key = tuple(col.name for col in columns_tuple if col.primary_key)
-        foreign_keys_tuple = tuple(foreign_keys) if foreign_keys is not None else ()
+        columns = tuple(columns)
+        primary_key = tuple(column.name for column in columns if column.primary_key)
+        foreign_keys = tuple(foreign_keys) if foreign_keys is not None else ()
 
         # Building DesiredTable here enforces all domain invariants (non-empty
         # columns, unique names, partition columns must exist, FK local columns
@@ -60,12 +60,12 @@ class DeltaTable:
         # to_desired_table().
         self._desired_table = DesiredTable(
             qualified_name=QualifiedName(catalog, schema, name),
-            columns=columns_tuple,
+            columns=columns,
             comment=comment,
             properties=effective,
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
             primary_key=primary_key,
-            foreign_keys=foreign_keys_tuple,
+            foreign_keys=foreign_keys,
         )
 
     @property

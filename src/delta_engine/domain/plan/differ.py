@@ -140,24 +140,26 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     Uses frozenset comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns.
     """
-    desired_set = frozenset(desired.primary_key)
-    observed_set = frozenset(observed.primary_key)
+    desired_primary_key = frozenset(desired.primary_key)
+    observed_primary_key = frozenset(observed.primary_key)
 
-    if desired_set == observed_set:
+    if desired_primary_key == observed_primary_key:
         return ()
 
     actions: list[Action] = []
 
-    if observed_set:
+    if observed_primary_key:
         actions.append(DropPrimaryKey())
 
-    if desired_set:
-        pk_columns = tuple(column for column in desired.columns if column.name in desired_set)
+    if desired_primary_key:
+        primary_key_columns = tuple(
+            column for column in desired.columns if column.name in desired_primary_key
+        )
         constraint_name = desired.primary_key_constraint_name
-        assert constraint_name is not None  # guaranteed: desired_set is non-empty
+        assert constraint_name is not None  # guaranteed: desired_primary_key is non-empty
         actions.append(
             SetPrimaryKey(
-                columns=pk_columns,
+                columns=primary_key_columns,
                 constraint_name=constraint_name,
             )
         )
