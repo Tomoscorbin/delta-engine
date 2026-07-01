@@ -10,7 +10,8 @@ properties, table comment) are private helpers — they exist only to keep
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
+from dataclasses import dataclass
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import (
@@ -30,6 +31,53 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class Diff[D, O]:
+    """
+    The outcome of matching desired items against observed items by identity.
+
+    Every keyed diff yields four outcomes per item: ``added`` (desired-only),
+    ``dropped`` (observed-only), ``changed`` (present on both sides but not
+    equal), and noop (present on both and equal). The noop set is the implicit
+    complement and is not carried — no consumer reads it.
+    """
+
+    added: tuple[D, ...]
+    dropped: tuple[O, ...]
+    changed: tuple[tuple[D, O], ...]
+
+
+def diff_by_key[D, O](
+    desired: Iterable[D],
+    observed: Iterable[O],
+    *,
+    key: Callable[[D | O], Hashable],
+    equals: Callable[[D, O], bool],
+) -> Diff[D, O]:
+    """
+    Match ``desired`` against ``observed`` by ``key`` into add/drop/change buckets.
+
+    ``key`` maps an item (from either side) to its identity. ``equals`` compares
+    a matched (desired, observed) pair to decide change vs noop. ``added``
+    preserves desired declaration order; ``dropped`` preserves observed order.
+    """
+    desired_by_key = {key(item): item for item in desired}
+    observed_by_key = {key(item): item for item in observed}
+
+    added = tuple(
+        item for identity, item in desired_by_key.items() if identity not in observed_by_key
+    )
+    dropped = tuple(
+        item for identity, item in observed_by_key.items() if identity not in desired_by_key
+    )
+    changed = tuple(
+        (desired_item, observed_by_key[identity])
+        for identity, desired_item in desired_by_key.items()
+        if identity in observed_by_key and not equals(desired_item, observed_by_key[identity])
+    )
+    return Diff(added=added, dropped=dropped, changed=changed)
 
 
 def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
