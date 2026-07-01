@@ -33,7 +33,7 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
-from delta_engine.domain.plan.differ import compute_plan
+from delta_engine.domain.plan.differ import _diff_foreign_keys, compute_plan
 
 # ----- Hypothesis strategies for valid domain objects
 
@@ -875,3 +875,34 @@ def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
     # Then no FK actions are emitted — the FK is already in the right state
     fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
     assert fk_actions == []
+
+
+def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
+    # Given a desired table with a FK and no observed table (observed is None)
+    desired = _orders_with_fk(_FK)
+
+    # When diffing FKs against a missing table
+    actions = _diff_foreign_keys(desired, None)
+
+    # Then every desired FK is set and nothing is dropped — a missing table has
+    # no observed FKs to diff against, so there is no separate "create" path
+    set_actions = [a for a in actions if isinstance(a, SetForeignKey)]
+    drop_actions = [a for a in actions if isinstance(a, DropForeignKey)]
+    assert len(set_actions) == 1
+    assert set_actions[0].foreign_key == _FK
+    assert set_actions[0].constraint_name == "orders_customer_id_fk"
+    assert drop_actions == []
+
+
+def test_diff_foreign_keys_missing_table_with_no_fks_produces_no_actions():
+    # Given a desired table with no FKs and no observed table
+    desired = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()),),
+    )
+
+    # When diffing FKs against a missing table
+    actions = _diff_foreign_keys(desired, None)
+
+    # Then there are no FK actions
+    assert actions == ()

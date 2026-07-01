@@ -45,24 +45,21 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
     """
     if observed is None:
-        foreign_key_actions = tuple(
-            SetForeignKey(
-                foreign_key=fk,
-                constraint_name=fk.resolve_constraint_name(desired.qualified_name.name),
-            )
-            for fk in desired.foreign_keys
-        )
-        actions: tuple[Action, ...] = (CreateTable(desired), *foreign_key_actions)
+        body: tuple[Action, ...] = (CreateTable(desired),)
     else:
-        actions = (
+        body = (
             _diff_columns(desired.columns, observed.columns)
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
             + _diff_primary_key(desired, observed)
-            + _diff_foreign_keys(desired, observed)
         )
-    return ActionPlan(actions)
+
+    # Foreign keys are reconciled the same way whether the table is new or
+    # existing: a missing table simply has no observed FKs, so every desired FK
+    # is set. Keeping this out of the branch above means there is one FK path,
+    # not a hand-rolled "create" variant kept in step with the diff variant.
+    return ActionPlan(body + _diff_foreign_keys(desired, observed))
 
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
@@ -169,9 +166,14 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     return tuple(actions)
 
 
-def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable | None) -> tuple[Action, ...]:
     """
     Return the FK actions to align observed with desired.
+
+    ``observed`` is ``None`` when the table does not yet exist. A missing table
+    has no observed foreign keys, so every desired FK is set and none is dropped
+    — the create case needs no separate code path, it is just a diff against an
+    empty set of observed FKs.
 
     Foreign keys are matched by their content signature (local columns,
     referenced table, and referenced columns), not by constraint name: a
@@ -185,8 +187,9 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
     actions are returned in does not matter — ActionPlan sorts every plan by
     execution phase.
     """
+    observed_foreign_keys = observed.foreign_keys if observed is not None else ()
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed_foreign_keys}
 
     set_actions = tuple(
         SetForeignKey(
@@ -198,7 +201,7 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[
     )
     drop_actions = tuple(
         DropForeignKey(
-            constraint_name=foreign_key.resolve_constraint_name(observed.qualified_name.name)
+            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name)
         )
         for signature, foreign_key in observed_by_signature.items()
         if signature not in desired_by_signature
