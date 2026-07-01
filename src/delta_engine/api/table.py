@@ -7,6 +7,7 @@ from typing import ClassVar
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
 class DeltaTable:
@@ -51,7 +52,10 @@ class DeltaTable:
         effective = {**self.default_properties, **user_properties}
 
         columns = tuple(columns)
-        primary_key = tuple(column.name for column in columns if column.primary_key)
+        primary_key_columns = tuple(column.name for column in columns if column.primary_key)
+        primary_key = (
+            PrimaryKeyConstraint(columns=primary_key_columns) if primary_key_columns else None
+        )
         foreign_keys = tuple(foreign_keys) if foreign_keys is not None else ()
 
         # Building DesiredTable here enforces all domain invariants (non-empty
@@ -76,7 +80,8 @@ class DeltaTable:
     @property
     def primary_key(self) -> tuple[str, ...]:
         """Column names declared as the primary key, in declaration order."""
-        return self._desired_table.primary_key
+        constraint = self._desired_table.primary_key
+        return constraint.columns if constraint is not None else ()
 
     @property
     def primary_key_constraint_name(self) -> str | None:

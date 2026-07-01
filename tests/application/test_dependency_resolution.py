@@ -17,7 +17,12 @@ from delta_engine.domain.model.table import DesiredTable
 
 def _table(fqn: str) -> DesiredTable:
     catalog, schema, name = fqn.split(".")
-    return DeltaTable(catalog, schema, name, columns=(Column("id", String()),)).to_desired_table()
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String(), nullable=False, primary_key=True),),
+    ).to_desired_table()
 
 
 def _table_with_fk(fqn: str, references: str) -> DesiredTable:
@@ -26,7 +31,10 @@ def _table_with_fk(fqn: str, references: str) -> DesiredTable:
         catalog,
         schema,
         name,
-        columns=(Column("id", String()), Column("ref_id", String())),
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("ref_id", String()),
+        ),
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_id",),
@@ -172,9 +180,7 @@ def test_resolve_propagates_block_along_a_chain():
 
     # Then a fails directly and b, c, d are all blocked transitively
     by_name = _candidates_by_name(candidates)
-    assert (
-        by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    )
+    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert (
             by_name[blocked].failures[0].reason
@@ -225,7 +231,10 @@ def test_resolve_treats_self_referential_fk_as_applicable():
         "cat",
         "sch",
         "employees",
-        columns=(Column("id", String()), Column("manager_id", String())),
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("manager_id", String()),
+        ),
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("manager_id",),
@@ -251,7 +260,11 @@ def test_resolve_propagates_block_through_a_diamond():
         "cat",
         "sch",
         "d",
-        columns=(Column("id", String()), Column("b_id", String()), Column("c_id", String())),
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("b_id", String()),
+            Column("c_id", String()),
+        ),
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
@@ -273,9 +286,7 @@ def test_resolve_propagates_block_through_a_diamond():
 
     # Then a fails directly; b, c, and d are all blocked
     by_name = _candidates_by_name(candidates)
-    assert (
-        by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    )
+    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert all(
             f.reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -333,3 +344,111 @@ def test_resolve_blocks_fk_dependent_of_externally_failed_table():
         by_name["cat.sch.shipments"].failures[0].reason
         == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     )
+
+
+def test_resolve_passes_when_fk_targets_the_parents_primary_key():
+    # Given orders.ref_id -> customers.id, and customers declares id as its PK
+    tables = (
+        _table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _table("cat.sch.customers"),
+    )
+
+    # When
+    candidates = resolve(tables)
+
+    # Then every table can execute
+    assert all(candidate.can_execute for candidate in candidates)
+
+
+def test_resolve_fails_fk_that_targets_a_non_key_column():
+    # Given orders.ref_id -> customers.id, but customers has NO primary key
+    customers_no_pk = DeltaTable(
+        "cat",
+        "sch",
+        "customers",
+        columns=(Column("id", String()),),
+    ).to_desired_table()
+    tables = (
+        _table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        customers_no_pk,
+    )
+
+    # When
+    candidates = resolve(tables)
+
+    # Then orders cannot execute: its referenced columns are not the parent's PK
+    by_name = _candidates_by_name(candidates)
+    assert not by_name["cat.sch.orders"].can_execute
+    assert (
+        by_name["cat.sch.orders"].failures[0].reason
+        == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
+    )
+    # customers has no FK of its own, so it is unaffected and can execute
+    assert by_name["cat.sch.customers"].can_execute
+
+
+def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
+    # Given customers' PK is (id) but orders references customers(email)
+    catalog, schema, name = "cat.sch.customers".split(".")
+    customers = DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("email", String()),
+        ),
+    ).to_desired_table()
+    orders = DeltaTable(
+        "cat",
+        "sch",
+        "orders",
+        columns=(Column("id", String()), Column("ref_email", String())),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_email",),
+                references="cat.sch.customers",
+                referenced_columns=("email",),
+            )
+        ],
+    ).to_desired_table()
+
+    # When
+    candidates = resolve((orders, customers))
+
+    # Then orders is rejected: email is not customers' primary key
+    by_name = _candidates_by_name(candidates)
+    assert (
+        by_name["cat.sch.orders"].failures[0].reason
+        == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
+    )
+
+
+def test_resolve_valid_chain_with_primary_keys_executes():
+    # Given c.ref_id -> a.id, a.ref_id -> b.id, and both a and b expose id as PK.
+    # a must therefore be a table that has BOTH a PK (id) and an FK (ref_id -> b).
+    a = DeltaTable(
+        "cat",
+        "sch",
+        "a",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("ref_id", String()),
+        ),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("ref_id",), references="cat.sch.b", referenced_columns=("id",)
+            )
+        ],
+    ).to_desired_table()
+    tables = (
+        _table_with_fk("cat.sch.c", "cat.sch.a"),
+        a,
+        _table("cat.sch.b"),
+    )
+
+    # When
+    candidates = resolve(tables)
+
+    # Then the whole chain validates and executes
+    assert all(candidate.can_execute for candidate in candidates)

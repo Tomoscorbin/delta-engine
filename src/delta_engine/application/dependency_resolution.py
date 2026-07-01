@@ -17,7 +17,7 @@ hidden behind that interface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from delta_engine.application.results import Failure, ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
@@ -28,7 +28,12 @@ from delta_engine.domain.model.table import DesiredTable
 # recursion depth of the SCC traversal below stays far under Python's limit.
 
 
-@dataclass
+def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
+    """Return the table's primary key column names (empty when it has none)."""
+    return table.primary_key.columns if table.primary_key is not None else ()
+
+
+@dataclass(frozen=True, slots=True)
 class SyncCandidate:
     """
     A table prepared for the sync loop, together with its pre-execution failure verdict.
@@ -42,7 +47,7 @@ class SyncCandidate:
     """
 
     table: DesiredTable
-    failures: list[Failure] = field(default_factory=list)
+    failures: tuple[Failure, ...] = ()
 
     @property
     def qualified_name(self) -> QualifiedName:
@@ -78,33 +83,27 @@ def resolve(
     Returns:
         A tuple of :class:`SyncCandidate` objects in dependency-first order.
         Each candidate carries its table and any pre-execution failures (external
-        failures first, then FK failures). A candidate with an empty failures
-        list is ready to sync; one with failures must be excluded from execution.
+        failures first, then FK failures). A candidate with no failures is ready
+        to sync; one with failures must be excluded from execution.
 
     """
     external = external_failures or {}
     already_failed = frozenset(
-        str(qualified_name)
-        for qualified_name, failures in external.items()
-        if failures
+        str(qualified_name) for qualified_name, failures in external.items() if failures
     )
 
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
     components = _strongly_connected_components(graph)
 
-    cycle_members = {
-        name for component in components if _is_cycle(component) for name in component
-    }
+    cycle_members = {name for component in components if _is_cycle(component) for name in component}
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(
-        tables, registered_names, cycle_members, already_failed
-    )
+    failures_by_table = _classify_failures(tables, registered_names, cycle_members, already_failed)
 
     return tuple(
         SyncCandidate(
             table=table,
-            failures=(
+            failures=tuple(
                 list(external.get(table.qualified_name, ()))
                 + list(failures_by_table.get(table.qualified_name, ()))
             ),
@@ -240,12 +239,25 @@ def _classify_failures(
             )
         )
 
+    # Primary-key columns of every registered table, keyed by qualified name.
+    # A foreign key is only valid if its referenced columns are exactly the
+    # referenced table's primary key (Databricks rejects other targets at DDL
+    # time). Compared as sets: a primary key's declaration order is not part of
+    # its identity, and referenced_columns is aligned to local_columns, not PK order.
+    primary_key_by_name = {
+        str(table.qualified_name): set(_primary_key_columns(table)) for table in tables
+    }
+
     # Pass 1 — direct failures.
     for table in tables:
         table_name = str(table.qualified_name)
         for foreign_key in table.foreign_keys:
             if foreign_key.references not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
+            # Checked before cycle membership so that a structural FK-target problem is
+            # reported per-FK even when the table also participates in a cycle.
+            elif set(foreign_key.referenced_columns) != primary_key_by_name[foreign_key.references]:
+                record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif table_name in cycle_members:
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 

@@ -7,6 +7,7 @@ from delta_engine.application.validation import (
     validate_plan,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
@@ -244,11 +245,12 @@ def _set_pk(*columns: Column) -> SetPrimaryKey:
 
 
 def _create_table_with_pk(*columns: Column) -> CreateTable:
+    pk_tuple = tuple(c.name for c in columns if not c.nullable)
     return CreateTable(
         table=DesiredTable(
             qualified_name=_QN,
             columns=columns,
-            primary_key=tuple(c.name for c in columns if not c.nullable),
+            primary_key=PrimaryKeyConstraint(columns=pk_tuple) if pk_tuple else None,
         )
     )
 
@@ -303,7 +305,7 @@ def test_rejects_create_table_with_nullable_pk_column():
         table=DesiredTable(
             qualified_name=_QN,
             columns=(Column("id", Integer(), nullable=True),),
-            primary_key=("id",),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
         )
     )
 
@@ -337,7 +339,7 @@ def test_allows_create_table_with_non_nullable_pk_column():
         table=DesiredTable(
             qualified_name=_QN,
             columns=(Column("id", Integer(), nullable=False),),
-            primary_key=("id",),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
         )
     )
 

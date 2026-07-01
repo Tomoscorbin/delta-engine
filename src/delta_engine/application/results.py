@@ -54,6 +54,7 @@ class ForeignKeyFailureReason(StrEnum):
     CYCLE = "CYCLE"
     UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
     BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
+    REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
 
 
 _FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
@@ -63,6 +64,9 @@ _FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
     ),
     ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY: (
         "it references a table that failed to sync"
+    ),
+    ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY: (
+        "its referenced columns are not the primary key of the referenced table"
     ),
 }
 
@@ -451,8 +455,7 @@ def _render_grid(reports: tuple[TableRunReport, ...]) -> str:
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
     widths = [max(len(row[col]) for row in rows) for col in range(len(_GRID_HEADERS))]
     return "\n".join(
-        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip()
-        for row in rows
+        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip() for row in rows
     )
 
 

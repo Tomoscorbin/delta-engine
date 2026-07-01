@@ -23,6 +23,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable
 
@@ -32,7 +33,9 @@ from delta_engine.domain.plan.actions import CreateTable
 def _spec(fqn: str) -> DeltaTable:
     """Build a minimal real table definition from a 'catalog.schema.name' string."""
     catalog, schema, name = fqn.split(".")
-    return DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
+    return DeltaTable(
+        catalog, schema, name, columns=(Column("id", String(), nullable=False, primary_key=True),)
+    )
 
 
 def _spec_adding_not_null(fqn: str) -> DeltaTable:
@@ -48,7 +51,10 @@ def _spec_adding_not_null(fqn: str) -> DeltaTable:
         catalog,
         schema,
         name,
-        columns=(Column("id", String()), Column("order_id", String(), nullable=False)),
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("order_id", String(), nullable=False),
+        ),
     )
 
 
@@ -73,8 +79,11 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     catalog, schema, name = fqn.split(".")
     return TablePresent(
         table=ObservedTable(
+            # The reader never sets the column-level primary_key flag on observed
+            # columns; the table-level PrimaryKeyConstraint carries the PK.
             qualified_name=QualifiedName(catalog, schema, name),
-            columns=(Column("id", String()),),
+            columns=(Column("id", String(), nullable=False),),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
             properties={
                 "delta.columnMapping.mode": "name",
                 "delta.enableDeletionVectors": "true",
@@ -388,7 +397,10 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
         catalog,
         schema,
         name,
-        columns=(Column("id", String()), Column("ref_id", String())),
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("ref_id", String()),
+        ),
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_id",),
@@ -462,13 +474,23 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
         local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
     )
     table_a = DeltaTable(
-        "cat", "sch", "a",
-        columns=(Column("id", String()), Column("b_id", String())),
+        "cat",
+        "sch",
+        "a",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("b_id", String()),
+        ),
         foreign_keys=[constraint_a_to_b],
     )
     table_b = DeltaTable(
-        "cat", "sch", "b",
-        columns=(Column("id", String()), Column("a_id", String())),
+        "cat",
+        "sch",
+        "b",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("a_id", String()),
+        ),
         foreign_keys=[constraint_b_to_a],
     )
     registry = Registry()
@@ -514,13 +536,15 @@ def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
     customers_fk_failures = [
-        f for f in reports["cat.sch.customers"].pre_execution_failures
+        f
+        for f in reports["cat.sch.customers"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert customers_fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f for f in reports["cat.sch.orders"].pre_execution_failures
+        f
+        for f in reports["cat.sch.orders"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -550,6 +574,9 @@ def test_fk_failed_table_executes_no_actions():
 
 def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
     """Build a spec with a NOT NULL FK column — adding it to an existing table trips validation."""
+    # 'id' deliberately has no primary key: this helper's FK references an
+    # unresolvable table, so the FK->PK check never runs, and leaving 'id' a
+    # plain column keeps the diff to the single validation-tripping change.
     catalog, schema, name = fqn.split(".")
     return DeltaTable(
         catalog,
@@ -564,6 +591,12 @@ def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
             )
         ],
     )
+
+
+def _spec_without_pk(fqn: str) -> DeltaTable:
+    """Build a table with a plain 'id' column and no primary key — an invalid FK target."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
 
 def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
@@ -589,12 +622,8 @@ def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
         Engine(reader=reader, executor=executor).sync(registry)
     [tr] = list(err.value.report)
     assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
-    fk_failures = [
-        f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)
-    ]
-    val_failures = [
-        f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)
-    ]
+    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    val_failures = [f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)]
     assert len(fk_failures) == 1
     assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
@@ -624,7 +653,8 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.customers"].status is TableRunStatus.VALIDATION_FAILED
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f for f in reports["cat.sch.orders"].pre_execution_failures
+        f
+        for f in reports["cat.sch.orders"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert len(orders_fk_failures) == 1
@@ -639,9 +669,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     registry = Registry()
     registry.register(_spec("cat.sch.a"))
     registry.register(_spec_with_fk("cat.sch.b", "cat.sch.a"))
-    reader = _FakeReader(
-        {"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))}
-    )
+    reader = _FakeReader({"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))})
 
     executed: list[str] = []
 
@@ -662,8 +690,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.a"].status is TableRunStatus.READ_FAILED
     assert reports["cat.sch.b"].status is TableRunStatus.FOREIGN_KEY_FAILED
     b_fk_failures = [
-        f for f in reports["cat.sch.b"].pre_execution_failures
-        if isinstance(f, ForeignKeyFailure)
+        f for f in reports["cat.sch.b"].pre_execution_failures if isinstance(f, ForeignKeyFailure)
     ]
     assert len(b_fk_failures) == 1
     assert b_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -780,3 +807,23 @@ def test_real_run_records_the_planned_actions_on_the_report():
     [tr] = list(report)
     assert [type(action) for action in tr.plan] == [CreateTable]
     assert tr.status is TableRunStatus.SUCCESS
+
+
+def test_sync_fails_fk_that_does_not_reference_a_primary_key():
+    # Given orders references customers, customers is registered but has NO PK
+    registry = Registry()
+    registry.register(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
+    registry.register(_spec_without_pk("cat.sch.customers"))
+    engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
+
+    # When / Then the run fails and orders is FOREIGN_KEY_FAILED, unexecuted
+    with pytest.raises(SyncFailedError) as err:
+        engine.sync(registry)
+    reports = {str(tr.qualified_name): tr for tr in err.value.report}
+    orders = reports["cat.sch.orders"]
+    assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
+    fk_failures = [f for f in orders.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    assert fk_failures[0].reason == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
+    assert orders.execution is None
+    # customers is a clean create with no FK — it is not itself foreign-key-failed
+    assert reports["cat.sch.customers"].status is TableRunStatus.SUCCESS

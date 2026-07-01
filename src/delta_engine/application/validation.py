@@ -183,8 +183,8 @@ class PrimaryKeyColumnsNullable:
                             )
                         )
             elif isinstance(action, CreateTable):
-                if action.table.primary_key:
-                    primary_key_columns = set(action.table.primary_key)
+                if action.table.primary_key is not None:
+                    primary_key_columns = set(action.table.primary_key.columns)
                     for column in action.table.columns:
                         if column.name in primary_key_columns and column.nullable:
                             failures.append(

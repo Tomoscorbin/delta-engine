@@ -11,6 +11,7 @@ from delta_engine.domain.model import (
     TableSnapshot,
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
@@ -66,7 +67,11 @@ def test_fails_when_partition_columns_are_duplicated():
 
 def test_desired_table_primary_key_constraint_name_returns_table_name_pk():
     # Given a DesiredTable with a primary key
-    table = DesiredTable(qualified_name=_QN, columns=(_COL,), primary_key=("id",))
+    table = DesiredTable(
+        qualified_name=_QN,
+        columns=(_COL,),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+    )
 
     # Then the constraint name is {table_name}_pk
     assert table.primary_key_constraint_name == "orders_pk"
@@ -80,38 +85,35 @@ def test_desired_table_primary_key_constraint_name_returns_none_when_no_pk():
     assert table.primary_key_constraint_name is None
 
 
-def test_table_snapshot_primary_key_defaults_to_empty():
+def test_table_snapshot_primary_key_defaults_to_none():
     # Given a DesiredTable constructed without primary_key
     table = DesiredTable(qualified_name=_QN, columns=(_COL,))
 
-    # Then primary_key is an empty tuple
-    assert table.primary_key == ()
+    # Then primary_key is None (no constraint defined)
+    assert table.primary_key is None
 
 
 def test_table_snapshot_rejects_pk_column_not_in_columns():
     # Given a primary_key naming a column that does not exist
     # Then construction raises ValueError
     with pytest.raises(ValueError, match="missing_col"):
-        DesiredTable(qualified_name=_QN, columns=(_COL,), primary_key=("missing_col",))
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(_COL,),
+            primary_key=PrimaryKeyConstraint(columns=("missing_col",)),
+        )
 
 
 def test_observed_table_has_primary_key_field():
     # Given an ObservedTable constructed with a primary key
-    table = ObservedTable(qualified_name=_QN, columns=(_COL,), primary_key=("id",))
+    table = ObservedTable(
+        qualified_name=_QN,
+        columns=(_COL,),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+    )
 
-    # Then the field is readable
-    assert table.primary_key == ("id",)
-
-
-def test_table_snapshot_rejects_duplicate_pk_column_names():
-    # Given a primary_key with the same column name twice
-    # Then construction raises ValueError
-    with pytest.raises(ValueError, match="id"):
-        DesiredTable(
-            qualified_name=_QN,
-            columns=(Column("id", Integer(), nullable=False),),
-            primary_key=("id", "id"),
-        )
+    # Then the field is readable and returns the value object
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
 def test_table_snapshot_defaults_to_no_foreign_keys():

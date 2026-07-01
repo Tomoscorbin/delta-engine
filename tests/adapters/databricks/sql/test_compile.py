@@ -5,6 +5,7 @@ import pytest
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
@@ -28,7 +29,11 @@ _TARGET = QualifiedName("cat", "sch", "tbl")
 
 
 def _create_table(
-    *columns: Column, comment: str = "", properties=None, partitioned_by=(), primary_key=()
+    *columns: Column,
+    comment: str = "",
+    properties=None,
+    partitioned_by=(),
+    primary_key: PrimaryKeyConstraint | None = None,
 ):
     """Wrap columns in a CreateTable action for the target table."""
     return CreateTable(
@@ -329,7 +334,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         Column("id", Integer(), nullable=False),
         Column("name", String()),
-        primary_key=("id",),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
     )
     statement = _compile_single(action)
 

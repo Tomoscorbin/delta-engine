@@ -3,6 +3,7 @@ import pytest
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
 from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
 def test_user_overrides_take_precedence_over_defaults():
@@ -283,8 +284,8 @@ def test_delta_table_passes_pk_to_desired_table():
     # When converting to domain
     desired = table.to_desired_table()
 
-    # Then primary_key is set on the domain DesiredTable
-    assert desired.primary_key == ("id",)
+    # Then primary_key is set on the domain DesiredTable as a value object
+    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():
