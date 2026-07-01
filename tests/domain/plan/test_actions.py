@@ -15,11 +15,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -232,6 +234,8 @@ def test_plan_full_phase_order_with_all_action_types():
             DropForeignKey(constraint_name="t_old_fk"),
             DropPrimaryKey(),
             DropColumn(column_name="d_col"),
+            SetColumnTag(column_name="email", name="pii", value="true"),
+            UnsetColumnTag(column_name="email", name="old"),
             SetColumnComment(column_name="c_col", comment="c"),
             _create_table_action(),
             SetTableTag(name="env", value="prod"),
@@ -249,6 +253,8 @@ def test_plan_full_phase_order_with_all_action_types():
         DropPrimaryKey,
         AddColumn,
         DropColumn,
+        SetColumnTag,
+        UnsetColumnTag,
         SetColumnComment,
         SetTableComment,
         SetColumnNullability,
@@ -348,3 +354,48 @@ def test_plan_orders_set_table_tag_before_unset_table_tag():
 
     # Then sets run before unsets (documented phase precedence)
     assert [type(a) for a in plan] == [SetTableTag, UnsetTableTag]
+
+
+# ----- SetColumnTag / UnsetColumnTag
+
+
+def test_set_column_tag_subject_is_column_and_tag_name():
+    # Given a SetColumnTag action
+    action = SetColumnTag(column_name="email", name="pii", value="true")
+
+    # Then its within-phase subject is "{column}.{tag}" (for deterministic ordering)
+    assert action.subject == "email.pii"
+
+
+def test_unset_column_tag_subject_is_column_and_tag_name():
+    # Given an UnsetColumnTag action
+    action = UnsetColumnTag(column_name="email", name="pii")
+
+    # Then its within-phase subject is "{column}.{tag}"
+    assert action.subject == "email.pii"
+
+
+def test_plan_orders_set_column_tag_after_add_column():
+    # Given an AddColumn and a SetColumnTag on that column in one plan
+    plan = ActionPlan(
+        (
+            SetColumnTag(column_name="email", name="pii", value="true"),
+            AddColumn(column=_column("email")),
+        )
+    )
+
+    # Then the column is added before it is tagged
+    assert [type(a) for a in plan] == [AddColumn, SetColumnTag]
+
+
+def test_plan_orders_set_column_tag_before_unset_column_tag():
+    # Given both a set and an unset column-tag action in one plan
+    plan = ActionPlan(
+        (
+            UnsetColumnTag(column_name="email", name="old"),
+            SetColumnTag(column_name="email", name="pii", value="true"),
+        )
+    )
+
+    # Then sets run before unsets (documented phase precedence)
+    assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]

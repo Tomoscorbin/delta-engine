@@ -33,6 +33,8 @@ class ActionPhase(IntEnum):
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
+    SET_COLUMN_TAG = auto()
+    UNSET_COLUMN_TAG = auto()
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
@@ -160,6 +162,35 @@ class SetColumnComment(Action):
     @property
     def subject(self) -> str:
         return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class SetColumnTag(Action):
+    """Set a Unity Catalog tag on a column (distinct from a column comment)."""
+
+    column_name: str
+    name: str
+    value: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_TAG
+
+    @property
+    def subject(self) -> str:
+        return f"{self.column_name}.{self.name}"
+
+
+@dataclass(frozen=True, slots=True)
+class UnsetColumnTag(Action):
+    """Remove a Unity Catalog tag from a column."""
+
+    column_name: str
+    name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.UNSET_COLUMN_TAG
+
+    @property
+    def subject(self) -> str:
+        return f"{self.column_name}.{self.name}"
 
 
 @dataclass(frozen=True, slots=True)
