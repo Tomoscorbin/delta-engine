@@ -377,7 +377,7 @@ def _(action: SetProperty) -> str:
 
 @_action_diff_line.register
 def _(action: SetPrimaryKey) -> str:
-    columns = ", ".join(column.name for column in action.columns)
+    columns = ", ".join(action.columns)
     return f"+ primary key ({columns})"
 
 

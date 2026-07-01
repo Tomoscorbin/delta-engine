@@ -98,8 +98,14 @@ class DesiredTable(TableSnapshot):
         over the same local columns are incoherent, and would generate the same
         constraint name (``{table}_{local_cols}_fk``) and collide at DDL time.
         Checking the column *set* (order-insensitive) also rejects a reordered
-        duplicate. This lives on DesiredTable, not the shared base: an observed
-        table may legitimately carry such a layout and must stay representable.
+        duplicate.
+
+        A primary key column must be NOT NULL — a nullable primary key is not a
+        well-formed desired schema, independent of any migration. Enforcing it
+        here (rather than as a plan-validation rule) keeps the planning layer
+        free of column-nullability lookups. Both checks live on DesiredTable,
+        not the shared base: an observed table may legitimately carry such a
+        layout (a legacy catalog schema) and must stay representable.
 
         Names are generated after validation. Each constraint's
         ``with_generated_name`` rejects a name that is already set, so a
@@ -116,6 +122,20 @@ class DesiredTable(TableSnapshot):
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
+
+        if self.primary_key is not None:
+            key_columns = set(self.primary_key.columns)
+            nullable_key_columns = [
+                column.name
+                for column in self.columns
+                if column.name in key_columns and column.nullable
+            ]
+            if nullable_key_columns:
+                raise ValueError(
+                    "Primary key column must be NOT NULL:"
+                    f" {nullable_key_columns[0]}. Set nullable=False on every"
+                    " primary key column."
+                )
 
         table_name = self.qualified_name.name
         if self.primary_key is not None:

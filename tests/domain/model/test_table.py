@@ -96,6 +96,44 @@ def test_observed_table_has_primary_key_field():
     assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
+def test_desired_table_rejects_nullable_primary_key_column():
+    # Given a desired table whose primary key column is nullable
+    # Then construction raises — a nullable PK is not a well-formed desired schema
+    with pytest.raises(ValueError, match="Primary key column must be NOT NULL"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("id", Integer(), nullable=True),),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
+        )
+
+
+def test_desired_table_reports_the_offending_nullable_primary_key_column():
+    # Given a composite primary key where one member is nullable
+    # Then the failure names that column
+    with pytest.raises(ValueError, match="tenant_id"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("tenant_id", Integer(), nullable=True),
+            ),
+            primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id")),
+        )
+
+
+def test_observed_table_allows_a_nullable_primary_key_column():
+    # Given an ObservedTable read from a legacy catalog where a PK column is nullable
+    table = ObservedTable(
+        qualified_name=_QN,
+        columns=(Column("id", Integer(), nullable=True),),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+    )
+
+    # Then it is accepted — an observed schema must stay representable, whatever
+    # its shape, so the differ can plan against it
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
+
+
 def test_table_snapshot_defaults_to_no_foreign_keys():
     # Given a minimal table definition
     table = DesiredTable(

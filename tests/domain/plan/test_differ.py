@@ -94,9 +94,14 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
             st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
         ).map(tuple)
     )
+    # Primary key columns must be NOT NULL (a DesiredTable well-formedness
+    # invariant), so draw them only from the non-nullable columns.
+    non_nullable_names = [c.name for c in columns if not c.nullable]
     primary_key_cols = draw(
         st.lists(
-            st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
+            st.sampled_from(non_nullable_names) if non_nullable_names else st.nothing(),
+            max_size=min(2, len(non_nullable_names)),
+            unique=True,
         ).map(tuple)
     )
     primary_key = PrimaryKeyConstraint(columns=primary_key_cols) if primary_key_cols else None
@@ -549,10 +554,10 @@ def test_emits_set_primary_key_when_desired_has_pk_and_observed_has_none():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: a SetPrimaryKey is emitted; no DropPrimaryKey
+    # Then: a SetPrimaryKey is emitted carrying the PK column names; no DropPrimaryKey
     pk_actions = [a for a in plan.actions if isinstance(a, SetPrimaryKey)]
     assert len(pk_actions) == 1
-    assert pk_actions[0].columns == (Column("id", Integer(), nullable=False),)
+    assert pk_actions[0].columns == ("id",)
     assert not any(isinstance(a, DropPrimaryKey) for a in plan.actions)
 
 

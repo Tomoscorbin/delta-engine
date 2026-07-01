@@ -178,10 +178,7 @@ def test_drop_primary_key_has_no_subject():
 
 def test_set_primary_key_has_no_subject():
     # Given a SetPrimaryKey action
-    action = SetPrimaryKey(
-        columns=(Column(name="id", data_type=Integer(), nullable=False),),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(columns=("id",), constraint_name="tbl_pk")
 
     # Then it has no within-phase subject
     assert action.subject == ""
@@ -204,10 +201,7 @@ def test_plan_orders_set_primary_key_after_set_column_nullability():
     # Given a SetPrimaryKey and a SetColumnNullability in the same plan
     plan = ActionPlan(
         (
-            SetPrimaryKey(
-                columns=(Column(name="id", data_type=Integer(), nullable=False),),
-                constraint_name="tbl_pk",
-            ),
+            SetPrimaryKey(columns=("id",), constraint_name="tbl_pk"),
             SetColumnNullability(column_name="id", nullable=False),
         )
     )
@@ -227,10 +221,7 @@ def test_plan_full_phase_order_with_all_action_types():
         (
             PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()),
             ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
-            SetPrimaryKey(
-                columns=(Column(name="id", data_type=Integer(), nullable=False),),
-                constraint_name="tbl_pk",
-            ),
+            SetPrimaryKey(columns=("id",), constraint_name="tbl_pk"),
             SetForeignKey(foreign_key=fk),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),

@@ -176,12 +176,14 @@ class SetPrimaryKey(Action):
     """
     Add a primary key constraint to a table.
 
-    Carries the full Column objects so the validation rule can check
-    nullability without requiring a DesiredTable reference, and the
+    Carries the primary key column names (in declaration order) and the
     engine-generated ``constraint_name`` so the compiler renders it directly.
+    That primary key columns must be NOT NULL is a well-formedness invariant of
+    a desired table, enforced when the ``DesiredTable`` is built, not a plan
+    concern — so this action needs only the names.
     """
 
-    columns: tuple[Column, ...]
+    columns: tuple[str, ...]
     constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY

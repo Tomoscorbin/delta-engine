@@ -152,7 +152,7 @@ def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
-    column_clause = ", ".join(backtick(column.name) for column in action.columns)
+    column_clause = ", ".join(backtick(name) for name in action.columns)
     constraint = backtick(action.constraint_name)
     return (
         f"ALTER TABLE {backticked_table_name}"

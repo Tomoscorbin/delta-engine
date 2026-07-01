@@ -280,14 +280,8 @@ def test_drop_primary_key_renders_alter_drop_primary_key():
 
 
 def test_set_primary_key_renders_add_constraint_primary_key():
-    # Given a SetPrimaryKey carrying its engine-generated constraint name
-    action = SetPrimaryKey(
-        columns=(
-            Column(name="tenant_id", data_type=Integer(), nullable=False),
-            Column(name="order_id", data_type=Integer(), nullable=False),
-        ),
-        constraint_name="tbl_pk",
-    )
+    # Given a SetPrimaryKey carrying its column names and engine-generated constraint name
+    action = SetPrimaryKey(columns=("tenant_id", "order_id"), constraint_name="tbl_pk")
 
     # When compiling the action
     statement = _compile_single(action)
@@ -301,10 +295,7 @@ def test_set_primary_key_renders_add_constraint_primary_key():
 
 def test_set_primary_key_renders_alter_add_constraint():
     # When compiling a SetPrimaryKey with one column
-    action = SetPrimaryKey(
-        columns=(Column("id", Integer(), nullable=False),),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(columns=("id",), constraint_name="tbl_pk")
     statement = _compile_single(action)
 
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
@@ -313,13 +304,7 @@ def test_set_primary_key_renders_alter_add_constraint():
 
 def test_set_primary_key_renders_multiple_columns():
     # When compiling a SetPrimaryKey with two columns
-    action = SetPrimaryKey(
-        columns=(
-            Column("id", Integer(), nullable=False),
-            Column("tenant_id", Integer(), nullable=False),
-        ),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk")
     statement = _compile_single(action)
 
     # Then both columns appear in the PRIMARY KEY clause
