@@ -266,9 +266,7 @@ def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
             }
         }
     ]
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows)
-    )
+    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows))
 
     # When we fetch state
     result = reader.fetch_state(qn)
@@ -608,6 +606,7 @@ def test_fetch_state_includes_single_column_foreign_key_in_observed_table():
             constraint_name="orders_customer_id_fk",
             local_column="customer_id",
             ordinal_position=1,
+            position_in_unique_constraint=1,
             ref_catalog="cat",
             ref_schema="sch",
             ref_table="customers",
@@ -639,6 +638,7 @@ def test_fetch_state_preserves_composite_foreign_key_columns_in_ordinal_order():
             constraint_name="orders_comp_fk",
             local_column="tenant_id",
             ordinal_position=1,
+            position_in_unique_constraint=1,
             ref_catalog="cat",
             ref_schema="sch",
             ref_table="customers",
@@ -648,6 +648,7 @@ def test_fetch_state_preserves_composite_foreign_key_columns_in_ordinal_order():
             constraint_name="orders_comp_fk",
             local_column="customer_id",
             ordinal_position=2,
+            position_in_unique_constraint=2,
             ref_catalog="cat",
             ref_schema="sch",
             ref_table="customers",
@@ -693,3 +694,68 @@ def test_fetch_state_foreign_keys_are_empty_when_information_schema_unavailable(
     # Then the read still succeeds with no foreign keys (no UC = no FK constraints)
     assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == ()
+
+
+class _FakeSparkRawForeignKeyRows:
+    """
+    Spark fake that returns the *raw* per-column rows the production FK query
+    produces, so tests exercise the reader's grouping/alignment rather than a
+    pre-joined result. Each row mirrors one row of the real
+    information_schema query result set.
+    """
+
+    def __init__(self, *, catalog, fk_rows, describe_rows=None):
+        self._catalog = catalog
+        self._fk_rows = fk_rows
+        self._describe_rows = describe_rows or [{"properties": {}}]
+
+    @property
+    def catalog(self):
+        return self._catalog
+
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            return FakeDataFrame(self._fk_rows)
+        if "information_schema" in query.lower():
+            return FakeDataFrame([])  # no primary key rows for these tables
+        return FakeDataFrame(self._describe_rows)
+
+
+def test_fetch_state_composite_foreign_key_aligns_local_and_referenced_columns():
+    # Given a composite FK (tenant_id, customer_id) -> customers(tenant_id, id):
+    # the raw query returns one row per local column, each carrying the parent
+    # key column at the matching position_in_unique_constraint.
+    qn = QualifiedName("cat", "sch", "orders")
+    fk_rows = [
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="tenant_id",
+            ordinal_position=1,
+            position_in_unique_constraint=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="tenant_id",
+        ),
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="customer_id",
+            ordinal_position=2,
+            position_in_unique_constraint=2,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        ),
+    ]
+    spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then exactly one FK is observed, with columns positionally aligned and no duplicates
+    assert isinstance(result, TablePresent)
+    [foreign_key] = result.table.foreign_keys
+    assert foreign_key.local_columns == ("tenant_id", "customer_id")
+    assert foreign_key.referenced_columns == ("tenant_id", "id")
+    assert foreign_key.references == "cat.sch.customers"

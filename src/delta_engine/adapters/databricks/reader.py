@@ -198,21 +198,29 @@ class DatabricksReader:
         normalised throughout this reader.
         """
         catalog = backtick(qualified_name.catalog)
+        # Read the FK's local columns from key_column_usage (kcu). For a foreign
+        # key, kcu also exposes position_in_unique_constraint: the 1-based
+        # position of each local column within the *parent* key. We resolve the
+        # referenced columns by reading the parent key's own kcu rows (aliased
+        # pk) and aligning them to the FK by that position. constraint_column_usage
+        # has no ordinal, so it cannot align composite keys — hence the self-join.
         query = (
             f"SELECT rc.constraint_name,"
             f" kcu.column_name AS local_column,"
             f" kcu.ordinal_position,"
-            f" ccu.table_catalog AS ref_catalog,"
-            f" ccu.table_schema AS ref_schema,"
-            f" ccu.table_name AS ref_table,"
-            f" ccu.column_name AS ref_column"
+            f" kcu.position_in_unique_constraint,"
+            f" pk.table_catalog AS ref_catalog,"
+            f" pk.table_schema AS ref_schema,"
+            f" pk.table_name AS ref_table,"
+            f" pk.column_name AS ref_column"
             f" FROM {catalog}.information_schema.referential_constraints AS rc"
             f" JOIN {catalog}.information_schema.key_column_usage AS kcu"
             f" USING (constraint_catalog, constraint_schema, constraint_name)"
-            f" JOIN {catalog}.information_schema.constraint_column_usage AS ccu"
-            f" ON rc.unique_constraint_name = ccu.constraint_name"
-            f" AND rc.unique_constraint_catalog = ccu.constraint_catalog"
-            f" AND rc.unique_constraint_schema = ccu.constraint_schema"
+            f" JOIN {catalog}.information_schema.key_column_usage AS pk"
+            f" ON rc.unique_constraint_catalog = pk.constraint_catalog"
+            f" AND rc.unique_constraint_schema = pk.constraint_schema"
+            f" AND rc.unique_constraint_name = pk.constraint_name"
+            f" AND kcu.position_in_unique_constraint = pk.ordinal_position"
             f" WHERE kcu.table_schema = {quote_literal(qualified_name.schema)}"
             f" AND kcu.table_name = {quote_literal(qualified_name.name)}"
             f" ORDER BY rc.constraint_name, kcu.ordinal_position"
@@ -225,9 +233,10 @@ class DatabricksReader:
             # there are no FK constraints to observe.
             return ()
 
-        # Group rows by constraint_name, preserving ordinal order from the query.
-        # Using a plain dict keeps insertion order (Python 3.7+), so constraints
-        # appear in the same order as the first row for each name.
+        # One row per local FK column, already ordered by ordinal_position within
+        # each constraint. Grouping by name preserves that order, so local and
+        # referenced columns stay positionally aligned (row K of the constraint
+        # is the K-th local column and its matching parent-key column).
         grouped: dict[str, dict] = {}
         for row in rows:
             constraint_name = row.constraint_name
@@ -245,7 +254,9 @@ class DatabricksReader:
         return tuple(
             ForeignKeyConstraint(
                 local_columns=tuple(data["local_columns"]),
-                references=f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold(),
+                references=(
+                    f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold()
+                ),
                 referenced_columns=tuple(data["referenced_columns"]),
                 constraint_name=constraint_name,
             )
