@@ -156,6 +156,8 @@ assert inspector.has_primary_key("orders")
 assert inspector.has_foreign_key("orders")
 
 print("Act 1 verified: both tables created with expected schema and constraints.")
+inspector.display_schema("customers")
+inspector.display_schema("orders")
 
 # COMMAND ----------
 
@@ -246,6 +248,9 @@ assert inspector.properties_of("customers").get("delta.enableChangeDataFeed") ==
 assert inspector.table_comment("customers") == "Customer master table (with contact details)"
 assert inspector.column_comment("customers", "name") == "Full legal name"
 print("Act 3a verified: batched add/drop/tags/property/comments applied together.")
+inspector.display_schema("customers")
+inspector.display_tags("customers")
+inspector.display_properties("customers")
 
 # COMMAND ----------
 
@@ -288,6 +293,7 @@ print(report.diff())
 assert report.any_failures is False
 assert inspector.fields_of("customers")["status"].nullable is True
 print("Act 3b verified: nullability loosened (NOT NULL dropped).")
+inspector.display_schema("customers")
 
 # COMMAND ----------
 
@@ -331,6 +337,7 @@ print(report.diff())
 assert report.any_failures is False
 assert inspector.tags_of("customers") == {"domain": "sales"}
 print("Act 3c verified: undeclared tag removed by full-state reconciliation.")
+inspector.display_tags("customers")
 
 # COMMAND ----------
 
@@ -405,6 +412,7 @@ customer_fields = inspector.fields_of("customers")
 assert "region_id" in customer_fields and customer_fields["region_id"].nullable is True
 assert inspector.has_foreign_key("customers")
 print("Act 3d verified: foreign key added to an existing table.")
+inspector.display_schema("customers")
 
 # COMMAND ----------
 
@@ -462,6 +470,7 @@ print(report.diff())
 assert report.any_failures is False
 assert inspector.properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
 print("Act 3e verified: undeclared property left untouched (declared-subset).")
+inspector.display_properties("customers")
 
 # COMMAND ----------
 
@@ -746,6 +755,7 @@ print(report.diff())
 assert report.any_failures is False
 assert "phone" in inspector.fields_of("customers")
 print("Act 6 verified: previewed change committed.")
+inspector.display_schema("customers")
 
 # COMMAND ----------
 
