@@ -21,18 +21,18 @@ from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
-    UnsupportedChange,
-    UnsupportedChangeKind,
 )
 from delta_engine.domain.plan.differ import _diff_foreign_keys, compute_plan
 
@@ -235,12 +235,11 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition change is surfaced as an UnsupportedChange of kind PARTITIONING
-    partitioning_changes = [a for a in plan.actions if isinstance(a, UnsupportedChange)]
+    # Partition change is surfaced as a PartitioningChange action
+    partitioning_changes = [a for a in plan.actions if isinstance(a, PartitioningChange)]
     assert len(partitioning_changes) == 1
-    assert partitioning_changes[0].kind == UnsupportedChangeKind.PARTITIONING
-    assert partitioning_changes[0].from_repr == str(("event_date",))
-    assert partitioning_changes[0].to_repr == str(("event_date", "country"))
+    assert partitioning_changes[0].observed_partitioning == ("event_date",)
+    assert partitioning_changes[0].desired_partitioning == ("event_date", "country")
 
 
 # ---------- column diffs ----------
@@ -367,13 +366,12 @@ def test_emits_column_type_change_action_when_type_differs():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: the drift is surfaced as an UnsupportedChange of kind COLUMN_TYPE
-    type_changes = [a for a in plan if isinstance(a, UnsupportedChange)]
+    # Then: the drift is surfaced as a ColumnTypeChange action
+    type_changes = [a for a in plan if isinstance(a, ColumnTypeChange)]
     assert len(type_changes) == 1
-    assert type_changes[0].kind == UnsupportedChangeKind.COLUMN_TYPE
-    assert type_changes[0].subject_name == "id"
-    assert type_changes[0].from_repr == "Integer"
-    assert type_changes[0].to_repr == "String"
+    assert type_changes[0].column_name == "id"
+    assert type_changes[0].from_type == Integer()
+    assert type_changes[0].to_type == String()
 
 
 def test_emits_partitioning_change_action_when_partition_spec_differs():
@@ -385,13 +383,11 @@ def test_emits_partitioning_change_action_when_partition_spec_differs():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: the conflict is surfaced as an UnsupportedChange of kind PARTITIONING
-    partitioning_changes = [a for a in plan if isinstance(a, UnsupportedChange)]
+    # Then: the conflict is surfaced as a PartitioningChange action
+    partitioning_changes = [a for a in plan if isinstance(a, PartitioningChange)]
     assert len(partitioning_changes) == 1
-    assert partitioning_changes[0].kind == UnsupportedChangeKind.PARTITIONING
-    assert partitioning_changes[0].subject_name == ""
-    assert partitioning_changes[0].from_repr == str(())
-    assert partitioning_changes[0].to_repr == str(("ds",))
+    assert partitioning_changes[0].observed_partitioning == ()
+    assert partitioning_changes[0].desired_partitioning == ("ds",)
 
 
 def test_no_partitioning_action_when_partition_spec_is_unchanged():

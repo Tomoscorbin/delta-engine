@@ -3,7 +3,7 @@ import inspect
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
@@ -11,18 +11,18 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
-    UnsupportedChange,
-    UnsupportedChangeKind,
 )
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
@@ -253,14 +253,19 @@ def test_every_action_type_has_a_registered_compiler():
     assert unregistered == []
 
 
-def test_unsupported_change_raises_at_compile_time():
-    # Given an UnsupportedChange (never meant to reach the compiler)
-    action = UnsupportedChange(
-        kind=UnsupportedChangeKind.COLUMN_TYPE,
-        subject_name="id",
-        from_repr="Integer",
-        to_repr="Long",
-    )
+def test_column_type_change_raises_at_compile_time():
+    # Given a ColumnTypeChange (validation rejects it first; it must never reach the compiler)
+    action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
+
+    # When / Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
+        _compile_single(action)
+
+
+def test_partitioning_change_raises_at_compile_time():
+    # Given a PartitioningChange (validation rejects it first; it must never reach the compiler)
+    action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
+
     # When / Then compiling it is an internal-invariant violation
     with pytest.raises(AssertionError):
         _compile_single(action)

@@ -70,7 +70,7 @@ def test_message_renders_validation_failure_detail():
     report = _table_report(
         read=TableAbsent(),
         pre_execution_failures=(
-            ValidationFailure("UnsupportedChangeRejected", "cannot repartition"),
+            ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
         ),
     )
 
@@ -79,7 +79,7 @@ def test_message_renders_validation_failure_detail():
 
     # Then the validation failure line is present
     assert "❌ cat.sch.tbl [VALIDATION_FAILED]" in message
-    assert "Validation failed: UnsupportedChangeRejected - cannot repartition" in message
+    assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 
 def test_message_renders_every_validation_failure_when_a_table_breaks_several_rules():
@@ -88,7 +88,7 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
         read=TableAbsent(),
         pre_execution_failures=(
             ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
-            ValidationFailure("UnsupportedChangeRejected", "cannot repartition"),
+            ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
         ),
     )
 
@@ -97,7 +97,7 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
 
     # Then BOTH failures are surfaced together, not just the first
     assert "Validation failed: NonNullableColumnAdd - cannot add NOT NULL column 'age'" in message
-    assert "Validation failed: UnsupportedChangeRejected - cannot repartition" in message
+    assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 
 def test_message_renders_execution_failure_detail_with_sql_preview():

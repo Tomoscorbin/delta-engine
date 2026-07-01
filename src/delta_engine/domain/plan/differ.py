@@ -21,24 +21,19 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
-    UnsupportedChange,
-    UnsupportedChangeKind,
 )
-
-
-def _type_name(data_type: object) -> str:
-    """Backend-agnostic display name for a domain data type (e.g. 'String')."""
-    return type(data_type).__name__
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,11 +131,10 @@ def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> 
         if desired_column.nullable != observed_column.nullable
     )
     type_change_actions = tuple(
-        UnsupportedChange(
-            kind=UnsupportedChangeKind.COLUMN_TYPE,
-            subject_name=desired_column.name,
-            from_repr=_type_name(observed_column.data_type),
-            to_repr=_type_name(desired_column.data_type),
+        ColumnTypeChange(
+            column_name=desired_column.name,
+            from_type=observed_column.data_type,
+            to_type=desired_column.data_type,
         )
         for desired_column, observed_column in diff.changed
         if desired_column.data_type != observed_column.data_type
@@ -175,18 +169,11 @@ def _diff_properties(
 
 def _diff_partitioning(
     desired: tuple[str, ...], observed: tuple[str, ...]
-) -> tuple[UnsupportedChange, ...]:
-    """Return an UnsupportedChange action when the partition specs differ."""
+) -> tuple[PartitioningChange, ...]:
+    """Return a PartitioningChange action when the partition specs differ."""
     if desired == observed:
         return ()
-    return (
-        UnsupportedChange(
-            kind=UnsupportedChangeKind.PARTITIONING,
-            subject_name="",
-            from_repr=str(observed),
-            to_repr=str(desired),
-        ),
-    )
+    return (PartitioningChange(desired_partitioning=desired, observed_partitioning=observed),)
 
 
 def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, ...]:

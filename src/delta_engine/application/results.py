@@ -21,18 +21,18 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
-    UnsupportedChange,
-    UnsupportedChangeKind,
 )
 
 # ---------- Status enums ----------
@@ -398,10 +398,16 @@ def _(action: DropForeignKey) -> str:
 
 
 @_action_diff_line.register
-def _(action: UnsupportedChange) -> str:
-    if action.kind is UnsupportedChangeKind.COLUMN_TYPE:
-        return f"~ column {action.subject_name} type {action.from_repr} → {action.to_repr}"
-    return f"~ partitioning {action.from_repr} → {action.to_repr}"
+def _(action: ColumnTypeChange) -> str:
+    return (
+        f"~ column {action.column_name} type "
+        f"{_type_name(action.from_type)} → {_type_name(action.to_type)}"
+    )
+
+
+@_action_diff_line.register
+def _(action: PartitioningChange) -> str:
+    return f"~ partitioning {action.observed_partitioning} → {action.desired_partitioning}"
 
 
 def _render_diff_block(report: TableRunReport) -> str:

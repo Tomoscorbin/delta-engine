@@ -8,11 +8,11 @@ from delta_engine.application.results import ValidationFailure, ValidationResult
 from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
+    ColumnTypeChange,
     CreateTable,
+    PartitioningChange,
     SetColumnNullability,
     SetPrimaryKey,
-    UnsupportedChange,
-    UnsupportedChangeKind,
 )
 
 
@@ -95,38 +95,60 @@ class NullabilityTighteningOnExistingColumn:
         )
 
 
-class UnsupportedChangeRejected:
+class UnsupportedColumnTypeChange:
     """
-    Disallow any change Delta Lake cannot apply in place.
+    Disallow changing the data type of an existing column.
 
-    The differ emits an :class:`~delta_engine.domain.plan.UnsupportedChange`
-    when it detects a column type change or a partitioning change. Neither is
-    supported on an existing table, so this rule blocks any such action and
-    surfaces the drift as a clear validation failure.
+    The differ emits a :class:`~delta_engine.domain.plan.ColumnTypeChange`
+    action when it detects a type mismatch between desired and observed. Delta
+    Lake does not support type migrations, so this rule blocks any such action
+    and surfaces the drift as a clear validation failure.
     """
 
-    name: ClassVar[str] = "UnsupportedChangeRejected"
+    name: ClassVar[str] = "UnsupportedColumnTypeChange"
 
     def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
-        """Flag every UnsupportedChange action in the plan."""
+        """Flag every ColumnTypeChange action in the plan."""
         return tuple(
-            ValidationFailure(rule_name=self.name, message=self._message(action))
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: cannot change the type of existing"
+                    f" column '{action.column_name}' from {action.from_type} to"
+                    f" {action.to_type}. Type migrations are not supported;"
+                    " recreate the table to change a column's type."
+                ),
+            )
             for action in plan
-            if isinstance(action, UnsupportedChange)
+            if isinstance(action, ColumnTypeChange)
         )
 
-    def _message(self, action: UnsupportedChange) -> str:
-        if action.kind is UnsupportedChangeKind.COLUMN_TYPE:
-            return (
-                "Operation not allowed: cannot change the type of existing column"
-                f" '{action.subject_name}' from {action.from_repr} to {action.to_repr}."
-                " Type migrations are not supported; recreate the table to change a column's type."
+
+class DisallowPartitioningChange:
+    """
+    Disallow any plan that attempts to change partitioning.
+
+    The differ emits a :class:`~delta_engine.domain.plan.PartitioningChange`
+    action when desired and observed partition specs differ. Partitioning can
+    only be set during table creation, so this rule blocks any such action.
+    """
+
+    name: ClassVar[str] = "DisallowPartitioningChange"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag the plan if it contains a PartitioningChange action."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: partitioning changes are not supported."
+                    f" Current partition columns: {action.observed_partitioning}"
+                    f" - Requested partition columns: {action.desired_partitioning}."
+                    " Recreate the table with the desired partitioning."
+                ),
             )
-        return (
-            "Operation not allowed: partitioning changes are not supported."
-            f" Current partition columns: {action.from_repr}"
-            f" - Requested partition columns: {action.to_repr}."
-            " Recreate the table with the desired partitioning."
+            for action in plan
+            if isinstance(action, PartitioningChange)
         )
 
 
@@ -181,7 +203,8 @@ class PrimaryKeyColumnsNullable:
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
-    UnsupportedChangeRejected(),
+    UnsupportedColumnTypeChange(),
+    DisallowPartitioningChange(),
     PrimaryKeyColumnsNullable(),
 )
 

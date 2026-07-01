@@ -55,7 +55,7 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 ## Sentinel actions
 
-`UnsupportedChange` is an action that is never executed. It carries a `kind` discriminant (`UnsupportedChangeKind.COLUMN_TYPE` or `UnsupportedChangeKind.PARTITIONING`) so the validation layer can reject it with a specific, clear message. The SQL compiler raises `AssertionError` if an `UnsupportedChange` reaches compilation — encoding the invariant that validation always runs first.
+`ColumnTypeChange` and `PartitioningChange` are actions that are never executed. The differ emits them to describe drift it detected — a column whose type differs, or a changed partition spec — without judging whether that drift is allowed; deciding what is permitted is the validation layer's job (`UnsupportedColumnTypeChange` and `DisallowPartitioningChange` reject them with a clear message). The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first.
 
 ## Constraint-name generation
 
