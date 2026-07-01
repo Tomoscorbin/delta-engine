@@ -83,8 +83,8 @@ def resolve(
     Returns:
         A tuple of :class:`SyncCandidate` objects in dependency-first order.
         Each candidate carries its table and any pre-execution failures (external
-        failures first, then FK failures). A candidate with an empty failures
-        list is ready to sync; one with failures must be excluded from execution.
+        failures first, then FK failures). A candidate with no failures is ready
+        to sync; one with failures must be excluded from execution.
 
     """
     external = external_failures or {}
