@@ -72,33 +72,38 @@ class TableSnapshot:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
         if self.foreign_keys:
-            seen_explicit_names: set[str] = set()
-            seen_unnamed_local_columns: set[tuple[str, ...]] = set()
             for foreign_key in self.foreign_keys:
                 missing = [col for col in foreign_key.local_columns if col not in seen_names]
                 if missing:
                     raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
 
-                # Two FKs with the same explicit constraint name would collide in SQL.
-                # Two unnamed FKs on the same local columns derive the same name in the
-                # SQL adapter, so reject that too.
-                if foreign_key.constraint_name is not None:
-                    if foreign_key.constraint_name in seen_explicit_names:
-                        raise ValueError(
-                            f"Duplicate foreign key constraint name: {foreign_key.constraint_name}"
-                        )
-                    seen_explicit_names.add(foreign_key.constraint_name)
-                else:
-                    if foreign_key.local_columns in seen_unnamed_local_columns:
-                        cols = "_".join(foreign_key.local_columns)
-                        derived = f"{self.qualified_name.name}_{cols}_fk"
-                        raise ValueError(f"Duplicate foreign key constraint name: {derived}")
-                    seen_unnamed_local_columns.add(foreign_key.local_columns)
-
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
+
+    def __post_init__(self) -> None:
+        """
+        Enforce desired-only invariants on top of the shared snapshot checks.
+
+        No two foreign keys may govern the same set of local columns. Two FKs
+        over the same local columns are incoherent, and under the adapter's
+        naming policy (``{table}_{local_cols}_fk``) they would derive the same
+        constraint name and collide at DDL time. Checking the column *set*
+        (order-insensitive) also rejects a reordered duplicate. This lives on
+        DesiredTable, not the shared base: an observed table may legitimately
+        carry such a layout and must stay representable.
+        """
+        TableSnapshot.__post_init__(self)
+        seen: set[frozenset[str]] = set()
+        for foreign_key in self.foreign_keys:
+            local_column_set = frozenset(foreign_key.local_columns)
+            if local_column_set in seen:
+                raise ValueError(
+                    "Two foreign keys declared over the same local columns:"
+                    f" {sorted(local_column_set)}"
+                )
+            seen.add(local_column_set)
 
 
 @dataclass(frozen=True, slots=True)

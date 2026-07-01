@@ -141,34 +141,6 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
         )
 
 
-def test_table_snapshot_rejects_foreign_keys_with_duplicate_explicit_names():
-    # Given two FKs sharing one explicit constraint name
-    first = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        references="cat.sch.customers",
-        referenced_columns=("id",),
-        constraint_name="shared_name",
-    )
-    second = ForeignKeyConstraint(
-        local_columns=("product_id",),
-        references="cat.sch.products",
-        referenced_columns=("id",),
-        constraint_name="shared_name",
-    )
-
-    # When / Then — the differ keys FKs by name, so a collision would drop one
-    with pytest.raises(ValueError, match="shared_name"):
-        DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(
-                Column("id", Integer()),
-                Column("customer_id", Integer()),
-                Column("product_id", Integer()),
-            ),
-            foreign_keys=(first, second),
-        )
-
-
 def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
     # Given two FKs on the same local columns, neither with an explicit name
     first = ForeignKeyConstraint(
@@ -182,10 +154,84 @@ def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
         referenced_columns=("id",),
     )
 
-    # When / Then — both derive orders_customer_id_fk, which would collide
-    with pytest.raises(ValueError, match="orders_customer_id_fk"):
+    # When / Then — both FKs govern the same local-column set, which is incoherent
+    # and would derive the same constraint name under the adapter's naming policy
+    with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(Column("id", Integer()), Column("customer_id", Integer())),
             foreign_keys=(first, second),
         )
+
+
+def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
+    # Given two FKs whose local-column sets are identical (would collide on the
+    # derived name and are semantically incoherent)
+    fk_one = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+    )
+    fk_two = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.accounts",
+        referenced_columns=("id",),
+    )
+
+    # When / Then building a DesiredTable with both is rejected
+    with pytest.raises(ValueError, match="same local columns"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(Column("customer_id", Integer()),),
+            foreign_keys=(fk_one, fk_two),
+        )
+
+
+def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
+    # Given two FKs over the same columns in a different order (the reorder case
+    # the old name-based guard missed)
+    fk_one = ForeignKeyConstraint(
+        local_columns=("tenant_id", "customer_id"),
+        references="cat.sch.customers",
+        referenced_columns=("tenant_id", "id"),
+    )
+    fk_two = ForeignKeyConstraint(
+        local_columns=("customer_id", "tenant_id"),
+        references="cat.sch.customers",
+        referenced_columns=("id", "tenant_id"),
+    )
+
+    # When / Then building a DesiredTable with both is rejected
+    with pytest.raises(ValueError, match="same local columns"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(Column("tenant_id", Integer()), Column("customer_id", Integer())),
+            foreign_keys=(fk_one, fk_two),
+        )
+
+
+def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
+    # Given the same clashing FK pair, but as an OBSERVED table (a catalog fact
+    # must stay representable and reconcilable, not rejected at read time)
+    fk_one = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="a_fk",
+    )
+    fk_two = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.accounts",
+        referenced_columns=("id",),
+        constraint_name="b_fk",
+    )
+
+    # When building an ObservedTable with both
+    observed = ObservedTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("customer_id", Integer()),),
+        foreign_keys=(fk_one, fk_two),
+    )
+
+    # Then it is accepted
+    assert len(observed.foreign_keys) == 2
