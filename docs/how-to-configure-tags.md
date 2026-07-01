@@ -45,3 +45,41 @@ This means a tag applied outside delta-engine (in the Databricks UI, by another 
 Tags require Unity Catalog on Databricks Runtime 13.3 LTS or later, and the `APPLY TAG` privilege on the table (plus `USE SCHEMA` / `USE CATALOG`). On non-Unity-Catalog environments the engine observes no tags and emits no tag changes.
 
 Databricks limits: up to 50 tags per table; keys and values up to 256 characters; tag keys cannot contain `. , - = / :` or leading/trailing spaces.
+
+## Column tags
+
+Tags can also be declared on individual columns. Pass a `tags` dict to a
+`Column`:
+
+```python
+from delta_engine import Column, DeltaTable, String
+
+table = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("id", String()),
+        Column(
+            "email",
+            String(),
+            tags={"pii": "true", "classification": "restricted"},
+        ),
+    ],
+)
+```
+
+Column tags follow the **same full-state reconciliation** as table tags: on each
+sync the engine sets any declared tag that is missing or has a different value,
+and unsets any tag found on the column that is not declared. A column tag applied
+out-of-band (Databricks UI, another job, an automated classifier) is removed on
+the next sync unless it is also declared.
+
+As with table tags, keys are **case-sensitive** (`PII` and `pii` are distinct).
+
+### Requirements and limits
+
+Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and the
+`APPLY TAG` privilege. Databricks limits: up to 50 tags per column, at most 1,000
+column tags per table across all columns, keys and values up to 256 characters,
+and tag keys cannot contain `. , - = / :` or leading/trailing spaces.
