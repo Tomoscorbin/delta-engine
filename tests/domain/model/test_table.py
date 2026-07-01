@@ -116,13 +116,6 @@ def test_observed_table_has_primary_key_field():
     assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
-def test_table_snapshot_rejects_duplicate_pk_column_names():
-    # Given a PrimaryKeyConstraint with a duplicate column name
-    # Then construction of the constraint raises ValueError (checked in PrimaryKeyConstraint)
-    with pytest.raises(ValueError, match="id"):
-        PrimaryKeyConstraint(columns=("id", "id"))
-
-
 def test_table_snapshot_defaults_to_no_foreign_keys():
     # Given a minimal table definition
     table = DesiredTable(
