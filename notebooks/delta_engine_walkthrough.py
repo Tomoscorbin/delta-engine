@@ -69,73 +69,16 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
 # MAGIC %md
 # MAGIC ### Verification helpers
 # MAGIC
-# MAGIC These read the live catalog with the same surfaces the engine's own reader
-# MAGIC uses, so assertions reflect real Unity Catalog state. Defined once here and
-# MAGIC reused by every verification cell.
+# MAGIC `CatalogInspector` reads live table state back from Unity Catalog using the
+# MAGIC same surfaces the engine's own reader uses, so assertions reflect real
+# MAGIC catalog state. It lives in `catalog_inspector.py` beside this notebook —
+# MAGIC import it as a module so the notebook itself stays focused on the syncs.
 
 # COMMAND ----------
 
-def fqname(table):
-    """Fully qualified name for a demo table."""
-    return f"{CATALOG}.{SCHEMA}.{table}"
+from catalog_inspector import CatalogInspector
 
-
-def fields_of(table):
-    """Map of column name to StructField for the live table."""
-    return {field.name: field for field in spark.table(fqname(table)).schema.fields}
-
-
-def partitions_of(table):
-    """Tuple of partition column names, in catalog order."""
-    columns = spark.catalog.listColumns(fqname(table))
-    return tuple(column.name for column in columns if column.isPartition)
-
-
-def properties_of(table):
-    """Delta table properties as a plain dict (from DESCRIBE DETAIL)."""
-    row = spark.sql(f"DESCRIBE DETAIL {fqname(table)}").first()
-    return dict(row["properties"]) if row else {}
-
-
-def tags_of(table):
-    """Unity Catalog tags as a plain dict, read from information_schema."""
-    rows = spark.sql(
-        f"SELECT tag_name, tag_value FROM {CATALOG}.information_schema.table_tags"
-        f" WHERE schema_name = '{SCHEMA}' AND table_name = '{table}'"
-    ).collect()
-    return {row.tag_name: row.tag_value for row in rows}
-
-
-def has_primary_key(table):
-    """Return True if the live table has a primary key constraint."""
-    rows = spark.sql(
-        f"SELECT 1 FROM {CATALOG}.information_schema.table_constraints"
-        f" WHERE table_schema = '{SCHEMA}' AND table_name = '{table}'"
-        f" AND constraint_type = 'PRIMARY KEY'"
-    ).collect()
-    return len(rows) > 0
-
-
-def has_foreign_key(table):
-    """Return True if the live table is the child of a foreign key constraint."""
-    rows = spark.sql(
-        f"SELECT 1 FROM {CATALOG}.information_schema.referential_constraints AS rc"
-        f" JOIN {CATALOG}.information_schema.key_column_usage AS kcu"
-        f" USING (constraint_catalog, constraint_schema, constraint_name)"
-        f" WHERE kcu.table_schema = '{SCHEMA}' AND kcu.table_name = '{table}'"
-    ).collect()
-    return len(rows) > 0
-
-
-def table_comment(table):
-    """Return the live table comment, or empty string."""
-    return spark.catalog.getTable(fqname(table)).description or ""
-
-
-def column_comment(table, column):
-    """Return the live comment on one column, or empty string."""
-    return fields_of(table)[column].metadata.get("comment", "")
-
+inspector = CatalogInspector(CATALOG, SCHEMA)
 
 # COMMAND ----------
 
@@ -200,18 +143,18 @@ print(report.diff())
 
 assert report.any_failures is False, "first sync should fully succeed"
 
-assert spark.catalog.tableExists(fqname("customers"))
-assert spark.catalog.tableExists(fqname("orders"))
+assert spark.catalog.tableExists(inspector.fqname("customers"))
+assert spark.catalog.tableExists(inspector.fqname("orders"))
 
-customer_fields = fields_of("customers")
+customer_fields = inspector.fields_of("customers")
 assert set(customer_fields) == {"id", "name", "legacy_code", "status"}
 assert customer_fields["id"].nullable is False
 assert customer_fields["status"].nullable is False
-assert has_primary_key("customers")
+assert inspector.has_primary_key("customers")
 
-assert partitions_of("orders") == ("order_date",)
-assert has_primary_key("orders")
-assert has_foreign_key("orders")
+assert inspector.partitions_of("orders") == ("order_date",)
+assert inspector.has_primary_key("orders")
+assert inspector.has_foreign_key("orders")
 
 print("Act 1 verified: both tables created with expected schema and constraints.")
 
@@ -296,13 +239,13 @@ print(report.diff())
 
 assert report.any_failures is False
 
-customer_fields = fields_of("customers")
+customer_fields = inspector.fields_of("customers")
 assert "email" in customer_fields and customer_fields["email"].nullable is True
 assert "legacy_code" not in customer_fields
-assert tags_of("customers") == {"domain": "sales", "owner": "data-eng"}
-assert properties_of("customers").get("delta.enableChangeDataFeed") == "true"
-assert table_comment("customers") == "Customer master table (with contact details)"
-assert column_comment("customers", "name") == "Full legal name"
+assert inspector.tags_of("customers") == {"domain": "sales", "owner": "data-eng"}
+assert inspector.properties_of("customers").get("delta.enableChangeDataFeed") == "true"
+assert inspector.table_comment("customers") == "Customer master table (with contact details)"
+assert inspector.column_comment("customers", "name") == "Full legal name"
 print("Act 3a verified: batched add/drop/tags/property/comments applied together.")
 
 # COMMAND ----------
@@ -344,7 +287,7 @@ print(report.diff())
 # COMMAND ----------
 
 assert report.any_failures is False
-assert fields_of("customers")["status"].nullable is True
+assert inspector.fields_of("customers")["status"].nullable is True
 print("Act 3b verified: nullability loosened (NOT NULL dropped).")
 
 # COMMAND ----------
@@ -387,7 +330,7 @@ print(report.diff())
 # COMMAND ----------
 
 assert report.any_failures is False
-assert tags_of("customers") == {"domain": "sales"}
+assert inspector.tags_of("customers") == {"domain": "sales"}
 print("Act 3c verified: undeclared tag removed by full-state reconciliation.")
 
 # COMMAND ----------
@@ -418,7 +361,7 @@ report = engine.sync(registry)
 print(report)
 print(report.diff())
 assert report.any_failures is False
-assert spark.catalog.tableExists(fqname("regions"))
+assert spark.catalog.tableExists(inspector.fqname("regions"))
 
 # COMMAND ----------
 
@@ -459,9 +402,9 @@ print(report.diff())
 # COMMAND ----------
 
 assert report.any_failures is False
-customer_fields = fields_of("customers")
+customer_fields = inspector.fields_of("customers")
 assert "region_id" in customer_fields and customer_fields["region_id"].nullable is True
-assert has_foreign_key("customers")
+assert inspector.has_foreign_key("customers")
 print("Act 3d verified: foreign key added to an existing table.")
 
 # COMMAND ----------
@@ -476,7 +419,7 @@ print("Act 3d verified: foreign key added to an existing table.")
 # COMMAND ----------
 
 spark.sql(
-    f"ALTER TABLE {fqname('customers')}"
+    f"ALTER TABLE {inspector.fqname('customers')}"
     f" SET TBLPROPERTIES ('delta.logRetentionDuration' = 'interval 7 days')"
 )
 
@@ -518,7 +461,7 @@ print(report.diff())
 # COMMAND ----------
 
 assert report.any_failures is False
-assert properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
+assert inspector.properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
 print("Act 3e verified: undeclared property left untouched (declared-subset).")
 
 # COMMAND ----------
@@ -560,7 +503,7 @@ print(report)
 print(report.diff())
 
 assert report.any_failures is False
-assert partitions_of("events") == ("event_date",)
+assert inspector.partitions_of("events") == ("event_date",)
 print("events baseline created.")
 
 # COMMAND ----------
@@ -591,7 +534,7 @@ except SyncFailedError as error:
     assert table_report.all_failures
 
 # Verify nothing was applied.
-assert "region" not in fields_of("events")
+assert "region" not in inspector.fields_of("events")
 print("Block 1 verified: NOT NULL add blocked, table untouched.")
 
 # COMMAND ----------
@@ -627,7 +570,7 @@ except SyncFailedError as error:
     assert table_report.all_failures
 
 # Verify nothing was applied.
-assert fields_of("events")["event_date"].nullable is True
+assert inspector.fields_of("events")["event_date"].nullable is True
 print("Block 2 verified: tightening blocked, event_date still nullable.")
 
 # COMMAND ----------
@@ -663,7 +606,7 @@ except SyncFailedError as error:
     assert table_report.all_failures
 
 # Verify nothing was applied — amount is still a decimal.
-assert isinstance(fields_of("events")["amount"].dataType, T.DecimalType)
+assert isinstance(inspector.fields_of("events")["amount"].dataType, T.DecimalType)
 print("Block 3 verified: type change blocked, amount still Decimal.")
 
 # COMMAND ----------
@@ -690,7 +633,7 @@ except SyncFailedError as error:
     assert table_report.all_failures
 
 # Verify nothing was applied — still partitioned by event_date.
-assert partitions_of("events") == ("event_date",)
+assert inspector.partitions_of("events") == ("event_date",)
 print("Block 4 verified: partitioning change blocked, partitions unchanged.")
 
 # COMMAND ----------
@@ -734,7 +677,7 @@ except SyncFailedError as error:
     assert table_report.all_failures
 
 # Verify nothing was applied — the table was never created.
-assert spark.catalog.tableExists(fqname("line_items")) is False
+assert spark.catalog.tableExists(inspector.fqname("line_items")) is False
 print("Act 5 verified: unresolved foreign key blocked, no table created.")
 
 # COMMAND ----------
@@ -787,7 +730,7 @@ print(preview.diff())
 # COMMAND ----------
 
 assert all(table_report.execution is None for table_report in preview)
-assert "phone" not in fields_of("customers")
+assert "phone" not in inspector.fields_of("customers")
 print("Dry run verified: plan shown, nothing executed.")
 
 # COMMAND ----------
@@ -802,7 +745,7 @@ print(report)
 print(report.diff())
 
 assert report.any_failures is False
-assert "phone" in fields_of("customers")
+assert "phone" in inspector.fields_of("customers")
 print("Act 6 verified: previewed change committed.")
 
 # COMMAND ----------
