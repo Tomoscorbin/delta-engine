@@ -63,11 +63,13 @@ In `src/delta_engine/adapters/databricks/sql/compile.py`, register a `singledisp
 
 ```python
 @_compile_action.register
-def _(action: UpdateComment, backticked_table_name: str) -> str:
+def _(action: UpdateComment, backticked_table_name: str, table_name: str) -> str:
     col = backtick(action.column_name)
     comment = quote_literal(action.new_comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {col} COMMENT {comment}"
 ```
+
+All handlers receive `table_name: str` as a third parameter. Handlers that need to emit a constraint name call `derive_constraint_name(table_name, local_columns)` — where `local_columns=None` yields the primary key name and a column tuple yields the foreign key name.
 
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).
 

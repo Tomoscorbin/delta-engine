@@ -22,7 +22,7 @@ orders = DeltaTable(
 )
 ```
 
-The engine derives the constraint name as `{table_name}_pk` — `orders_pk` in the example above. You can read it back from `orders.primary_key_constraint_name`.
+The engine derives the constraint name as `{table_name}_pk` — `orders_pk` in the example above. This name is determined by the SQL adapter when DDL is emitted; it is not exposed on the table object.
 
 ## Composite primary keys
 
