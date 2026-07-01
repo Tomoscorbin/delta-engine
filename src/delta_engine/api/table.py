@@ -84,11 +84,6 @@ class DeltaTable:
         return constraint.columns if constraint is not None else ()
 
     @property
-    def primary_key_constraint_name(self) -> str | None:
-        """The constraint name for this table's primary key, or None if no PK is defined."""
-        return self._desired_table.primary_key_constraint_name
-
-    @property
     def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
         """Foreign key constraints declared on this table."""
         return self._desired_table.foreign_keys

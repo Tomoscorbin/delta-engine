@@ -65,26 +65,6 @@ def test_fails_when_partition_columns_are_duplicated():
         TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("visit_date", "visit_date"))
 
 
-def test_desired_table_primary_key_constraint_name_returns_table_name_pk():
-    # Given a DesiredTable with a primary key
-    table = DesiredTable(
-        qualified_name=_QN,
-        columns=(_COL,),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
-    )
-
-    # Then the constraint name is {table_name}_pk
-    assert table.primary_key_constraint_name == "orders_pk"
-
-
-def test_desired_table_primary_key_constraint_name_returns_none_when_no_pk():
-    # Given a DesiredTable with no primary key
-    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
-
-    # Then the constraint name is None
-    assert table.primary_key_constraint_name is None
-
-
 def test_table_snapshot_primary_key_defaults_to_none():
     # Given a DesiredTable constructed without primary_key
     table = DesiredTable(qualified_name=_QN, columns=(_COL,))

@@ -16,8 +16,9 @@ class PrimaryKeyConstraint:
 
     Attributes:
         columns: Ordered tuple of column names that make up the primary key.
-        constraint_name: Optional explicit constraint name. When omitted, the
-            name is derived as ``{table_name}_pk`` via ``resolve_constraint_name``.
+        constraint_name: Optional constraint name. Populated from the catalog for an
+            observed constraint; ``None`` for a desired declaration (the SQL adapter
+            derives the name).
 
     """
 
@@ -34,9 +35,3 @@ class PrimaryKeyConstraint:
             seen.add(column)
         if self.constraint_name is not None and not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank when provided")
-
-    def resolve_constraint_name(self, table_name: str) -> str:
-        """Return the constraint name to use in SQL, deriving it when not explicitly set."""
-        if self.constraint_name is not None:
-            return self.constraint_name
-        return f"{table_name}_pk"

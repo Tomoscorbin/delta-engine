@@ -72,25 +72,28 @@ class TableSnapshot:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
         if self.foreign_keys:
-            seen_constraint_names: set[str] = set()
+            seen_explicit_names: set[str] = set()
+            seen_unnamed_local_columns: set[tuple[str, ...]] = set()
             for foreign_key in self.foreign_keys:
                 missing = [col for col in foreign_key.local_columns if col not in seen_names]
                 if missing:
                     raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
 
-                # The differ keys FKs by their resolved constraint name, so two
-                # FKs resolving to the same name would silently collapse to one.
-                constraint_name = foreign_key.resolve_constraint_name(self.qualified_name.name)
-                if constraint_name in seen_constraint_names:
-                    raise ValueError(f"Duplicate foreign key constraint name: {constraint_name}")
-                seen_constraint_names.add(constraint_name)
-
-    @property
-    def primary_key_constraint_name(self) -> str | None:
-        """The constraint name for this table's primary key, or None if no PK is defined."""
-        if self.primary_key is None:
-            return None
-        return self.primary_key.resolve_constraint_name(self.qualified_name.name)
+                # Two FKs with the same explicit constraint name would collide in SQL.
+                # Two unnamed FKs on the same local columns derive the same name in the
+                # SQL adapter, so reject that too.
+                if foreign_key.constraint_name is not None:
+                    if foreign_key.constraint_name in seen_explicit_names:
+                        raise ValueError(
+                            f"Duplicate foreign key constraint name: {foreign_key.constraint_name}"
+                        )
+                    seen_explicit_names.add(foreign_key.constraint_name)
+                else:
+                    if foreign_key.local_columns in seen_unnamed_local_columns:
+                        cols = "_".join(foreign_key.local_columns)
+                        derived = f"{self.qualified_name.name}_{cols}_fk"
+                        raise ValueError(f"Duplicate foreign key constraint name: {derived}")
+                    seen_unnamed_local_columns.add(foreign_key.local_columns)
 
 
 @dataclass(frozen=True, slots=True)

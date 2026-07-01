@@ -3,22 +3,6 @@ import pytest
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
-def test_resolves_default_constraint_name_from_table_name():
-    # Given a primary key with no explicit constraint name
-    primary_key = PrimaryKeyConstraint(columns=("id",))
-
-    # Then the resolved name is derived from the table name
-    assert primary_key.resolve_constraint_name("customers") == "customers_pk"
-
-
-def test_uses_explicit_constraint_name_when_provided():
-    # Given a primary key with an explicit name
-    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="custom_pk")
-
-    # Then the explicit name wins
-    assert primary_key.resolve_constraint_name("customers") == "custom_pk"
-
-
 def test_rejects_empty_columns():
     # Given / Then constructing with no columns is an error
     with pytest.raises(ValueError, match="columns must not be empty"):

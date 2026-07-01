@@ -243,32 +243,6 @@ def test_delta_table_primary_key_returns_empty_when_no_pk_declared():
     assert table.primary_key == ()
 
 
-def test_delta_table_primary_key_constraint_name_returns_table_name_pk():
-    # Given a DeltaTable with a PK column
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
-    )
-
-    # Then the constraint name is {table_name}_pk
-    assert table.primary_key_constraint_name == "orders_pk"
-
-
-def test_delta_table_primary_key_constraint_name_returns_none_when_no_pk():
-    # Given a DeltaTable with no PK
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer())],
-    )
-
-    # Then the constraint name is None
-    assert table.primary_key_constraint_name is None
-
-
 def test_delta_table_passes_pk_to_desired_table():
     # Given a DeltaTable where "id" is PK
     table = DeltaTable(

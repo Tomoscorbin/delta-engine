@@ -15,8 +15,9 @@ class ForeignKeyConstraint:
         references: Fully qualified name of the referenced table (catalog.schema.name).
         referenced_columns: Ordered tuple of column names in the referenced table,
             positionally aligned with ``local_columns``.
-        constraint_name: Optional explicit constraint name. When omitted, the name
-            is derived as ``{table_name}_{local_cols}_fk`` via ``resolve_constraint_name``.
+        constraint_name: Optional constraint name. Populated from the catalog for an
+            observed constraint; ``None`` for a desired declaration (the SQL adapter
+            derives the name).
 
     """
 
@@ -48,13 +49,6 @@ class ForeignKeyConstraint:
                 raise ValueError(f"references must be lowercase; got: {self.references!r}")
         if self.constraint_name is not None and not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank when provided")
-
-    def resolve_constraint_name(self, table_name: str) -> str:
-        """Return the constraint name to use in SQL, deriving it when not explicitly set."""
-        if self.constraint_name is not None:
-            return self.constraint_name
-        cols = "_".join(self.local_columns)
-        return f"{table_name}_{cols}_fk"
 
     @property
     def signature(self) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
