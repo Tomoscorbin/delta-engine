@@ -46,6 +46,15 @@ class CatalogInspector:
         ).collect()
         return {row.tag_name: row.tag_value for row in rows}
 
+    def column_tags_of(self, table: str) -> dict[tuple[str, str], str]:
+        """Return {(column, tag): value} for the live table, from information_schema."""
+        rows = spark.sql(
+            f"SELECT column_name, tag_name, tag_value"
+            f" FROM {self.catalog}.information_schema.column_tags"
+            f" WHERE schema_name = '{self.schema}' AND table_name = '{table}'"
+        ).collect()
+        return {(row.column_name, row.tag_name): row.tag_value for row in rows}
+
     def has_primary_key(self, table: str) -> bool:
         """Return True if the live table has a primary key constraint."""
         rows = spark.sql(
