@@ -262,7 +262,7 @@ class DatabricksReader:
                     f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold()
                 ),
                 referenced_columns=tuple(data["referenced_columns"]),
-                constraint_name=constraint_name,
+                constraint_name=constraint_name.casefold(),
             )
             for constraint_name, data in grouped.items()
         )
