@@ -120,8 +120,9 @@ def test_table_snapshot_stores_foreign_keys():
         foreign_keys=(fk,),
     )
 
-    # Then the FK is stored
-    assert table.foreign_keys == (fk,)
+    # Then the FK is stored, carrying its engine-generated constraint name
+    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_table_snapshot_rejects_fk_referencing_unknown_local_column():

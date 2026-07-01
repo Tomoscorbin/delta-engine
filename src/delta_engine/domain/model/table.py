@@ -80,19 +80,31 @@ class TableSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
-    """Desired definition authored by users (target state)."""
+    """
+    Desired definition authored by users (target state).
+
+    A desired table's key constraints carry engine-generated names: the
+    constraint name is a property of the desired schema (a pure function of the
+    table name and columns), so it is resolved here, once, and then flows
+    downstream as data. The differ and compiler read the name off the
+    constraint rather than deriving it themselves.
+    """
 
     def __post_init__(self) -> None:
         """
-        Enforce desired-only invariants on top of the shared snapshot checks.
+        Enforce desired-only invariants, then generate constraint names.
 
         No two foreign keys may govern the same set of local columns. Two FKs
-        over the same local columns are incoherent, and under the adapter's
-        naming policy (``{table}_{local_cols}_fk``) they would derive the same
-        constraint name and collide at DDL time. Checking the column *set*
-        (order-insensitive) also rejects a reordered duplicate. This lives on
-        DesiredTable, not the shared base: an observed table may legitimately
-        carry such a layout and must stay representable.
+        over the same local columns are incoherent, and would generate the same
+        constraint name (``{table}_{local_cols}_fk``) and collide at DDL time.
+        Checking the column *set* (order-insensitive) also rejects a reordered
+        duplicate. This lives on DesiredTable, not the shared base: an observed
+        table may legitimately carry such a layout and must stay representable.
+
+        Names are generated after validation. Each constraint's
+        ``with_generated_name`` rejects a name that is already set, so a
+        user-supplied constraint name fails loudly here (user-defined names are
+        a future feature) rather than being silently ignored downstream.
         """
         TableSnapshot.__post_init__(self)
         seen: set[frozenset[str]] = set()
@@ -104,6 +116,17 @@ class DesiredTable(TableSnapshot):
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
+
+        table_name = self.qualified_name.name
+        if self.primary_key is not None:
+            object.__setattr__(
+                self, "primary_key", self.primary_key.with_generated_name(table_name)
+            )
+        object.__setattr__(
+            self,
+            "foreign_keys",
+            tuple(fk.with_generated_name(table_name) for fk in self.foreign_keys),
+        )
 
 
 @dataclass(frozen=True, slots=True)

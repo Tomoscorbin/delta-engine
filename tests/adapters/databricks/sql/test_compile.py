@@ -2,11 +2,7 @@ import inspect
 
 import pytest
 
-from delta_engine.adapters.databricks.sql.compile import (
-    _compile_action,
-    compile_plan,
-    derive_constraint_name,
-)
+from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -279,12 +275,13 @@ def test_drop_primary_key_renders_alter_drop_primary_key():
 
 
 def test_set_primary_key_renders_add_constraint_primary_key():
-    # Given a SetPrimaryKey with two columns (compiler derives the constraint name)
+    # Given a SetPrimaryKey carrying its engine-generated constraint name
     action = SetPrimaryKey(
         columns=(
             Column(name="tenant_id", data_type=Integer(), nullable=False),
             Column(name="order_id", data_type=Integer(), nullable=False),
         ),
+        constraint_name="tbl_pk",
     )
 
     # When compiling the action
@@ -298,9 +295,10 @@ def test_set_primary_key_renders_add_constraint_primary_key():
 
 
 def test_set_primary_key_renders_alter_add_constraint():
-    # When compiling a SetPrimaryKey with one column (compiler derives the constraint name)
+    # When compiling a SetPrimaryKey with one column
     action = SetPrimaryKey(
         columns=(Column("id", Integer(), nullable=False),),
+        constraint_name="tbl_pk",
     )
     statement = _compile_single(action)
 
@@ -309,12 +307,13 @@ def test_set_primary_key_renders_alter_add_constraint():
 
 
 def test_set_primary_key_renders_multiple_columns():
-    # When compiling a SetPrimaryKey with two columns (compiler derives the constraint name)
+    # When compiling a SetPrimaryKey with two columns
     action = SetPrimaryKey(
         columns=(
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
+        constraint_name="tbl_pk",
     )
     statement = _compile_single(action)
 
@@ -363,11 +362,12 @@ def test_drop_foreign_key_renders_drop_constraint_if_exists():
 
 
 def test_set_foreign_key_renders_add_constraint_foreign_key():
-    # Given
+    # Given a foreign key carrying its engine-generated constraint name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         references="cat.sch.customers",
         referenced_columns=("id",),
+        constraint_name="tbl_customer_id_fk",
     )
     action = SetForeignKey(foreign_key=fk)
 
@@ -383,11 +383,12 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
 
 
 def test_set_foreign_key_renders_composite_fk():
-    # Given a composite FK (two local columns, two referenced columns)
+    # Given a composite FK (two local columns) carrying its generated name
     fk = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
         references="cat.sch.customers",
         referenced_columns=("tenant_id", "id"),
+        constraint_name="tbl_tenant_id_customer_id_fk",
     )
     action = SetForeignKey(foreign_key=fk)
 
@@ -400,25 +401,4 @@ def test_set_foreign_key_renders_composite_fk():
         " ADD CONSTRAINT `tbl_tenant_id_customer_id_fk`"
         " FOREIGN KEY (`tenant_id`, `customer_id`)"
         " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
-    )
-
-
-def test_derive_constraint_name_for_primary_key():
-    # Given a table name and no local columns (the primary-key case)
-    # Then the derived name is {table}_pk
-    assert derive_constraint_name("orders", None) == "orders_pk"
-
-
-def test_derive_constraint_name_for_single_column_foreign_key():
-    # Given a table name and one local column
-    # Then the derived name joins the column between the table name and _fk
-    assert derive_constraint_name("orders", ("customer_id",)) == "orders_customer_id_fk"
-
-
-def test_derive_constraint_name_for_composite_foreign_key():
-    # Given a table name and several local columns
-    # Then every local column appears, in order, joined by underscores
-    assert (
-        derive_constraint_name("orders", ("tenant_id", "customer_id"))
-        == "orders_tenant_id_customer_id_fk"
     )

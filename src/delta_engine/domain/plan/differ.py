@@ -207,8 +207,8 @@ def _diff_primary_key(
     Uses set comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns. The
     desired Column objects are needed so SetPrimaryKey can carry full columns
-    (validation checks their nullability); no table name is needed — the
-    compiler derives the constraint name.
+    (validation checks their nullability); its constraint name is read off the
+    desired constraint, which was generated when the DesiredTable was built.
     """
     desired_columns_in_key = set(desired_pk.columns) if desired_pk else set()
     observed_columns_in_key = set(observed_pk.columns) if observed_pk else set()
@@ -219,11 +219,14 @@ def _diff_primary_key(
     actions: list[Action] = []
     if observed_columns_in_key:
         actions.append(DropPrimaryKey())
-    if desired_columns_in_key:
+    if desired_pk is not None:
         primary_key_columns = tuple(
             column for column in desired_columns if column.name in desired_columns_in_key
         )
-        actions.append(SetPrimaryKey(columns=primary_key_columns))
+        assert desired_pk.constraint_name is not None  # generated when DesiredTable was built
+        actions.append(
+            SetPrimaryKey(columns=primary_key_columns, constraint_name=desired_pk.constraint_name)
+        )
     return tuple(actions)
 
 
@@ -246,10 +249,10 @@ def _diff_foreign_keys(
     even under a different constraint name, e.g. one created outside this engine
     — produces no action, so a sync over an unchanged catalog stays idempotent.
 
-    Setting a desired FK carries the FK content; the compiler derives its name.
-    Dropping an observed FK uses its catalog-stored name, so the correct
-    constraint is removed. Order does not matter — ActionPlan sorts every plan
-    by execution phase.
+    Setting a desired FK carries the FK content, including the name generated
+    when the DesiredTable was built. Dropping an observed FK uses its
+    catalog-stored name, so the correct constraint is removed. Order does not
+    matter — ActionPlan sorts every plan by execution phase.
     """
     diff = diff_by_key(
         desired,

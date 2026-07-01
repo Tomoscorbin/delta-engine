@@ -57,9 +57,9 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 `UnsupportedChange` is an action that is never executed. It carries a `kind` discriminant (`UnsupportedChangeKind.COLUMN_TYPE` or `UnsupportedChangeKind.PARTITIONING`) so the validation layer can reject it with a specific, clear message. The SQL compiler raises `AssertionError` if an `UnsupportedChange` reaches compilation — encoding the invariant that validation always runs first.
 
-## Constraint-name derivation
+## Constraint-name generation
 
-Constraint names are a SQL-adapter concern, not a domain concern. `derive_constraint_name(table_name, local_columns)` in `delta_engine.adapters.databricks.sql.compile` encodes the naming policy (`{table}_pk` for primary keys, `{table}_{columns}_fk` for foreign keys). The domain carries only constraint content and observed names — it does not know how a constraint will be named in SQL.
+A key constraint's name is a property of the desired table: a pure function of the table name and its columns (`{table}_pk` for primary keys, `{table}_{columns}_fk` for foreign keys). It is generated once, when the `DesiredTable` is built (`DesiredTable.__post_init__` calls each constraint's `with_generated_name`), and then flows downstream as data — the differ and SQL compiler read the name off the constraint rather than deriving it. Constraint names are not user-definable today: `with_generated_name` rejects a name that is already set, so a user-supplied name fails loudly at construction rather than being silently ignored. Observed constraints carry the catalog's own name, read back by the adapter.
 
 ## Validation
 

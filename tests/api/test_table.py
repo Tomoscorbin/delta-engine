@@ -258,8 +258,8 @@ def test_delta_table_passes_pk_to_desired_table():
     # When converting to domain
     desired = table.to_desired_table()
 
-    # Then primary_key is set on the domain DesiredTable as a value object
-    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",))
+    # Then primary_key is set as a value object carrying its engine-generated name
+    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():
@@ -296,8 +296,8 @@ def test_delta_table_accepts_foreign_keys_parameter():
         foreign_keys=[fk],
     )
 
-    # Then the FK is accessible
-    assert table.foreign_keys == (fk,)
+    # Then the FK is accessible, carrying its engine-generated constraint name
+    assert table.foreign_keys == (fk.with_generated_name("orders"),)
 
 
 def test_delta_table_defaults_to_no_foreign_keys():
