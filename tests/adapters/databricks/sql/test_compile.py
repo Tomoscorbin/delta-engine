@@ -2,7 +2,11 @@ import inspect
 
 import pytest
 
-from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
+from delta_engine.adapters.databricks.sql.compile import (
+    _compile_action,
+    compile_plan,
+    derive_constraint_name,
+)
 from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -296,7 +300,7 @@ def test_set_primary_key_renders_add_constraint_primary_key():
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+        " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
     )
 
 
@@ -382,7 +386,7 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
     # Then
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_customer_id_fk`"
+        " ADD CONSTRAINT `tbl_customer_id_fk`"
         " FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
     )
 
@@ -402,7 +406,28 @@ def test_set_foreign_key_renders_composite_fk():
     # Then both column pairs appear
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_tenant_id_customer_id_fk`"
+        " ADD CONSTRAINT `tbl_tenant_id_customer_id_fk`"
         " FOREIGN KEY (`tenant_id`, `customer_id`)"
         " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
+    )
+
+
+def test_derive_constraint_name_for_primary_key():
+    # Given a table name and no local columns (the primary-key case)
+    # Then the derived name is {table}_pk
+    assert derive_constraint_name("orders", None) == "orders_pk"
+
+
+def test_derive_constraint_name_for_single_column_foreign_key():
+    # Given a table name and one local column
+    # Then the derived name joins the column between the table name and _fk
+    assert derive_constraint_name("orders", ("customer_id",)) == "orders_customer_id_fk"
+
+
+def test_derive_constraint_name_for_composite_foreign_key():
+    # Given a table name and several local columns
+    # Then every local column appears, in order, joined by underscores
+    assert (
+        derive_constraint_name("orders", ("tenant_id", "customer_id"))
+        == "orders_tenant_id_customer_id_fk"
     )

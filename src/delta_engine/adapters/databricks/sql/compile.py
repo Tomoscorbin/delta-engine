@@ -39,24 +39,25 @@ from delta_engine.domain.plan.actions import (
 def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
     """Compile an :class:`ActionPlan` for ``qualified_name`` into Spark SQL statements."""
     backticked_table_name = backtick_qualified_name(qualified_name)
-    return tuple(_compile_action(action, backticked_table_name) for action in plan)
+    table_name = qualified_name.name
+    return tuple(_compile_action(action, backticked_table_name, table_name) for action in plan)
 
 
 @singledispatch
-def _compile_action(action: Action, backticked_table_name: str) -> str:
+def _compile_action(action: Action, backticked_table_name: str, table_name: str) -> str:
     """Dispatch to action-specific SQL compiler."""
     raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
 
 
 @_compile_action.register
-def _(action: CreateTable, backticked_table_name: str) -> str:
+def _(action: CreateTable, backticked_table_name: str, table_name: str) -> str:
     """Compile a CREATE TABLE statement including columns, comment, properties, and optional PK."""
     table = action.table
     column_defs = [_column_definition(column) for column in table.columns]
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = table.primary_key.resolve_constraint_name(table.qualified_name.name)
+        constraint_name = derive_constraint_name(table.qualified_name.name, None)
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
@@ -83,7 +84,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: AddColumn, backticked_table_name: str) -> str:
+def _(action: AddColumn, backticked_table_name: str, table_name: str) -> str:
     """
     Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
 
@@ -108,20 +109,20 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: DropColumn, backticked_table_name: str) -> str:
+def _(action: DropColumn, backticked_table_name: str, table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
     column_name = backtick(action.column_name)
     return f"ALTER TABLE {backticked_table_name} DROP COLUMN {column_name}"
 
 
 @_compile_action.register
-def _(action: SetProperty, backticked_table_name: str) -> str:
+def _(action: SetProperty, backticked_table_name: str, table_name: str) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
     return f"ALTER TABLE {backticked_table_name} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register
-def _(action: SetColumnComment, backticked_table_name: str) -> str:
+def _(action: SetColumnComment, backticked_table_name: str, table_name: str) -> str:
     column_name = backtick(action.column_name)
     if not action.comment:
         return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} UNSET COMMENT"
@@ -130,29 +131,29 @@ def _(action: SetColumnComment, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: SetTableComment, backticked_table_name: str) -> str:
+def _(action: SetTableComment, backticked_table_name: str, table_name: str) -> str:
     comment = quote_literal(action.comment)
     return f"COMMENT ON TABLE {backticked_table_name} IS {comment}"
 
 
 @_compile_action.register
-def _(action: SetColumnNullability, backticked_table_name: str) -> str:
+def _(action: SetColumnNullability, backticked_table_name: str, table_name: str) -> str:
     column_name = backtick(action.column_name)
     sign = "DROP" if action.nullable else "SET"
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
 
 
 @_compile_action.register
-def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
+def _(action: DropPrimaryKey, backticked_table_name: str, table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
     return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY IF EXISTS"
 
 
 @_compile_action.register
-def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
+def _(action: SetPrimaryKey, backticked_table_name: str, table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(column.name) for column in action.columns)
-    constraint = backtick(action.constraint_name)
+    constraint = backtick(derive_constraint_name(table_name, None))
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
@@ -160,17 +161,17 @@ def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: DropForeignKey, backticked_table_name: str) -> str:
+def _(action: DropForeignKey, backticked_table_name: str, table_name: str) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
     constraint = backtick(action.constraint_name)
     return f"ALTER TABLE {backticked_table_name} DROP CONSTRAINT IF EXISTS {constraint}"
 
 
 @_compile_action.register
-def _(action: SetForeignKey, backticked_table_name: str) -> str:
+def _(action: SetForeignKey, backticked_table_name: str, table_name: str) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
     foreign_key = action.foreign_key
-    constraint = backtick(action.constraint_name)
+    constraint = backtick(derive_constraint_name(table_name, foreign_key.local_columns))
     local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
     ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
     # references is a dotted qualified name — split and backtick each part
@@ -183,7 +184,7 @@ def _(action: SetForeignKey, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
+def _(action: ColumnTypeChange, backticked_table_name: str, table_name: str) -> str:
     # Validation rejects this action before execution, so reaching here is an
     # internal-invariant violation (AssertionError), not an unimplemented feature.
     raise AssertionError(
@@ -193,7 +194,7 @@ def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
-def _(action: PartitioningChange, backticked_table_name: str) -> str:
+def _(action: PartitioningChange, backticked_table_name: str, table_name: str) -> str:
     # Validation rejects this action before execution, so reaching here is an
     # internal-invariant violation (AssertionError), not an unimplemented feature.
     raise AssertionError(
@@ -204,6 +205,21 @@ def _(action: PartitioningChange, backticked_table_name: str) -> str:
 
 
 # ----------- helpers ------------
+
+
+def derive_constraint_name(table_name: str, local_columns: tuple[str, ...] | None) -> str:
+    """
+    Derive the SQL constraint name for a table-owned constraint.
+
+    This is the engine's naming policy, kept in the adapter: the domain does
+    not know how a constraint is named. ``local_columns is None`` means the
+    primary key (``{table}_pk``); otherwise a foreign key over those columns
+    (``{table}_{col1_col2_...}_fk``).
+    """
+    if local_columns is None:
+        return f"{table_name}_pk"
+    columns = "_".join(local_columns)
+    return f"{table_name}_{columns}_fk"
 
 
 def _column_definition(column: Column) -> str:
