@@ -7,18 +7,18 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    UnsupportedChange,
+    UnsupportedChangeKind,
 )
 
 # ----- builders
@@ -223,8 +223,12 @@ def test_plan_full_phase_order_with_all_action_types():
     )
     plan = ActionPlan(
         (
-            ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
-            PartitioningChange(desired_partitioning=("p",), observed_partitioning=()),
+            UnsupportedChange(
+                kind=UnsupportedChangeKind.COLUMN_TYPE,
+                subject_name="ct_col",
+                from_repr="Integer",
+                to_repr="Integer",
+            ),
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
             ),
@@ -254,8 +258,7 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnNullability,
         SetPrimaryKey,
         SetForeignKey,
-        ColumnTypeChange,
-        PartitioningChange,
+        UnsupportedChange,
     ]
 
 

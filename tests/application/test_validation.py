@@ -1,20 +1,18 @@
 from delta_engine.application.validation import (
-    DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
     PrimaryKeyColumnsNullable,
-    UnsupportedColumnTypeChange,
+    UnsupportedChangeRejected,
     validate_plan,
 )
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.plan import UnsupportedChange, UnsupportedChangeKind
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnNullability,
     SetPrimaryKey,
 )
@@ -114,65 +112,50 @@ def test_allows_loosening_an_existing_column_to_nullable():
     assert failures == ()
 
 
-# ---- UnsupportedColumnTypeChange
+# ---- UnsupportedChangeRejected
 
 
-def test_rejects_column_type_change_action():
-    # Given a plan containing a ColumnTypeChange (emitted by the differ on type drift)
-    rule = UnsupportedColumnTypeChange()
-
+def test_rejects_column_type_change():
+    # Given a plan with an UnsupportedChange of kind COLUMN_TYPE
+    rule = UnsupportedChangeRejected()
     failures = rule.evaluate(
-        _plan(ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long()))
+        _plan(
+            UnsupportedChange(
+                kind=UnsupportedChangeKind.COLUMN_TYPE,
+                subject_name="id",
+                from_repr="Integer",
+                to_repr="Long",
+            )
+        )
     )
+    # Then it is rejected with the column name in the message
     assert len(failures) == 1
-    assert failures[0].rule_name == "UnsupportedColumnTypeChange"
+    assert failures[0].rule_name == "UnsupportedChangeRejected"
     assert "id" in failures[0].message
 
 
-def test_rejects_all_type_changes_in_a_single_pass():
-    # Given a plan with two ColumnTypeChange actions
-    rule = UnsupportedColumnTypeChange()
-
+def test_rejects_partitioning_change():
+    # Given a plan with an UnsupportedChange of kind PARTITIONING
+    rule = UnsupportedChangeRejected()
     failures = rule.evaluate(
         _plan(
-            ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long()),
-            ColumnTypeChange(column_name="score", from_type=String(), to_type=Integer()),
+            UnsupportedChange(
+                kind=UnsupportedChangeKind.PARTITIONING,
+                subject_name="",
+                from_repr="()",
+                to_repr="('ds',)",
+            )
         )
     )
-    assert len(failures) == 2
-    assert {f.rule_name for f in failures} == {"UnsupportedColumnTypeChange"}
-    messages = [f.message for f in failures]
-    for column_name in ("id", "score"):
-        assert any(column_name in message for message in messages)
-
-
-def test_allows_plan_with_no_type_changes():
-    # Given a plan with no ColumnTypeChange actions
-    rule = UnsupportedColumnTypeChange()
-
-    failures = rule.evaluate(_plan(AddColumn(Column("new_col", String()))))
-    assert failures == ()
-
-
-# ---- DisallowPartitioningChange
-
-
-def test_rejects_partitioning_change_action():
-    # Given a plan containing a PartitioningChange (emitted by the differ on partition drift)
-    rule = DisallowPartitioningChange()
-
-    failures = rule.evaluate(
-        _plan(PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()))
-    )
+    # Then it is rejected
     assert len(failures) == 1
-    assert failures[0].rule_name == "DisallowPartitioningChange"
+    assert failures[0].rule_name == "UnsupportedChangeRejected"
 
 
-def test_allows_plan_with_no_partitioning_change():
-    # Given a plan with no PartitioningChange action
-    rule = DisallowPartitioningChange()
-
-    failures = rule.evaluate(_plan(AddColumn(Column("x", Integer()))))
+def test_allows_plan_with_no_unsupported_change():
+    # Given a plan with no UnsupportedChange
+    rule = UnsupportedChangeRejected()
+    failures = rule.evaluate(_plan(AddColumn(Column("new_col", String()))))
     assert failures == ()
 
 
@@ -181,7 +164,7 @@ def test_allows_plan_with_no_partitioning_change():
 
 def test_validation_passes_when_no_rule_is_broken():
     # Given a plan that violates no rule
-    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
+    rules = (NonNullableColumnAdd(), UnsupportedChangeRejected())
 
     result = validate_plan(_plan(AddColumn(Column("x", String(), nullable=True))), rules=rules)
 
@@ -210,7 +193,7 @@ def test_validation_collects_a_failure_from_every_broken_rule():
 
 def test_empty_plan_produces_no_failures():
     # Given an empty plan
-    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
+    rules = (NonNullableColumnAdd(), UnsupportedChangeRejected())
 
     result = validate_plan(_plan(), rules=rules)
 

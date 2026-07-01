@@ -7,7 +7,7 @@ from delta_engine.adapters.databricks.sql.compile import (
     compile_plan,
     derive_constraint_name,
 )
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
@@ -15,18 +15,18 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    UnsupportedChange,
+    UnsupportedChangeKind,
 )
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
@@ -257,22 +257,16 @@ def test_every_action_type_has_a_registered_compiler():
     assert unregistered == []
 
 
-def test_column_type_change_compiler_raises_on_invariant_violation():
-    # Given a ColumnTypeChange action (blocked by validation; should never reach execution)
-    action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
-
-    # Then reaching the compiler is an internal-invariant violation, not an
-    # unimplemented feature -- it raises AssertionError rather than producing bad SQL
-    with pytest.raises(AssertionError, match="id"):
-        _compile_single(action)
-
-
-def test_partitioning_change_compiler_raises_on_invariant_violation():
-    # Given a PartitioningChange action (blocked by validation; should never reach execution)
-    action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
-
-    # Then reaching the compiler is an internal-invariant violation -- AssertionError
-    with pytest.raises(AssertionError, match=r"[Pp]artitioning"):
+def test_unsupported_change_raises_at_compile_time():
+    # Given an UnsupportedChange (never meant to reach the compiler)
+    action = UnsupportedChange(
+        kind=UnsupportedChangeKind.COLUMN_TYPE,
+        subject_name="id",
+        from_repr="Integer",
+        to_repr="Long",
+    )
+    # When / Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
         _compile_single(action)
 
 

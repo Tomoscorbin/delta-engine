@@ -5,11 +5,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import IntEnum, auto
+from enum import IntEnum, StrEnum, auto
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable
-from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
@@ -36,8 +35,7 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
-    COLUMN_TYPE_CHANGE = auto()
-    PARTITIONING_CHANGE = auto()
+    UNSUPPORTED_CHANGE = auto()
 
 
 class Action(ABC):
@@ -215,46 +213,36 @@ class SetForeignKey(Action):
         return ",".join(self.foreign_key.local_columns)
 
 
-@dataclass(frozen=True, slots=True)
-class ColumnTypeChange(Action):
-    """
-    Records that a column's type differs between desired and observed.
+class UnsupportedChangeKind(StrEnum):
+    """Which unsupported drift an UnsupportedChange records."""
 
-    Delta Lake does not support column type changes, so this action is never
-    executed — it exists so the differ can make the drift visible in the plan
-    and validation can reject it with a clear message instead of silently
-    ignoring it.
-    """
-
-    column_name: str
-    from_type: DataType
-    to_type: DataType
-
-    phase: ClassVar[ActionPhase] = ActionPhase.COLUMN_TYPE_CHANGE
-
-    @property
-    def subject(self) -> str:
-        return self.column_name
+    COLUMN_TYPE = "COLUMN_TYPE"
+    PARTITIONING = "PARTITIONING"
 
 
 @dataclass(frozen=True, slots=True)
-class PartitioningChange(Action):
+class UnsupportedChange(Action):
     """
-    Records that the desired and observed partition specs differ.
+    Records drift that Delta Lake cannot apply in place.
 
-    Partitioning cannot be changed on an existing Delta table, so this action
-    is never executed — it exists so the differ can make the conflict visible
-    in the plan and validation can reject it with a clear message.
+    Covers column type changes and partitioning changes. A sentinel action:
+    never executed. It exists so the differ can make the
+    drift visible in the plan and validation can reject it with a clear message.
+    The SQL compiler raises AssertionError if it reaches compilation. The
+    changed values are stringified at construction (there is nothing to execute,
+    only to report).
     """
 
-    desired_partitioning: tuple[str, ...]
-    observed_partitioning: tuple[str, ...]
+    kind: UnsupportedChangeKind
+    subject_name: str
+    from_repr: str
+    to_repr: str
 
-    phase: ClassVar[ActionPhase] = ActionPhase.PARTITIONING_CHANGE
+    phase: ClassVar[ActionPhase] = ActionPhase.UNSUPPORTED_CHANGE
 
     @property
     def subject(self) -> str:
-        return ""
+        return self.subject_name
 
 
 def _execution_order(action: Action) -> tuple[int, str]:
