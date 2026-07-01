@@ -135,3 +135,109 @@ def table_comment(table):
 def column_comment(table, column):
     """Return the live comment on one column, or empty string."""
     return fields_of(table)[column].metadata.get("comment", "")
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 1 — Define and first sync
+# MAGIC
+# MAGIC Define two tables and sync them. `orders` has a foreign key to `customers`
+# MAGIC and is declared **first** in the registry — the engine reorders by
+# MAGIC dependency, so `customers` is created before `orders` adds its foreign key.
+# MAGIC The `customers` baseline is deliberately plain (no tags, no extra
+# MAGIC properties, no foreign key) so Act 3 can add them.
+
+# COMMAND ----------
+
+customers = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String()),
+        Column("legacy_code", String(), comment="Retired identifier, dropped in Act 3"),
+        Column("status", String(), nullable=False),
+    ],
+    comment="Customer master table",
+)
+
+orders = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="orders",
+    columns=[
+        Column("order_id", Long(), nullable=False, primary_key=True),
+        Column("customer_id", Long(), nullable=False),
+        Column("order_date", Date()),
+    ],
+    partitioned_by=["order_date"],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("customer_id",),
+            references=f"{CATALOG}.{SCHEMA}.customers",
+            referenced_columns=("id",),
+        )
+    ],
+)
+
+registry = Registry()
+registry.register(orders, customers)  # declared orders-first on purpose
+
+engine = build_databricks_engine(spark)
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verify** both tables landed with the expected shape, partitioning, and
+# MAGIC constraints.
+
+# COMMAND ----------
+
+assert report.any_failures is False, "first sync should fully succeed"
+
+assert spark.catalog.tableExists(fqname("customers"))
+assert spark.catalog.tableExists(fqname("orders"))
+
+customer_fields = fields_of("customers")
+assert set(customer_fields) == {"id", "name", "legacy_code", "status"}
+assert customer_fields["id"].nullable is False
+assert customer_fields["status"].nullable is False
+assert has_primary_key("customers")
+
+assert partitions_of("orders") == ("order_date",)
+assert has_primary_key("orders")
+assert has_foreign_key("orders")
+
+print("Act 1 verified: both tables created with expected schema and constraints.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 2 — Idempotent resync
+# MAGIC
+# MAGIC Syncing the same registry again is a true no-op: the engine executes
+# MAGIC nothing when the catalog already matches the declaration.
+
+# COMMAND ----------
+
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verify** no actions ran — `execution is None` for every table.
+
+# COMMAND ----------
+
+assert report.any_failures is False
+assert all(table_report.execution is None for table_report in report), (
+    "a matching resync must execute nothing"
+)
+print("Act 2 verified: resync was a true no-op.")
