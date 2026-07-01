@@ -361,8 +361,11 @@ def test_delta_table_defaults_to_no_tags():
         columns=[Column("id", Integer())],
     )
 
-    # Then effective_tags is an empty mapping, never None
-    assert dict(table.effective_tags) == {}
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then tags is an empty mapping, never None
+    assert dict(desired.tags) == {}
 
 
 def test_delta_table_does_not_restrict_tag_keys():
@@ -376,7 +379,7 @@ def test_delta_table_does_not_restrict_tag_keys():
     )
 
     # Then construction succeeds and the key is preserved (no ValueError)
-    assert dict(table.effective_tags) == {"any.custom-key": "v"}
+    assert dict(table.to_desired_table().tags) == {"any.custom-key": "v"}
 
 
 def test_delta_table_preserves_tag_key_case():
@@ -390,4 +393,4 @@ def test_delta_table_preserves_tag_key_case():
     )
 
     # Then the key case is preserved
-    assert "CostCentre" in dict(table.effective_tags)
+    assert "CostCentre" in dict(table.to_desired_table().tags)

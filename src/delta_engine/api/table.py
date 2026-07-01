@@ -50,11 +50,7 @@ class DeltaTable:
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
-        effective = {**self.default_properties, **user_properties}
-
-        # Tags are free-form Unity Catalog governance objects: unlike properties,
-        # there is no managed-key allowlist and no engine defaults.
-        effective_tags = dict(tags or {})
+        effective_properties = {**self.default_properties, **user_properties}
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
@@ -71,8 +67,8 @@ class DeltaTable:
             qualified_name=QualifiedName(catalog, schema, name),
             columns=columns,
             comment=comment,
-            properties=effective,
-            tags=effective_tags,
+            properties=effective_properties,
+            tags=dict(tags or {}),
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
             primary_key=primary_key,
             foreign_keys=foreign_keys,
@@ -82,11 +78,6 @@ class DeltaTable:
     def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
         return self._desired_table.properties
-
-    @property
-    def effective_tags(self) -> Mapping[str, str]:
-        """Unity Catalog tags declared on this table (empty when none)."""
-        return self._desired_table.tags
 
     @property
     def primary_key(self) -> tuple[str, ...]:
