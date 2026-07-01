@@ -45,17 +45,6 @@ def _table_with_fk(fqn: str, references: str) -> DesiredTable:
     ).to_desired_table()
 
 
-def _table_with_pk(fqn: str) -> DesiredTable:
-    """Build a table whose 'id' column is a NOT NULL primary key."""
-    catalog, schema, name = fqn.split(".")
-    return DeltaTable(
-        catalog,
-        schema,
-        name,
-        columns=(Column("id", String(), nullable=False, primary_key=True),),
-    ).to_desired_table()
-
-
 def _candidates_by_name(
     candidates: tuple[SyncCandidate, ...],
 ) -> dict[str, SyncCandidate]:
@@ -365,7 +354,7 @@ def test_resolve_passes_when_fk_targets_the_parents_primary_key():
     # Given orders.ref_id -> customers.id, and customers declares id as its PK
     tables = (
         _table_with_fk("cat.sch.orders", "cat.sch.customers"),
-        _table_with_pk("cat.sch.customers"),
+        _table("cat.sch.customers"),
     )
 
     # When
@@ -396,6 +385,8 @@ def test_resolve_fails_fk_that_targets_a_non_key_column():
         by_name["cat.sch.orders"].failures[0].reason
         == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     )
+    # customers has no FK of its own, so it is unaffected and can execute
+    assert by_name["cat.sch.customers"].can_execute
 
 
 def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
@@ -449,7 +440,7 @@ def test_resolve_valid_chain_with_primary_keys_executes():
     tables = (
         _table_with_fk("cat.sch.c", "cat.sch.a"),
         a,
-        _table_with_pk("cat.sch.b"),
+        _table("cat.sch.b"),
     )
 
     # When

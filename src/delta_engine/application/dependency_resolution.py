@@ -260,6 +260,8 @@ def _classify_failures(
         for foreign_key in table.foreign_keys:
             if foreign_key.references not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
+            # Checked before cycle membership so that a structural FK-target problem is
+            # reported per-FK even when the table also participates in a cycle.
             elif set(foreign_key.referenced_columns) != primary_key_by_name[foreign_key.references]:
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif table_name in cycle_members:

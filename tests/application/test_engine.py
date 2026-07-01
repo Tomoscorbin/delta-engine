@@ -819,3 +819,5 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     fk_failures = [f for f in orders.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
     assert fk_failures[0].reason == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     assert orders.execution is None
+    # customers is a clean create with no FK — it is not itself foreign-key-failed
+    assert reports["cat.sch.customers"].status is TableRunStatus.SUCCESS
