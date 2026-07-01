@@ -82,6 +82,8 @@ class FakeSparkForFetchState:
     def sql(self, query: str):
         if "referential_constraints" in query:
             return FakeDataFrame([])
+        if "table_tags" in query.lower():
+            return FakeDataFrame([])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
