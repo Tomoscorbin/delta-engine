@@ -43,9 +43,7 @@ class ForeignKeyConstraint:
             )
         for part in self.references.split("."):
             if not part.strip():
-                raise ValueError(
-                    f"references must not have a blank part; got: {self.references!r}"
-                )
+                raise ValueError(f"references must not have a blank part; got: {self.references!r}")
             if part != part.casefold():
                 raise ValueError(f"references must be lowercase; got: {self.references!r}")
         if self.constraint_name is not None and not self.constraint_name.strip():
@@ -63,10 +61,9 @@ class ForeignKeyConstraint:
         """
         Content identity: local columns, referenced table, referenced columns.
 
-        Excludes ``constraint_name``, so a desired foreign key (which may be
+        Excludes ``constraint_name``, so a declared foreign key (which may be
         unnamed) and a catalog-observed one (which always carries a name)
-        compare equal when they describe the same relationship. The differ
-        matches foreign keys by this signature, which keeps repeated syncs over
-        an unchanged catalog idempotent.
+        compare equal when they describe the same relationship. This makes the
+        constraint's identity independent of how it happens to be named.
         """
         return (self.local_columns, self.references, self.referenced_columns)
