@@ -28,11 +28,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -95,6 +97,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
         body: tuple[Action, ...] = (CreateTable(desired),)
         observed_foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
         observed_tags: Mapping[str, str] = {}
+        observed_columns: tuple[Column, ...] = ()
     else:
         body = (
             _diff_columns(desired.columns, observed.columns)
@@ -105,15 +108,18 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
         )
         observed_foreign_keys = observed.foreign_keys
         observed_tags = observed.tags
+        observed_columns = observed.columns
 
-    # Tags, like foreign keys, are reconciled once for both the new-table and
-    # existing-table cases: a missing table has no observed tags (the empty
-    # mapping above), so every desired tag is set and none is unset. Tags cannot
-    # be declared inline in CREATE TABLE, so they are always applied as
-    # follow-up SET TAGS actions.
+    # Tags, foreign keys, and column tags are reconciled once for both the
+    # new-table and existing-table cases. A missing table has no observed tags
+    # (empty mapping), no observed foreign keys (empty tuple), and no observed
+    # column tags (empty column tuple), so every desired value is set and none
+    # is unset. None of these can be declared inline in CREATE TABLE, so they
+    # are always applied as follow-up actions.
     return ActionPlan(
         body
         + _diff_table_tags(desired.tags, observed_tags)
+        + _diff_column_tags(desired.columns, observed_columns)
         + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys)
     )
 
@@ -178,9 +184,7 @@ def _diff_properties(
     )
 
 
-def _diff_table_tags(
-    desired: Mapping[str, str], observed: Mapping[str, str]
-) -> tuple[Action, ...]:
+def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> tuple[Action, ...]:
     """
     Return the tag actions to align observed tags with desired.
 
@@ -201,6 +205,40 @@ def _diff_table_tags(
         UnsetTableTag(name=name) for name in observed if name not in desired
     )
     return set_actions + unset_actions
+
+
+def _diff_column_tags(
+    desired_columns: tuple[Column, ...],
+    observed_columns: tuple[Column, ...],
+) -> tuple[Action, ...]:
+    """
+    Return the column-tag actions to align observed columns with desired.
+
+    Column tags are full-state per column, exactly like `_diff_table_tags` is
+    for the table: for each column present in the desired definition, a declared
+    tag missing from or differing in the observed column is set, and an observed
+    tag not declared is unset. A newly added column (or every column in the
+    create case, where `observed_columns` is empty) has no observed tags, so all
+    its tags are set and none unset. Columns being dropped are not in
+    `desired_columns` and are skipped — dropping the column removes its tags, so
+    emitting UnsetColumnTag for them would be redundant (and would target a
+    column that no longer exists by the time tag actions run).
+    """
+    observed_tags_by_column = {column.name: column.tags for column in observed_columns}
+    actions: list[Action] = []
+    for desired_column in desired_columns:
+        observed_column_tags = observed_tags_by_column.get(desired_column.name, {})
+        actions.extend(
+            SetColumnTag(column_name=desired_column.name, name=name, value=value)
+            for name, value in desired_column.tags.items()
+            if observed_column_tags.get(name) != value
+        )
+        actions.extend(
+            UnsetColumnTag(column_name=desired_column.name, name=name)
+            for name in observed_column_tags
+            if name not in desired_column.tags
+        )
+    return tuple(actions)
 
 
 def _diff_partitioning(

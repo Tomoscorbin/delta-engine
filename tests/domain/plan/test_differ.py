@@ -29,11 +29,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 from delta_engine.domain.plan.differ import _diff_foreign_keys, compute_plan
@@ -940,9 +942,7 @@ def test_sets_tag_when_key_absent_in_observed():
 
 def test_updates_tag_when_value_differs():
     # Given the key matches but the value differs
-    plan = compute_plan(
-        _desired(tags={"env": "prod"}), _observed(tags={"env": "dev"})
-    )
+    plan = compute_plan(_desired(tags={"env": "prod"}), _observed(tags={"env": "dev"}))
 
     # Then a single SetTableTag updates the value
     assert plan.actions == (SetTableTag(name="env", value="prod"),)
@@ -981,3 +981,113 @@ def test_new_table_sets_all_desired_tags_after_creation():
     assert any(isinstance(a, CreateTable) for a in plan)
     set_tags = [a for a in plan if isinstance(a, SetTableTag)]
     assert set_tags == [SetTableTag(name="env", value="prod")]
+
+
+# ---------- column tag diffs (full-state) ----------
+
+
+def test_no_column_tag_actions_when_tags_match():
+    # Given a column whose desired and observed tags are identical
+    desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
+    observed = _observed(columns=(Column("email", String(), tags={"pii": "true"}),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then nothing to do
+    assert plan.actions == ()
+
+
+def test_sets_column_tag_when_absent_in_observed():
+    # Given the catalog column carries no tags but the desired column declares one
+    desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
+    observed = _observed(columns=(Column("email", String()),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then a SetColumnTag is emitted for that column
+    assert plan.actions == (SetColumnTag(column_name="email", name="pii", value="true"),)
+
+
+def test_updates_column_tag_when_value_differs():
+    # Given the tag key matches but the value differs
+    desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
+    observed = _observed(columns=(Column("email", String(), tags={"pii": "false"}),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then a single SetColumnTag updates the value
+    assert plan.actions == (SetColumnTag(column_name="email", name="pii", value="true"),)
+
+
+def test_unsets_observed_only_column_tag_under_full_state_ownership():
+    # Given the catalog column carries a tag the desired column does not declare
+    desired = _desired(columns=(Column("email", String()),))
+    observed = _observed(columns=(Column("email", String(), tags={"legacy": "1"}),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then the engine unsets it — column tags are full-state
+    assert plan.actions == (UnsetColumnTag(column_name="email", name="legacy"),)
+
+
+def test_sets_and_unsets_column_tags_in_one_plan():
+    # Given one tag to change and one observed-only tag to remove on the same column
+    desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
+    observed = _observed(columns=(Column("email", String(), tags={"pii": "false", "legacy": "1"}),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then the changed tag is set and the undeclared tag is unset
+    assert set(plan.actions) == {
+        SetColumnTag(column_name="email", name="pii", value="true"),
+        UnsetColumnTag(column_name="email", name="legacy"),
+    }
+
+
+def test_no_unset_column_tag_for_a_dropped_column():
+    # Given the observed table has a tagged column that the desired table drops
+    desired = _desired(columns=(Column("id", Integer()),))
+    observed = _observed(
+        columns=(Column("id", Integer()), Column("legacy", String(), tags={"pii": "true"}))
+    )
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then the column is dropped and NO UnsetColumnTag is emitted (drop removes its tags)
+    assert any(isinstance(a, DropColumn) for a in plan)
+    assert not any(isinstance(a, (SetColumnTag, UnsetColumnTag)) for a in plan)
+
+
+def test_new_column_gets_all_its_tags_set():
+    # Given an existing table gaining a new, tagged column
+    desired = _desired(
+        columns=(Column("id", Integer()), Column("email", String(), tags={"pii": "true"}))
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    # When
+    plan = compute_plan(desired, observed)
+
+    # Then the column is added and its tag is set afterwards
+    assert any(isinstance(a, AddColumn) for a in plan)
+    set_tags = [a for a in plan if isinstance(a, SetColumnTag)]
+    assert set_tags == [SetColumnTag(column_name="email", name="pii", value="true")]
+
+
+def test_new_table_sets_all_column_tags_after_creation():
+    # Given a brand-new table (observed is None) whose column declares tags
+    desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
+
+    # When diffing against a missing table
+    plan = compute_plan(desired, observed=None)
+
+    # Then the plan creates the table and sets its column tags (no inline CREATE syntax)
+    assert any(isinstance(a, CreateTable) for a in plan)
+    set_tags = [a for a in plan if isinstance(a, SetColumnTag)]
+    assert set_tags == [SetColumnTag(column_name="email", name="pii", value="true")]
