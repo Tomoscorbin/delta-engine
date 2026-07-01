@@ -62,7 +62,6 @@ configure_logging()
 # Clean slate: drop every table this notebook may create, then ensure the schema.
 for _table in DEMO_TABLES:
     spark.sql(f"DROP TABLE IF EXISTS {CATALOG}.{SCHEMA}.{_table}")
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
 
 # COMMAND ----------
 
