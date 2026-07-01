@@ -56,9 +56,8 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        column_defs.append(
-            f"CONSTRAINT {backtick(table.primary_key_constraint_name)} PRIMARY KEY ({pk_cols})"
-        )
+        constraint_name = table.primary_key.resolve_constraint_name(table.qualified_name.name)
+        column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
     table_comment = _set_table_comment(table.comment)
