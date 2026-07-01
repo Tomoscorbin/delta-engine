@@ -804,3 +804,17 @@ print(report.diff())
 assert report.any_failures is False
 assert "phone" in fields_of("customers")
 print("Act 6 verified: previewed change committed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 7 — Teardown
+# MAGIC
+# MAGIC Drop the demo tables. The schema is left in place — the engine never owned
+# MAGIC it, and dropping it is out of scope.
+
+# COMMAND ----------
+
+for _table in DEMO_TABLES:
+    spark.sql(f"DROP TABLE IF EXISTS {CATALOG}.{SCHEMA}.{_table}")
+print("Teardown complete: demo tables dropped.")
