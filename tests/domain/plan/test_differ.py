@@ -16,6 +16,7 @@ from delta_engine.domain.model import (
     Timestamp,
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
@@ -92,11 +93,12 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
             st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
         ).map(tuple)
     )
-    primary_key = draw(
+    primary_key_cols = draw(
         st.lists(
             st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
         ).map(tuple)
     )
+    primary_key = PrimaryKeyConstraint(columns=primary_key_cols) if primary_key_cols else None
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=tuple(columns),
@@ -117,7 +119,7 @@ def _desired(
     comment="",
     properties=None,
     partitioned_by=(),
-    primary_key=(),
+    primary_key=None,
 ) -> DesiredTable:
     """Build a DesiredTable, defaulting every dimension to a no-op baseline."""
     return DesiredTable(
@@ -136,7 +138,7 @@ def _observed(
     comment="",
     properties=None,
     partitioned_by=(),
-    primary_key=(),
+    primary_key=None,
 ) -> ObservedTable:
     """Build an ObservedTable matching `_desired`'s baseline so a single dimension can vary."""
     return ObservedTable(
@@ -511,20 +513,22 @@ def _desired_with_pk(pk_columns: list[str]) -> DesiredTable:
     all_columns = tuple(
         Column(name, Integer(), nullable=name not in pk_columns) for name in all_column_names
     )
+    pk_tuple = tuple(pk_columns)
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=all_columns,
-        primary_key=tuple(pk_columns),
+        primary_key=PrimaryKeyConstraint(columns=pk_tuple) if pk_tuple else None,
     )
 
 
 def _observed_with_pk(pk_columns: list[str]) -> ObservedTable:
     """Build an ObservedTable with a given primary key (columns default to nullable=True)."""
     all_columns = (Column("id", Integer()), Column("name", String()))
+    pk_tuple = tuple(pk_columns)
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=all_columns,
-        primary_key=tuple(pk_columns),
+        primary_key=PrimaryKeyConstraint(columns=pk_tuple) if pk_tuple else None,
     )
 
 
@@ -586,7 +590,7 @@ def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
-        primary_key=("id", "tenant_id"),
+        primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id")),
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -594,7 +598,7 @@ def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
-        primary_key=("tenant_id", "id"),
+        primary_key=PrimaryKeyConstraint(columns=("tenant_id", "id")),
     )
 
     # When
@@ -609,12 +613,12 @@ def test_drop_primary_key_runs_before_add_column_in_plan():
     desired = DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False), Column("new_col", String())),
-        primary_key=(),
+        primary_key=None,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False),),
-        primary_key=("id",),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
     )
 
     # When
@@ -633,12 +637,12 @@ def test_set_primary_key_runs_after_set_column_nullability_in_plan():
     desired = DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False),),
-        primary_key=("id",),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=True),),
-        primary_key=(),
+        primary_key=None,
     )
 
     # When

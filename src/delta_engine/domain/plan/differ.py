@@ -142,8 +142,8 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[A
     Uses set comparison so column order does not trigger spurious changes.
     Declaration order from desired is preserved in SetPrimaryKey.columns.
     """
-    desired_primary_key = set(desired.primary_key)
-    observed_primary_key = set(observed.primary_key)
+    desired_primary_key = set(desired.primary_key.columns) if desired.primary_key else set()
+    observed_primary_key = set(observed.primary_key.columns) if observed.primary_key else set()
 
     if desired_primary_key == observed_primary_key:
         return ()

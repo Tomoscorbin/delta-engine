@@ -10,6 +10,7 @@ from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.results import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 # ---------- fakes & helpers ----------
 
@@ -508,7 +509,7 @@ def test_fetch_state_lowercases_primary_key_column_names_from_catalog():
 
     # Then the primary key column is normalised to lowercase at the adapter boundary
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == ("orderid",)
+    assert result.table.primary_key == PrimaryKeyConstraint(columns=("orderid",))
 
 
 def test_fetch_state_includes_primary_key_in_observed_table():
@@ -532,7 +533,7 @@ def test_fetch_state_includes_primary_key_in_observed_table():
 
     # Then: primary_key is populated on the ObservedTable
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == ("id",)
+    assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",))
 
 
 def test_fetch_state_primary_key_is_empty_when_none_defined():
@@ -554,9 +555,9 @@ def test_fetch_state_primary_key_is_empty_when_none_defined():
     # When
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then: primary_key is empty
+    # Then: primary_key is None (no constraint defined)
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == ()
+    assert result.table.primary_key is None
 
 
 def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
@@ -576,9 +577,9 @@ def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
     # When
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then: the read succeeds and primary_key is empty (no UC = no PK constraints)
+    # Then: the read succeeds and primary_key is None (no UC = no PK constraints)
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == ()
+    assert result.table.primary_key is None
 
 
 # ---------- tests: foreign keys ----------

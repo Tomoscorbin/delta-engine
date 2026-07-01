@@ -23,6 +23,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable
 
@@ -80,7 +81,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String(), nullable=False, primary_key=True),),
-            primary_key=("id",),
+            primary_key=PrimaryKeyConstraint(columns=("id",)),
             properties={
                 "delta.columnMapping.mode": "name",
                 "delta.enableDeletionVectors": "true",

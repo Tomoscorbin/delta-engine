@@ -27,6 +27,7 @@ from delta_engine.application.results import (
 )
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 logger = logging.getLogger(__name__)
 
@@ -153,11 +154,11 @@ class DatabricksReader:
             return MappingProxyType({})
         return MappingProxyType(dict(row["properties"]))
 
-    def _fetch_primary_key(self, qualified_name: QualifiedName) -> tuple[str, ...]:
+    def _fetch_primary_key(self, qualified_name: QualifiedName) -> PrimaryKeyConstraint | None:
         """
-        Return the primary key column names from Unity Catalog information_schema.
+        Return the primary key from Unity Catalog information_schema, or None.
 
-        Returns an empty tuple when no primary key is defined. Column names are
+        Returns ``None`` when no primary key is defined. Column names are
         normalised to lowercase at the adapter boundary.
         """
         catalog = backtick(qualified_name.catalog)
@@ -180,8 +181,11 @@ class DatabricksReader:
             # information_schema is only available in Unity Catalog. On plain
             # Spark (e.g. local tests), the table does not exist and there are
             # no PK constraints to observe.
-            return ()
-        return tuple(row["column_name"].casefold() for row in rows)
+            return None
+        columns = tuple(row["column_name"].casefold() for row in rows)
+        if not columns:
+            return None
+        return PrimaryKeyConstraint(columns=columns)
 
     def _fetch_foreign_keys(
         self, qualified_name: QualifiedName

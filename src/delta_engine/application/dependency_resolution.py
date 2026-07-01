@@ -30,7 +30,7 @@ from delta_engine.domain.model.table import DesiredTable
 
 def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
     """Return the table's primary key column names (empty when it has none)."""
-    return table.primary_key
+    return table.primary_key.columns if table.primary_key is not None else ()
 
 
 @dataclass

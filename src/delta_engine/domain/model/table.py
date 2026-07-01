@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
@@ -21,7 +22,7 @@ class TableSnapshot:
         comment: Optional table-level comment (empty string when unset).
         properties: Read-only mapping of table properties.
         partitioned_by: Ordered tuple of partition column names.
-        primary_key: Ordered tuple of primary key column names (empty when none).
+        primary_key: Primary key constraint, or ``None`` when no primary key is defined.
 
     """
 
@@ -30,7 +31,7 @@ class TableSnapshot:
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
-    primary_key: tuple[str, ...] = ()
+    primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
 
     def __post_init__(self) -> None:
@@ -65,16 +66,10 @@ class TableSnapshot:
                     raise ValueError(f"Duplicate partition column: {name}")
                 seen_partitions.add(name)
 
-        if self.primary_key:
-            missing_pk = [name for name in self.primary_key if name not in seen_names]
+        if self.primary_key is not None:
+            missing_pk = [name for name in self.primary_key.columns if name not in seen_names]
             if missing_pk:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
-
-            seen_pk: set[str] = set()
-            for name in self.primary_key:
-                if name in seen_pk:
-                    raise ValueError(f"Duplicate primary key column: {name}")
-                seen_pk.add(name)
 
         if self.foreign_keys:
             seen_constraint_names: set[str] = set()
@@ -94,17 +89,17 @@ class TableSnapshot:
                     )
                 seen_constraint_names.add(constraint_name)
 
+    @property
+    def primary_key_constraint_name(self) -> str | None:
+        """The constraint name for this table's primary key, or None if no PK is defined."""
+        if self.primary_key is None:
+            return None
+        return self.primary_key.resolve_constraint_name(self.qualified_name.name)
+
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
     """Desired definition authored by users (target state)."""
-
-    @property
-    def primary_key_constraint_name(self) -> str | None:
-        """Return the constraint name for this table's primary key, or None if no PK is defined."""
-        if not self.primary_key:
-            return None
-        return f"{self.qualified_name.name}_pk"
 
 
 @dataclass(frozen=True, slots=True)
