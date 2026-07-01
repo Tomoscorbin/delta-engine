@@ -806,3 +806,47 @@ def test_fetch_state_composite_foreign_key_aligns_local_and_referenced_columns()
     assert foreign_key.local_columns == ("tenant_id", "customer_id")
     assert foreign_key.referenced_columns == ("tenant_id", "id")
     assert foreign_key.references == "cat.sch.customers"
+
+
+def test_fetch_state_composite_foreign_key_does_not_duplicate_columns():
+    # Guard the grouping layer: N raw query rows must produce exactly N local columns
+    # and N referenced columns — not N×M as a cross-join would.
+    #
+    # Given a 2-column composite FK whose raw query returns exactly 2 rows
+    # (one per local column, each carrying its matching parent-key column):
+    qn = QualifiedName("cat", "sch", "orders")
+    fk_rows = [
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="tenant_id",
+            ordinal_position=1,
+            position_in_unique_constraint=1,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="tenant_id",
+        ),
+        SimpleNamespace(
+            constraint_name="orders_comp_fk",
+            local_column="customer_id",
+            ordinal_position=2,
+            position_in_unique_constraint=2,
+            ref_catalog="cat",
+            ref_schema="sch",
+            ref_table="customers",
+            ref_column="id",
+        ),
+    ]
+    spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the grouped FK has exactly 2 local columns and 2 referenced columns —
+    # no duplication — and they are positionally aligned
+    assert isinstance(result, TablePresent)
+    [foreign_key] = result.table.foreign_keys
+    assert len(foreign_key.local_columns) == 2
+    assert len(foreign_key.referenced_columns) == 2
+    assert foreign_key.local_columns == ("tenant_id", "customer_id")
+    assert foreign_key.referenced_columns == ("tenant_id", "id")
