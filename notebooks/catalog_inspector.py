@@ -9,7 +9,8 @@ Keep this file in the same workspace folder as the notebook so the import
 resolves.
 """
 
-from databricks.sdk.runtime import spark
+from databricks.sdk.runtime import display, spark
+from pyspark.sql import Row
 from pyspark.sql.types import StructField
 
 
@@ -72,3 +73,28 @@ class CatalogInspector:
     def column_comment(self, table: str, column: str) -> str:
         """Return the live comment on one column, or empty string."""
         return self.fields_of(table)[column].metadata.get("comment", "")
+
+    def display_schema(self, table: str) -> None:
+        """Display the live column schema as a table: column, type, nullable, comment."""
+        rows = [
+            Row(
+                column=field.name,
+                type=field.dataType.simpleString(),
+                nullable=field.nullable,
+                comment=field.metadata.get("comment", ""),
+            )
+            for field in self.fields_of(table).values()
+        ]
+        display(spark.createDataFrame(rows))
+
+    def display_tags(self, table: str) -> None:
+        """Display the live Unity Catalog tags as a table: tag, value."""
+        rows = [Row(tag=k, value=v) for k, v in self.tags_of(table).items()]
+        empty = spark.createDataFrame([], "tag string, value string")
+        display(spark.createDataFrame(rows) if rows else empty)
+
+    def display_properties(self, table: str) -> None:
+        """Display the live Delta table properties as a table: property, value."""
+        rows = [Row(property=k, value=v) for k, v in self.properties_of(table).items()]
+        empty = spark.createDataFrame([], "property string, value string")
+        display(spark.createDataFrame(rows) if rows else empty)
