@@ -552,7 +552,6 @@ def test_emits_set_primary_key_when_desired_has_pk_and_observed_has_none():
     pk_actions = [a for a in plan.actions if isinstance(a, SetPrimaryKey)]
     assert len(pk_actions) == 1
     assert pk_actions[0].columns == (Column("id", Integer(), nullable=False),)
-    assert pk_actions[0].constraint_name == "test_pk"
     assert not any(isinstance(a, DropPrimaryKey) for a in plan.actions)
 
 
@@ -726,21 +725,26 @@ def test_new_fk_on_desired_only_emits_set_foreign_key():
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
     assert set_actions[0].foreign_key == _FK
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_fk_removed_from_desired_emits_drop_then_no_set():
-    # Given observed has a FK but desired has none
+    # Given observed has a FK (catalog-stored name, as the reader always sets) but desired has none
+    observed_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
     desired = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         columns=(Column("id", Integer()), Column("customer_id", Integer())),
     )
-    observed = _observed_orders((_FK,))
+    observed = _observed_orders((observed_fk,))
 
     # When
     plan = compute_plan(desired, observed)
 
-    # Then a DropForeignKey is emitted, no SetForeignKey
+    # Then a DropForeignKey is emitted using the observed catalog name, no SetForeignKey
     drop_actions = [a for a in plan if isinstance(a, DropForeignKey)]
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(drop_actions) == 1
@@ -761,7 +765,7 @@ def test_fk_same_on_both_sides_produces_no_fk_actions():
     assert fk_actions == []
 
 
-def test_fk_with_explicit_constraint_name_uses_that_name():
+def test_fk_with_explicit_constraint_name_carried_on_fk_object():
     # Given desired has a FK with an explicit constraint name, observed has none
     desired = _orders_with_fk(_FK_WITH_EXPLICIT_NAME)
     observed = _observed_orders()
@@ -769,18 +773,20 @@ def test_fk_with_explicit_constraint_name_uses_that_name():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then SetForeignKey uses the explicit name
+    # Then SetForeignKey carries the FK object (compiler reads explicit name from it)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].constraint_name == "custom_fk_name"
+    assert set_actions[0].foreign_key == _FK_WITH_EXPLICIT_NAME
 
 
 def test_fk_changed_emits_drop_and_set():
-    # Given the FK's referenced table changes between observed and desired
+    # Given the FK's referenced table changes between observed and desired.
+    # The observed FK carries a catalog-stored name (as the reader always sets).
     old_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         references="cat.sch.old_customers",
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     new_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -793,14 +799,13 @@ def test_fk_changed_emits_drop_and_set():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then drop the old one, set the new one
+    # Then drop the old one (using the catalog name), set the new one
     drop_actions = [a for a in plan if isinstance(a, DropForeignKey)]
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(drop_actions) == 1
     assert drop_actions[0].constraint_name == "orders_customer_id_fk"
     assert len(set_actions) == 1
     assert set_actions[0].foreign_key == new_fk
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_new_table_with_fk_includes_set_foreign_key_in_plan():
@@ -815,7 +820,6 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
     assert set_actions[0].foreign_key == _FK
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
@@ -881,8 +885,8 @@ def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
     # Given a desired table with a FK and no observed table (observed is None)
     desired = _orders_with_fk(_FK)
 
-    # When diffing FKs against a missing table
-    actions = _diff_foreign_keys(desired, None)
+    # When diffing FKs against a missing table (empty observed FK tuple)
+    actions = _diff_foreign_keys(desired.foreign_keys, ())
 
     # Then every desired FK is set and nothing is dropped — a missing table has
     # no observed FKs to diff against, so there is no separate "create" path
@@ -890,19 +894,13 @@ def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
     drop_actions = [a for a in actions if isinstance(a, DropForeignKey)]
     assert len(set_actions) == 1
     assert set_actions[0].foreign_key == _FK
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
     assert drop_actions == []
 
 
 def test_diff_foreign_keys_missing_table_with_no_fks_produces_no_actions():
     # Given a desired table with no FKs and no observed table
-    desired = DesiredTable(
-        qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("id", Integer()),),
-    )
-
     # When diffing FKs against a missing table
-    actions = _diff_foreign_keys(desired, None)
+    actions = _diff_foreign_keys((), ())
 
     # Then there are no FK actions
     assert actions == ()

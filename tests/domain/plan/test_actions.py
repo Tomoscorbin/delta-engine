@@ -180,7 +180,6 @@ def test_set_primary_key_has_no_subject():
     # Given a SetPrimaryKey action
     action = SetPrimaryKey(
         columns=(Column(name="id", data_type=Integer(), nullable=False),),
-        constraint_name="orders_pk",
     )
 
     # Then it has no within-phase subject
@@ -206,7 +205,6 @@ def test_plan_orders_set_primary_key_after_set_column_nullability():
         (
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
-                constraint_name="t_pk",
             ),
             SetColumnNullability(column_name="id", nullable=False),
         )
@@ -229,9 +227,8 @@ def test_plan_full_phase_order_with_all_action_types():
             PartitioningChange(desired_partitioning=("p",), observed_partitioning=()),
             SetPrimaryKey(
                 columns=(Column(name="id", data_type=Integer(), nullable=False),),
-                constraint_name="t_pk",
             ),
-            SetForeignKey(foreign_key=fk, constraint_name="t_customer_id_fk"),
+            SetForeignKey(foreign_key=fk),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
@@ -299,14 +296,14 @@ def test_drop_foreign_key_subject_is_constraint_name():
     assert action.subject == "orders_customer_id_fk"
 
 
-def test_set_foreign_key_subject_is_constraint_name():
+def test_set_foreign_key_subject_is_local_columns_joined():
     # Given
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         references="cat.sch.customers",
         referenced_columns=("id",),
     )
-    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk)
 
-    # Then subject is the constraint name
-    assert action.subject == "orders_customer_id_fk"
+    # Then subject is the local columns joined (used for deterministic ordering within the phase)
+    assert action.subject == "customer_id"

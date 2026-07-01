@@ -285,13 +285,12 @@ def test_drop_primary_key_renders_alter_drop_primary_key():
 
 
 def test_set_primary_key_renders_add_constraint_primary_key():
-    # Given a SetPrimaryKey with two columns and a constraint name
+    # Given a SetPrimaryKey with two columns (compiler derives the constraint name)
     action = SetPrimaryKey(
         columns=(
             Column(name="tenant_id", data_type=Integer(), nullable=False),
             Column(name="order_id", data_type=Integer(), nullable=False),
         ),
-        constraint_name="orders_pk",
     )
 
     # When compiling the action
@@ -305,10 +304,9 @@ def test_set_primary_key_renders_add_constraint_primary_key():
 
 
 def test_set_primary_key_renders_alter_add_constraint():
-    # When compiling a SetPrimaryKey with one column
+    # When compiling a SetPrimaryKey with one column (compiler derives the constraint name)
     action = SetPrimaryKey(
         columns=(Column("id", Integer(), nullable=False),),
-        constraint_name="tbl_pk",
     )
     statement = _compile_single(action)
 
@@ -317,13 +315,12 @@ def test_set_primary_key_renders_alter_add_constraint():
 
 
 def test_set_primary_key_renders_multiple_columns():
-    # When compiling a SetPrimaryKey with two columns
+    # When compiling a SetPrimaryKey with two columns (compiler derives the constraint name)
     action = SetPrimaryKey(
         columns=(
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
-        constraint_name="tbl_pk",
     )
     statement = _compile_single(action)
 
@@ -378,7 +375,7 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
         references="cat.sch.customers",
         referenced_columns=("id",),
     )
-    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)
@@ -398,7 +395,7 @@ def test_set_foreign_key_renders_composite_fk():
         references="cat.sch.customers",
         referenced_columns=("tenant_id", "id"),
     )
-    action = SetForeignKey(foreign_key=fk, constraint_name="orders_tenant_id_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)

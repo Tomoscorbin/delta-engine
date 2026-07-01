@@ -174,14 +174,13 @@ class DropPrimaryKey(Action):
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
     """
-    Add a primary key constraint to a table.
+    Add a primary key constraint to a table. The compiler derives its name.
 
     Carries the full Column objects so the validation rule can check
     nullability without requiring a DesiredTable reference.
     """
 
     columns: tuple[Column, ...]
-    constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
 
@@ -205,16 +204,15 @@ class DropForeignKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetForeignKey(Action):
-    """Add a foreign key constraint to a table."""
+    """Add a foreign key constraint to a table. The compiler derives its name."""
 
     foreign_key: ForeignKeyConstraint
-    constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return ",".join(self.foreign_key.local_columns)
 
 
 @dataclass(frozen=True, slots=True)

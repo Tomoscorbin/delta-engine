@@ -388,7 +388,7 @@ def _(action: DropPrimaryKey) -> str:
 
 @_action_diff_line.register
 def _(action: SetForeignKey) -> str:
-    return f"+ foreign key {action.constraint_name}"
+    return f"+ foreign key ({action.subject})"
 
 
 @_action_diff_line.register

@@ -241,7 +241,7 @@ _QN = QualifiedName("c", "s", "t")
 
 
 def _set_pk(*columns: Column) -> SetPrimaryKey:
-    return SetPrimaryKey(columns=columns, constraint_name="t_pk")
+    return SetPrimaryKey(columns=columns)
 
 
 def _create_table_with_pk(*columns: Column) -> CreateTable:

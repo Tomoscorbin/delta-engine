@@ -15,6 +15,8 @@ from dataclasses import dataclass
 import operator
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -101,14 +103,15 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
-            + _diff_primary_key(desired, observed)
+            + _diff_primary_key(desired.primary_key, observed.primary_key, desired.columns)
         )
 
     # Foreign keys are reconciled the same way whether the table is new or
     # existing: a missing table simply has no observed FKs, so every desired FK
     # is set. Keeping this out of the branch above means there is one FK path,
     # not a hand-rolled "create" variant kept in step with the diff variant.
-    return ActionPlan(body + _diff_foreign_keys(desired, observed))
+    observed_foreign_keys = observed.foreign_keys if observed is not None else ()
+    return ActionPlan(body + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys))
 
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
@@ -180,78 +183,71 @@ def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, .
     return (SetTableComment(comment=desired),)
 
 
-def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+def _diff_primary_key(
+    desired_pk: PrimaryKeyConstraint | None,
+    observed_pk: PrimaryKeyConstraint | None,
+    desired_columns: tuple[Column, ...],
+) -> tuple[Action, ...]:
     """
     Return the primary key actions to align observed with desired.
 
     Uses set comparison so column order does not trigger spurious changes.
-    Declaration order from desired is preserved in SetPrimaryKey.columns.
+    Declaration order from desired is preserved in SetPrimaryKey.columns. The
+    desired Column objects are needed so SetPrimaryKey can carry full columns
+    (validation checks their nullability); no table name is needed — the
+    compiler derives the constraint name.
     """
-    desired_primary_key = set(desired.primary_key.columns) if desired.primary_key else set()
-    observed_primary_key = set(observed.primary_key.columns) if observed.primary_key else set()
+    desired_columns_in_key = set(desired_pk.columns) if desired_pk else set()
+    observed_columns_in_key = set(observed_pk.columns) if observed_pk else set()
 
-    if desired_primary_key == observed_primary_key:
+    if desired_columns_in_key == observed_columns_in_key:
         return ()
 
     actions: list[Action] = []
-
-    if observed_primary_key:
+    if observed_columns_in_key:
         actions.append(DropPrimaryKey())
-
-    if desired_primary_key:
+    if desired_columns_in_key:
         primary_key_columns = tuple(
-            column for column in desired.columns if column.name in desired_primary_key
+            column for column in desired_columns if column.name in desired_columns_in_key
         )
-        constraint_name = desired.primary_key_constraint_name
-        assert constraint_name is not None  # guaranteed: desired_primary_key is non-empty
-        actions.append(
-            SetPrimaryKey(
-                columns=primary_key_columns,
-                constraint_name=constraint_name,
-            )
-        )
-
+        actions.append(SetPrimaryKey(columns=primary_key_columns))
     return tuple(actions)
 
 
-def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable | None) -> tuple[Action, ...]:
+def _diff_foreign_keys(
+    desired: tuple[ForeignKeyConstraint, ...],
+    observed: tuple[ForeignKeyConstraint, ...],
+) -> tuple[Action, ...]:
     """
     Return the FK actions to align observed with desired.
 
-    ``observed`` is ``None`` when the table does not yet exist. A missing table
-    has no observed foreign keys, so every desired FK is set and none is dropped
-    — the create case needs no separate code path, it is just a diff against an
-    empty set of observed FKs.
+    A missing table has no observed foreign keys (``observed`` is an empty
+    tuple), so every desired FK is set and none is dropped — the create case
+    needs no separate path.
 
     Foreign keys are matched by their content signature (local columns,
-    referenced table, and referenced columns), not by constraint name: a
-    desired FK whose signature is not observed is set; an observed FK whose
-    signature is not desired is dropped; a FK on both sides — even under a
-    different constraint name, e.g. one created outside this engine — produces
-    no action, so a sync over an unchanged catalog stays idempotent.
+    referenced table, referenced columns), not by name: because the signature
+    is the identity, a matched pair is always equal, so ``changed`` is empty by
+    construction. A desired FK whose signature is not observed is set; an
+    observed FK whose signature is not desired is dropped; a FK on both sides —
+    even under a different constraint name, e.g. one created outside this engine
+    — produces no action, so a sync over an unchanged catalog stays idempotent.
 
-    Setting a desired FK uses its resolved name; dropping an observed FK uses
-    its catalog-stored name, so the correct constraint is removed. The order
-    actions are returned in does not matter — ActionPlan sorts every plan by
-    execution phase.
+    Setting a desired FK carries the FK content; the compiler derives its name.
+    Dropping an observed FK uses its catalog-stored name, so the correct
+    constraint is removed. Order does not matter — ActionPlan sorts every plan
+    by execution phase.
     """
-    observed_foreign_keys = observed.foreign_keys if observed is not None else ()
-    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed_foreign_keys}
-
-    set_actions = tuple(
-        SetForeignKey(
-            foreign_key=foreign_key,
-            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name),
-        )
-        for signature, foreign_key in desired_by_signature.items()
-        if signature not in observed_by_signature
+    diff = diff_by_key(
+        desired,
+        observed,
+        key=lambda foreign_key: foreign_key.signature,
+        equals=lambda desired_fk, observed_fk: True,
     )
+    set_actions = tuple(SetForeignKey(foreign_key=foreign_key) for foreign_key in diff.added)
     drop_actions = tuple(
-        DropForeignKey(
-            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name)
-        )
-        for signature, foreign_key in observed_by_signature.items()
-        if signature not in desired_by_signature
+        DropForeignKey(constraint_name=foreign_key.constraint_name)
+        for foreign_key in diff.dropped
+        if foreign_key.constraint_name is not None
     )
     return set_actions + drop_actions
