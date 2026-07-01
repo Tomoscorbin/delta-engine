@@ -721,6 +721,53 @@ class _FakeSparkRawForeignKeyRows:
         return FakeDataFrame(self._describe_rows)
 
 
+class _FakeSparkCapturingForeignKeyQuery:
+    """
+    Spark fake that records the SQL text emitted for the FK query so tests can
+    assert on its structure, while still returning empty rows so fetch_state
+    completes without error.
+    """
+
+    def __init__(self, *, catalog):
+        self._catalog = catalog
+        self.captured_fk_query: str | None = None
+
+    @property
+    def catalog(self):
+        return self._catalog
+
+    def sql(self, query: str):
+        if "referential_constraints" in query:
+            self.captured_fk_query = query
+            return FakeDataFrame([])
+        if "information_schema" in query.lower():
+            return FakeDataFrame([])
+        return FakeDataFrame([{"properties": {}}])
+
+
+def test_foreign_key_query_correlates_referenced_columns_by_parent_key_position():
+    # Given a spark fake that records the FK SQL query text
+    qn = QualifiedName("cat", "sch", "orders")
+    spark = _FakeSparkCapturingForeignKeyQuery(catalog=_orders_catalog())
+
+    # When we fetch state (triggering the FK query)
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the captured query aligns referenced columns via position_in_unique_constraint
+    # (the fix) and does NOT source referenced columns from constraint_column_usage
+    # (the old, broken cross-join approach)
+    assert isinstance(result, TablePresent)
+    assert spark.captured_fk_query is not None, "FK query was never issued"
+    fk_query = spark.captured_fk_query
+    assert "position_in_unique_constraint" in fk_query, (
+        "FK query must align referenced columns via position_in_unique_constraint"
+    )
+    assert "constraint_column_usage" not in fk_query, (
+        "FK query must not source referenced columns from constraint_column_usage "
+        "(that cross-join cannot align composite keys)"
+    )
+
+
 def test_fetch_state_composite_foreign_key_aligns_local_and_referenced_columns():
     # Given a composite FK (tenant_id, customer_id) -> customers(tenant_id, id):
     # the raw query returns one row per local column, each carrying the parent
