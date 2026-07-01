@@ -520,3 +520,175 @@ print(report.diff())
 assert report.any_failures is False
 assert properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
 print("Act 3e verified: undeclared property left untouched (declared-subset).")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 4 — Validation blocks unsafe changes
+# MAGIC
+# MAGIC The engine refuses changes that would silently break data or require a
+# MAGIC rewrite. Each block runs *before* any SQL executes, so the live table is
+# MAGIC left untouched. We use a dedicated, foreign-key-free `events` table so each
+# MAGIC failure is a clean `VALIDATION_FAILED` (a foreign-key failure would
+# MAGIC otherwise take precedence and mask it).
+
+# COMMAND ----------
+
+def define_events(*, columns, partitioned_by=("event_date",)):
+    """Build the events table from a column list (baseline plus one variation)."""
+    return DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="events",
+        columns=columns,
+        partitioned_by=partitioned_by,
+        comment="Raw events",
+    )
+
+
+events_baseline_columns = [
+    Column("event_id", Long(), nullable=False, primary_key=True),
+    Column("event_date", Date()),
+    Column("amount", Decimal(12, 2)),
+    Column("created_at", Timestamp()),
+]
+
+registry = Registry()
+registry.register(define_events(columns=events_baseline_columns))
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+assert report.any_failures is False
+assert partitions_of("events") == ("event_date",)
+print("events baseline created.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Block 1 — Adding a NOT NULL column
+# MAGIC
+# MAGIC A new `NOT NULL` column has no value for existing rows. Add it as nullable,
+# MAGIC backfill, then tighten outside the engine.
+
+# COMMAND ----------
+
+try:
+    registry = Registry()
+    registry.register(
+        define_events(
+            columns=[*events_baseline_columns, Column("region", String(), nullable=False)]
+        )
+    )
+    engine.sync(registry)
+    raise AssertionError("expected SyncFailedError")
+except SyncFailedError as error:
+    [table_report] = error.report.table_reports
+    print(table_report.status.value)
+    for failure in table_report.all_failures:
+        print("\n".join(failure.format_lines()))
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.all_failures
+
+# Verify nothing was applied.
+assert "region" not in fields_of("events")
+print("Block 1 verified: NOT NULL add blocked, table untouched.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Block 2 — Tightening a column to NOT NULL
+# MAGIC
+# MAGIC Existing nulls would violate the new constraint. Backfill and tighten
+# MAGIC out of band instead.
+
+# COMMAND ----------
+
+try:
+    registry = Registry()
+    registry.register(
+        define_events(
+            columns=[
+                Column("event_id", Long(), nullable=False, primary_key=True),
+                Column("event_date", Date(), nullable=False),  # tightened
+                Column("amount", Decimal(12, 2)),
+                Column("created_at", Timestamp()),
+            ]
+        )
+    )
+    engine.sync(registry)
+    raise AssertionError("expected SyncFailedError")
+except SyncFailedError as error:
+    [table_report] = error.report.table_reports
+    print(table_report.status.value)
+    for failure in table_report.all_failures:
+        print("\n".join(failure.format_lines()))
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.all_failures
+
+# Verify nothing was applied.
+assert fields_of("events")["event_date"].nullable is True
+print("Block 2 verified: tightening blocked, event_date still nullable.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Block 3 — Changing a column's data type
+# MAGIC
+# MAGIC Type changes can corrupt or fail to cast existing data. Recreate the table
+# MAGIC out of band if a type must change.
+
+# COMMAND ----------
+
+try:
+    registry = Registry()
+    registry.register(
+        define_events(
+            columns=[
+                Column("event_id", Long(), nullable=False, primary_key=True),
+                Column("event_date", Date()),
+                Column("amount", Double()),  # was Decimal(12, 2)
+                Column("created_at", Timestamp()),
+            ]
+        )
+    )
+    engine.sync(registry)
+    raise AssertionError("expected SyncFailedError")
+except SyncFailedError as error:
+    [table_report] = error.report.table_reports
+    print(table_report.status.value)
+    for failure in table_report.all_failures:
+        print("\n".join(failure.format_lines()))
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.all_failures
+
+# Verify nothing was applied — amount is still a decimal.
+assert isinstance(fields_of("events")["amount"].dataType, T.DecimalType)
+print("Block 3 verified: type change blocked, amount still Decimal.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Block 4 — Changing the partitioning
+# MAGIC
+# MAGIC Partitioning is fixed at creation; changing it requires a rewrite. The
+# MAGIC engine refuses to alter it in place.
+
+# COMMAND ----------
+
+try:
+    registry = Registry()
+    registry.register(define_events(columns=events_baseline_columns, partitioned_by=()))
+    engine.sync(registry)
+    raise AssertionError("expected SyncFailedError")
+except SyncFailedError as error:
+    [table_report] = error.report.table_reports
+    print(table_report.status.value)
+    for failure in table_report.all_failures:
+        print("\n".join(failure.format_lines()))
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.all_failures
+
+# Verify nothing was applied — still partitioned by event_date.
+assert partitions_of("events") == ("event_date",)
+print("Block 4 verified: partitioning change blocked, partitions unchanged.")
