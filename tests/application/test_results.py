@@ -377,3 +377,20 @@ def test_table_run_report_with_no_pre_execution_failures_is_success():
     # Then it is a success and carries no pre-execution failures
     assert report.status is TableRunStatus.SUCCESS
     assert report.pre_execution_failures == ()
+
+
+def test_foreign_key_failure_renders_not_a_key_reason():
+    # Given a FK failure because the referenced columns are not the parent's PK
+    failure = ForeignKeyFailure(
+        table=QualifiedName("cat", "sch", "orders"),
+        constraint_name="orders_customer_id_fk",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
+    )
+
+    # When rendered
+    [line] = failure.format_lines()
+
+    # Then the message names the constraint, the table, and the reason
+    assert "orders_customer_id_fk" in line
+    assert "cat.sch.orders" in line
+    assert "not the primary key" in line

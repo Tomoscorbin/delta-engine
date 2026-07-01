@@ -28,6 +28,11 @@ from delta_engine.domain.model.table import DesiredTable
 # recursion depth of the SCC traversal below stays far under Python's limit.
 
 
+def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
+    """Return the table's primary key column names (empty when it has none)."""
+    return table.primary_key
+
+
 @dataclass
 class SyncCandidate:
     """
@@ -240,12 +245,23 @@ def _classify_failures(
             )
         )
 
+    # Primary-key columns of every registered table, keyed by qualified name.
+    # A foreign key is only valid if its referenced columns are exactly the
+    # referenced table's primary key (Databricks rejects other targets at DDL
+    # time). Compared as sets: a primary key's declaration order is not part of
+    # its identity, and referenced_columns is aligned to local_columns, not PK order.
+    primary_key_by_name = {
+        str(table.qualified_name): set(_primary_key_columns(table)) for table in tables
+    }
+
     # Pass 1 — direct failures.
     for table in tables:
         table_name = str(table.qualified_name)
         for foreign_key in table.foreign_keys:
             if foreign_key.references not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
+            elif set(foreign_key.referenced_columns) != primary_key_by_name[foreign_key.references]:
+                record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif table_name in cycle_members:
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 
