@@ -17,7 +17,7 @@ hidden behind that interface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from delta_engine.application.results import Failure, ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
@@ -33,7 +33,7 @@ def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
     return table.primary_key.columns if table.primary_key is not None else ()
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SyncCandidate:
     """
     A table prepared for the sync loop, together with its pre-execution failure verdict.
@@ -47,7 +47,7 @@ class SyncCandidate:
     """
 
     table: DesiredTable
-    failures: list[Failure] = field(default_factory=list)
+    failures: tuple[Failure, ...] = ()
 
     @property
     def qualified_name(self) -> QualifiedName:
@@ -89,27 +89,21 @@ def resolve(
     """
     external = external_failures or {}
     already_failed = frozenset(
-        str(qualified_name)
-        for qualified_name, failures in external.items()
-        if failures
+        str(qualified_name) for qualified_name, failures in external.items() if failures
     )
 
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
     components = _strongly_connected_components(graph)
 
-    cycle_members = {
-        name for component in components if _is_cycle(component) for name in component
-    }
+    cycle_members = {name for component in components if _is_cycle(component) for name in component}
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(
-        tables, registered_names, cycle_members, already_failed
-    )
+    failures_by_table = _classify_failures(tables, registered_names, cycle_members, already_failed)
 
     return tuple(
         SyncCandidate(
             table=table,
-            failures=(
+            failures=tuple(
                 list(external.get(table.qualified_name, ()))
                 + list(failures_by_table.get(table.qualified_name, ()))
             ),
