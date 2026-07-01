@@ -72,30 +72,81 @@ class TableSnapshot:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
         if self.foreign_keys:
-            seen_constraint_names: set[str] = set()
             for foreign_key in self.foreign_keys:
                 missing = [col for col in foreign_key.local_columns if col not in seen_names]
                 if missing:
                     raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
 
-                # The differ keys FKs by their resolved constraint name, so two
-                # FKs resolving to the same name would silently collapse to one.
-                constraint_name = foreign_key.resolve_constraint_name(self.qualified_name.name)
-                if constraint_name in seen_constraint_names:
-                    raise ValueError(f"Duplicate foreign key constraint name: {constraint_name}")
-                seen_constraint_names.add(constraint_name)
-
-    @property
-    def primary_key_constraint_name(self) -> str | None:
-        """The constraint name for this table's primary key, or None if no PK is defined."""
-        if self.primary_key is None:
-            return None
-        return self.primary_key.resolve_constraint_name(self.qualified_name.name)
-
 
 @dataclass(frozen=True, slots=True)
 class DesiredTable(TableSnapshot):
-    """Desired definition authored by users (target state)."""
+    """
+    Desired definition authored by users (target state).
+
+    A desired table's key constraints carry engine-generated names: the
+    constraint name is a property of the desired schema (a pure function of the
+    table name and columns), so it is resolved here, once, and then flows
+    downstream as data. The differ and compiler read the name off the
+    constraint rather than deriving it themselves.
+    """
+
+    def __post_init__(self) -> None:
+        """
+        Enforce desired-only invariants, then generate constraint names.
+
+        No two foreign keys may govern the same set of local columns. Two FKs
+        over the same local columns are incoherent, and would generate the same
+        constraint name (``{table}_{local_cols}_fk``) and collide at DDL time.
+        Checking the column *set* (order-insensitive) also rejects a reordered
+        duplicate.
+
+        A primary key column must be NOT NULL — a nullable primary key is not a
+        well-formed desired schema, independent of any migration. Enforcing it
+        here (rather than as a plan-validation rule) keeps the planning layer
+        free of column-nullability lookups. Both checks live on DesiredTable,
+        not the shared base: an observed table may legitimately carry such a
+        layout (a legacy catalog schema) and must stay representable.
+
+        Names are generated after validation. Each constraint's
+        ``with_generated_name`` rejects a name that is already set, so a
+        user-supplied constraint name fails loudly here (user-defined names are
+        a future feature) rather than being silently ignored downstream.
+        """
+        TableSnapshot.__post_init__(self)
+        seen: set[frozenset[str]] = set()
+        for foreign_key in self.foreign_keys:
+            local_column_set = frozenset(foreign_key.local_columns)
+            if local_column_set in seen:
+                raise ValueError(
+                    "Two foreign keys declared over the same local columns:"
+                    f" {sorted(local_column_set)}"
+                )
+            seen.add(local_column_set)
+
+        if self.primary_key is not None:
+            key_columns = set(self.primary_key.columns)
+            nullable_key_columns = [
+                column.name
+                for column in self.columns
+                if column.name in key_columns and column.nullable
+            ]
+            if nullable_key_columns:
+                raise ValueError(
+                    "Primary key column must be NOT NULL:"
+                    f" {nullable_key_columns[0]}. Set nullable=False on every"
+                    " primary key column."
+                )
+
+        table_name = self.qualified_name.name
+        if self.primary_key is not None:
+            object.__setattr__(
+                self, "primary_key", self.primary_key.with_generated_name(table_name)
+            )
+        object.__setattr__(
+            self,
+            "foreign_keys",
+            tuple(fk.with_generated_name(table_name) for fk in self.foreign_keys),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -176,11 +176,14 @@ class SetPrimaryKey(Action):
     """
     Add a primary key constraint to a table.
 
-    Carries the full Column objects so the validation rule can check
-    nullability without requiring a DesiredTable reference.
+    Carries the primary key column names (in declaration order) and the
+    engine-generated ``constraint_name`` so the compiler renders it directly.
+    That primary key columns must be NOT NULL is a well-formedness invariant of
+    a desired table, enforced when the ``DesiredTable`` is built, not a plan
+    concern — so this action needs only the names.
     """
 
-    columns: tuple[Column, ...]
+    columns: tuple[str, ...]
     constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
@@ -205,27 +208,31 @@ class DropForeignKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetForeignKey(Action):
-    """Add a foreign key constraint to a table."""
+    """
+    Add a foreign key constraint to a table.
+
+    Carries the full :class:`ForeignKeyConstraint`, whose engine-generated
+    ``constraint_name`` the compiler renders directly.
+    """
 
     foreign_key: ForeignKeyConstraint
-    constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
 
     @property
     def subject(self) -> str:
-        return self.constraint_name
+        return ",".join(self.foreign_key.local_columns)
 
 
 @dataclass(frozen=True, slots=True)
 class ColumnTypeChange(Action):
     """
-    Records that a column's type differs between desired and observed.
+    Records that a column's data type differs between desired and observed.
 
-    Delta Lake does not support column type changes, so this action is never
-    executed — it exists so the differ can make the drift visible in the plan
-    and validation can reject it with a clear message instead of silently
-    ignoring it.
+    A descriptive action: it states the drift, not whether the drift is
+    permitted — deciding what is allowed is the validator's job. It carries the
+    observed and desired types so a validation rule can reason about them and
+    render a clear message.
     """
 
     column_name: str
@@ -244,9 +251,10 @@ class PartitioningChange(Action):
     """
     Records that the desired and observed partition specs differ.
 
-    Partitioning cannot be changed on an existing Delta table, so this action
-    is never executed — it exists so the differ can make the conflict visible
-    in the plan and validation can reject it with a clear message.
+    A descriptive action: it states the drift, not whether the drift is
+    permitted — deciding what is allowed is the validator's job. It carries the
+    observed and desired partition columns so a validation rule can reason about
+    them and render a clear message.
     """
 
     desired_partitioning: tuple[str, ...]

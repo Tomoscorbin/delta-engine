@@ -293,18 +293,22 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
 
 
 def test_foreign_key_failure_renders_a_descriptive_line():
-    # Given an unresolvable-reference FK failure
+    # Given a foreign-key failure described by its content
     failure = ForeignKeyFailure(
         table=QualifiedName("cat", "sch", "orders"),
-        constraint_name="orders_customer_id_fk",
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
         reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
     )
 
-    # Then it renders one line naming the constraint and explaining the reason
+    # When rendering its lines
     lines = failure.format_lines()
-    assert len(lines) == 1
-    assert "orders_customer_id_fk" in lines[0]
-    assert "not registered" in lines[0]
+
+    # Then the message identifies the FK by its local columns and referenced table
+    assert lines == (
+        "Foreign key (customer_id) → cat.sch.customers on cat.sch.orders was not applied:"
+        " it references a table that is not registered.",
+    )
 
 
 def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
@@ -315,7 +319,8 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
         pre_execution_failures=(
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
-                constraint_name="orders_customer_id_fk",
+                local_columns=("customer_id",),
+                references="cat.sch.customers",
                 reason=ForeignKeyFailureReason.CYCLE,
             ),
         ),
@@ -350,7 +355,8 @@ def test_table_run_report_status_is_fk_failed_when_both_fk_and_validation_failur
         pre_execution_failures=(
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
-                constraint_name="orders_customer_id_fk",
+                local_columns=("customer_id",),
+                references="cat.sch.customers",
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
@@ -383,14 +389,16 @@ def test_foreign_key_failure_renders_not_a_key_reason():
     # Given a FK failure because the referenced columns are not the parent's PK
     failure = ForeignKeyFailure(
         table=QualifiedName("cat", "sch", "orders"),
-        constraint_name="orders_customer_id_fk",
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
         reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
     )
 
     # When rendered
     [line] = failure.format_lines()
 
-    # Then the message names the constraint, the table, and the reason
-    assert "orders_customer_id_fk" in line
+    # Then the message names the local columns, referenced table, owning table, and reason
+    assert "(customer_id)" in line
+    assert "cat.sch.customers" in line
     assert "cat.sch.orders" in line
     assert "not the primary key" in line

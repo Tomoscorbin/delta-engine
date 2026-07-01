@@ -69,6 +69,8 @@ def _(action: UpdateComment, backticked_table_name: str) -> str:
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {col} COMMENT {comment}"
 ```
 
+Each handler receives the `backticked_table_name` and renders SQL. A constraint action carries its own name (generated when the `DesiredTable` was built, or read from the catalog for an observed one), so the handler renders `action.constraint_name` directly rather than computing it.
+
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).
 
 ## 5. Add a validation rule if needed

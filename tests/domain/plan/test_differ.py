@@ -1,4 +1,5 @@
 from hypothesis import given, strategies as st
+import pytest
 
 from delta_engine.domain.model import (
     Boolean,
@@ -33,7 +34,7 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
 )
-from delta_engine.domain.plan.differ import compute_plan
+from delta_engine.domain.plan.differ import _diff_foreign_keys, compute_plan
 
 # ----- Hypothesis strategies for valid domain objects
 
@@ -93,9 +94,14 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
             st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
         ).map(tuple)
     )
+    # Primary key columns must be NOT NULL (a DesiredTable well-formedness
+    # invariant), so draw them only from the non-nullable columns.
+    non_nullable_names = [c.name for c in columns if not c.nullable]
     primary_key_cols = draw(
         st.lists(
-            st.sampled_from(column_names), max_size=min(2, len(column_names)), unique=True
+            st.sampled_from(non_nullable_names) if non_nullable_names else st.nothing(),
+            max_size=min(2, len(non_nullable_names)),
+            unique=True,
         ).map(tuple)
     )
     primary_key = PrimaryKeyConstraint(columns=primary_key_cols) if primary_key_cols else None
@@ -234,14 +240,11 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition change is surfaced as a PartitioningChange action in the plan
-    assert (
-        PartitioningChange(
-            desired_partitioning=("event_date", "country"),
-            observed_partitioning=("event_date",),
-        )
-        in plan.actions
-    )
+    # Partition change is surfaced as a PartitioningChange action
+    partitioning_changes = [a for a in plan.actions if isinstance(a, PartitioningChange)]
+    assert len(partitioning_changes) == 1
+    assert partitioning_changes[0].observed_partitioning == ("event_date",)
+    assert partitioning_changes[0].desired_partitioning == ("event_date", "country")
 
 
 # ---------- column diffs ----------
@@ -368,10 +371,12 @@ def test_emits_column_type_change_action_when_type_differs():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: a ColumnTypeChange makes the drift visible in the plan so validation can reject it
-    assert plan.actions == (
-        ColumnTypeChange(column_name="id", from_type=Integer(), to_type=String()),
-    )
+    # Then: the drift is surfaced as a ColumnTypeChange action
+    type_changes = [a for a in plan if isinstance(a, ColumnTypeChange)]
+    assert len(type_changes) == 1
+    assert type_changes[0].column_name == "id"
+    assert type_changes[0].from_type == Integer()
+    assert type_changes[0].to_type == String()
 
 
 def test_emits_partitioning_change_action_when_partition_spec_differs():
@@ -383,10 +388,11 @@ def test_emits_partitioning_change_action_when_partition_spec_differs():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: a PartitioningChange makes the conflict visible so validation can reject it
-    assert plan.actions == (
-        PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()),
-    )
+    # Then: the conflict is surfaced as a PartitioningChange action
+    partitioning_changes = [a for a in plan if isinstance(a, PartitioningChange)]
+    assert len(partitioning_changes) == 1
+    assert partitioning_changes[0].observed_partitioning == ()
+    assert partitioning_changes[0].desired_partitioning == ("ds",)
 
 
 def test_no_partitioning_action_when_partition_spec_is_unchanged():
@@ -548,11 +554,10 @@ def test_emits_set_primary_key_when_desired_has_pk_and_observed_has_none():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then: a SetPrimaryKey is emitted; no DropPrimaryKey
+    # Then: a SetPrimaryKey is emitted carrying the PK column names; no DropPrimaryKey
     pk_actions = [a for a in plan.actions if isinstance(a, SetPrimaryKey)]
     assert len(pk_actions) == 1
-    assert pk_actions[0].columns == (Column("id", Integer(), nullable=False),)
-    assert pk_actions[0].constraint_name == "test_pk"
+    assert pk_actions[0].columns == ("id",)
     assert not any(isinstance(a, DropPrimaryKey) for a in plan.actions)
 
 
@@ -722,25 +727,32 @@ def test_new_fk_on_desired_only_emits_set_foreign_key():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then exactly one SetForeignKey action is emitted
+    # Then exactly one SetForeignKey is emitted, carrying the desired FK with its
+    # engine-generated name (DesiredTable resolved it at construction)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == _FK
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
+    assert set_actions[0].foreign_key == desired.foreign_keys[0]
+    assert set_actions[0].foreign_key.constraint_name == "orders_customer_id_fk"
 
 
 def test_fk_removed_from_desired_emits_drop_then_no_set():
-    # Given observed has a FK but desired has none
+    # Given observed has a FK (catalog-stored name, as the reader always sets) but desired has none
+    observed_fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        references="cat.sch.customers",
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
     desired = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         columns=(Column("id", Integer()), Column("customer_id", Integer())),
     )
-    observed = _observed_orders((_FK,))
+    observed = _observed_orders((observed_fk,))
 
     # When
     plan = compute_plan(desired, observed)
 
-    # Then a DropForeignKey is emitted, no SetForeignKey
+    # Then a DropForeignKey is emitted using the observed catalog name, no SetForeignKey
     drop_actions = [a for a in plan if isinstance(a, DropForeignKey)]
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(drop_actions) == 1
@@ -761,26 +773,22 @@ def test_fk_same_on_both_sides_produces_no_fk_actions():
     assert fk_actions == []
 
 
-def test_fk_with_explicit_constraint_name_uses_that_name():
-    # Given desired has a FK with an explicit constraint name, observed has none
-    desired = _orders_with_fk(_FK_WITH_EXPLICIT_NAME)
-    observed = _observed_orders()
-
-    # When
-    plan = compute_plan(desired, observed)
-
-    # Then SetForeignKey uses the explicit name
-    set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
-    assert len(set_actions) == 1
-    assert set_actions[0].constraint_name == "custom_fk_name"
+def test_desired_fk_with_user_supplied_constraint_name_is_rejected():
+    # Given a desired FK carrying a user-supplied constraint name (a future feature,
+    # not yet allowed — the engine generates names itself)
+    # When / Then building the DesiredTable fails loudly rather than silently ignoring it
+    with pytest.raises(ValueError, match="generated by the engine"):
+        _orders_with_fk(_FK_WITH_EXPLICIT_NAME)
 
 
 def test_fk_changed_emits_drop_and_set():
-    # Given the FK's referenced table changes between observed and desired
+    # Given the FK's referenced table changes between observed and desired.
+    # The observed FK carries a catalog-stored name (as the reader always sets).
     old_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         references="cat.sch.old_customers",
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     new_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
@@ -793,14 +801,14 @@ def test_fk_changed_emits_drop_and_set():
     # When
     plan = compute_plan(desired, observed)
 
-    # Then drop the old one, set the new one
+    # Then drop the old one (using the catalog name), set the new one carrying
+    # its engine-generated name
     drop_actions = [a for a in plan if isinstance(a, DropForeignKey)]
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(drop_actions) == 1
     assert drop_actions[0].constraint_name == "orders_customer_id_fk"
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == new_fk
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
+    assert set_actions[0].foreign_key == desired.foreign_keys[0]
 
 
 def test_new_table_with_fk_includes_set_foreign_key_in_plan():
@@ -811,11 +819,11 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     plan = compute_plan(desired, None)
 
     # Then plan contains CreateTable — and a SetForeignKey (FK applied after creation)
+    # carrying the desired FK with its engine-generated name
     assert any(isinstance(a, CreateTable) for a in plan)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == _FK
-    assert set_actions[0].constraint_name == "orders_customer_id_fk"
+    assert set_actions[0].foreign_key == desired.foreign_keys[0]
 
 
 def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
@@ -875,3 +883,28 @@ def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
     # Then no FK actions are emitted — the FK is already in the right state
     fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
     assert fk_actions == []
+
+
+def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
+    # Given a desired table with a FK and no observed table (observed is None)
+    desired = _orders_with_fk(_FK)
+
+    # When diffing FKs against a missing table (empty observed FK tuple)
+    actions = _diff_foreign_keys(desired.foreign_keys, ())
+
+    # Then every desired FK is set and nothing is dropped — a missing table has
+    # no observed FKs to diff against, so there is no separate "create" path
+    set_actions = [a for a in actions if isinstance(a, SetForeignKey)]
+    drop_actions = [a for a in actions if isinstance(a, DropForeignKey)]
+    assert len(set_actions) == 1
+    assert set_actions[0].foreign_key == desired.foreign_keys[0]
+    assert drop_actions == []
+
+
+def test_diff_foreign_keys_missing_table_with_no_fks_produces_no_actions():
+    # Given a desired table with no FKs and no observed table
+    # When diffing FKs against a missing table
+    actions = _diff_foreign_keys((), ())
+
+    # Then there are no FK actions
+    assert actions == ()

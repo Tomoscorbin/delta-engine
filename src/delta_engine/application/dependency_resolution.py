@@ -234,7 +234,8 @@ def _classify_failures(
         failures.setdefault(table.qualified_name, []).append(
             ForeignKeyFailure(
                 table=table.qualified_name,
-                constraint_name=foreign_key.resolve_constraint_name(table.qualified_name.name),
+                local_columns=foreign_key.local_columns,
+                references=foreign_key.references,
                 reason=reason,
             )
         )

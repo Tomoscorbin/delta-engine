@@ -56,7 +56,8 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
 
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
-        constraint_name = table.primary_key.resolve_constraint_name(table.qualified_name.name)
+        constraint_name = table.primary_key.constraint_name
+        assert constraint_name is not None  # generated when the DesiredTable was built
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
@@ -94,7 +95,7 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
     bypassed or a custom rule set let a NOT NULL add through, rather than
     silently emitting an add that drops the constraint. It is an unconditional
     ``raise`` (not ``assert``) so the invariant survives ``python -O``, matching
-    the ColumnTypeChange/PartitioningChange guards below.
+    the ColumnTypeChange and PartitioningChange guards below.
     """
     if not action.column.nullable:
         raise AssertionError(
@@ -151,7 +152,7 @@ def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
-    column_clause = ", ".join(backtick(column.name) for column in action.columns)
+    column_clause = ", ".join(backtick(name) for name in action.columns)
     constraint = backtick(action.constraint_name)
     return (
         f"ALTER TABLE {backticked_table_name}"
@@ -170,7 +171,8 @@ def _(action: DropForeignKey, backticked_table_name: str) -> str:
 def _(action: SetForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
     foreign_key = action.foreign_key
-    constraint = backtick(action.constraint_name)
+    assert foreign_key.constraint_name is not None  # generated when the DesiredTable was built
+    constraint = backtick(foreign_key.constraint_name)
     local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
     ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
     # references is a dotted qualified name — split and backtick each part

@@ -9,10 +9,8 @@ from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
     ColumnTypeChange,
-    CreateTable,
     PartitioningChange,
     SetColumnNullability,
-    SetPrimaryKey,
 )
 
 
@@ -152,60 +150,11 @@ class DisallowPartitioningChange:
         )
 
 
-class PrimaryKeyColumnsNullable:
-    """
-    Disallow primary key constraints on nullable columns.
-
-    Databricks rejects primary key constraints on nullable columns at execution
-    time. This rule surfaces the violation at validation time — before any SQL
-    is executed — with a clear message. Fires on both ``SetPrimaryKey`` actions
-    (for existing tables) and ``CreateTable`` actions (for new tables with a
-    declared primary key).
-    """
-
-    name: ClassVar[str] = "PrimaryKeyColumnsNullable"
-
-    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
-        """Flag every nullable column declared as a primary key member."""
-        failures = []
-        for action in plan:
-            if isinstance(action, SetPrimaryKey):
-                for column in action.columns:
-                    if column.nullable:
-                        failures.append(
-                            ValidationFailure(
-                                rule_name=self.name,
-                                message=(
-                                    f"Operation not allowed: primary key column '{column.name}'"
-                                    " must be NOT NULL. Set nullable=False on the column before"
-                                    " declaring it as a primary key."
-                                ),
-                            )
-                        )
-            elif isinstance(action, CreateTable):
-                if action.table.primary_key is not None:
-                    primary_key_columns = set(action.table.primary_key.columns)
-                    for column in action.table.columns:
-                        if column.name in primary_key_columns and column.nullable:
-                            failures.append(
-                                ValidationFailure(
-                                    rule_name=self.name,
-                                    message=(
-                                        f"Operation not allowed: primary key column '{column.name}'"
-                                        " must be NOT NULL. Set nullable=False on the column before"
-                                        " declaring it as a primary key."
-                                    ),
-                                )
-                            )
-        return tuple(failures)
-
-
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     UnsupportedColumnTypeChange(),
     DisallowPartitioningChange(),
-    PrimaryKeyColumnsNullable(),
 )
 
 

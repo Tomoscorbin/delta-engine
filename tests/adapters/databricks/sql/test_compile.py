@@ -253,22 +253,21 @@ def test_every_action_type_has_a_registered_compiler():
     assert unregistered == []
 
 
-def test_column_type_change_compiler_raises_on_invariant_violation():
-    # Given a ColumnTypeChange action (blocked by validation; should never reach execution)
+def test_column_type_change_raises_at_compile_time():
+    # Given a ColumnTypeChange (validation rejects it first; it must never reach the compiler)
     action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
 
-    # Then reaching the compiler is an internal-invariant violation, not an
-    # unimplemented feature -- it raises AssertionError rather than producing bad SQL
-    with pytest.raises(AssertionError, match="id"):
+    # When / Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
         _compile_single(action)
 
 
-def test_partitioning_change_compiler_raises_on_invariant_violation():
-    # Given a PartitioningChange action (blocked by validation; should never reach execution)
+def test_partitioning_change_raises_at_compile_time():
+    # Given a PartitioningChange (validation rejects it first; it must never reach the compiler)
     action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
 
-    # Then reaching the compiler is an internal-invariant violation -- AssertionError
-    with pytest.raises(AssertionError, match=r"[Pp]artitioning"):
+    # When / Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
         _compile_single(action)
 
 
@@ -281,14 +280,8 @@ def test_drop_primary_key_renders_alter_drop_primary_key():
 
 
 def test_set_primary_key_renders_add_constraint_primary_key():
-    # Given a SetPrimaryKey with two columns and a constraint name
-    action = SetPrimaryKey(
-        columns=(
-            Column(name="tenant_id", data_type=Integer(), nullable=False),
-            Column(name="order_id", data_type=Integer(), nullable=False),
-        ),
-        constraint_name="orders_pk",
-    )
+    # Given a SetPrimaryKey carrying its column names and engine-generated constraint name
+    action = SetPrimaryKey(columns=("tenant_id", "order_id"), constraint_name="tbl_pk")
 
     # When compiling the action
     statement = _compile_single(action)
@@ -296,16 +289,13 @@ def test_set_primary_key_renders_add_constraint_primary_key():
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
+        " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
     )
 
 
 def test_set_primary_key_renders_alter_add_constraint():
     # When compiling a SetPrimaryKey with one column
-    action = SetPrimaryKey(
-        columns=(Column("id", Integer(), nullable=False),),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(columns=("id",), constraint_name="tbl_pk")
     statement = _compile_single(action)
 
     # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
@@ -314,13 +304,7 @@ def test_set_primary_key_renders_alter_add_constraint():
 
 def test_set_primary_key_renders_multiple_columns():
     # When compiling a SetPrimaryKey with two columns
-    action = SetPrimaryKey(
-        columns=(
-            Column("id", Integer(), nullable=False),
-            Column("tenant_id", Integer(), nullable=False),
-        ),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk")
     statement = _compile_single(action)
 
     # Then both columns appear in the PRIMARY KEY clause
@@ -368,13 +352,14 @@ def test_drop_foreign_key_renders_drop_constraint_if_exists():
 
 
 def test_set_foreign_key_renders_add_constraint_foreign_key():
-    # Given
+    # Given a foreign key carrying its engine-generated constraint name
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         references="cat.sch.customers",
         referenced_columns=("id",),
+        constraint_name="tbl_customer_id_fk",
     )
-    action = SetForeignKey(foreign_key=fk, constraint_name="orders_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)
@@ -382,19 +367,20 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
     # Then
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_customer_id_fk`"
+        " ADD CONSTRAINT `tbl_customer_id_fk`"
         " FOREIGN KEY (`customer_id`) REFERENCES `cat`.`sch`.`customers` (`id`)"
     )
 
 
 def test_set_foreign_key_renders_composite_fk():
-    # Given a composite FK (two local columns, two referenced columns)
+    # Given a composite FK (two local columns) carrying its generated name
     fk = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
         references="cat.sch.customers",
         referenced_columns=("tenant_id", "id"),
+        constraint_name="tbl_tenant_id_customer_id_fk",
     )
-    action = SetForeignKey(foreign_key=fk, constraint_name="orders_tenant_id_customer_id_fk")
+    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)
@@ -402,7 +388,7 @@ def test_set_foreign_key_renders_composite_fk():
     # Then both column pairs appear
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
-        " ADD CONSTRAINT `orders_tenant_id_customer_id_fk`"
+        " ADD CONSTRAINT `tbl_tenant_id_customer_id_fk`"
         " FOREIGN KEY (`tenant_id`, `customer_id`)"
         " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
     )

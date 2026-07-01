@@ -243,32 +243,6 @@ def test_delta_table_primary_key_returns_empty_when_no_pk_declared():
     assert table.primary_key == ()
 
 
-def test_delta_table_primary_key_constraint_name_returns_table_name_pk():
-    # Given a DeltaTable with a PK column
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
-    )
-
-    # Then the constraint name is {table_name}_pk
-    assert table.primary_key_constraint_name == "orders_pk"
-
-
-def test_delta_table_primary_key_constraint_name_returns_none_when_no_pk():
-    # Given a DeltaTable with no PK
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer())],
-    )
-
-    # Then the constraint name is None
-    assert table.primary_key_constraint_name is None
-
-
 def test_delta_table_passes_pk_to_desired_table():
     # Given a DeltaTable where "id" is PK
     table = DeltaTable(
@@ -284,8 +258,8 @@ def test_delta_table_passes_pk_to_desired_table():
     # When converting to domain
     desired = table.to_desired_table()
 
-    # Then primary_key is set on the domain DesiredTable as a value object
-    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",))
+    # Then primary_key is set as a value object carrying its engine-generated name
+    assert desired.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk")
 
 
 def test_delta_table_pk_column_order_matches_declaration_order():
@@ -322,8 +296,8 @@ def test_delta_table_accepts_foreign_keys_parameter():
         foreign_keys=[fk],
     )
 
-    # Then the FK is accessible
-    assert table.foreign_keys == (fk,)
+    # Then the FK is accessible, carrying its engine-generated constraint name
+    assert table.foreign_keys == (fk.with_generated_name("orders"),)
 
 
 def test_delta_table_defaults_to_no_foreign_keys():

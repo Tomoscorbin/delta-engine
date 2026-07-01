@@ -55,7 +55,11 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 ## Sentinel actions
 
-`ColumnTypeChange` and `PartitioningChange` are actions that are never executed. They exist solely to make unsupported drift visible in the plan so the validation layer can reject it with a clear message. The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first.
+`ColumnTypeChange` and `PartitioningChange` are actions that are never executed. The differ emits them to describe drift it detected — a column whose type differs, or a changed partition spec — without judging whether that drift is allowed; deciding what is permitted is the validation layer's job (`UnsupportedColumnTypeChange` and `DisallowPartitioningChange` reject them with a clear message). The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first.
+
+## Constraint-name generation
+
+A key constraint's name is a property of the desired table: a pure function of the table name and its columns (`{table}_pk` for primary keys, `{table}_{columns}_fk` for foreign keys). It is generated once, when the `DesiredTable` is built (`DesiredTable.__post_init__` calls each constraint's `with_generated_name`), and then flows downstream as data — the differ and SQL compiler read the name off the constraint rather than deriving it. Constraint names are not user-definable today: `with_generated_name` rejects a name that is already set, so a user-supplied name fails loudly at construction rather than being silently ignored. Observed constraints carry the catalog's own name, read back by the adapter.
 
 ## Validation
 

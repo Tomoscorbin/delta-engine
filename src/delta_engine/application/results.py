@@ -127,12 +127,14 @@ class ForeignKeyFailure(Failure):
     """A foreign key constraint that could not be applied, failing its whole table."""
 
     table: QualifiedName
-    constraint_name: str
+    local_columns: tuple[str, ...]
+    references: str
     reason: ForeignKeyFailureReason
 
     def format_lines(self) -> tuple[str, ...]:
+        columns = ", ".join(self.local_columns)
         return (
-            f"Foreign key '{self.constraint_name}' on {self.table} was not applied: "
+            f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
             f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
         )
 
@@ -375,7 +377,7 @@ def _(action: SetProperty) -> str:
 
 @_action_diff_line.register
 def _(action: SetPrimaryKey) -> str:
-    columns = ", ".join(column.name for column in action.columns)
+    columns = ", ".join(action.columns)
     return f"+ primary key ({columns})"
 
 
@@ -386,7 +388,8 @@ def _(action: DropPrimaryKey) -> str:
 
 @_action_diff_line.register
 def _(action: SetForeignKey) -> str:
-    return f"+ foreign key {action.constraint_name}"
+    columns = ", ".join(action.foreign_key.local_columns)
+    return f"+ foreign key ({columns}) → {action.foreign_key.references}"
 
 
 @_action_diff_line.register

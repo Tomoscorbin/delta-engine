@@ -22,7 +22,7 @@ orders = DeltaTable(
 )
 ```
 
-The engine derives the constraint name as `{table_name}_pk` — `orders_pk` in the example above. You can read it back from `orders.primary_key_constraint_name`.
+The engine derives the constraint name as `{table_name}_pk` — `orders_pk` in the example above. This name is determined by the SQL adapter when DDL is emitted; it is not exposed on the table object.
 
 ## Composite primary keys
 
@@ -58,4 +58,4 @@ Column order within the key is ignored when detecting drift — `(a, b)` and `(b
 
 Databricks primary key constraints are informational, not enforced. They do not prevent duplicate or null values at write time, but they enable query optimizations in Unity Catalog.
 
-Because Databricks rejects a primary key on a nullable column at execution time, the engine validates this before running any SQL. If any primary key column is nullable, `sync` raises `SyncFailedError` with a `PrimaryKeyColumnsNullable` failure. See [reference-safe-change-rules.md](reference-safe-change-rules.md) for all validation rules.
+A primary key column must be `NOT NULL` — a nullable primary key is not a well-formed table definition, and Databricks rejects it at execution time regardless. The engine enforces this when you construct the `DeltaTable`: declaring a primary key on a nullable column raises `ValueError` at definition time, before any sync runs.

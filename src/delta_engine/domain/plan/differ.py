@@ -10,9 +10,12 @@ properties, table comment) are private helpers — they exist only to keep
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
+from dataclasses import dataclass
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -32,6 +35,48 @@ from delta_engine.domain.plan.actions import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class Matched[T]:
+    """
+    The outcome of matching desired items against observed items by identity.
+
+    Partitions purely by key membership: ``added`` (desired-only), ``dropped``
+    (observed-only), and ``common`` (present on both sides, paired as
+    ``(desired, observed)``). It says nothing about whether a common pair is
+    equal — deciding what a match *means* is the caller's concern, not the
+    matcher's. ``added`` preserves desired declaration order; ``dropped``
+    preserves observed order.
+    """
+
+    added: tuple[T, ...]
+    dropped: tuple[T, ...]
+    common: tuple[tuple[T, T], ...]
+
+
+def match_by_key[T](
+    desired: Iterable[T],
+    observed: Iterable[T],
+    *,
+    key: Callable[[T], Hashable],
+) -> Matched[T]:
+    """Match ``desired`` against ``observed`` by ``key`` into added/dropped/common."""
+    desired_by_key = {key(item): item for item in desired}
+    observed_by_key = {key(item): item for item in observed}
+
+    added = tuple(
+        item for identity, item in desired_by_key.items() if identity not in observed_by_key
+    )
+    dropped = tuple(
+        item for identity, item in observed_by_key.items() if identity not in desired_by_key
+    )
+    common = tuple(
+        (desired_item, observed_by_key[identity])
+        for identity, desired_item in desired_by_key.items()
+        if identity in observed_by_key
+    )
+    return Matched(added=added, dropped=dropped, common=common)
+
+
 def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
     Compute the actions required to reach the desired schema.
@@ -45,61 +90,63 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
     """
     if observed is None:
-        foreign_key_actions = tuple(
-            SetForeignKey(
-                foreign_key=fk,
-                constraint_name=fk.resolve_constraint_name(desired.qualified_name.name),
-            )
-            for fk in desired.foreign_keys
-        )
-        actions: tuple[Action, ...] = (CreateTable(desired), *foreign_key_actions)
+        body: tuple[Action, ...] = (CreateTable(desired),)
+        observed_foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     else:
-        actions = (
+        body = (
             _diff_columns(desired.columns, observed.columns)
             + _diff_properties(desired.properties, observed.properties)
             + _diff_table_comment(desired.comment, observed.comment)
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
-            + _diff_primary_key(desired, observed)
-            + _diff_foreign_keys(desired, observed)
+            + _diff_primary_key(desired.primary_key, observed.primary_key)
         )
-    return ActionPlan(actions)
+        observed_foreign_keys = observed.foreign_keys
+
+    # Foreign keys are reconciled the same way whether the table is new or
+    # existing: a missing table simply has no observed FKs (the empty tuple
+    # above), so every desired FK is set. Reconciling them here, once, means
+    # there is one FK path — not a hand-rolled "create" variant kept in step
+    # with the diff variant.
+    return ActionPlan(body + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys))
 
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
     """Return the column-level actions to transform `observed` into `desired`."""
-    observed_by_name = {column.name: column for column in observed}
-    desired_names = {column.name for column in desired}
+    matched = match_by_key(desired, observed, key=lambda column: column.name)
 
-    added = tuple(column for column in desired if column.name not in observed_by_name)
-    dropped = tuple(column for column in observed if column.name not in desired_names)
-    common = tuple(
-        (desired_column, observed_by_name[desired_column.name])
-        for desired_column in desired
-        if desired_column.name in observed_by_name
+    add_actions = tuple(AddColumn(column=column) for column in matched.added)
+    drop_actions = tuple(DropColumn(column.name) for column in matched.dropped)
+    change_actions = tuple(
+        action
+        for desired_column, observed_column in matched.common
+        for action in _reconcile_column(desired_column, observed_column)
     )
+    return add_actions + drop_actions + change_actions
 
-    add_actions = tuple(AddColumn(column=column) for column in added)
-    drop_actions = tuple(DropColumn(column.name) for column in dropped)
-    comment_actions = tuple(
-        SetColumnComment(desired_column.name, desired_column.comment)
-        for desired_column, observed_column in common
-        if desired_column.comment != observed_column.comment
-    )
-    nullability_actions = tuple(
-        SetColumnNullability(column_name=desired_column.name, nullable=desired_column.nullable)
-        for desired_column, observed_column in common
-        if desired_column.nullable != observed_column.nullable
-    )
-    type_change_actions = tuple(
-        ColumnTypeChange(
-            column_name=desired_column.name,
-            from_type=observed_column.data_type,
-            to_type=desired_column.data_type,
+
+def _reconcile_column(desired: Column, observed: Column) -> tuple[Action, ...]:
+    """
+    Return the actions to align one existing column with its desired form.
+
+    A column present on both sides can differ in comment, nullability, and/or
+    data type; each difference is an independent action, and an unchanged column
+    yields none. Reconciling all three attributes of a matched pair in one place
+    keeps the per-attribute checks from drifting apart and visits each pair once.
+    """
+    actions: list[Action] = []
+    if desired.comment != observed.comment:
+        actions.append(SetColumnComment(desired.name, desired.comment))
+    if desired.nullable != observed.nullable:
+        actions.append(SetColumnNullability(column_name=desired.name, nullable=desired.nullable))
+    if desired.data_type != observed.data_type:
+        actions.append(
+            ColumnTypeChange(
+                column_name=desired.name,
+                from_type=observed.data_type,
+                to_type=desired.data_type,
+            )
         )
-        for desired_column, observed_column in common
-        if desired_column.data_type != observed_column.data_type
-    )
-    return add_actions + drop_actions + comment_actions + nullability_actions + type_change_actions
+    return tuple(actions)
 
 
 def _diff_properties(
@@ -109,8 +156,12 @@ def _diff_properties(
     Return the `SetProperty` actions needed to align observed with desired.
 
     Properties are a declared subset, not a complete desired state: the engine
-    only manages keys the user declared. Observed-only keys (e.g. properties
-    Databricks sets autonomously) are left untouched — they are never unset.
+    only manages keys the user declared. A key absent from ``observed`` or
+    carrying a different value is set; observed-only keys (e.g. properties
+    Databricks sets autonomously) are never unset. ``dict.get`` covers both the
+    new-key and changed-value cases in one comparison — properties are a
+    mapping, so this direct idiom is clearer than routing them through the
+    keyed-collection matcher.
     """
     return tuple(
         SetProperty(name=name, value=value)
@@ -135,72 +186,68 @@ def _diff_table_comment(desired: str, observed: str) -> tuple[SetTableComment, .
     return (SetTableComment(comment=desired),)
 
 
-def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+def _diff_primary_key(
+    desired_pk: PrimaryKeyConstraint | None,
+    observed_pk: PrimaryKeyConstraint | None,
+) -> tuple[Action, ...]:
     """
     Return the primary key actions to align observed with desired.
 
-    Uses set comparison so column order does not trigger spurious changes.
-    Declaration order from desired is preserved in SetPrimaryKey.columns.
+    Compares the key columns as a set so column order does not trigger a
+    spurious change; declaration order from desired is preserved in the emitted
+    SetPrimaryKey.columns. The constraint name is read off the desired
+    constraint, which was generated when the DesiredTable was built.
     """
-    desired_primary_key = set(desired.primary_key.columns) if desired.primary_key else set()
-    observed_primary_key = set(observed.primary_key.columns) if observed.primary_key else set()
+    desired_columns_in_key = set(desired_pk.columns) if desired_pk else set()
+    observed_columns_in_key = set(observed_pk.columns) if observed_pk else set()
 
-    if desired_primary_key == observed_primary_key:
+    if desired_columns_in_key == observed_columns_in_key:
         return ()
 
     actions: list[Action] = []
-
-    if observed_primary_key:
+    if observed_columns_in_key:
         actions.append(DropPrimaryKey())
-
-    if desired_primary_key:
-        primary_key_columns = tuple(
-            column for column in desired.columns if column.name in desired_primary_key
-        )
-        constraint_name = desired.primary_key_constraint_name
-        assert constraint_name is not None  # guaranteed: desired_primary_key is non-empty
+    if desired_pk is not None:
+        assert desired_pk.constraint_name is not None  # generated when DesiredTable was built
         actions.append(
-            SetPrimaryKey(
-                columns=primary_key_columns,
-                constraint_name=constraint_name,
-            )
+            SetPrimaryKey(columns=desired_pk.columns, constraint_name=desired_pk.constraint_name)
         )
-
     return tuple(actions)
 
 
-def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> tuple[Action, ...]:
+def _diff_foreign_keys(
+    desired: tuple[ForeignKeyConstraint, ...],
+    observed: tuple[ForeignKeyConstraint, ...],
+) -> tuple[Action, ...]:
     """
     Return the FK actions to align observed with desired.
 
+    A missing table has no observed foreign keys (``observed`` is an empty
+    tuple), so every desired FK is set and none is dropped — the create case
+    needs no separate path.
+
     Foreign keys are matched by their content signature (local columns,
-    referenced table, and referenced columns), not by constraint name: a
-    desired FK whose signature is not observed is set; an observed FK whose
-    signature is not desired is dropped; a FK on both sides — even under a
-    different constraint name, e.g. one created outside this engine — produces
-    no action, so a sync over an unchanged catalog stays idempotent.
+    referenced table, referenced columns), not by name. The signature *is* the
+    FK's identity, so a matched pair is content-identical and needs no action —
+    an FK has no "changed" state, only added or dropped, which is why the
+    matcher's ``common`` bucket is unused here. A desired FK whose signature is
+    not observed is set; an observed FK whose signature is not desired is
+    dropped; a FK on both sides — even under a different constraint name, e.g.
+    one created outside this engine — produces no action, so a sync over an
+    unchanged catalog stays idempotent.
 
-    Setting a desired FK uses its resolved name; dropping an observed FK uses
-    its catalog-stored name, so the correct constraint is removed. The order
-    actions are returned in does not matter — ActionPlan sorts every plan by
-    execution phase.
+    Setting a desired FK carries the FK content, including the name generated
+    when the DesiredTable was built. Dropping an observed FK uses its
+    catalog-stored name, so the correct constraint is removed. Order does not
+    matter — ActionPlan sorts every plan by execution phase.
     """
-    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
-
-    set_actions = tuple(
-        SetForeignKey(
-            foreign_key=foreign_key,
-            constraint_name=foreign_key.resolve_constraint_name(desired.qualified_name.name),
-        )
-        for signature, foreign_key in desired_by_signature.items()
-        if signature not in observed_by_signature
-    )
+    matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
+    set_actions = tuple(SetForeignKey(foreign_key=foreign_key) for foreign_key in matched.added)
     drop_actions = tuple(
-        DropForeignKey(
-            constraint_name=foreign_key.resolve_constraint_name(observed.qualified_name.name)
-        )
-        for signature, foreign_key in observed_by_signature.items()
-        if signature not in desired_by_signature
+        DropForeignKey(constraint_name=foreign_key.constraint_name)
+        for foreign_key in matched.dropped
+        # An observed FK always carries the catalog name set by the reader; this guard
+        # is a type-narrowing safeguard against a reader bug — never false in practice.
+        if foreign_key.constraint_name is not None
     )
     return set_actions + drop_actions
