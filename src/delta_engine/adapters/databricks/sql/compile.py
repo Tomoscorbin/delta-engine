@@ -29,11 +29,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -132,6 +134,22 @@ def _(action: SetTableTag, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: UnsetTableTag, backticked_table_name: str) -> str:
     return f"ALTER TABLE {backticked_table_name} UNSET TAGS ({quote_literal(action.name)})"
+
+
+@_compile_action.register
+def _(action: SetColumnTag, backticked_table_name: str) -> str:
+    column = backtick(action.column_name)
+    pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
+    return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column} SET TAGS ({pair})"
+
+
+@_compile_action.register
+def _(action: UnsetColumnTag, backticked_table_name: str) -> str:
+    column = backtick(action.column_name)
+    return (
+        f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column}"
+        f" UNSET TAGS ({quote_literal(action.name)})"
+    )
 
 
 @_compile_action.register
