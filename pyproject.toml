@@ -99,6 +99,17 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
 # only restate it, so we don't require a docstring on every override.
 "src/delta_engine/domain/plan/actions.py" = ["D102"]
 "src/delta_engine/application/results.py" = ["D102"]
+# Example notebooks in Databricks source format. Databricks injects `spark`,
+# `dbutils`, and `display` at runtime; the first line must be the notebook
+# header (so no module docstring); imports follow cell markers, not the file top.
+"notebooks/**" = [
+  "F821", # Databricks injects `spark`, `dbutils`, and `display` at runtime
+  "F401", # the intro cell imports the public surface up-front; cells below use it
+  "D100", # first line must be `# Databricks notebook source`, so no module docstring
+  "D103", # notebook-local helper functions don't need docstrings
+  "E402", # imports follow cell markers, not the true top of the module
+  "N812", # `import pyspark.sql.types as T` is the canonical PySpark alias
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -121,6 +132,10 @@ source = ["delta_engine"]
 
 [tool.mypy]
 python_version = "3.12"
+# Example notebooks rely on Databricks-injected globals (spark, dbutils, display)
+# and are run on a cluster, not type-checked here. Excluding them keeps the
+# library's own type-checking strict without fighting the runtime environment.
+exclude = ["^notebooks/"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
