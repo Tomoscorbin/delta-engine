@@ -51,3 +51,4 @@
 - [ ] should DesiredTableSource live in ports.py?
 - [ ] review primary_key_constraint_name and foreign key on TableSnapshot 
 - [ ] Decide whether to emit `RELY` on FK/PK constraints. Without `RELY`, Databricks treats informational constraints as documentation only and the optimizer cannot use them for join elimination / query rewrite. If the point of declaring keys is optimization, they are currently inert. Weigh against the risk of `RELY` on unverified data (the optimizer trusts it). Would add a `rely: bool` to `ForeignKeyConstraint`/`PrimaryKeyConstraint` and a ` NOT ENFORCED RELY` / ` NOT ENFORCED` suffix in the compiler.
+- [ ] Add a test for the cycle + invalid-FK-target combination in resolve(): a table that is both on a foreign key cycle AND references a non-primary-key column currently reports REFERENCED_COLUMNS_NOT_A_KEY (the FK->PK check runs before the CYCLE check, by design). No test covers this interaction; document the precedence or add coverage.

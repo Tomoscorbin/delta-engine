@@ -79,8 +79,10 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     catalog, schema, name = fqn.split(".")
     return TablePresent(
         table=ObservedTable(
+            # The reader never sets the column-level primary_key flag on observed
+            # columns; the table-level PrimaryKeyConstraint carries the PK.
             qualified_name=QualifiedName(catalog, schema, name),
-            columns=(Column("id", String(), nullable=False, primary_key=True),),
+            columns=(Column("id", String(), nullable=False),),
             primary_key=PrimaryKeyConstraint(columns=("id",)),
             properties={
                 "delta.columnMapping.mode": "name",
@@ -572,6 +574,9 @@ def test_fk_failed_table_executes_no_actions():
 
 def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
     """Build a spec with a NOT NULL FK column — adding it to an existing table trips validation."""
+    # 'id' deliberately has no primary key: this helper's FK references an
+    # unresolvable table, so the FK->PK check never runs, and leaving 'id' a
+    # plain column keeps the diff to the single validation-tripping change.
     catalog, schema, name = fqn.split(".")
     return DeltaTable(
         catalog,
