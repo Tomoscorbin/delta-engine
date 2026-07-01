@@ -156,9 +156,7 @@ class Engine:
                 len(report.table_reports),
             )
         else:
-            logger.info(
-                "Sync completed successfully for %d table(s)", len(report.table_reports)
-            )
+            logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
         return report
 
     def _read(

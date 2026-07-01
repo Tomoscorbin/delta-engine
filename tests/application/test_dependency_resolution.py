@@ -180,9 +180,7 @@ def test_resolve_propagates_block_along_a_chain():
 
     # Then a fails directly and b, c, d are all blocked transitively
     by_name = _candidates_by_name(candidates)
-    assert (
-        by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    )
+    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert (
             by_name[blocked].failures[0].reason
@@ -288,9 +286,7 @@ def test_resolve_propagates_block_through_a_diamond():
 
     # Then a fails directly; b, c, and d are all blocked
     by_name = _candidates_by_name(candidates)
-    assert (
-        by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    )
+    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert all(
             f.reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -367,7 +363,9 @@ def test_resolve_passes_when_fk_targets_the_parents_primary_key():
 def test_resolve_fails_fk_that_targets_a_non_key_column():
     # Given orders.ref_id -> customers.id, but customers has NO primary key
     customers_no_pk = DeltaTable(
-        "cat", "sch", "customers",
+        "cat",
+        "sch",
+        "customers",
         columns=(Column("id", String()),),
     ).to_desired_table()
     tables = (
@@ -393,14 +391,18 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
     # Given customers' PK is (id) but orders references customers(email)
     catalog, schema, name = "cat.sch.customers".split(".")
     customers = DeltaTable(
-        catalog, schema, name,
+        catalog,
+        schema,
+        name,
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("email", String()),
         ),
     ).to_desired_table()
     orders = DeltaTable(
-        "cat", "sch", "orders",
+        "cat",
+        "sch",
+        "orders",
         columns=(Column("id", String()), Column("ref_email", String())),
         foreign_keys=[
             ForeignKeyConstraint(
@@ -426,7 +428,9 @@ def test_resolve_valid_chain_with_primary_keys_executes():
     # Given c.ref_id -> a.id, a.ref_id -> b.id, and both a and b expose id as PK.
     # a must therefore be a table that has BOTH a PK (id) and an FK (ref_id -> b).
     a = DeltaTable(
-        "cat", "sch", "a",
+        "cat",
+        "sch",
+        "a",
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("ref_id", String()),

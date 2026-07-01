@@ -472,7 +472,9 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
         local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
     )
     table_a = DeltaTable(
-        "cat", "sch", "a",
+        "cat",
+        "sch",
+        "a",
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("b_id", String()),
@@ -480,7 +482,9 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
         foreign_keys=[constraint_a_to_b],
     )
     table_b = DeltaTable(
-        "cat", "sch", "b",
+        "cat",
+        "sch",
+        "b",
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("a_id", String()),
@@ -530,13 +534,15 @@ def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
     customers_fk_failures = [
-        f for f in reports["cat.sch.customers"].pre_execution_failures
+        f
+        for f in reports["cat.sch.customers"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert customers_fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f for f in reports["cat.sch.orders"].pre_execution_failures
+        f
+        for f in reports["cat.sch.orders"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -611,12 +617,8 @@ def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
         Engine(reader=reader, executor=executor).sync(registry)
     [tr] = list(err.value.report)
     assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
-    fk_failures = [
-        f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)
-    ]
-    val_failures = [
-        f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)
-    ]
+    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    val_failures = [f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)]
     assert len(fk_failures) == 1
     assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
@@ -646,7 +648,8 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.customers"].status is TableRunStatus.VALIDATION_FAILED
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f for f in reports["cat.sch.orders"].pre_execution_failures
+        f
+        for f in reports["cat.sch.orders"].pre_execution_failures
         if isinstance(f, ForeignKeyFailure)
     ]
     assert len(orders_fk_failures) == 1
@@ -661,9 +664,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     registry = Registry()
     registry.register(_spec("cat.sch.a"))
     registry.register(_spec_with_fk("cat.sch.b", "cat.sch.a"))
-    reader = _FakeReader(
-        {"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))}
-    )
+    reader = _FakeReader({"cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read"))})
 
     executed: list[str] = []
 
@@ -684,8 +685,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.a"].status is TableRunStatus.READ_FAILED
     assert reports["cat.sch.b"].status is TableRunStatus.FOREIGN_KEY_FAILED
     b_fk_failures = [
-        f for f in reports["cat.sch.b"].pre_execution_failures
-        if isinstance(f, ForeignKeyFailure)
+        f for f in reports["cat.sch.b"].pre_execution_failures if isinstance(f, ForeignKeyFailure)
     ]
     assert len(b_fk_failures) == 1
     assert b_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY

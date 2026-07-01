@@ -455,8 +455,7 @@ def _render_grid(reports: tuple[TableRunReport, ...]) -> str:
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
     widths = [max(len(row[col]) for row in rows) for col in range(len(_GRID_HEADERS))]
     return "\n".join(
-        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip()
-        for row in rows
+        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip() for row in rows
     )
 
 

@@ -76,17 +76,13 @@ class TableSnapshot:
             for foreign_key in self.foreign_keys:
                 missing = [col for col in foreign_key.local_columns if col not in seen_names]
                 if missing:
-                    raise ValueError(
-                        f"Foreign key local column not found in columns: {missing[0]}"
-                    )
+                    raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
 
                 # The differ keys FKs by their resolved constraint name, so two
                 # FKs resolving to the same name would silently collapse to one.
                 constraint_name = foreign_key.resolve_constraint_name(self.qualified_name.name)
                 if constraint_name in seen_constraint_names:
-                    raise ValueError(
-                        f"Duplicate foreign key constraint name: {constraint_name}"
-                    )
+                    raise ValueError(f"Duplicate foreign key constraint name: {constraint_name}")
                 seen_constraint_names.add(constraint_name)
 
     @property
