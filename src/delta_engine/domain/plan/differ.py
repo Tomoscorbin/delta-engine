@@ -91,6 +91,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
     """
     if observed is None:
         body: tuple[Action, ...] = (CreateTable(desired),)
+        observed_foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     else:
         body = (
             _diff_columns(desired.columns, observed.columns)
@@ -99,12 +100,13 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
             + _diff_primary_key(desired.primary_key, observed.primary_key)
         )
+        observed_foreign_keys = observed.foreign_keys
 
     # Foreign keys are reconciled the same way whether the table is new or
-    # existing: a missing table simply has no observed FKs, so every desired FK
-    # is set. Keeping this out of the branch above means there is one FK path,
-    # not a hand-rolled "create" variant kept in step with the diff variant.
-    observed_foreign_keys = observed.foreign_keys if observed is not None else ()
+    # existing: a missing table simply has no observed FKs (the empty tuple
+    # above), so every desired FK is set. Reconciling them here, once, means
+    # there is one FK path — not a hand-rolled "create" variant kept in step
+    # with the diff variant.
     return ActionPlan(body + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys))
 
 
