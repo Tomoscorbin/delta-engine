@@ -90,9 +90,11 @@ class CatalogInspector:
     def display_tags(self, table: str) -> None:
         """Display the live Unity Catalog tags as a table: tag, value."""
         rows = [Row(tag=k, value=v) for k, v in self.tags_of(table).items()]
-        display(spark.createDataFrame(rows) if rows else spark.createDataFrame([], "tag string, value string"))
+        empty = spark.createDataFrame([], "tag string, value string")
+        display(spark.createDataFrame(rows) if rows else empty)
 
     def display_properties(self, table: str) -> None:
         """Display the live Delta table properties as a table: property, value."""
         rows = [Row(property=k, value=v) for k, v in self.properties_of(table).items()]
-        display(spark.createDataFrame(rows) if rows else spark.createDataFrame([], "property string, value string"))
+        empty = spark.createDataFrame([], "property string, value string")
+        display(spark.createDataFrame(rows) if rows else empty)
