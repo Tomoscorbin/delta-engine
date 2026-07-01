@@ -443,7 +443,7 @@ def test_unset_column_tag_renders_alter_column_unset_tags():
     statement = _compile_single(UnsetColumnTag(column_name="email", name="pii"))
 
     # Then it renders ALTER COLUMN ... UNSET TAGS with the quoted key only
-    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` UNSET TAGS ('pii')")
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` UNSET TAGS ('pii')"
 
 
 def test_set_column_tag_escapes_single_quotes_in_key_and_value():

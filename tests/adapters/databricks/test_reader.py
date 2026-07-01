@@ -101,10 +101,9 @@ class FakeSparkWithPrimaryKey:
     'referential_constraints'; the column_tags query references 'column_tags';
     the table_tags query references 'table_tags'; the PK query is the other
     'information_schema' query; everything else is treated as DESCRIBE DETAIL.
-    The 'column_tags' and 'table_tags' checks precede the generic
-    'information_schema' check because those queries also contain that string.
-    The 'column_tags' check must also precede the 'table_tags' check order is
-    unimportant between them, but both must come before 'information_schema'.
+    The 'column_tags' and 'table_tags' checks must both precede the generic
+    'information_schema' check because those queries also contain that string;
+    the order between 'column_tags' and 'table_tags' themselves is unimportant.
     """
 
     def __init__(
