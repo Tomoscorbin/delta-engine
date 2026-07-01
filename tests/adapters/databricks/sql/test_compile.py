@@ -23,6 +23,8 @@ from delta_engine.domain.plan.actions import (
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
@@ -392,3 +394,30 @@ def test_set_foreign_key_renders_composite_fk():
         " FOREIGN KEY (`tenant_id`, `customer_id`)"
         " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
     )
+
+
+# ---------- tags ----------
+
+
+def test_set_table_tag_renders_alter_set_tags():
+    # When compiling a SetTableTag
+    statement = _compile_single(SetTableTag(name="env", value="prod"))
+
+    # Then it renders ALTER TABLE ... SET TAGS with quoted key and value
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('env'='prod')"
+
+
+def test_unset_table_tag_renders_alter_unset_tags():
+    # When compiling an UnsetTableTag
+    statement = _compile_single(UnsetTableTag(name="env"))
+
+    # Then it renders ALTER TABLE ... UNSET TAGS with the quoted key only
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` UNSET TAGS ('env')"
+
+
+def test_set_table_tag_escapes_single_quotes_in_key_and_value():
+    # Given a tag key and value each containing a single quote (escaping edge case)
+    statement = _compile_single(SetTableTag(name="o'k", value="v'x"))
+
+    # Then both quotes are doubled all the way through compile
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('o''k'='v''x')"
