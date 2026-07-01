@@ -36,6 +36,7 @@ class DeltaTable:
         columns: Iterable[Column],
         comment: str = "",
         properties: dict[str, str] | None = None,
+        tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
         foreign_keys: Iterable[ForeignKeyConstraint] | None = None,
     ) -> None:
@@ -49,7 +50,7 @@ class DeltaTable:
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
-        effective = {**self.default_properties, **user_properties}
+        effective_properties = {**self.default_properties, **user_properties}
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
@@ -66,7 +67,8 @@ class DeltaTable:
             qualified_name=QualifiedName(catalog, schema, name),
             columns=columns,
             comment=comment,
-            properties=effective,
+            properties=effective_properties,
+            tags=dict(tags or {}),
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
             primary_key=primary_key,
             foreign_keys=foreign_keys,

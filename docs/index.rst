@@ -18,6 +18,7 @@ Declarative schema management for Delta Lake tables on Databricks.
    how-to-declare-primary-keys
    how-to-declare-foreign-keys
    how-to-configure-properties
+   how-to-configure-tags
 
 .. toctree::
    :hidden:

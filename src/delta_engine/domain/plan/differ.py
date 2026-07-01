@@ -32,6 +32,8 @@ from delta_engine.domain.plan.actions import (
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 
@@ -92,6 +94,7 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
     if observed is None:
         body: tuple[Action, ...] = (CreateTable(desired),)
         observed_foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
+        observed_tags: Mapping[str, str] = {}
     else:
         body = (
             _diff_columns(desired.columns, observed.columns)
@@ -101,13 +104,18 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
             + _diff_primary_key(desired.primary_key, observed.primary_key)
         )
         observed_foreign_keys = observed.foreign_keys
+        observed_tags = observed.tags
 
-    # Foreign keys are reconciled the same way whether the table is new or
-    # existing: a missing table simply has no observed FKs (the empty tuple
-    # above), so every desired FK is set. Reconciling them here, once, means
-    # there is one FK path — not a hand-rolled "create" variant kept in step
-    # with the diff variant.
-    return ActionPlan(body + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys))
+    # Tags, like foreign keys, are reconciled once for both the new-table and
+    # existing-table cases: a missing table has no observed tags (the empty
+    # mapping above), so every desired tag is set and none is unset. Tags cannot
+    # be declared inline in CREATE TABLE, so they are always applied as
+    # follow-up SET TAGS actions.
+    return ActionPlan(
+        body
+        + _diff_table_tags(desired.tags, observed_tags)
+        + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys)
+    )
 
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
@@ -168,6 +176,31 @@ def _diff_properties(
         for name, value in desired.items()
         if observed.get(name) != value
     )
+
+
+def _diff_table_tags(
+    desired: Mapping[str, str], observed: Mapping[str, str]
+) -> tuple[Action, ...]:
+    """
+    Return the tag actions to align observed tags with desired.
+
+    Tags are full-state: the engine owns the complete tag set. A desired key
+    that is absent from observed or carries a different value is set; an
+    observed key not present in desired is unset. This is the deliberate
+    difference from `_diff_properties` (declared-subset, no unset) and mirrors
+    how `_diff_foreign_keys` drops observed-only entries. ActionPlan orders the
+    emitted actions by phase and subject, so the return order is not
+    load-bearing.
+    """
+    set_actions: tuple[Action, ...] = tuple(
+        SetTableTag(name=name, value=value)
+        for name, value in desired.items()
+        if observed.get(name) != value
+    )
+    unset_actions: tuple[Action, ...] = tuple(
+        UnsetTableTag(name=name) for name in observed if name not in desired
+    )
+    return set_actions + unset_actions
 
 
 def _diff_partitioning(

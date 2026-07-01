@@ -15,6 +15,8 @@ from delta_engine.domain.plan.actions import (
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     "SetPrimaryKey",
     "SetProperty",
     "SetTableComment",
+    "SetTableTag",
+    "UnsetTableTag",
 ]

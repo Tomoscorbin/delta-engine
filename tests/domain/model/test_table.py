@@ -274,3 +274,61 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
 
     # Then it is accepted
     assert len(observed.foreign_keys) == 2
+
+
+# ---------- tags ----------
+
+
+def test_table_snapshot_defaults_to_no_tags():
+    # Given a minimal table definition with no tags declared
+    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
+
+    # Then tags defaults to an empty mapping
+    assert dict(table.tags) == {}
+
+
+def test_table_snapshot_stores_tags():
+    # Given a table declared with two tags
+    table = DesiredTable(
+        qualified_name=_QN,
+        columns=(_COL,),
+        tags={"env": "prod", "domain": "sales"},
+    )
+
+    # Then the tags are stored verbatim
+    assert dict(table.tags) == {"env": "prod", "domain": "sales"}
+
+
+def test_table_snapshot_preserves_tag_key_case():
+    # Given a tag key with mixed case (UC tag keys are case-sensitive)
+    table = DesiredTable(
+        qualified_name=_QN,
+        columns=(_COL,),
+        tags={"CostCentre": "data-eng"},
+    )
+
+    # Then the key case is preserved, not casefolded
+    assert "CostCentre" in dict(table.tags)
+
+
+def test_table_snapshot_rejects_blank_tag_key():
+    # Given a tag whose key is blank (would emit a malformed SET TAGS ('') clause)
+    # When / Then construction fails, naming the offending key as blank
+    with pytest.raises(ValueError, match="blank"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(_COL,),
+            tags={"  ": "x"},
+        )
+
+
+def test_observed_table_stores_tags():
+    # Given an ObservedTable read from a catalog carrying a tag
+    table = ObservedTable(
+        qualified_name=_QN,
+        columns=(_COL,),
+        tags={"env": "prod"},
+    )
+
+    # Then the tag is readable on the observed snapshot
+    assert dict(table.tags) == {"env": "prod"}
