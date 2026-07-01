@@ -124,13 +124,14 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
 
 
 def test_message_renders_fk_failure_detail():
-    # Given a table with an FK failure
+    # Given a table with an FK failure described by its content
     report = _table_report(
         read=TableAbsent(),
         pre_execution_failures=(
             ForeignKeyFailure(
                 table=_QN,
-                constraint_name="tbl_ref_id_fk",
+                local_columns=("ref_id",),
+                references="cat.sch.other",
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
         ),
@@ -139,7 +140,7 @@ def test_message_renders_fk_failure_detail():
     # When building the error message
     message = _message_for(report)
 
-    # Then the FK failure line is present
+    # Then the FK failure line is present with content-based description
     assert "❌ cat.sch.tbl [FOREIGN_KEY_FAILED]" in message
-    assert "tbl_ref_id_fk" in message
+    assert "(ref_id)" in message
     assert "not registered" in message

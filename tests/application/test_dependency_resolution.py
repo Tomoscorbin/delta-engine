@@ -108,7 +108,8 @@ def test_resolve_fails_table_with_unresolvable_reference():
     assert not candidate.can_execute
     assert len(candidate.failures) == 1
     assert candidate.failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    assert candidate.failures[0].constraint_name == "orders_ref_id_fk"
+    assert candidate.failures[0].local_columns == ("ref_id",)
+    assert candidate.failures[0].references == "cat.sch.customers"
 
 
 def test_resolve_fails_both_members_of_a_cycle():

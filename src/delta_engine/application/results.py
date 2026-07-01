@@ -127,12 +127,14 @@ class ForeignKeyFailure(Failure):
     """A foreign key constraint that could not be applied, failing its whole table."""
 
     table: QualifiedName
-    constraint_name: str
+    local_columns: tuple[str, ...]
+    references: str
     reason: ForeignKeyFailureReason
 
     def format_lines(self) -> tuple[str, ...]:
+        columns = ", ".join(self.local_columns)
         return (
-            f"Foreign key '{self.constraint_name}' on {self.table} was not applied: "
+            f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
             f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
         )
 
