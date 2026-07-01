@@ -21,6 +21,7 @@ class TableSnapshot:
         columns: Ordered tuple of ``Column`` definitions.
         comment: Optional table-level comment (empty string when unset).
         properties: Read-only mapping of table properties.
+        tags: Read-only mapping of Unity Catalog tag keys to values.
         partitioned_by: Ordered tuple of partition column names.
         primary_key: Primary key constraint, or ``None`` when no primary key is defined.
 
@@ -30,6 +31,7 @@ class TableSnapshot:
     columns: tuple[Column, ...]
     comment: str = ""
     properties: Mapping[str, str] = field(default_factory=dict)
+    tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
@@ -76,6 +78,10 @@ class TableSnapshot:
                 missing = [col for col in foreign_key.local_columns if col not in seen_names]
                 if missing:
                     raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
+
+        for tag_key in self.tags:
+            if not tag_key.strip():
+                raise ValueError(f"Tag key must not be blank: {tag_key!r}")
 
 
 @dataclass(frozen=True, slots=True)
