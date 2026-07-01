@@ -82,6 +82,8 @@ class FakeSparkForFetchState:
     def sql(self, query: str):
         if "referential_constraints" in query:
             return FakeDataFrame([])
+        if "table_tags" in query.lower():
+            return FakeDataFrame([])
         if self._describe_exc is not None:
             raise self._describe_exc
         return FakeDataFrame(self._describe_rows or [])
@@ -89,13 +91,16 @@ class FakeSparkForFetchState:
 
 class FakeSparkWithPrimaryKey:
     """
-    Spark fake that handles the three queries `fetch_state` issues against a
-    present table: DESCRIBE DETAIL (properties), the information_schema primary
-    key query, and the information_schema foreign key query.
+    Spark fake that handles the queries `fetch_state` issues against a present
+    table: DESCRIBE DETAIL (properties), the information_schema primary key
+    query, the information_schema foreign key query, and the
+    information_schema.table_tags query.
 
     sql() distinguishes them by query text: the FK query references
-    'referential_constraints'; the PK query is the other 'information_schema'
-    query; everything else is treated as DESCRIBE DETAIL.
+    'referential_constraints'; the tag query references 'table_tags'; the PK
+    query is the other 'information_schema' query; everything else is treated as
+    DESCRIBE DETAIL. The 'table_tags' check precedes the generic
+    'information_schema' check because the tag query also contains that string.
     """
 
     def __init__(
@@ -107,6 +112,8 @@ class FakeSparkWithPrimaryKey:
         pk_exc: Exception | None = None,
         fk_rows=None,
         fk_exc: Exception | None = None,
+        tag_rows=None,
+        tags_exc: Exception | None = None,
     ):
         self._catalog = catalog
         self._describe_rows = describe_rows or [{"properties": {}}]
@@ -114,6 +121,8 @@ class FakeSparkWithPrimaryKey:
         self._pk_exc = pk_exc
         self._fk_rows = fk_rows or []
         self._fk_exc = fk_exc
+        self._tag_rows = tag_rows or []
+        self._tags_exc = tags_exc
 
     @property
     def catalog(self):
@@ -124,6 +133,10 @@ class FakeSparkWithPrimaryKey:
             if self._fk_exc is not None:
                 raise self._fk_exc
             return FakeDataFrame(self._fk_rows)
+        if "table_tags" in query.lower():
+            if self._tags_exc is not None:
+                raise self._tags_exc
+            return FakeDataFrame(self._tag_rows)
         if "information_schema" in query.lower():
             if self._pk_exc is not None:
                 raise self._pk_exc
@@ -876,3 +889,82 @@ def test_fetch_state_lowercases_foreign_key_constraint_name():
     # Then the observed constraint name is normalised to lowercase
     [foreign_key] = result.table.foreign_keys
     assert foreign_key.constraint_name == "orders_customer_fk"
+
+
+# ---------- tests: tags ----------
+
+
+def test_fetch_state_observes_table_tags(qn):
+    # Given a present table whose information_schema.table_tags carries two tags
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    tag_rows = [
+        SimpleNamespace(tag_name="env", tag_value="prod"),
+        SimpleNamespace(tag_name="domain", tag_value="sales"),
+    ]
+    spark = FakeSparkWithPrimaryKey(catalog=catalog, tag_rows=tag_rows)
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the observed table carries the tags as a read-only mapping
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.tags) == {"env": "prod", "domain": "sales"}
+    with pytest.raises(TypeError):
+        result.table.tags["x"] = "y"  # type: ignore[index]
+
+
+def test_fetch_state_preserves_tag_key_case(qn):
+    # Given a catalog tag with a mixed-case key (UC tag keys are case-sensitive)
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    spark = FakeSparkWithPrimaryKey(
+        catalog=catalog,
+        tag_rows=[SimpleNamespace(tag_name="CostCentre", tag_value="data-eng")],
+    )
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the tag key is NOT casefolded (contrast column names)
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.tags) == {"CostCentre": "data-eng"}
+
+
+def test_fetch_state_tags_are_empty_when_none_defined(qn):
+    # Given a present table whose table_tags query returns no rows
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    spark = FakeSparkWithPrimaryKey(catalog=catalog, tag_rows=[])
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then no tags are observed
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.tags) == {}
+
+
+def test_fetch_state_tags_are_empty_when_information_schema_unavailable(qn):
+    # Given the table_tags query raises (non-Unity-Catalog Spark, e.g. local tests)
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        table_comments={str(qn): ""},
+    )
+    spark = FakeSparkWithPrimaryKey(
+        catalog=catalog,
+        tags_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
+    )
+
+    # When we fetch state
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    # Then the read still succeeds with no tags (no UC = no tags to observe)
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.tags) == {}

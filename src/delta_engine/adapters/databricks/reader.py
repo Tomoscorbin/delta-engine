@@ -123,6 +123,7 @@ class DatabricksReader:
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
             properties=self._fetch_properties(qualified_name),
+            tags=self._fetch_table_tags(qualified_name),
             partitioned_by=partition_columns,
             primary_key=self._fetch_primary_key(qualified_name),
             foreign_keys=self._fetch_foreign_keys(qualified_name),
@@ -186,6 +187,31 @@ class DatabricksReader:
         if not columns:
             return None
         return PrimaryKeyConstraint(columns=columns)
+
+    def _fetch_table_tags(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
+        """
+        Return the table's Unity Catalog tags as a read-only mapping.
+
+        Reads information_schema.table_tags — tags are a separate UC governance
+        object and are NOT part of the DESCRIBE DETAIL properties map, so they
+        must be queried directly or the differ would re-apply them on every
+        sync. Returns an empty mapping on AnalysisException: information_schema
+        is only available in Unity Catalog, so on plain Spark (e.g. local tests)
+        there are no tags to observe. Tag keys and values are case-sensitive and
+        are returned exactly as stored — never casefolded.
+        """
+        catalog = backtick(qualified_name.catalog)
+        query = (
+            f"SELECT tag_name, tag_value"
+            f" FROM {catalog}.information_schema.table_tags"
+            f" WHERE schema_name = {quote_literal(qualified_name.schema)}"
+            f" AND table_name = {quote_literal(qualified_name.name)}"
+        )
+        try:
+            rows = self.spark.sql(query).collect()
+        except AnalysisException:
+            return MappingProxyType({})
+        return MappingProxyType({row.tag_name: row.tag_value for row in rows})
 
     def _fetch_foreign_keys(
         self, qualified_name: QualifiedName

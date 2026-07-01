@@ -27,6 +27,8 @@ class ActionPhase(IntEnum):
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    SET_TABLE_TAG = auto()
+    UNSET_TABLE_TAG = auto()
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
@@ -113,6 +115,33 @@ class SetProperty(Action):
     value: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PROPERTY
+
+    @property
+    def subject(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True, slots=True)
+class SetTableTag(Action):
+    """Set a Unity Catalog tag on a table (distinct from a table property)."""
+
+    name: str
+    value: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_TABLE_TAG
+
+    @property
+    def subject(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True, slots=True)
+class UnsetTableTag(Action):
+    """Remove a Unity Catalog tag from a table."""
+
+    name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.UNSET_TABLE_TAG
 
     @property
     def subject(self) -> str:

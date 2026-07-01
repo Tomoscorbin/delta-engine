@@ -19,6 +19,8 @@ from delta_engine.domain.plan.actions import (
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 # ----- builders
@@ -232,6 +234,8 @@ def test_plan_full_phase_order_with_all_action_types():
             DropColumn(column_name="d_col"),
             SetColumnComment(column_name="c_col", comment="c"),
             _create_table_action(),
+            SetTableTag(name="env", value="prod"),
+            UnsetTableTag(name="old_tag"),
         )
     )
 
@@ -239,6 +243,8 @@ def test_plan_full_phase_order_with_all_action_types():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        SetTableTag,
+        UnsetTableTag,
         DropForeignKey,
         DropPrimaryKey,
         AddColumn,
@@ -301,3 +307,44 @@ def test_set_foreign_key_subject_is_local_columns_joined():
 
     # Then subject is the local columns joined (used for deterministic ordering within the phase)
     assert action.subject == "customer_id"
+
+
+# ----- SetTableTag / UnsetTableTag
+
+
+def test_set_table_tag_subject_is_tag_name():
+    # Given a SetTableTag action
+    action = SetTableTag(name="env", value="prod")
+
+    # Then its within-phase subject is the tag name (for deterministic ordering)
+    assert action.subject == "env"
+
+
+def test_unset_table_tag_subject_is_tag_name():
+    # Given an UnsetTableTag action
+    action = UnsetTableTag(name="env")
+
+    # Then its within-phase subject is the tag name
+    assert action.subject == "env"
+
+
+def test_plan_orders_set_table_tag_after_set_property_and_before_drop_foreign_key():
+    # Given a plan holding a SetProperty, a SetTableTag, and a DropForeignKey
+    plan = ActionPlan(
+        (
+            DropForeignKey(constraint_name="t_old_fk"),
+            SetTableTag(name="env", value="prod"),
+            SetProperty(name="delta.appendOnly", value="true"),
+        )
+    )
+
+    # Then tags apply after properties and before structural constraint drops
+    assert [type(a) for a in plan] == [SetProperty, SetTableTag, DropForeignKey]
+
+
+def test_plan_orders_set_table_tag_before_unset_table_tag():
+    # Given both a set and an unset tag action in one plan
+    plan = ActionPlan((UnsetTableTag(name="old"), SetTableTag(name="env", value="prod")))
+
+    # Then sets run before unsets (documented phase precedence)
+    assert [type(a) for a in plan] == [SetTableTag, UnsetTableTag]
