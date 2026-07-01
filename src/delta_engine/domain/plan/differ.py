@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
+import operator
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.plan.actions import (
@@ -112,27 +113,18 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
 def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
     """Return the column-level actions to transform `observed` into `desired`."""
-    observed_by_name = {column.name: column for column in observed}
-    desired_names = {column.name for column in desired}
+    diff = diff_by_key(desired, observed, key=lambda column: column.name, equals=operator.eq)
 
-    added = tuple(column for column in desired if column.name not in observed_by_name)
-    dropped = tuple(column for column in observed if column.name not in desired_names)
-    common = tuple(
-        (desired_column, observed_by_name[desired_column.name])
-        for desired_column in desired
-        if desired_column.name in observed_by_name
-    )
-
-    add_actions = tuple(AddColumn(column=column) for column in added)
-    drop_actions = tuple(DropColumn(column.name) for column in dropped)
+    add_actions = tuple(AddColumn(column=column) for column in diff.added)
+    drop_actions = tuple(DropColumn(column.name) for column in diff.dropped)
     comment_actions = tuple(
         SetColumnComment(desired_column.name, desired_column.comment)
-        for desired_column, observed_column in common
+        for desired_column, observed_column in diff.changed
         if desired_column.comment != observed_column.comment
     )
     nullability_actions = tuple(
         SetColumnNullability(column_name=desired_column.name, nullable=desired_column.nullable)
-        for desired_column, observed_column in common
+        for desired_column, observed_column in diff.changed
         if desired_column.nullable != observed_column.nullable
     )
     type_change_actions = tuple(
@@ -141,7 +133,7 @@ def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> 
             from_type=observed_column.data_type,
             to_type=desired_column.data_type,
         )
-        for desired_column, observed_column in common
+        for desired_column, observed_column in diff.changed
         if desired_column.data_type != observed_column.data_type
     )
     return add_actions + drop_actions + comment_actions + nullability_actions + type_change_actions
@@ -154,14 +146,22 @@ def _diff_properties(
     Return the `SetProperty` actions needed to align observed with desired.
 
     Properties are a declared subset, not a complete desired state: the engine
-    only manages keys the user declared. Observed-only keys (e.g. properties
-    Databricks sets autonomously) are left untouched — they are never unset.
+    only manages keys the user declared. `diff_by_key`'s ``dropped`` bucket is
+    deliberately ignored — observed-only keys (e.g. properties Databricks sets
+    autonomously) are never unset. Both new keys (``added``) and keys whose
+    value differs (``changed``) emit a `SetProperty`.
     """
-    return tuple(
-        SetProperty(name=name, value=value)
-        for name, value in desired.items()
-        if observed.get(name) != value
+    diff = diff_by_key(
+        desired.items(),
+        observed.items(),
+        key=lambda item: item[0],
+        equals=lambda desired_item, observed_item: desired_item[1] == observed_item[1],
     )
+    set_from_added = tuple(SetProperty(name=name, value=value) for name, value in diff.added)
+    set_from_changed = tuple(
+        SetProperty(name=desired_item[0], value=desired_item[1]) for desired_item, _ in diff.changed
+    )
+    return set_from_added + set_from_changed
 
 
 def _diff_partitioning(
