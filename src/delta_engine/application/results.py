@@ -29,11 +29,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -385,6 +387,16 @@ def _(action: SetTableTag) -> str:
 @_action_diff_line.register
 def _(action: UnsetTableTag) -> str:
     return f"- tag {action.name}"
+
+
+@_action_diff_line.register
+def _(action: SetColumnTag) -> str:
+    return f"~ column tag {action.column_name}.{action.name} = '{action.value}'"
+
+
+@_action_diff_line.register
+def _(action: UnsetColumnTag) -> str:
+    return f"- column tag {action.column_name}.{action.name}"
 
 
 @_action_diff_line.register
