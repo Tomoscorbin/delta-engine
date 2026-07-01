@@ -33,6 +33,8 @@ from delta_engine.domain.plan.actions import (
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 # ---------- Status enums ----------
@@ -373,6 +375,16 @@ def _(action: SetTableComment) -> str:
 @_action_diff_line.register
 def _(action: SetProperty) -> str:
     return f"~ property {action.name} = '{action.value}'"
+
+
+@_action_diff_line.register
+def _(action: SetTableTag) -> str:
+    return f"~ tag {action.name} = '{action.value}'"
+
+
+@_action_diff_line.register
+def _(action: UnsetTableTag) -> str:
+    return f"- tag {action.name}"
 
 
 @_action_diff_line.register
