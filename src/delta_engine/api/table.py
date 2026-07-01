@@ -36,6 +36,7 @@ class DeltaTable:
         columns: Iterable[Column],
         comment: str = "",
         properties: dict[str, str] | None = None,
+        tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
         foreign_keys: Iterable[ForeignKeyConstraint] | None = None,
     ) -> None:
@@ -50,6 +51,10 @@ class DeltaTable:
                 )
 
         effective = {**self.default_properties, **user_properties}
+
+        # Tags are free-form Unity Catalog governance objects: unlike properties,
+        # there is no managed-key allowlist and no engine defaults.
+        effective_tags = dict(tags or {})
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
@@ -67,6 +72,7 @@ class DeltaTable:
             columns=columns,
             comment=comment,
             properties=effective,
+            tags=effective_tags,
             partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
             primary_key=primary_key,
             foreign_keys=foreign_keys,
@@ -76,6 +82,11 @@ class DeltaTable:
     def effective_properties(self) -> Mapping[str, str]:
         """Defaults overlaid by user properties (user wins)."""
         return self._desired_table.properties
+
+    @property
+    def effective_tags(self) -> Mapping[str, str]:
+        """Unity Catalog tags declared on this table (empty when none)."""
+        return self._desired_table.tags
 
     @property
     def primary_key(self) -> tuple[str, ...]:

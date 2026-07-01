@@ -330,3 +330,64 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
             columns=[Column("id", Integer())],
             foreign_keys=[fk],
         )
+
+
+# ---------- tags ----------
+
+
+def test_delta_table_passes_tags_through_to_desired_table():
+    # Given a table declared with tags
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags={"env": "prod", "domain": "sales"},
+    )
+
+    # When converting to the domain table
+    desired = table.to_desired_table()
+
+    # Then the tags carry through unchanged
+    assert dict(desired.tags) == {"env": "prod", "domain": "sales"}
+
+
+def test_delta_table_defaults_to_no_tags():
+    # Given a table with no tags argument
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then effective_tags is an empty mapping, never None
+    assert dict(table.effective_tags) == {}
+
+
+def test_delta_table_does_not_restrict_tag_keys():
+    # Given arbitrary tag keys (tags are free-form, unlike the Property allowlist)
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags={"any.custom-key": "v"},
+    )
+
+    # Then construction succeeds and the key is preserved (no ValueError)
+    assert dict(table.effective_tags) == {"any.custom-key": "v"}
+
+
+def test_delta_table_preserves_tag_key_case():
+    # Given a mixed-case tag key (UC tag keys are case-sensitive)
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags={"CostCentre": "data-eng"},
+    )
+
+    # Then the key case is preserved
+    assert "CostCentre" in dict(table.effective_tags)
