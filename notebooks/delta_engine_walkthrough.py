@@ -692,3 +692,115 @@ except SyncFailedError as error:
 # Verify nothing was applied — still partitioned by event_date.
 assert partitions_of("events") == ("event_date",)
 print("Block 4 verified: partitioning change blocked, partitions unchanged.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 5 — A foreign key that cannot be resolved
+# MAGIC
+# MAGIC `line_items` references `products`, which is not in the registry. The engine
+# MAGIC resolves foreign keys before executing, so the table is never created.
+
+# COMMAND ----------
+
+line_items = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="line_items",
+    columns=[
+        Column("line_item_id", Long(), nullable=False, primary_key=True),
+        Column("product_id", Long(), nullable=False),
+    ],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("product_id",),
+            references=f"{CATALOG}.{SCHEMA}.products",  # never registered
+            referenced_columns=("product_id",),
+        )
+    ],
+)
+
+try:
+    registry = Registry()
+    registry.register(line_items)
+    engine.sync(registry)
+    raise AssertionError("expected SyncFailedError")
+except SyncFailedError as error:
+    [table_report] = error.report.table_reports
+    print(table_report.status.value)
+    for failure in table_report.all_failures:
+        print("\n".join(failure.format_lines()))
+    assert table_report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert table_report.all_failures
+
+# Verify nothing was applied — the table was never created.
+assert spark.catalog.tableExists(fqname("line_items")) is False
+print("Act 5 verified: unresolved foreign key blocked, no table created.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Act 6 — Preview with a dry run, then commit
+# MAGIC
+# MAGIC A dry run plans and validates but executes nothing — the standard way to
+# MAGIC preview a change before committing it. We add a nullable `phone` column,
+# MAGIC preview it, confirm the catalog is unchanged, then sync for real.
+
+# COMMAND ----------
+
+customers = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+        Column("region_id", Long()),
+        Column("phone", String()),  # new
+    ],
+    comment="Customer master table (with contact details)",
+    tags={"domain": "sales"},
+    properties={Property.CHANGE_DATA_FEED: "true"},
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("region_id",),
+            references=f"{CATALOG}.{SCHEMA}.regions",
+            referenced_columns=("region_id",),
+        )
+    ],
+)
+
+registry = Registry()
+registry.register(customers, orders, regions)
+
+preview = engine.sync(registry, dry_run=True)
+print(preview)
+print(preview.diff())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verify** the dry run executed nothing and `phone` is not yet in the table.
+
+# COMMAND ----------
+
+assert all(table_report.execution is None for table_report in preview)
+assert "phone" not in fields_of("customers")
+print("Dry run verified: plan shown, nothing executed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Now commit the same registry for real.
+
+# COMMAND ----------
+
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+assert report.any_failures is False
+assert "phone" in fields_of("customers")
+print("Act 6 verified: previewed change committed.")
