@@ -261,6 +261,8 @@ def _diff_foreign_keys(
     drop_actions = tuple(
         DropForeignKey(constraint_name=foreign_key.constraint_name)
         for foreign_key in diff.dropped
+        # An observed FK always carries the catalog name set by the reader; this guard
+        # is a type-narrowing safeguard against a reader bug — never false in practice.
         if foreign_key.constraint_name is not None
     )
     return set_actions + drop_actions

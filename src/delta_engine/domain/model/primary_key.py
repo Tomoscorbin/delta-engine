@@ -11,14 +11,13 @@ class PrimaryKeyConstraint:
     A primary key constraint declaration.
 
     Symmetric with :class:`ForeignKeyConstraint`: a table-level key constraint
-    over an ordered set of columns, with a constraint name that is derived from
-    the owning table name when not set explicitly.
+    over an ordered set of columns.
 
     Attributes:
         columns: Ordered tuple of column names that make up the primary key.
         constraint_name: Optional constraint name. Populated from the catalog for an
-            observed constraint; ``None`` for a desired declaration (the SQL adapter
-            derives the name).
+            observed constraint; ``None`` for a desired declaration. The SQL adapter
+            derives the emitted name when executing against the catalog.
 
     """
 

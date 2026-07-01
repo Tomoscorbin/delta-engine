@@ -104,13 +104,11 @@ def test_read_failure_formats_itself_as_a_display_line():
 
 def test_validation_failure_formats_itself_as_a_display_line():
     # Given a validation failure
-    failure = ValidationFailure(
-        rule_name="DisallowPartitioningChange", message="cannot repartition"
-    )
+    failure = ValidationFailure(rule_name="UnsupportedChangeRejected", message="cannot repartition")
 
     # Then it renders its own one-line description
     assert failure.format_lines() == (
-        "Validation failed: DisallowPartitioningChange - cannot repartition",
+        "Validation failed: UnsupportedChangeRejected - cannot repartition",
     )
 
 
