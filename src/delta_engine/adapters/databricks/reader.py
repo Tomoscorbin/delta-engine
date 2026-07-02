@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from types import MappingProxyType
 
@@ -116,7 +116,11 @@ class DatabricksReader:
             for c in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(m for m in all_mappings if m is not None)
-        columns = tuple(m.column for m in mappings)
+        column_tags = self._fetch_column_tags(qualified_name)
+        columns = tuple(
+            replace(m.column, tags=column_tags.get(m.column.name, MappingProxyType({})))
+            for m in mappings
+        )
         partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(
             qualified_name=qualified_name,
@@ -212,6 +216,39 @@ class DatabricksReader:
         except AnalysisException:
             return MappingProxyType({})
         return MappingProxyType({row.tag_name: row.tag_value for row in rows})
+
+    def _fetch_column_tags(
+        self, qualified_name: QualifiedName
+    ) -> MappingProxyType[str, MappingProxyType[str, str]]:
+        """
+        Return the table's column tags as ``{column_name: {tag: value}}``.
+
+        Reads information_schema.column_tags in a single query for the whole
+        table (avoiding a per-column round-trip). Column names are casefolded to
+        match the domain's lowercase columns; tag keys and values are
+        case-sensitive and returned verbatim — never casefolded. Returns an empty
+        mapping on AnalysisException: information_schema is only available in
+        Unity Catalog, so on plain Spark (e.g. local tests) there are no column
+        tags to observe. Without this guard an unobservable tag would be re-set
+        on every sync and the differ would never converge.
+        """
+        catalog = backtick(qualified_name.catalog)
+        query = (
+            f"SELECT column_name, tag_name, tag_value"
+            f" FROM {catalog}.information_schema.column_tags"
+            f" WHERE schema_name = {quote_literal(qualified_name.schema)}"
+            f" AND table_name = {quote_literal(qualified_name.name)}"
+        )
+        try:
+            rows = self.spark.sql(query).collect()
+        except AnalysisException:
+            return MappingProxyType({})
+        grouped: dict[str, dict[str, str]] = {}
+        for row in rows:
+            grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
+        return MappingProxyType(
+            {column: MappingProxyType(tags) for column, tags in grouped.items()}
+        )
 
     def _fetch_foreign_keys(
         self, qualified_name: QualifiedName

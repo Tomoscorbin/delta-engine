@@ -19,11 +19,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -421,3 +423,34 @@ def test_set_table_tag_escapes_single_quotes_in_key_and_value():
 
     # Then both quotes are doubled all the way through compile
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('o''k'='v''x')"
+
+
+# ---------- column tags ----------
+
+
+def test_set_column_tag_renders_alter_column_set_tags():
+    # When compiling a SetColumnTag
+    statement = _compile_single(SetColumnTag(column_name="email", name="pii", value="true"))
+
+    # Then it renders ALTER COLUMN ... SET TAGS with backticked column and quoted pair
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('pii'='true')"
+    )
+
+
+def test_unset_column_tag_renders_alter_column_unset_tags():
+    # When compiling an UnsetColumnTag
+    statement = _compile_single(UnsetColumnTag(column_name="email", name="pii"))
+
+    # Then it renders ALTER COLUMN ... UNSET TAGS with the quoted key only
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` UNSET TAGS ('pii')"
+
+
+def test_set_column_tag_escapes_single_quotes_in_key_and_value():
+    # Given a column-tag key and value each containing a single quote (escaping edge case)
+    statement = _compile_single(SetColumnTag(column_name="email", name="o'k", value="v'x"))
+
+    # Then both quotes are doubled all the way through compile
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')"
+    )

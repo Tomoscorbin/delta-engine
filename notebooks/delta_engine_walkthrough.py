@@ -342,7 +342,71 @@ inspector.display_tags("customers")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Act 3d — Foreign-key drift on an existing table (own sync)
+# MAGIC ### Act 3d — Column tags — set then unset (full-state)
+# MAGIC
+# MAGIC Add a column tag to `email` (`pii=true`), sync, and assert it landed. Then
+# MAGIC re-declare without the tag and resync — column-tag reconciliation is
+# MAGIC **full-state**, so the absent declaration removes the tag. This is the
+# MAGIC column-level analogue of Act 3c.
+
+# COMMAND ----------
+
+customers = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String(), tags={"pii": "true"}),
+        Column("status", String()),
+    ],
+    comment="Customer master table (with contact details)",
+    tags={"domain": "sales"},
+    properties={Property.CHANGE_DATA_FEED: "true"},
+)
+
+registry = Registry()
+registry.register(customers, orders)
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+assert report.any_failures is False
+assert inspector.column_tags_of("customers")[("email", "pii")] == "true"
+print("Column tag set: customers.email pii=true")
+
+# COMMAND ----------
+
+customers = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),  # tag removed from declaration
+        Column("status", String()),
+    ],
+    comment="Customer master table (with contact details)",
+    tags={"domain": "sales"},
+    properties={Property.CHANGE_DATA_FEED: "true"},
+)
+
+registry = Registry()
+registry.register(customers, orders)
+report = engine.sync(registry)
+print(report)
+print(report.diff())
+
+assert report.any_failures is False
+assert ("email", "pii") not in inspector.column_tags_of("customers")
+print("Column tag unset by full-state reconciliation: customers.email pii removed")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Act 3e — Foreign-key drift on an existing table (own sync)
 # MAGIC
 # MAGIC Create a `regions` dimension, then add a `region_id` column and a foreign
 # MAGIC key to `customers` — which already exists. This is drift management on a
@@ -411,13 +475,11 @@ assert report.any_failures is False
 customer_fields = inspector.fields_of("customers")
 assert "region_id" in customer_fields and customer_fields["region_id"].nullable is True
 assert inspector.has_foreign_key("customers")
-print("Act 3d verified: foreign key added to an existing table.")
-inspector.display_schema("customers")
-
+print("Act 3e verified: foreign key added to an existing table.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Act 3e — Properties are declared-subset (own sync)
+# MAGIC ### Act 3f — Properties are declared-subset (own sync)
 # MAGIC
 # MAGIC Set a property **out-of-band**, then resync `customers` without declaring
 # MAGIC it. The engine manages only declared property keys, so the out-of-band
@@ -430,7 +492,7 @@ spark.sql(
     f" SET TBLPROPERTIES ('delta.logRetentionDuration' = 'interval 7 days')"
 )
 
-# Re-declare customers exactly as in Act 3d (logRetentionDuration is NOT declared).
+# Re-declare customers exactly as in Act 3e (logRetentionDuration is NOT declared).
 customers = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -469,9 +531,7 @@ print(report.diff())
 
 assert report.any_failures is False
 assert inspector.properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
-print("Act 3e verified: undeclared property left untouched (declared-subset).")
-inspector.display_properties("customers")
-
+print("Act 3f verified: undeclared property left untouched (declared-subset).")
 # COMMAND ----------
 
 # MAGIC %md
@@ -484,6 +544,7 @@ inspector.display_properties("customers")
 # MAGIC otherwise take precedence and mask it).
 
 # COMMAND ----------
+
 
 def define_events(*, columns, partitioned_by=("event_date",)):
     """Build the events table from a column list (baseline plus one variation)."""

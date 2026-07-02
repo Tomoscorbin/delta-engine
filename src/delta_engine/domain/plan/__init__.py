@@ -11,11 +11,13 @@ from delta_engine.domain.plan.actions import (
     PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
+    SetColumnTag,
     SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
     SetTableTag,
+    UnsetColumnTag,
     UnsetTableTag,
 )
 
@@ -32,10 +34,12 @@ __all__ = [
     "PartitioningChange",
     "SetColumnComment",
     "SetColumnNullability",
+    "SetColumnTag",
     "SetForeignKey",
     "SetPrimaryKey",
     "SetProperty",
     "SetTableComment",
     "SetTableTag",
+    "UnsetColumnTag",
     "UnsetTableTag",
 ]
