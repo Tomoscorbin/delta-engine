@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
-from delta_engine.application.results import ValidationFailure, ValidationResult
+from delta_engine.application.failures import ValidationFailure
 from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
@@ -12,6 +13,18 @@ from delta_engine.domain.plan import (
     PartitioningChange,
     SetColumnNullability,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationResult:
+    """Outcome of plan validation."""
+
+    failures: tuple[ValidationFailure, ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        """True when any validation failures are present."""
+        return bool(self.failures)
 
 
 class Rule(Protocol):

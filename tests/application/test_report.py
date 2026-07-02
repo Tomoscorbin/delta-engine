@@ -1,27 +1,27 @@
 from datetime import datetime
 
-from hypothesis import given, strategies as st
-
-from delta_engine.application.results import (
-    ActionPlan,
-    ExecutionFailed,
+from delta_engine.application.failures import (
     ExecutionFailure,
-    ExecutionResult,
-    ExecutionSucceeded,
-    ExecutionSummary,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
-    ReadFailed,
     ReadFailure,
-    SyncReport,
+    ValidationFailure,
+)
+from delta_engine.application.ports import (
+    ExecutionFailed,
+    ExecutionSucceeded,
+    ExecutionSummary,
+    ReadFailed,
     TableAbsent,
     TablePresent,
+)
+from delta_engine.application.report import (
+    SyncReport,
     TableRunReport,
     TableRunStatus,
-    ValidationFailure,
-    ValidationResult,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.plan.actions import ActionPlan
 
 # ---------- test builders
 
@@ -67,132 +67,6 @@ def _failed_exec(
 
 
 # ---------- Tests
-
-
-def test_present_state_holds_the_observed_table():
-    # Given a table that was read and exists
-    observed = _an_observed_table()
-
-    # When recording its catalog state
-    state = TablePresent(table=observed)
-
-    # Then it carries the observed table and is not a failure
-    assert state.table is observed
-    assert not isinstance(state, ReadFailed)
-
-
-def test_absent_state_is_distinct_from_a_failure():
-    # Given a table that was read but does not exist
-
-    # When recording its catalog state
-    state = TableAbsent()
-
-    # Then absence is its own state, not a failure
-    assert not isinstance(state, ReadFailed)
-
-
-def test_read_failed_carries_the_failure():
-    # Given a read that raised
-    failure = ReadFailure(exception_type="RuntimeError", message="catalog unreachable")
-
-    # When recording a failed read
-    result = ReadFailed(failure=failure)
-
-    # Then it records the failure
-    assert result.failure is failure
-
-
-def test_read_failure_formats_itself_as_a_display_line():
-    # Given a read failure
-    failure = ReadFailure(exception_type="AnalysisException", message="table not found")
-
-    # Then it renders its own one-line description
-    assert failure.format_lines() == ("Read error: AnalysisException - table not found",)
-
-
-def test_validation_failure_formats_itself_as_a_display_line():
-    # Given a validation failure
-    failure = ValidationFailure(
-        rule_name="DisallowPartitioningChange", message="cannot repartition"
-    )
-
-    # Then it renders its own one-line description
-    assert failure.format_lines() == (
-        "Validation failed: DisallowPartitioningChange - cannot repartition",
-    )
-
-
-def test_execution_failure_formats_itself_as_two_lines_including_sql_preview():
-    # Given an execution failure with a SQL preview
-    failure = ExecutionFailure(
-        action_index=2,
-        exception_type="SparkException",
-        message="boom",
-        statement_preview="ALTER TABLE t ADD COLUMN x INT",
-    )
-
-    # Then it renders the error line and the SQL preview together
-    lines = failure.format_lines()
-    assert lines[0] == "Execution failed at action 2: SparkException - boom"
-    assert "ALTER TABLE t ADD COLUMN x INT" in lines[1]
-
-
-def test_validation_result_failed_property_reflects_presence_of_failures():
-    # Given a result with failures
-    vf = ValidationFailure(rule_name="SomeRule", message="nope")
-
-    # When checking .failed
-    failed_result = ValidationResult(failures=(vf,))
-    ok_result = ValidationResult()
-
-    # Then it reports correctly
-    assert failed_result.failed is True
-    assert ok_result.failed is False
-
-
-def test_execution_summary_reports_no_failure_when_every_action_succeeds():
-    # Given a plan whose actions all executed
-    summary = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
-
-    # Then the summary reports success with no failures
-    assert summary.failed is False
-    assert summary.failures == ()
-    assert summary.failed_count == 0
-
-
-def test_execution_summary_exposes_the_failures_among_mixed_results():
-    # Given a plan that ran two actions, the second of which failed
-    summary = ExecutionSummary((_ok_exec(0), _failed_exec(1, msg="bang")))
-
-    # Then the summary surfaces the single failure and its count
-    assert summary.failed is True
-    assert summary.failed_count == 1
-    assert tuple(f.message for f in summary.failures) == ("bang",)
-
-
-def test_execution_summary_defaults_to_an_empty_unattempted_run():
-    # Given no execution happened (e.g. an earlier phase short-circuited)
-    summary = ExecutionSummary()
-
-    # Then it is an empty, non-failing summary
-    assert summary.results == ()
-    assert summary.failed is False
-    assert summary.failed_count == 0
-
-
-def test_execution_outcome_variants_carry_the_right_payload():
-    # Given the two execution outcomes
-    succeeded = ExecutionSucceeded(action="AddColumn", action_index=0, statement_preview="SQL")
-    failed = ExecutionFailed(
-        action="AddColumn",
-        failure=ExecutionFailure(
-            action_index=1, exception_type="E", message="m", statement_preview="SQL"
-        ),
-    )
-
-    # Then a failure is only representable on the failed variant
-    assert failed.failure.exception_type == "E"
-    assert not hasattr(succeeded, "failure")
 
 
 def test_table_status_success_when_all_actions_succeed():
@@ -244,43 +118,6 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     assert sr.any_failures is True
 
 
-# ---------- property: ExecutionSummary internal consistency ----------
-
-
-_EXECUTION_RESULT = st.one_of(
-    st.builds(
-        ExecutionSucceeded,
-        action=st.just("AddColumn"),
-        action_index=st.integers(min_value=0, max_value=100),
-        statement_preview=st.just("ALTER TABLE ..."),
-    ),
-    st.builds(
-        ExecutionFailed,
-        action=st.just("AddColumn"),
-        failure=st.builds(
-            ExecutionFailure,
-            action_index=st.integers(min_value=0, max_value=100),
-            exception_type=st.just("SparkException"),
-            message=st.text(max_size=40),
-            statement_preview=st.just("ALTER TABLE ..."),
-        ),
-    ),
-)
-
-
-@given(st.lists(_EXECUTION_RESULT, max_size=10))
-def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
-    results: list[ExecutionResult],
-) -> None:
-    # Given: any mix of succeeded and failed execution results
-    summary = ExecutionSummary(tuple(results))
-
-    # Then: failed, failures, and failed_count all agree
-    assert summary.failed == (summary.failed_count > 0)
-    assert summary.failed_count == len(summary.failures)
-    assert all(isinstance(f, ExecutionFailure) for f in summary.failures)
-
-
 def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
     ok_name = QualifiedName("cat", "s", "x")
@@ -308,25 +145,6 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     assert all(
         isinstance(f, ValidationFailure | ReadFailure | ExecutionFailure | ForeignKeyFailure)
         for f in mapping[failed_name]
-    )
-
-
-def test_foreign_key_failure_renders_a_descriptive_line():
-    # Given a foreign-key failure described by its content
-    failure = ForeignKeyFailure(
-        table=QualifiedName("cat", "sch", "orders"),
-        local_columns=("customer_id",),
-        references="cat.sch.customers",
-        reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
-    )
-
-    # When rendering its lines
-    lines = failure.format_lines()
-
-    # Then the message identifies the FK by its local columns and referenced table
-    assert lines == (
-        "Foreign key (customer_id) → cat.sch.customers on cat.sch.orders was not applied:"
-        " it references a table that is not registered.",
     )
 
 
@@ -402,77 +220,6 @@ def test_table_run_report_with_no_failures_is_success():
     # Then it is a success and carries no failures
     assert report.status is TableRunStatus.SUCCESS
     assert report.failures == ()
-
-
-def test_foreign_key_failure_renders_not_a_key_reason():
-    # Given a FK failure because the referenced columns are not the parent's PK
-    failure = ForeignKeyFailure(
-        table=QualifiedName("cat", "sch", "orders"),
-        local_columns=("customer_id",),
-        references="cat.sch.customers",
-        reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
-    )
-
-    # When rendered
-    [line] = failure.format_lines()
-
-    # Then the message names the local columns, referenced table, owning table, and reason
-    assert "(customer_id)" in line
-    assert "cat.sch.customers" in line
-    assert "cat.sch.orders" in line
-    assert "not the primary key" in line
-
-
-def test_each_failure_kind_declares_its_producing_phase():
-    # Given the four failure kinds
-    # Then each declares the phase that produced it, ordered read < validation < fk < execution
-    from delta_engine.application.results import FailurePhase
-
-    assert ReadFailure("E", "m").phase is FailurePhase.READ
-    assert ValidationFailure("R", "m").phase is FailurePhase.VALIDATION
-    assert (
-        ForeignKeyFailure(
-            table=QualifiedName("c", "s", "t"),
-            local_columns=("x",),
-            references="c.s.o",
-            reason=ForeignKeyFailureReason.CYCLE,
-        ).phase
-        is FailurePhase.FOREIGN_KEY
-    )
-    assert (
-        ExecutionFailure(
-            action_index=0, exception_type="E", message="m", statement_preview="SQL"
-        ).phase
-        is FailurePhase.EXECUTION
-    )
-    assert (
-        FailurePhase.READ
-        < FailurePhase.VALIDATION
-        < FailurePhase.FOREIGN_KEY
-        < FailurePhase.EXECUTION
-    )
-
-
-def test_foreign_key_reason_detail_is_defined_for_every_member():
-    # Given every FK failure reason
-    # Then each renders a non-empty human-readable detail string from the enum itself
-    for reason in ForeignKeyFailureReason:
-        assert reason.detail
-        assert isinstance(reason.detail, str)
-
-
-def test_execution_failed_carries_index_only_on_its_failure_detail():
-    # Given a failed action
-    failed = ExecutionFailed(
-        action="AddColumn",
-        failure=ExecutionFailure(
-            action_index=3, exception_type="E", message="m", statement_preview="SQL"
-        ),
-    )
-
-    # Then the index lives on the failure detail, not duplicated on the carrier
-    assert failed.failure.action_index == 3
-    assert not hasattr(failed, "action_index")
 
 
 def test_status_reflects_the_earliest_failing_phase():

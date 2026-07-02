@@ -33,15 +33,18 @@ import logging
 
 from delta_engine.application.dependency_resolution import resolve
 from delta_engine.application.errors import SyncFailedError
-from delta_engine.application.ports import CatalogStateReader, PlanExecutor
-from delta_engine.application.registry import Registry
-from delta_engine.application.results import (
+from delta_engine.application.failures import Failure
+from delta_engine.application.ports import (
     CatalogState,
+    CatalogStateReader,
     ExecutionSummary,
-    Failure,
+    PlanExecutor,
     ReadFailed,
-    SyncReport,
     TablePresent,
+)
+from delta_engine.application.registry import Registry
+from delta_engine.application.report import (
+    SyncReport,
     TableRunReport,
 )
 from delta_engine.application.validation import validate_plan

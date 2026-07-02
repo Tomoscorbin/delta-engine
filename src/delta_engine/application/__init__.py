@@ -10,7 +10,8 @@ returns or the `SyncFailedError` it raises (whose failures render via
 
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.failures import Failure
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import Failure, SyncReport, TableRunStatus
+from delta_engine.application.report import SyncReport, TableRunStatus
 
 __all__ = ["Engine", "Failure", "Registry", "SyncFailedError", "SyncReport", "TableRunStatus"]

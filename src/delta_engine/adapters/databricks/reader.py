@@ -18,10 +18,10 @@ from delta_engine.adapters.databricks.sql import (
     exception_type_name,
     quote_literal,
 )
-from delta_engine.application.results import (
+from delta_engine.application.failures import ReadFailure
+from delta_engine.application.ports import (
     CatalogState,
     ReadFailed,
-    ReadFailure,
     TableAbsent,
     TablePresent,
 )
