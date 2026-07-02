@@ -62,3 +62,4 @@
 - [ ] review types hints; things like Mapping, AbstractSet, etc
 - [ ] review Matched and Matched.common, particularly in _diff_columns
 - [ ] Review whether `_TableRun` and `TableRunReport` should stay as two types. `_TableRun` (mutable, private to engine.py) and `TableRunReport` (frozen, public) currently share an identical 6-field list plus a `to_report()` bridge, so adding a field means touching three places. The split buys clean phase code (mutate in place, no `dataclasses.replace`) AND an immutable published report. Collapsing to one type means dropping one of those: single frozen type reintroduces `replace()`; single mutable type makes the public `SyncReport` mutable (and the only mutable type in `results.py`). Decide whether the duplication is worth those guarantees.
+- [ ] Add tags, comment, etc as properties to DeltaTable
