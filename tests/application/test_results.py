@@ -3,6 +3,7 @@ from datetime import datetime
 from hypothesis import given, strategies as st
 
 from delta_engine.application.results import (
+    ActionPlan,
     ExecutionFailed,
     ExecutionFailure,
     ExecutionResult,
@@ -20,7 +21,7 @@ from delta_engine.application.results import (
     ValidationFailure,
     ValidationResult,
 )
-from delta_engine.domain.model import Column, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
 
 # ---------- test builders
 
@@ -31,6 +32,14 @@ def _an_observed_table(partitioned_by=()):
         qualified_name=QualifiedName("cat", "schema", "observed"),
         columns=(Column("id", Integer()),),
         partitioned_by=partitioned_by,
+    )
+
+
+def _a_desired_table(name="observed"):
+    """Build a minimal real DesiredTable for pipeline-record construction."""
+    return DesiredTable(
+        qualified_name=QualifiedName("cat", "schema", name),
+        columns=(Column("id", Integer()),),
     )
 
 
@@ -194,6 +203,7 @@ def test_table_status_success_when_all_actions_succeed():
     # When aggregating
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
         read=read,
         execution=execution,
     )
@@ -208,11 +218,13 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "a"),
+        desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "b"),
+        desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
@@ -275,11 +287,13 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     failed_name = QualifiedName("cat", "s", "y")
     t_ok = TableRunReport(
         qualified_name=ok_name,
+        desired=_a_desired_table("x"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     t_bad = TableRunReport(
         qualified_name=failed_name,
+        desired=_a_desired_table("y"),
         read=TableAbsent(),
         failures=(ValidationFailure("R", "v"),),
         execution=ExecutionSummary(),
@@ -320,6 +334,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     # Given a table that read cleanly but has an FK failure in failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
+        desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
             ForeignKeyFailure(
@@ -341,6 +356,7 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
     # Given a table that read cleanly but has a validation failure and no FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
+        desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
@@ -356,6 +372,7 @@ def test_table_run_report_status_is_validation_failed_when_both_fk_and_validatio
     # Given a table with both a validation failure and an FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
+        desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
@@ -377,6 +394,7 @@ def test_table_run_report_with_no_failures_is_success():
     # Given a clean table with no failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "ok"),
+        desired=_a_desired_table("ok"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
@@ -462,6 +480,7 @@ def test_status_reflects_the_earliest_failing_phase():
     read = TablePresent(table=_an_observed_table())
     exec_only = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "e"),
+        desired=_a_desired_table("e"),
         read=read,
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
@@ -476,6 +495,7 @@ def test_status_reflects_the_earliest_failing_phase():
     # Given a read failure present in the stream, it dominates any later phase
     read_and_exec = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "r"),
+        desired=_a_desired_table("r"),
         read=ReadFailed(ReadFailure("IOError", "boom")),
         failures=(
             ReadFailure("IOError", "boom"),
@@ -486,3 +506,19 @@ def test_status_reflects_the_earliest_failing_phase():
     )
     # Then READ_FAILED wins (earliest phase)
     assert read_and_exec.status is TableRunStatus.READ_FAILED
+
+
+def test_table_run_report_carries_its_desired_definition():
+    # Given a freshly-born run: read set, other phase fields at defaults
+    desired = _a_desired_table("customers")
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "customers"),
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+    )
+
+    # Then it carries the desired definition and is a clean success so far
+    assert report.desired is desired
+    assert report.status is TableRunStatus.SUCCESS
+    assert report.failures == ()
+    assert report.plan == ActionPlan()

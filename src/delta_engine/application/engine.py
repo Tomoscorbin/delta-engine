@@ -148,10 +148,11 @@ class Engine:
         table_reports = tuple(
             TableRunReport(
                 qualified_name=candidate.qualified_name,
+                desired=candidate.table,
                 read=catalog_states[candidate.qualified_name],
                 plan=plans[candidate.qualified_name],
-                execution=executions.get(candidate.qualified_name),
                 failures=tuple(pre_execution[candidate.qualified_name]),
+                execution=executions.get(candidate.qualified_name),
             )
             for candidate in candidates
         )
