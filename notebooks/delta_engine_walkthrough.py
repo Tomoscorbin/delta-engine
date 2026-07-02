@@ -808,6 +808,12 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 # MAGIC
 # MAGIC The sync fails with `FOREIGN_KEY_FAILED`. The engine resolves foreign keys
 # MAGIC before executing, so `line_items` is never created.
+# MAGIC
+# MAGIC You may see a `Validation passed` log before the failure. That is the
+# MAGIC plan-safety validation phase; foreign-key resolution runs later. The printed
+# MAGIC Diff still shows the intended plan, not what actually executed. Read the
+# MAGIC `STATUS` column and summary footer as the source of truth for the sync
+# MAGIC result.
 
 # COMMAND ----------
 
