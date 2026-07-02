@@ -4,7 +4,7 @@
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet declared in the registry)
 - [x] Add support for foreign keys
-- [ ] Add support for tags
+- [x] Add support for tags
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
