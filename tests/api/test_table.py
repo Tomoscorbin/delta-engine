@@ -214,6 +214,19 @@ def test_column_primary_key_defaults_to_false():
     assert col.primary_key is False
 
 
+def test_delta_table_qualified_name_returns_its_fully_qualified_name():
+    # Given a table declared with a catalog, schema, and name
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then qualified_name exposes them as a QualifiedName value object
+    assert table.qualified_name == QualifiedName("cat", "sales", "orders")
+
+
 def test_delta_table_primary_key_returns_pk_column_names():
     # Given a DeltaTable with one PK column
     table = DeltaTable(

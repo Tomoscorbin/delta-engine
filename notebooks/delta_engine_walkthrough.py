@@ -988,10 +988,16 @@ except ValueError as error:
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Declare a table with a foreign key whose `references` is the table itself.
-# MAGIC A `ForeignKey` names its target by the referenced `DeltaTable` object, so a
-# MAGIC table cannot reference itself — the object does not exist yet inside its own
-# MAGIC definition. Self-referential foreign keys are not supported.
+# MAGIC Declare a table with a foreign key that points back at the same
+# MAGIC `catalog.schema.name`. Self-referential foreign keys are not supported: the
+# MAGIC engine rejects any FK whose referenced table equals the table's own
+# MAGIC qualified name.
+# MAGIC
+# MAGIC Note the shape of the demo. A `ForeignKey` names its target by the referenced
+# MAGIC `DeltaTable` object, and a table's own object cannot exist inside its own
+# MAGIC definition — so a literal self-reference is impossible to even write. To trip
+# MAGIC the guard we build a *separate* object that happens to share the same
+# MAGIC qualified name; the rejection fires on that qualified-name equality.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
