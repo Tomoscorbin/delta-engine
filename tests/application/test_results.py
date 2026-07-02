@@ -20,7 +20,6 @@ from delta_engine.application.results import (
     SyncReport,
     TableRunReport,
     TableRunStatus,
-    ValidationResult,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
 
@@ -68,19 +67,6 @@ def _failed_exec(
 
 
 # ---------- Tests
-
-
-def test_validation_result_failed_property_reflects_presence_of_failures():
-    # Given a result with failures
-    vf = ValidationFailure(rule_name="SomeRule", message="nope")
-
-    # When checking .failed
-    failed_result = ValidationResult(failures=(vf,))
-    ok_result = ValidationResult()
-
-    # Then it reports correctly
-    assert failed_result.failed is True
-    assert ok_result.failed is False
 
 
 def test_table_status_success_when_all_actions_succeed():

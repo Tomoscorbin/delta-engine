@@ -1,8 +1,10 @@
+from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
     DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
     UnsupportedColumnTypeChange,
+    ValidationResult,
     validate_plan,
 )
 from delta_engine.domain.model import Column, Integer, Long, String
@@ -227,6 +229,19 @@ def test_validation_passes_when_empty_rule_set_is_supplied():
 
     assert not result.failed
     assert result.failures == ()
+
+
+def test_validation_result_failed_property_reflects_presence_of_failures():
+    # Given a result with failures
+    vf = ValidationFailure(rule_name="SomeRule", message="nope")
+
+    # When checking .failed
+    failed_result = ValidationResult(failures=(vf,))
+    ok_result = ValidationResult()
+
+    # Then it reports correctly
+    assert failed_result.failed is True
+    assert ok_result.failed is False
 
 
 # A nullable primary key column is rejected when the DesiredTable is built (a

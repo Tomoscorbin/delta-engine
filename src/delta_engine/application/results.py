@@ -17,7 +17,6 @@ from enum import StrEnum
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
-    ValidationFailure,
 )
 from delta_engine.application.ports import CatalogState, ExecutionSummary
 from delta_engine.domain.model import QualifiedName
@@ -35,21 +34,6 @@ class TableRunStatus(StrEnum):
     VALIDATION_FAILED = "VALIDATION_FAILED"
     FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
-
-
-# ---------- ValidationResult ----------
-
-
-@dataclass(frozen=True, slots=True)
-class ValidationResult:
-    """Outcome of plan validation."""
-
-    failures: tuple[ValidationFailure, ...] = ()
-
-    @property
-    def failed(self) -> bool:
-        """True when any validation failures are present."""
-        return bool(self.failures)
 
 
 # ---------- Reports ----------
