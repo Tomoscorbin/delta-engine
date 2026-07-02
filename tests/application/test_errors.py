@@ -16,7 +16,8 @@ from delta_engine.application.results import (
     TableRunReport,
     ValidationFailure,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import Column, Integer, QualifiedName
+from delta_engine.domain.model.table import DesiredTable
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
@@ -30,6 +31,7 @@ def _table_report(
 ) -> TableRunReport:
     return TableRunReport(
         qualified_name=_QN,
+        desired=DesiredTable(qualified_name=_QN, columns=(Column("id", Integer()),)),
         read=read,
         failures=failures,
         execution=execution,

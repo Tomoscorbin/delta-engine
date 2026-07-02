@@ -17,6 +17,7 @@ from enum import IntEnum, StrEnum
 from typing import ClassVar
 
 from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
 
 
@@ -253,10 +254,11 @@ class TableRunReport:
     """Per-table report with outcomes and a single phase-ordered failure stream."""
 
     qualified_name: QualifiedName
+    desired: DesiredTable
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
-    execution: ExecutionSummary | None = None
     failures: tuple[Failure, ...] = ()
+    execution: ExecutionSummary | None = None
 
     @property
     def status(self) -> TableRunStatus:
