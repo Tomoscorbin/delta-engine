@@ -811,6 +811,26 @@ def test_real_run_records_the_planned_actions_on_the_report():
     assert tr.status is TableRunStatus.SUCCESS
 
 
+def test_read_failure_is_reported_exactly_once():
+    # Given a table whose read fails
+    reg = Registry()
+    reg.register(_spec("c.s.read_fail"))
+    reader = _FakeReader({"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))})
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(reg)
+
+    # Then the read failure appears exactly once across the table's failures
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.READ_FAILED
+    assert len(tr.all_failures) == 1
+    # And the rendered error message lists it once, not twice
+    message = str(err.value)
+    assert message.count("Read error: IOError - cannot read") == 1
+
+
 def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     # Given orders references customers, customers is registered but has NO PK
     registry = Registry()

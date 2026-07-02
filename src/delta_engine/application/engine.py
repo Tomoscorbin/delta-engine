@@ -107,24 +107,36 @@ class Engine:
         tables = tuple(registry)
         catalog_states = self._read(tables)
         plans = self._plan(tables, catalog_states)
-        validation_failures = self._validate_plans(plans)
 
-        # Merge read failures into external_failures so read-failed tables are
-        # treated as "won't build" during FK propagation, blocking their dependents
-        # with BLOCKED_BY_FAILED_DEPENDENCY just as validation-failed tables do.
-        external_failures: dict[QualifiedName, tuple[Failure, ...]] = dict(validation_failures)
-        for table in tables:
-            qn = table.qualified_name
-            state = catalog_states[qn]
-            if isinstance(state, ReadFailed) and not external_failures.get(qn):
-                external_failures[qn] = (state.failure,)
+        # One accumulator, filled phase by phase. Read failures are NOT put here:
+        # they live on the table's CatalogState (`read`) and are surfaced by the
+        # report. The accumulator holds the pre-execution failures the report's
+        # `pre_execution_failures` field carries (validation, then FK), plus any
+        # execution failures appended after the execute phase.
+        pre_execution: dict[QualifiedName, list[Failure]] = {
+            table.qualified_name: [] for table in tables
+        }
+        for qualified_name, result in self._validate_plans(plans).items():
+            pre_execution[qualified_name].extend(result)
 
-        candidates = resolve(tables, external_failures=external_failures)
+        read_failed = frozenset(
+            table.qualified_name
+            for table in tables
+            if isinstance(catalog_states[table.qualified_name], ReadFailed)
+        )
+        blocked = read_failed | frozenset(
+            qualified_name for qualified_name, failures in pre_execution.items() if failures
+        )
+
+        candidates = resolve(tables, blocked=blocked)
+        for candidate in candidates:
+            pre_execution[candidate.qualified_name].extend(candidate.fk_failures)
 
         plans_to_execute = {
             candidate.qualified_name: plans[candidate.qualified_name]
             for candidate in candidates
-            if candidate.can_execute
+            if candidate.qualified_name not in read_failed
+            and not pre_execution[candidate.qualified_name]
         }
         executions: dict[QualifiedName, ExecutionSummary] = (
             {} if dry_run else self._execute(plans_to_execute)
@@ -135,7 +147,7 @@ class Engine:
                 qualified_name=candidate.qualified_name,
                 read=catalog_states[candidate.qualified_name],
                 plan=plans[candidate.qualified_name],
-                pre_execution_failures=tuple(candidate.failures),
+                pre_execution_failures=tuple(pre_execution[candidate.qualified_name]),
                 execution=executions.get(candidate.qualified_name),
             )
             for candidate in candidates
