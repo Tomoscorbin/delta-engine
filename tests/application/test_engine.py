@@ -471,6 +471,30 @@ def test_sync_processes_tables_in_fk_dependency_order():
     assert synced_order.index("cat.sch.customers") < synced_order.index("cat.sch.orders")
 
 
+def test_engine_executes_tables_in_resolved_order():
+    # Given a dependency chain whose registry order is alpha, middle, zed
+    registry = Registry()
+    registry.register(
+        _spec_with_fk("cat.sch.alpha", "cat.sch.middle"),
+        _spec_with_fk("cat.sch.middle", "cat.sch.zed"),
+        _spec("cat.sch.zed"),
+    )
+    executed: list[str] = []
+
+    class _TrackingExecutor:
+        def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+            executed.append(str(qualified_name))
+            return ExecutionSummary((_ok_exec(0),))
+
+    engine = Engine(_FakeReader({}), _TrackingExecutor())
+
+    # When syncing
+    engine.sync(registry)
+
+    # Then execution receives the full dependency-first order produced by resolve
+    assert executed == ["cat.sch.zed", "cat.sch.middle", "cat.sch.alpha"]
+
+
 def test_sync_fails_all_tables_in_a_detected_cycle():
     # Given A -> B and B -> A (cycle)
     constraint_a_to_b = ForeignKeyConstraint(

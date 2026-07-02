@@ -415,6 +415,53 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
     )
 
 
+def test_resolve_reports_invalid_fk_target_before_cycle_failure():
+    # Given a is in a cycle with b, and a also references a non-primary-key column on b
+    table_a = DeltaTable(
+        "cat",
+        "sch",
+        "a",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("b_email", String()),
+        ),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("b_email",),
+                references="cat.sch.b",
+                referenced_columns=("email",),
+            )
+        ],
+    ).to_desired_table()
+    table_b = DeltaTable(
+        "cat",
+        "sch",
+        "b",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("email", String()),
+            Column("a_id", String()),
+        ),
+        foreign_keys=[
+            ForeignKeyConstraint(
+                local_columns=("a_id",),
+                references="cat.sch.a",
+                referenced_columns=("id",),
+            )
+        ],
+    ).to_desired_table()
+
+    # When resolving the cyclic pair
+    result = resolve((table_a, table_b))
+
+    # Then a reports the structural FK-target problem before the cycle classification
+    assert (
+        _failures_for(result, "cat.sch.a")[0].reason
+        == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
+    )
+    assert _failures_for(result, "cat.sch.b")[0].reason == ForeignKeyFailureReason.CYCLE
+
+
 def test_resolve_valid_chain_with_primary_keys_executes():
     # Given c.ref_id -> a.id, a.ref_id -> b.id, and both a and b expose id as PK.
     # a must therefore be a table that has BOTH a PK (id) and an FK (ref_id -> b).
