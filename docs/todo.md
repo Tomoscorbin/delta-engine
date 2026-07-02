@@ -25,7 +25,7 @@
 - [ ] Test that table order is kept from resolve through to execute on engine
 - [x] Delete redundant Claude documentation
 - [ ] Do we need action_index?
-- [ ] Add quick code example to README
+- [x] Add quick code example to README
 - [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
 - [ ] consider replacing typle comps in validation with regular loops for readability
 - [x] clean up claude documentation
