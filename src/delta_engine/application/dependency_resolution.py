@@ -17,6 +17,7 @@ hidden behind that interface.
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 
 from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
@@ -63,7 +64,7 @@ class SyncCandidate:
 def resolve(
     tables: tuple[DesiredTable, ...],
     *,
-    blocked: frozenset[QualifiedName] = frozenset(),
+    blocked: AbstractSet[QualifiedName] = frozenset(),
 ) -> tuple[SyncCandidate, ...]:
     """
     Resolve foreign key dependencies across all registered tables.
@@ -85,7 +86,7 @@ def resolve(
         each carrying only the FK failures resolution found for it.
 
     """
-    already_failed = frozenset(str(qualified_name) for qualified_name in blocked)
+    already_failed = {str(qualified_name) for qualified_name in blocked}
 
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
@@ -203,7 +204,7 @@ def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[str],
     cycle_members: set[str],
-    already_failed: frozenset[str] = frozenset(),
+    already_failed: set[str],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.

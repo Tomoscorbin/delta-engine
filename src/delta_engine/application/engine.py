@@ -124,9 +124,7 @@ class Engine:
         for qualified_name, result in self._validate_plans(plans).items():
             pre_execution[qualified_name].extend(result)
 
-        blocked = frozenset(
-            qualified_name for qualified_name, failures in pre_execution.items() if failures
-        )
+        blocked = {qualified_name for qualified_name, failures in pre_execution.items() if failures}
 
         candidates = resolve(tables, blocked=blocked)
         for candidate in candidates:
