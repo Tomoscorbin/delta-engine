@@ -373,8 +373,8 @@ def test_table_run_report_status_is_validation_failed_when_both_fk_and_validatio
     assert len(report.failures) == 2
 
 
-def test_table_run_report_with_no_pre_execution_failures_is_success():
-    # Given a clean table with no pre-execution failures
+def test_table_run_report_with_no_failures_is_success():
+    # Given a clean table with no failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "ok"),
         read=TablePresent(table=_an_observed_table()),
