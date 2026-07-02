@@ -44,11 +44,11 @@ from delta_engine import TableRunStatus
 
 for table_report in report:
     if table_report.status == TableRunStatus.VALIDATION_FAILED:
-        for failure in table_report.all_failures:
+        for failure in table_report.failures:
             print("\n".join(failure.format_lines()))
 ```
 
-`table_report.all_failures` returns every `Failure` across all phases. Each `Failure` renders itself via `format_lines()`.
+`table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → validation → foreign key → execution). Each `Failure` renders itself via `format_lines()`.
 
 ## Check which tables failed
 
@@ -70,7 +70,7 @@ Validation failures mean no SQL ran for that table. The failure message names th
 for table_report in report:
     if table_report.status == TableRunStatus.VALIDATION_FAILED:
         # Safe to retry after fixing the declaration
-        for failure in table_report.all_failures:
+        for failure in table_report.failures:
             print(failure.format_lines()[0])
 ```
 
@@ -83,7 +83,7 @@ A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an 
 ```python
 for table_report in report:
     if table_report.status == TableRunStatus.FOREIGN_KEY_FAILED:
-        for failure in table_report.all_failures:
+        for failure in table_report.failures:
             print(failure.format_lines()[0])
 ```
 

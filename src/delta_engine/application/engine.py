@@ -10,8 +10,8 @@ The sync runs five phases across all tables in sequence:
   1. Read     — fetch current catalog state for every table
   2. Plan     — compute action plans from desired vs observed state
   3. Validate — check every plan against rules; collect per-table failures
-  4. Resolve  — order tables by FK dependency; propagate all failures
-                (FK-structural and validation) to dependents
+  4. Resolve  — order tables by FK dependency; produce FK failures and
+                propagate blocking to dependents
   5. Execute  — run plans for candidates with no pre-execution failures
 
 Running `resolve()` after validation means a table that fails validation
@@ -107,36 +107,51 @@ class Engine:
         tables = tuple(registry)
         catalog_states = self._read(tables)
         plans = self._plan(tables, catalog_states)
-        validation_failures = self._validate_plans(plans)
 
-        # Merge read failures into external_failures so read-failed tables are
-        # treated as "won't build" during FK propagation, blocking their dependents
-        # with BLOCKED_BY_FAILED_DEPENDENCY just as validation-failed tables do.
-        external_failures: dict[QualifiedName, tuple[Failure, ...]] = dict(validation_failures)
+        # One accumulator for every failure across all phases. Filled in order:
+        # read failures, validation failures, FK failures from resolve, then
+        # execution failures mirrored in after the execute phase. This makes
+        # `failures` on each TableRunReport the single place to read what went wrong.
+        pre_execution: dict[QualifiedName, list[Failure]] = {
+            table.qualified_name: [] for table in tables
+        }
+
         for table in tables:
-            qn = table.qualified_name
-            state = catalog_states[qn]
-            if isinstance(state, ReadFailed) and not external_failures.get(qn):
-                external_failures[qn] = (state.failure,)
+            state = catalog_states[table.qualified_name]
+            if isinstance(state, ReadFailed):
+                pre_execution[table.qualified_name].append(state.failure)
 
-        candidates = resolve(tables, external_failures=external_failures)
+        for qualified_name, result in self._validate_plans(plans).items():
+            pre_execution[qualified_name].extend(result)
+
+        blocked = {qualified_name for qualified_name, failures in pre_execution.items() if failures}
+
+        candidates = resolve(tables, blocked=blocked)
+        for candidate in candidates:
+            pre_execution[candidate.qualified_name].extend(candidate.fk_failures)
 
         plans_to_execute = {
             candidate.qualified_name: plans[candidate.qualified_name]
             for candidate in candidates
-            if candidate.can_execute
+            if not pre_execution[candidate.qualified_name]
         }
         executions: dict[QualifiedName, ExecutionSummary] = (
             {} if dry_run else self._execute(plans_to_execute)
         )
+
+        # Mirror execution failures into the one stream so `failures` is the
+        # single place to read what went wrong; ExecutionSummary stays for the
+        # per-action diff/preview.
+        for qualified_name, summary in executions.items():
+            pre_execution[qualified_name].extend(summary.failures)
 
         table_reports = tuple(
             TableRunReport(
                 qualified_name=candidate.qualified_name,
                 read=catalog_states[candidate.qualified_name],
                 plan=plans[candidate.qualified_name],
-                pre_execution_failures=tuple(candidate.failures),
                 execution=executions.get(candidate.qualified_name),
+                failures=tuple(pre_execution[candidate.qualified_name]),
             )
             for candidate in candidates
         )

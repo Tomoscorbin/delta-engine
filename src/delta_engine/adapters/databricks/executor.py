@@ -99,7 +99,6 @@ def _run_statement(
         logger.warning("%s failed: %s\nSQL: %s", action_name, error_message, preview)
         return ExecutionFailed(
             action=action_name,
-            action_index=action_index,
             failure=ExecutionFailure(
                 action_index=action_index,
                 exception_type=exception_type_name(exception),

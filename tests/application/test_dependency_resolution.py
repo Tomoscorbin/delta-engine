@@ -9,7 +9,7 @@ transitive propagation to dependents.
 
 from delta_engine.api import Column, DeltaTable, String
 from delta_engine.application.dependency_resolution import SyncCandidate, resolve
-from delta_engine.application.results import ForeignKeyFailureReason, ValidationFailure
+from delta_engine.application.results import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
@@ -106,10 +106,10 @@ def test_resolve_fails_table_with_unresolvable_reference():
     # Then orders cannot execute, with UNRESOLVABLE_REFERENCE
     [candidate] = candidates
     assert not candidate.can_execute
-    assert len(candidate.failures) == 1
-    assert candidate.failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    assert candidate.failures[0].local_columns == ("ref_id",)
-    assert candidate.failures[0].references == "cat.sch.customers"
+    assert len(candidate.fk_failures) == 1
+    assert candidate.fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert candidate.fk_failures[0].local_columns == ("ref_id",)
+    assert candidate.fk_failures[0].references == "cat.sch.customers"
 
 
 def test_resolve_fails_both_members_of_a_cycle():
@@ -126,8 +126,8 @@ def test_resolve_fails_both_members_of_a_cycle():
     by_name = _candidates_by_name(candidates)
     assert not by_name["cat.sch.a"].can_execute
     assert not by_name["cat.sch.b"].can_execute
-    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.CYCLE
-    assert by_name["cat.sch.b"].failures[0].reason == ForeignKeyFailureReason.CYCLE
+    assert by_name["cat.sch.a"].fk_failures[0].reason == ForeignKeyFailureReason.CYCLE
+    assert by_name["cat.sch.b"].fk_failures[0].reason == ForeignKeyFailureReason.CYCLE
 
 
 def test_resolve_includes_failed_tables_in_candidates():
@@ -158,11 +158,11 @@ def test_resolve_blocks_table_that_references_an_unresolvable_table():
     # Then customers fails directly, and orders cannot execute because customers will not build
     by_name = _candidates_by_name(candidates)
     assert (
-        by_name["cat.sch.customers"].failures[0].reason
+        by_name["cat.sch.customers"].fk_failures[0].reason
         == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     )
     assert (
-        by_name["cat.sch.orders"].failures[0].reason
+        by_name["cat.sch.orders"].fk_failures[0].reason
         == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     )
 
@@ -181,10 +181,12 @@ def test_resolve_propagates_block_along_a_chain():
 
     # Then a fails directly and b, c, d are all blocked transitively
     by_name = _candidates_by_name(candidates)
-    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert (
+        by_name["cat.sch.a"].fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    )
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert (
-            by_name[blocked].failures[0].reason
+            by_name[blocked].fk_failures[0].reason
             == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
         )
 
@@ -202,10 +204,10 @@ def test_resolve_blocks_table_that_depends_on_a_cycle():
 
     # Then b and c fail as CYCLE, and a cannot execute because b will not build
     by_name = _candidates_by_name(candidates)
-    assert by_name["cat.sch.b"].failures[0].reason == ForeignKeyFailureReason.CYCLE
-    assert by_name["cat.sch.c"].failures[0].reason == ForeignKeyFailureReason.CYCLE
+    assert by_name["cat.sch.b"].fk_failures[0].reason == ForeignKeyFailureReason.CYCLE
+    assert by_name["cat.sch.c"].fk_failures[0].reason == ForeignKeyFailureReason.CYCLE
     assert (
-        by_name["cat.sch.a"].failures[0].reason
+        by_name["cat.sch.a"].fk_failures[0].reason
         == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     )
 
@@ -287,14 +289,16 @@ def test_resolve_propagates_block_through_a_diamond():
 
     # Then a fails directly; b, c, and d are all blocked
     by_name = _candidates_by_name(candidates)
-    assert by_name["cat.sch.a"].failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    assert (
+        by_name["cat.sch.a"].fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
+    )
     for blocked in ("cat.sch.b", "cat.sch.c", "cat.sch.d"):
         assert all(
             f.reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-            for f in by_name[blocked].failures
+            for f in by_name[blocked].fk_failures
         )
     # d has two blocking FKs, so it records two failures (one per FK)
-    assert len(by_name["cat.sch.d"].failures) == 2
+    assert len(by_name["cat.sch.d"].fk_failures) == 2
 
 
 def test_resolve_with_empty_tables_returns_empty_tuple():
@@ -305,44 +309,35 @@ def test_resolve_with_empty_tables_returns_empty_tuple():
     assert candidates == ()
 
 
-def test_resolve_blocks_table_passed_in_external_failures():
-    # Given one table with no FKs, passed as externally failed
+def test_resolve_blocks_table_passed_in_blocked_set():
+    # Given one table with no FKs, named as already-blocked (e.g. failed validation upstream)
     table = _table("cat.sch.orders")
-    external_failures = {
-        QualifiedName("cat", "sch", "orders"): (
-            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
-        )
-    }
+    blocked = frozenset({QualifiedName("cat", "sch", "orders")})
 
-    # When
-    candidates = resolve((table,), external_failures=external_failures)
+    # When resolving with that table blocked
+    candidates = resolve((table,), blocked=blocked)
 
-    # Then orders cannot execute and carries the validation failure
+    # Then it produces no FK failures of its own (it was blocked for an external reason)
+    # and, having no FKs, it is not further classified by resolve
     [candidate] = candidates
-    assert not candidate.can_execute
-    assert len(candidate.failures) == 1
-    assert isinstance(candidate.failures[0], ValidationFailure)
+    assert candidate.fk_failures == ()
 
 
-def test_resolve_blocks_fk_dependent_of_externally_failed_table():
-    # Given orders (no FKs) is externally failed, and shipments has a FK on orders
+def test_resolve_blocks_fk_dependent_of_a_blocked_table():
+    # Given orders (no FKs) is blocked, and shipments has a FK on orders
     orders = _table("cat.sch.orders")
     shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
-    external_failures = {
-        QualifiedName("cat", "sch", "orders"): (
-            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
-        )
-    }
+    blocked = frozenset({QualifiedName("cat", "sch", "orders")})
 
-    # When
-    candidates = resolve((orders, shipments), external_failures=external_failures)
+    # When resolving
+    candidates = resolve((orders, shipments), blocked=blocked)
 
-    # Then orders carries the validation failure; shipments is blocked by failed dependency
+    # Then shipments is blocked-by-failed-dependency; orders itself has no FK failure
     by_name = _candidates_by_name(candidates)
-    assert not by_name["cat.sch.orders"].can_execute
+    assert by_name["cat.sch.orders"].fk_failures == ()
     assert not by_name["cat.sch.shipments"].can_execute
     assert (
-        by_name["cat.sch.shipments"].failures[0].reason
+        by_name["cat.sch.shipments"].fk_failures[0].reason
         == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     )
 
@@ -381,7 +376,7 @@ def test_resolve_fails_fk_that_targets_a_non_key_column():
     by_name = _candidates_by_name(candidates)
     assert not by_name["cat.sch.orders"].can_execute
     assert (
-        by_name["cat.sch.orders"].failures[0].reason
+        by_name["cat.sch.orders"].fk_failures[0].reason
         == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     )
     # customers has no FK of its own, so it is unaffected and can execute
@@ -420,7 +415,7 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
     # Then orders is rejected: email is not customers' primary key
     by_name = _candidates_by_name(candidates)
     assert (
-        by_name["cat.sch.orders"].failures[0].reason
+        by_name["cat.sch.orders"].fk_failures[0].reason
         == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     )
 

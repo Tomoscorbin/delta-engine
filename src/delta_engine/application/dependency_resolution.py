@@ -5,10 +5,10 @@ The public entry point is `resolve`, which takes the registered tables and
 returns them as a tuple of :class:`SyncCandidate` objects in dependency-first
 order — referenced tables before their dependents.
 
-Each candidate carries the table it represents and any foreign key failures
-that prevent the table from being executed (CYCLE, UNRESOLVABLE_REFERENCE, or
-BLOCKED_BY_FAILED_DEPENDENCY). A candidate whose `failures` list is empty may
-be executed; one with failures must be excluded.
+Each candidate carries the table it represents and only the FK failures that
+`resolve` found for it (CYCLE, UNRESOLVABLE_REFERENCE, REFERENCED_COLUMNS_NOT_A_KEY,
+or BLOCKED_BY_FAILED_DEPENDENCY). A candidate with an empty `fk_failures` tuple
+may be executed; one with failures must be excluded.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm, reverse-reachability propagation) are
@@ -17,9 +17,10 @@ hidden behind that interface.
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 
-from delta_engine.application.results import Failure, ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
@@ -36,18 +37,18 @@ def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
 @dataclass(frozen=True, slots=True)
 class SyncCandidate:
     """
-    A table prepared for the sync loop, together with its pre-execution failure verdict.
+    A table prepared for the sync loop, with the FK failures resolution found for it.
 
     Attributes:
         table: The desired table to sync.
-        failures: All pre-execution failures — external failures (e.g. validation)
-            prepended, FK structural failures appended. Assembled by `resolve()`;
-            the engine does not modify this after construction.
+        fk_failures: Foreign-key failures this table incurred during resolution
+            (CYCLE / UNRESOLVABLE_REFERENCE / REFERENCED_COLUMNS_NOT_A_KEY /
+            BLOCKED_BY_FAILED_DEPENDENCY). Empty when resolution found none.
 
     """
 
     table: DesiredTable
-    failures: tuple[Failure, ...] = ()
+    fk_failures: tuple[ForeignKeyFailure, ...] = ()
 
     @property
     def qualified_name(self) -> QualifiedName:
@@ -56,41 +57,36 @@ class SyncCandidate:
 
     @property
     def can_execute(self) -> bool:
-        """True when the table has no pre-execution failures and may be executed."""
-        return not self.failures
+        """True when resolution found no foreign-key failures for this table."""
+        return not self.fk_failures
 
 
 def resolve(
     tables: tuple[DesiredTable, ...],
-    external_failures: dict[QualifiedName, tuple[Failure, ...]] | None = None,
+    *,
+    blocked: AbstractSet[QualifiedName] = frozenset(),
 ) -> tuple[SyncCandidate, ...]:
     """
     Resolve foreign key dependencies across all registered tables.
 
     Builds a dependency graph, runs Tarjan's strongly-connected-components
     algorithm to find the safe sync order and detect true cycles, then
-    classifies every table as buildable or failed.
+    classifies every table's foreign-key failures.
 
     Args:
         tables: All desired tables from the registry, in registry order.
-        external_failures: Failures already known before FK resolution — typically
-            validation failures computed by the engine. Tables with non-empty
-            external failures are treated as will-not-build when propagating
-            BLOCKED_BY_FAILED_DEPENDENCY to their FK dependents. Their failures
-            are prepended to the candidate's failure list so all pre-execution
-            failures appear together.
+        blocked: Tables already known to be failing before FK resolution
+            (e.g. failed read or validation). Their FK dependents are blocked
+            with BLOCKED_BY_FAILED_DEPENDENCY, but resolve records no failure
+            for the blocked tables themselves — their failures are owned by the
+            phase that produced them.
 
     Returns:
-        A tuple of :class:`SyncCandidate` objects in dependency-first order.
-        Each candidate carries its table and any pre-execution failures (external
-        failures first, then FK failures). A candidate with no failures is ready
-        to sync; one with failures must be excluded from execution.
+        A tuple of :class:`SyncCandidate` objects in dependency-first order,
+        each carrying only the FK failures resolution found for it.
 
     """
-    external = external_failures or {}
-    already_failed = frozenset(
-        str(qualified_name) for qualified_name, failures in external.items() if failures
-    )
+    already_failed = {str(qualified_name) for qualified_name in blocked}
 
     registered_names = {str(table.qualified_name) for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
@@ -103,10 +99,7 @@ def resolve(
     return tuple(
         SyncCandidate(
             table=table,
-            failures=tuple(
-                list(external.get(table.qualified_name, ()))
-                + list(failures_by_table.get(table.qualified_name, ()))
-            ),
+            fk_failures=failures_by_table.get(table.qualified_name, ()),
         )
         for table in ordered
     )
@@ -211,8 +204,8 @@ def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[str],
     cycle_members: set[str],
-    already_failed: frozenset[str] = frozenset(),
-) -> dict[QualifiedName, tuple[Failure, ...]]:
+    already_failed: set[str],
+) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.
 

@@ -56,3 +56,7 @@
 - [ ] make sure docstrings & comments are accurate
 - [ ] investigate TableSnapshot.__post_init__(self) on DesiredTable. Should all validation be in DesiredTable?
 - [ ] Add a note to the step 6 markdown in the walkthrough notebook clarifying the phase distinction: the "Validation passed" log is the plan-safety (validate) phase, while the foreign-key check is a separate, later (resolve) phase — so "Validation passed" then `FOREIGN_KEY_FAILED` is expected, not contradictory. Also note the Diff renders the intended plan, not what executed (the report STATUS/footer are the truth).
+- [ ] Review the user report formatting. Make sure is has everything it needs
+- [ ] look for redundancies; things like frozenset for local variables
+- [ ] review if we need from __future__ import annotations
+- [ ] review types hints; things like Mapping, AbstractSet, etc

@@ -13,31 +13,21 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
-import functools
+from enum import IntEnum, StrEnum
+from typing import ClassVar
 
 from delta_engine.domain.model import ObservedTable, QualifiedName
-from delta_engine.domain.plan.actions import (
-    Action,
-    ActionPlan,
-    AddColumn,
-    ColumnTypeChange,
-    CreateTable,
-    DropColumn,
-    DropForeignKey,
-    DropPrimaryKey,
-    PartitioningChange,
-    SetColumnComment,
-    SetColumnNullability,
-    SetColumnTag,
-    SetForeignKey,
-    SetPrimaryKey,
-    SetProperty,
-    SetTableComment,
-    SetTableTag,
-    UnsetColumnTag,
-    UnsetTableTag,
-)
+from delta_engine.domain.plan.actions import ActionPlan
+
+
+class FailurePhase(IntEnum):
+    """The sync phase that produced a failure. Ordered so the earliest wins."""
+
+    READ = 1
+    VALIDATION = 2
+    FOREIGN_KEY = 3
+    EXECUTION = 4
+
 
 # ---------- Status enums ----------
 
@@ -60,26 +50,27 @@ class ForeignKeyFailureReason(StrEnum):
     BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
     REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
 
-
-_FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
-    ForeignKeyFailureReason.CYCLE: "it is part of a foreign key dependency cycle",
-    ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE: (
-        "it references a table that is not registered"
-    ),
-    ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY: (
-        "it references a table that failed to sync"
-    ),
-    ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY: (
-        "its referenced columns are not the primary key of the referenced table"
-    ),
-}
+    @property
+    def detail(self) -> str:
+        """Human-readable reason clause for a failure message."""
+        match self:
+            case ForeignKeyFailureReason.CYCLE:
+                return "it is part of a foreign key dependency cycle"
+            case ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE:
+                return "it references a table that is not registered"
+            case ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY:
+                return "it references a table that failed to sync"
+            case ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY:
+                return "its referenced columns are not the primary key of the referenced table"
 
 
 # ---------- Failure value objects ----------
 
 
 class Failure(ABC):
-    """A failure that can render itself as display lines."""
+    """A failure that can render itself as display lines, tagged with its phase."""
+
+    phase: ClassVar[FailurePhase]
 
     @abstractmethod
     def format_lines(self) -> tuple[str, ...]:
@@ -91,6 +82,7 @@ class Failure(ABC):
 class ReadFailure(Failure):
     """Failure reading current catalog state for a table."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.READ
     exception_type: str
     message: str
 
@@ -102,6 +94,7 @@ class ReadFailure(Failure):
 class ValidationFailure(Failure):
     """Description of a validation rule failure."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.VALIDATION
     rule_name: str
     message: str
 
@@ -113,6 +106,7 @@ class ValidationFailure(Failure):
 class ExecutionFailure(Failure):
     """Details about a failed action execution."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.EXECUTION
     action_index: int
     exception_type: str
     message: str
@@ -130,6 +124,7 @@ class ExecutionFailure(Failure):
 class ForeignKeyFailure(Failure):
     """A foreign key constraint that could not be applied, failing its whole table."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
     table: QualifiedName
     local_columns: tuple[str, ...]
     references: str
@@ -139,7 +134,7 @@ class ForeignKeyFailure(Failure):
         columns = ", ".join(self.local_columns)
         return (
             f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
-            f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
+            f"{self.reason.detail}.",
         )
 
 
@@ -202,7 +197,6 @@ class ExecutionFailed:
     """A single plan action that raised while executing."""
 
     action: str
-    action_index: int
     failure: ExecutionFailure
 
 
@@ -246,52 +240,47 @@ class ExecutionSummary:
 # ---------- Reports ----------
 
 
+_STATUS_FOR_PHASE: dict[FailurePhase, TableRunStatus] = {
+    FailurePhase.READ: TableRunStatus.READ_FAILED,
+    FailurePhase.VALIDATION: TableRunStatus.VALIDATION_FAILED,
+    FailurePhase.FOREIGN_KEY: TableRunStatus.FOREIGN_KEY_FAILED,
+    FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
-    """Per-table report with outcomes and failures."""
+    """Per-table report with outcomes and a single phase-ordered failure stream."""
 
     qualified_name: QualifiedName
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
-    pre_execution_failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary | None = None
+    failures: tuple[Failure, ...] = ()
 
     @property
     def status(self) -> TableRunStatus:
-        """Aggregate table status across read, pre-execution, and execution phases."""
-        if isinstance(self.read, ReadFailed):
-            return TableRunStatus.READ_FAILED
-        if any(isinstance(f, ForeignKeyFailure) for f in self.pre_execution_failures):
-            return TableRunStatus.FOREIGN_KEY_FAILED
-        if any(isinstance(f, ValidationFailure) for f in self.pre_execution_failures):
-            return TableRunStatus.VALIDATION_FAILED
-        if self.execution is not None and self.execution.failed:
-            return TableRunStatus.EXECUTION_FAILED
-        return TableRunStatus.SUCCESS
+        """Status of the earliest phase that failed; SUCCESS when nothing failed."""
+        if not self.failures:
+            return TableRunStatus.SUCCESS
+        return _STATUS_FOR_PHASE[min(failure.phase for failure in self.failures)]
 
     @property
     def has_failures(self) -> bool:
         """True if the table did not fully succeed."""
-        return self.status is not TableRunStatus.SUCCESS
-
-    @property
-    def all_failures(self) -> tuple[Failure, ...]:
-        """All failures for this table (read, pre-execution, execution)."""
-        out: list[Failure] = []
-        if isinstance(self.read, ReadFailed):
-            out.append(self.read.failure)
-        out.extend(self.pre_execution_failures)
-        if self.execution is not None:
-            out.extend(self.execution.failures)
-        return tuple(out)
+        return bool(self.failures)
 
     def diff(self) -> str:
         """Render this table's planned changes as a +/-/~ change list."""
-        return _render_diff_block(self)
+        from delta_engine.application.rendering import render_diff_block
+
+        return render_diff_block(self)
 
     def __str__(self) -> str:
         """Render this report as the grid header plus its single row."""
-        return _render_grid((self,))
+        from delta_engine.application.rendering import render_grid
+
+        return render_grid((self,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,195 +299,21 @@ class SyncReport:
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
         """Mapping of qualified table name to its failures (if any)."""
-        return {t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures}
+        return {t.qualified_name: t.failures for t in self.table_reports if t.has_failures}
 
     def __iter__(self) -> Iterator[TableRunReport]:
         return iter(self.table_reports)
 
     def diff(self) -> str:
         """Render every table's planned changes, in report order."""
-        return "\n\n".join(_render_diff_block(report) for report in self.table_reports)
+        from delta_engine.application.rendering import render_diff_block
+
+        return "\n\n".join(render_diff_block(report) for report in self.table_reports)
 
     def __str__(self) -> str:
         """Render the run as an aligned grid followed by a summary footer."""
+        from delta_engine.application.rendering import render_grid, run_summary_footer
+
         if not self.table_reports:
             return "Sync report: 0 tables"
-        return f"{_render_grid(self.table_reports)}\n\n{_run_summary_footer(self)}"
-
-
-# ---------- Display
-
-
-def _type_name(data_type: object) -> str:
-    """Backend-agnostic display name for a domain data type (e.g. 'String')."""
-    return type(data_type).__name__
-
-
-@functools.singledispatch
-def _action_diff_line(action: Action) -> str:
-    """Render one plan action as a single +/-/~ diff line."""
-    raise NotImplementedError(f"No diff line for action {type(action).__name__}")
-
-
-@_action_diff_line.register
-def _(action: CreateTable) -> str:
-    columns = ", ".join(column.name for column in action.table.columns)
-    return f"+ create table (columns: {columns})"
-
-
-@_action_diff_line.register
-def _(action: AddColumn) -> str:
-    nullable = "" if action.column.nullable else " NOT NULL"
-    return f"+ column {action.column.name} {_type_name(action.column.data_type)}{nullable}"
-
-
-@_action_diff_line.register
-def _(action: DropColumn) -> str:
-    return f"- column {action.column_name}"
-
-
-@_action_diff_line.register
-def _(action: SetColumnNullability) -> str:
-    direction = "drop" if action.nullable else "set"
-    return f"~ column {action.column_name} {direction} NOT NULL"
-
-
-@_action_diff_line.register
-def _(action: SetColumnComment) -> str:
-    suffix = "" if action.comment else " (unset)"
-    return f"~ comment on column {action.column_name}{suffix}"
-
-
-@_action_diff_line.register
-def _(action: SetTableComment) -> str:
-    return "~ comment on table"
-
-
-@_action_diff_line.register
-def _(action: SetProperty) -> str:
-    return f"~ property {action.name} = '{action.value}'"
-
-
-@_action_diff_line.register
-def _(action: SetTableTag) -> str:
-    return f"~ tag {action.name} = '{action.value}'"
-
-
-@_action_diff_line.register
-def _(action: UnsetTableTag) -> str:
-    return f"- tag {action.name}"
-
-
-@_action_diff_line.register
-def _(action: SetColumnTag) -> str:
-    return f"~ column tag {action.column_name}.{action.name} = '{action.value}'"
-
-
-@_action_diff_line.register
-def _(action: UnsetColumnTag) -> str:
-    return f"- column tag {action.column_name}.{action.name}"
-
-
-@_action_diff_line.register
-def _(action: SetPrimaryKey) -> str:
-    columns = ", ".join(action.columns)
-    return f"+ primary key ({columns})"
-
-
-@_action_diff_line.register
-def _(action: DropPrimaryKey) -> str:
-    return "- primary key"
-
-
-@_action_diff_line.register
-def _(action: SetForeignKey) -> str:
-    columns = ", ".join(action.foreign_key.local_columns)
-    return f"+ foreign key ({columns}) → {action.foreign_key.references}"
-
-
-@_action_diff_line.register
-def _(action: DropForeignKey) -> str:
-    return f"- foreign key {action.constraint_name}"
-
-
-@_action_diff_line.register
-def _(action: ColumnTypeChange) -> str:
-    return (
-        f"~ column {action.column_name} type "
-        f"{_type_name(action.from_type)} → {_type_name(action.to_type)}"
-    )
-
-
-@_action_diff_line.register
-def _(action: PartitioningChange) -> str:
-    return f"~ partitioning {action.observed_partitioning} → {action.desired_partitioning}"
-
-
-def _render_diff_block(report: TableRunReport) -> str:
-    """Render one table's change block: its name then one line per planned action."""
-    header = str(report.qualified_name)
-    if isinstance(report.read, ReadFailed):
-        return f"{header}\n  (could not read — no diff)"
-    if not report.plan:
-        return f"{header}\n  (no changes)"
-    lines = [f"  {_action_diff_line(action)}" for action in report.plan]
-    return "\n".join([header, *lines])
-
-
-_DETAIL_MAX_CHARS = 60
-
-_GRID_HEADERS = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
-
-
-def _grid_detail(report: TableRunReport) -> str:
-    """Return the DETAIL cell: first failure summary, action names, or 'no changes'."""
-    if report.has_failures:
-        failures = report.all_failures
-        first = failures[0].format_lines()[0]
-        extra = len(failures) - 1
-        return f"{first} (+{extra} more)" if extra else first
-    if len(report.plan):
-        return ", ".join(type(action).__name__ for action in report.plan)
-    return "no changes"
-
-
-def _truncate(text: str, limit: int = _DETAIL_MAX_CHARS) -> str:
-    """Truncate with an ellipsis when longer than ``limit``."""
-    return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
-def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
-    """Return the four grid cells for one report (DETAIL already truncated)."""
-    return (
-        str(report.qualified_name),
-        report.status.value,
-        str(len(report.plan)),
-        _truncate(_grid_detail(report)),
-    )
-
-
-def _render_grid(reports: tuple[TableRunReport, ...]) -> str:
-    """Render an aligned TABLE | STATUS | ACTIONS | DETAIL grid for ``reports``."""
-    rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
-    widths = [max(len(row[col]) for row in rows) for col in range(len(_GRID_HEADERS))]
-    return "\n".join(
-        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip() for row in rows
-    )
-
-
-def _run_summary_footer(report: SyncReport) -> str:
-    """One-line summary: table total, changed/unchanged/failed counts, duration."""
-    changed = unchanged = failed = 0
-    for table_report in report.table_reports:
-        if table_report.has_failures:
-            failed += 1
-        elif len(table_report.plan):
-            changed += 1
-        else:
-            unchanged += 1
-    seconds = (report.ended_at - report.started_at).total_seconds()
-    total = len(report.table_reports)
-    return (
-        f"{total} tables: {changed} changed, {unchanged} unchanged, "
-        f"{failed} failed ({seconds:.1f}s)"
-    )
+        return f"{render_grid(self.table_reports)}\n\n{run_summary_footer(self)}"

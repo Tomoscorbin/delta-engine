@@ -118,7 +118,6 @@ def _ok_exec(idx: int = 0) -> ExecutionResult:
 def _failed_exec(idx: int = 0, exc="AnalysisException", msg="boom") -> ExecutionResult:
     return ExecutionFailed(
         action="X",
-        action_index=idx,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview="-- bad sql"
         ),
@@ -423,9 +422,9 @@ def test_sync_report_has_no_fk_failures_when_no_fks_declared():
     # When
     report = engine.sync(registry)
 
-    # Then the single table has no pre-execution failures and succeeds
+    # Then the single table has no failures and succeeds
     [tr] = list(report)
-    assert tr.pre_execution_failures == ()
+    assert tr.failures == ()
     assert tr.status is TableRunStatus.SUCCESS
 
 
@@ -441,7 +440,7 @@ def test_sync_fails_table_whose_fk_references_table_not_in_registry():
         engine.sync(registry)
     [tr] = list(err.value.report)
     assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
-    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    fk_failures = [f for f in tr.failures if isinstance(f, ForeignKeyFailure)]
     assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert tr.execution is None  # all-or-nothing: the table was not built
 
@@ -509,7 +508,7 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
     reasons = {
         failure.reason
         for tr in err.value.report
-        for failure in tr.pre_execution_failures
+        for failure in tr.failures
         if isinstance(failure, ForeignKeyFailure)
     }
     assert reasons == {ForeignKeyFailureReason.CYCLE}
@@ -539,16 +538,12 @@ def test_sync_blocks_table_whose_dependency_has_an_unresolvable_fk():
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     assert reports["cat.sch.customers"].status is TableRunStatus.FOREIGN_KEY_FAILED
     customers_fk_failures = [
-        f
-        for f in reports["cat.sch.customers"].pre_execution_failures
-        if isinstance(f, ForeignKeyFailure)
+        f for f in reports["cat.sch.customers"].failures if isinstance(f, ForeignKeyFailure)
     ]
     assert customers_fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f
-        for f in reports["cat.sch.orders"].pre_execution_failures
-        if isinstance(f, ForeignKeyFailure)
+        f for f in reports["cat.sch.orders"].failures if isinstance(f, ForeignKeyFailure)
     ]
     assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     assert executed == []
@@ -624,9 +619,9 @@ def test_sync_surfaces_both_fk_and_validation_failures_for_a_blocked_table():
     with pytest.raises(SyncFailedError) as err:
         Engine(reader=reader, executor=executor).sync(registry)
     [tr] = list(err.value.report)
-    assert tr.status is TableRunStatus.FOREIGN_KEY_FAILED
-    fk_failures = [f for f in tr.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
-    val_failures = [f for f in tr.pre_execution_failures if isinstance(f, ValidationFailure)]
+    assert tr.status is TableRunStatus.VALIDATION_FAILED
+    fk_failures = [f for f in tr.failures if isinstance(f, ForeignKeyFailure)]
+    val_failures = [f for f in tr.failures if isinstance(f, ValidationFailure)]
     assert len(fk_failures) == 1
     assert fk_failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert len(val_failures) == 1  # NonNullableColumnAdd fires on the NOT NULL ref_id
@@ -656,9 +651,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert reports["cat.sch.customers"].status is TableRunStatus.VALIDATION_FAILED
     assert reports["cat.sch.orders"].status is TableRunStatus.FOREIGN_KEY_FAILED
     orders_fk_failures = [
-        f
-        for f in reports["cat.sch.orders"].pre_execution_failures
-        if isinstance(f, ForeignKeyFailure)
+        f for f in reports["cat.sch.orders"].failures if isinstance(f, ForeignKeyFailure)
     ]
     assert len(orders_fk_failures) == 1
     assert orders_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -692,9 +685,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     assert reports["cat.sch.a"].status is TableRunStatus.READ_FAILED
     assert reports["cat.sch.b"].status is TableRunStatus.FOREIGN_KEY_FAILED
-    b_fk_failures = [
-        f for f in reports["cat.sch.b"].pre_execution_failures if isinstance(f, ForeignKeyFailure)
-    ]
+    b_fk_failures = [f for f in reports["cat.sch.b"].failures if isinstance(f, ForeignKeyFailure)]
     assert len(b_fk_failures) == 1
     assert b_fk_failures[0].reason == ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
     assert executed == []
@@ -812,6 +803,26 @@ def test_real_run_records_the_planned_actions_on_the_report():
     assert tr.status is TableRunStatus.SUCCESS
 
 
+def test_read_failure_is_reported_exactly_once():
+    # Given a table whose read fails
+    reg = Registry()
+    reg.register(_spec("c.s.read_fail"))
+    reader = _FakeReader({"c.s.read_fail": ReadFailed(ReadFailure("IOError", "cannot read"))})
+    executor = _FakeExecutor(results=())
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as err:
+        Engine(reader=reader, executor=executor).sync(reg)
+
+    # Then the read failure appears exactly once across the table's failures
+    [tr] = list(err.value.report)
+    assert tr.status is TableRunStatus.READ_FAILED
+    assert len(tr.failures) == 1
+    # And the rendered error message lists it once, not twice
+    message = str(err.value)
+    assert message.count("Read error: IOError - cannot read") == 1
+
+
 def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     # Given orders references customers, customers is registered but has NO PK
     registry = Registry()
@@ -825,7 +836,7 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     reports = {str(tr.qualified_name): tr for tr in err.value.report}
     orders = reports["cat.sch.orders"]
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
-    fk_failures = [f for f in orders.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
+    fk_failures = [f for f in orders.failures if isinstance(f, ForeignKeyFailure)]
     assert fk_failures[0].reason == ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     assert orders.execution is None
     # customers is a clean create with no FK — it is not itself foreign-key-failed

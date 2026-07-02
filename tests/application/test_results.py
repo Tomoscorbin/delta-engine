@@ -19,15 +19,8 @@ from delta_engine.application.results import (
     TableRunStatus,
     ValidationFailure,
     ValidationResult,
-    _action_diff_line,
 )
 from delta_engine.domain.model import Column, Integer, ObservedTable, QualifiedName
-from delta_engine.domain.plan.actions import (
-    SetColumnTag,
-    SetTableTag,
-    UnsetColumnTag,
-    UnsetTableTag,
-)
 
 # ---------- test builders
 
@@ -58,7 +51,6 @@ def _failed_exec(
 ):
     return ExecutionFailed(
         action=action,
-        action_index=idx,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
@@ -184,7 +176,6 @@ def test_execution_outcome_variants_carry_the_right_payload():
     succeeded = ExecutionSucceeded(action="AddColumn", action_index=0, statement_preview="SQL")
     failed = ExecutionFailed(
         action="AddColumn",
-        action_index=1,
         failure=ExecutionFailure(
             action_index=1, exception_type="E", message="m", statement_preview="SQL"
         ),
@@ -224,6 +215,14 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         qualified_name=QualifiedName("cat", "s", "b"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_failed_exec(0),)),
+        failures=(
+            ExecutionFailure(
+                action_index=0,
+                exception_type="ValueError",
+                message="boom",
+                statement_preview="ALTER TABLE ...",
+            ),
+        ),
     )
 
     # When aggregating the sync
@@ -246,7 +245,6 @@ _EXECUTION_RESULT = st.one_of(
     st.builds(
         ExecutionFailed,
         action=st.just("AddColumn"),
-        action_index=st.integers(min_value=0, max_value=100),
         failure=st.builds(
             ExecutionFailure,
             action_index=st.integers(min_value=0, max_value=100),
@@ -283,7 +281,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     t_bad = TableRunReport(
         qualified_name=failed_name,
         read=TableAbsent(),
-        pre_execution_failures=(ValidationFailure("R", "v"),),
+        failures=(ValidationFailure("R", "v"),),
         execution=ExecutionSummary(),
     )
 
@@ -319,11 +317,11 @@ def test_foreign_key_failure_renders_a_descriptive_line():
 
 
 def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
-    # Given a table that read cleanly but has an FK failure in pre_execution_failures
+    # Given a table that read cleanly but has an FK failure in failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
@@ -336,7 +334,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     # Then its status reflects the FK failure and it counts as a failure
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert report.has_failures is True
-    assert report.all_failures[0].format_lines()[0].startswith("Foreign key")
+    assert report.failures[0].format_lines()[0].startswith("Foreign key")
 
 
 def test_table_run_report_status_is_validation_failed_when_only_validation_failure_present():
@@ -344,7 +342,7 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
         ),
     )
@@ -354,42 +352,38 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
     assert report.has_failures is True
 
 
-def test_table_run_report_status_is_fk_failed_when_both_fk_and_validation_failures_present():
-    # Given a table with both an FK failure and a validation failure
+def test_table_run_report_status_is_validation_failed_when_both_fk_and_validation_present():
+    # Given a table with both a validation failure and an FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
                 references="cat.sch.customers",
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
-            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
         ),
     )
 
-    # Then FOREIGN_KEY_FAILED takes priority, and both failures are surfaced
-    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert len(report.pre_execution_failures) == 2
-    fk_failures = [f for f in report.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
-    val_failures = [f for f in report.pre_execution_failures if isinstance(f, ValidationFailure)]
-    assert len(fk_failures) == 1
-    assert len(val_failures) == 1
+    # Then VALIDATION_FAILED wins: it is the earlier phase and the actionable root cause
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert len(report.failures) == 2
 
 
-def test_table_run_report_with_no_pre_execution_failures_is_success():
-    # Given a clean table with no pre-execution failures
+def test_table_run_report_with_no_failures_is_success():
+    # Given a clean table with no failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "ok"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
 
-    # Then it is a success and carries no pre-execution failures
+    # Then it is a success and carries no failures
     assert report.status is TableRunStatus.SUCCESS
-    assert report.pre_execution_failures == ()
+    assert report.failures == ()
 
 
 def test_foreign_key_failure_renders_not_a_key_reason():
@@ -411,39 +405,84 @@ def test_foreign_key_failure_renders_not_a_key_reason():
     assert "not the primary key" in line
 
 
-# ---------- tag diff lines ----------
+def test_each_failure_kind_declares_its_producing_phase():
+    # Given the four failure kinds
+    # Then each declares the phase that produced it, ordered read < validation < fk < execution
+    from delta_engine.application.results import FailurePhase
+
+    assert ReadFailure("E", "m").phase is FailurePhase.READ
+    assert ValidationFailure("R", "m").phase is FailurePhase.VALIDATION
+    assert (
+        ForeignKeyFailure(
+            table=QualifiedName("c", "s", "t"),
+            local_columns=("x",),
+            references="c.s.o",
+            reason=ForeignKeyFailureReason.CYCLE,
+        ).phase
+        is FailurePhase.FOREIGN_KEY
+    )
+    assert (
+        ExecutionFailure(
+            action_index=0, exception_type="E", message="m", statement_preview="SQL"
+        ).phase
+        is FailurePhase.EXECUTION
+    )
+    assert (
+        FailurePhase.READ
+        < FailurePhase.VALIDATION
+        < FailurePhase.FOREIGN_KEY
+        < FailurePhase.EXECUTION
+    )
 
 
-def test_set_table_tag_renders_a_tilde_tag_line():
-    # Given a SetTableTag action
-    line = _action_diff_line(SetTableTag(name="env", value="prod"))
-
-    # Then it renders as a change line naming the tag and its value
-    assert line == "~ tag env = 'prod'"
-
-
-def test_unset_table_tag_renders_a_minus_tag_line():
-    # Given an UnsetTableTag action
-    line = _action_diff_line(UnsetTableTag(name="env"))
-
-    # Then it renders as a removal line naming the tag
-    assert line == "- tag env"
+def test_foreign_key_reason_detail_is_defined_for_every_member():
+    # Given every FK failure reason
+    # Then each renders a non-empty human-readable detail string from the enum itself
+    for reason in ForeignKeyFailureReason:
+        assert reason.detail
+        assert isinstance(reason.detail, str)
 
 
-# ---------- column tag diff lines ----------
+def test_execution_failed_carries_index_only_on_its_failure_detail():
+    # Given a failed action
+    failed = ExecutionFailed(
+        action="AddColumn",
+        failure=ExecutionFailure(
+            action_index=3, exception_type="E", message="m", statement_preview="SQL"
+        ),
+    )
+
+    # Then the index lives on the failure detail, not duplicated on the carrier
+    assert failed.failure.action_index == 3
+    assert not hasattr(failed, "action_index")
 
 
-def test_set_column_tag_renders_a_tilde_column_tag_line():
-    # Given a SetColumnTag action
-    line = _action_diff_line(SetColumnTag(column_name="email", name="pii", value="true"))
+def test_status_reflects_the_earliest_failing_phase():
+    # Given a table with an execution failure only
+    read = TablePresent(table=_an_observed_table())
+    exec_only = TableRunReport(
+        qualified_name=QualifiedName("cat", "s", "e"),
+        read=read,
+        execution=ExecutionSummary((_failed_exec(0),)),
+        failures=(
+            ExecutionFailure(
+                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+            ),
+        ),
+    )
+    # Then it is EXECUTION_FAILED
+    assert exec_only.status is TableRunStatus.EXECUTION_FAILED
 
-    # Then it renders as a change line naming the column, tag, and value
-    assert line == "~ column tag email.pii = 'true'"
-
-
-def test_unset_column_tag_renders_a_minus_column_tag_line():
-    # Given an UnsetColumnTag action
-    line = _action_diff_line(UnsetColumnTag(column_name="email", name="pii"))
-
-    # Then it renders as a removal line naming the column and tag
-    assert line == "- column tag email.pii"
+    # Given a read failure present in the stream, it dominates any later phase
+    read_and_exec = TableRunReport(
+        qualified_name=QualifiedName("cat", "s", "r"),
+        read=ReadFailed(ReadFailure("IOError", "boom")),
+        failures=(
+            ReadFailure("IOError", "boom"),
+            ExecutionFailure(
+                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+            ),
+        ),
+    )
+    # Then READ_FAILED wins (earliest phase)
+    assert read_and_exec.status is TableRunStatus.READ_FAILED
