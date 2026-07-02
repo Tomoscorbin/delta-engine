@@ -55,3 +55,4 @@
 - [ ] Add a test for the cycle + invalid-FK-target combination in resolve(): a table that is both on a foreign key cycle AND references a non-primary-key column currently reports REFERENCED_COLUMNS_NOT_A_KEY (the FK->PK check runs before the CYCLE check, by design). No test covers this interaction; document the precedence or add coverage.
 - [ ] make sure docstrings & comments are accurate
 - [ ] investigate TableSnapshot.__post_init__(self) on DesiredTable. Should all validation be in DesiredTable?
+- [ ] Add a note to the step 6 markdown in the walkthrough notebook clarifying the phase distinction: the "Validation passed" log is the plan-safety (validate) phase, while the foreign-key check is a separate, later (resolve) phase — so "Validation passed" then `FOREIGN_KEY_FAILED` is expected, not contradictory. Also note the Diff renders the intended plan, not what executed (the report STATUS/footer are the truth).
