@@ -59,3 +59,4 @@
 - [ ] Review the user report formatting. Make sure is has everything it needs
 - [ ] look for redundancies; things like frozenset for local variables
 - [ ] review if we need from __future__ import annotations
+- [ ] review types hints; things like Mapping, AbstractSet, etc
