@@ -9,6 +9,7 @@ package.
 
 import logging
 import sys
+from typing import TextIO
 
 RESET = "\033[0m"
 YELLOW = "\033[33m"
@@ -46,12 +47,21 @@ class SafeStreamHandler(logging.StreamHandler):
             pass
 
 
-def configure_logging(level: int = logging.INFO) -> None:
+def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:
     """
-    Configure root logging with a colored formatter to stderr.
+    Configure root logging with a colored formatter.
 
-    Uses sys.__stderr__ to avoid pytest's captured stream and installs a
-    shutdown-safe handler. Also quiets noisy third-party loggers.
+    Installs a single shutdown-safe handler on the root logger and quiets noisy
+    third-party loggers.
+
+    Args:
+        level: Root log level to set (default ``logging.INFO``).
+        stream: Destination for log records. Defaults to ``sys.__stderr__``,
+            which avoids pytest's captured stream. Notebooks should pass
+            ``sys.stdout`` so logs and ``print`` output share one ordered
+            stream — otherwise stdout and stderr flush independently and log
+            lines can surface after later prints.
+
     """
     root = logging.getLogger()
 
@@ -59,7 +69,7 @@ def configure_logging(level: int = logging.INFO) -> None:
         root.handlers.clear()
     root.setLevel(level)
 
-    handler = SafeStreamHandler(stream=sys.__stderr__)
+    handler = SafeStreamHandler(stream=stream if stream is not None else sys.__stderr__)
     handler.setFormatter(
         LevelColorFormatter(
             "%(asctime)s | %(levelname)s | %(name)s | %(message)s",

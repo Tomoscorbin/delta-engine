@@ -1,3 +1,4 @@
+import io
 import logging
 
 from delta_engine.adapters.databricks import build_databricks_engine, configure_logging
@@ -48,6 +49,24 @@ def test_configure_logging_installs_the_coloured_handler_at_the_requested_level(
         assert root.level == logging.DEBUG
         colour_handlers = [h for h in root.handlers if isinstance(h.formatter, LevelColorFormatter)]
         assert len(colour_handlers) == 1
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
+
+
+def test_configure_logging_routes_records_to_the_given_stream():
+    # Given a caller-supplied stream (as a notebook passes sys.stdout)
+    root = logging.getLogger()
+    saved_handlers = root.handlers[:]
+    saved_level = root.level
+    stream = io.StringIO()
+    try:
+        # When logging is configured to write to that stream
+        configure_logging(stream=stream)
+        logging.getLogger("delta_engine.test").info("hello from the stream")
+
+        # Then the record lands on the supplied stream, not stderr
+        assert "hello from the stream" in stream.getvalue()
     finally:
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
