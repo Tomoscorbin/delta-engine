@@ -60,3 +60,4 @@
 - [ ] look for redundancies; things like frozenset for local variables
 - [ ] review if we need from __future__ import annotations
 - [ ] review types hints; things like Mapping, AbstractSet, etc
+- [ ] review Matched and Matched.common, particularly in _diff_columns
