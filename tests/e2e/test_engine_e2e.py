@@ -160,7 +160,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
     # and the error message names the offending column so an operator can act
     [table_report] = excinfo.value.report.table_reports
     assert table_report.status is TableRunStatus.VALIDATION_FAILED
-    assert any(isinstance(f, ValidationFailure) for f in table_report.all_failures)
+    assert any(isinstance(f, ValidationFailure) for f in table_report.failures)
     assert "age" in str(excinfo.value)
 
     # And the schema is unchanged: the invalid 'age' column was never added

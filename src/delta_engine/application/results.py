@@ -261,44 +261,35 @@ class ExecutionSummary:
 # ---------- Reports ----------
 
 
+_STATUS_FOR_PHASE: dict[FailurePhase, TableRunStatus] = {
+    FailurePhase.READ: TableRunStatus.READ_FAILED,
+    FailurePhase.VALIDATION: TableRunStatus.VALIDATION_FAILED,
+    FailurePhase.FOREIGN_KEY: TableRunStatus.FOREIGN_KEY_FAILED,
+    FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
-    """Per-table report with outcomes and failures."""
+    """Per-table report with outcomes and a single phase-ordered failure stream."""
 
     qualified_name: QualifiedName
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
-    pre_execution_failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary | None = None
+    failures: tuple[Failure, ...] = ()
 
     @property
     def status(self) -> TableRunStatus:
-        """Aggregate table status across read, pre-execution, and execution phases."""
-        if isinstance(self.read, ReadFailed):
-            return TableRunStatus.READ_FAILED
-        if any(isinstance(f, ForeignKeyFailure) for f in self.pre_execution_failures):
-            return TableRunStatus.FOREIGN_KEY_FAILED
-        if any(isinstance(f, ValidationFailure) for f in self.pre_execution_failures):
-            return TableRunStatus.VALIDATION_FAILED
-        if self.execution is not None and self.execution.failed:
-            return TableRunStatus.EXECUTION_FAILED
-        return TableRunStatus.SUCCESS
+        """Status of the earliest phase that failed; SUCCESS when nothing failed."""
+        if not self.failures:
+            return TableRunStatus.SUCCESS
+        return _STATUS_FOR_PHASE[min(failure.phase for failure in self.failures)]
 
     @property
     def has_failures(self) -> bool:
         """True if the table did not fully succeed."""
-        return self.status is not TableRunStatus.SUCCESS
-
-    @property
-    def all_failures(self) -> tuple[Failure, ...]:
-        """All failures for this table (read, pre-execution, execution)."""
-        out: list[Failure] = []
-        if isinstance(self.read, ReadFailed):
-            out.append(self.read.failure)
-        out.extend(self.pre_execution_failures)
-        if self.execution is not None:
-            out.extend(self.execution.failures)
-        return tuple(out)
+        return bool(self.failures)
 
     def diff(self) -> str:
         """Render this table's planned changes as a +/-/~ change list."""
@@ -325,7 +316,7 @@ class SyncReport:
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
         """Mapping of qualified table name to its failures (if any)."""
-        return {t.qualified_name: t.all_failures for t in self.table_reports if t.has_failures}
+        return {t.qualified_name: t.failures for t in self.table_reports if t.has_failures}
 
     def __iter__(self) -> Iterator[TableRunReport]:
         return iter(self.table_reports)
@@ -468,7 +459,7 @@ _GRID_HEADERS = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
 def _grid_detail(report: TableRunReport) -> str:
     """Return the DETAIL cell: first failure summary, action names, or 'no changes'."""
     if report.has_failures:
-        failures = report.all_failures
+        failures = report.failures
         first = failures[0].format_lines()[0]
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first

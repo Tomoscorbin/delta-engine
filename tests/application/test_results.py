@@ -222,6 +222,14 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         qualified_name=QualifiedName("cat", "s", "b"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_failed_exec(0),)),
+        failures=(
+            ExecutionFailure(
+                action_index=0,
+                exception_type="ValueError",
+                message="boom",
+                statement_preview="ALTER TABLE ...",
+            ),
+        ),
     )
 
     # When aggregating the sync
@@ -280,7 +288,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     t_bad = TableRunReport(
         qualified_name=failed_name,
         read=TableAbsent(),
-        pre_execution_failures=(ValidationFailure("R", "v"),),
+        failures=(ValidationFailure("R", "v"),),
         execution=ExecutionSummary(),
     )
 
@@ -316,11 +324,11 @@ def test_foreign_key_failure_renders_a_descriptive_line():
 
 
 def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
-    # Given a table that read cleanly but has an FK failure in pre_execution_failures
+    # Given a table that read cleanly but has an FK failure in failures
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
@@ -333,7 +341,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     # Then its status reflects the FK failure and it counts as a failure
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert report.has_failures is True
-    assert report.all_failures[0].format_lines()[0].startswith("Foreign key")
+    assert report.failures[0].format_lines()[0].startswith("Foreign key")
 
 
 def test_table_run_report_status_is_validation_failed_when_only_validation_failure_present():
@@ -341,7 +349,7 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
             ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
         ),
     )
@@ -351,29 +359,25 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
     assert report.has_failures is True
 
 
-def test_table_run_report_status_is_fk_failed_when_both_fk_and_validation_failures_present():
-    # Given a table with both an FK failure and a validation failure
+def test_table_run_report_status_is_validation_failed_when_both_fk_and_validation_present():
+    # Given a table with both a validation failure and an FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         read=TablePresent(table=_an_observed_table()),
-        pre_execution_failures=(
+        failures=(
+            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
                 references="cat.sch.customers",
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
-            ValidationFailure(rule_name="NonNullableColumnAdd", message="cannot add NOT NULL"),
         ),
     )
 
-    # Then FOREIGN_KEY_FAILED takes priority, and both failures are surfaced
-    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert len(report.pre_execution_failures) == 2
-    fk_failures = [f for f in report.pre_execution_failures if isinstance(f, ForeignKeyFailure)]
-    val_failures = [f for f in report.pre_execution_failures if isinstance(f, ValidationFailure)]
-    assert len(fk_failures) == 1
-    assert len(val_failures) == 1
+    # Then VALIDATION_FAILED wins: it is the earlier phase and the actionable root cause
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert len(report.failures) == 2
 
 
 def test_table_run_report_with_no_pre_execution_failures_is_success():
@@ -384,9 +388,9 @@ def test_table_run_report_with_no_pre_execution_failures_is_success():
         execution=ExecutionSummary((_ok_exec(0),)),
     )
 
-    # Then it is a success and carries no pre-execution failures
+    # Then it is a success and carries no failures
     assert report.status is TableRunStatus.SUCCESS
-    assert report.pre_execution_failures == ()
+    assert report.failures == ()
 
 
 def test_foreign_key_failure_renders_not_a_key_reason():
@@ -496,3 +500,34 @@ def test_execution_failed_carries_index_only_on_its_failure_detail():
     # Then the index lives on the failure detail, not duplicated on the carrier
     assert failed.failure.action_index == 3
     assert not hasattr(failed, "action_index")
+
+
+def test_status_reflects_the_earliest_failing_phase():
+    # Given a table with an execution failure only
+    read = TablePresent(table=_an_observed_table())
+    exec_only = TableRunReport(
+        qualified_name=QualifiedName("cat", "s", "e"),
+        read=read,
+        execution=ExecutionSummary((_failed_exec(0),)),
+        failures=(
+            ExecutionFailure(
+                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+            ),
+        ),
+    )
+    # Then it is EXECUTION_FAILED
+    assert exec_only.status is TableRunStatus.EXECUTION_FAILED
+
+    # Given a read failure present in the stream, it dominates any later phase
+    read_and_exec = TableRunReport(
+        qualified_name=QualifiedName("cat", "s", "r"),
+        read=ReadFailed(ReadFailure("IOError", "boom")),
+        failures=(
+            ReadFailure("IOError", "boom"),
+            ExecutionFailure(
+                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+            ),
+        ),
+    )
+    # Then READ_FAILED wins (earliest phase)
+    assert read_and_exec.status is TableRunStatus.READ_FAILED

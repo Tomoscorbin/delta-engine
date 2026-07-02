@@ -25,13 +25,13 @@ _QN = QualifiedName("cat", "sch", "tbl")
 def _table_report(
     *,
     read: CatalogState,
-    pre_execution_failures: tuple[Failure, ...] = (),
+    failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
     return TableRunReport(
         qualified_name=_QN,
         read=read,
-        pre_execution_failures=pre_execution_failures,
+        failures=failures,
         execution=execution,
     )
 
@@ -44,7 +44,10 @@ def _message_for(table_report: TableRunReport) -> str:
 
 def test_message_headline_counts_failed_tables():
     # Given a run with a single failed table
-    report = _table_report(read=ReadFailed(ReadFailure("AnalysisException", "table not found")))
+    report = _table_report(
+        read=ReadFailed(ReadFailure("AnalysisException", "table not found")),
+        failures=(ReadFailure("AnalysisException", "table not found"),),
+    )
 
     # When building the error message
     message = _message_for(report)
@@ -55,7 +58,10 @@ def test_message_headline_counts_failed_tables():
 
 def test_message_renders_read_failure_detail():
     # Given a table whose read phase failed
-    report = _table_report(read=ReadFailed(ReadFailure("AnalysisException", "table not found")))
+    report = _table_report(
+        read=ReadFailed(ReadFailure("AnalysisException", "table not found")),
+        failures=(ReadFailure("AnalysisException", "table not found"),),
+    )
 
     # When building the error message
     message = _message_for(report)
@@ -69,9 +75,7 @@ def test_message_renders_validation_failure_detail():
     # Given a table whose validation phase failed
     report = _table_report(
         read=TableAbsent(),
-        pre_execution_failures=(
-            ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
-        ),
+        failures=(ValidationFailure("DisallowPartitioningChange", "cannot repartition"),),
     )
 
     # When building the error message
@@ -86,7 +90,7 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
     # Given a table whose plan tripped two rules at once
     report = _table_report(
         read=TableAbsent(),
-        pre_execution_failures=(
+        failures=(
             ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL column 'age'"),
             ValidationFailure("DisallowPartitioningChange", "cannot repartition"),
         ),
@@ -111,7 +115,18 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
             statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         ),
     )
-    report = _table_report(read=TableAbsent(), execution=ExecutionSummary((failed_result,)))
+    report = _table_report(
+        read=TableAbsent(),
+        execution=ExecutionSummary((failed_result,)),
+        failures=(
+            ExecutionFailure(
+                action_index=2,
+                exception_type="SparkException",
+                message="boom",
+                statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
+            ),
+        ),
+    )
 
     # When building the error message
     message = _message_for(report)
@@ -126,7 +141,7 @@ def test_message_renders_fk_failure_detail():
     # Given a table with an FK failure described by its content
     report = _table_report(
         read=TableAbsent(),
-        pre_execution_failures=(
+        failures=(
             ForeignKeyFailure(
                 table=_QN,
                 local_columns=("ref_id",),
