@@ -1,18 +1,18 @@
 """
 High-level orchestration of planning, validation, and execution.
 
-`Engine.sync` reads current catalog state, computes a plan (schema diff +
-deterministic ordering), validates it against rules, resolves FK dependencies
-with full failure context, then executes passing plans. If any table fails,
+`Engine.sync` runs a chain of phases, each a pure transform over the per-table
+runs — one `TableRunReport` is born per table in the read phase and accretes
+its plan, failures, and execution as the chain proceeds. If any table fails,
 `SyncFailedError` is raised with a formatted summary.
 
-The sync runs five phases across all tables in sequence:
-  1. Read     — fetch current catalog state for every table
+The five phases, each taking the runs and returning them:
+  1. Read     — fetch current catalog state; birth one run per table
   2. Plan     — compute action plans from desired vs observed state
-  3. Validate — check every plan against rules; collect per-table failures
-  4. Resolve  — order tables by FK dependency; produce FK failures and
+  3. Validate — check every plan against rules; append per-table failures
+  4. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  5. Execute  — run plans for candidates with no pre-execution failures
+  5. Execute  — run the plan of every run with no failures and a non-empty plan
 
 Running `resolve()` after validation means a table that fails validation
 blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
@@ -20,13 +20,14 @@ with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). The rule is
 uniform: if a dependency won't reach desired state this sync, its dependents
 don't execute either.
 
-A table that fails in an early phase is carried forward as a partial result
-and skipped in later phases, so all tables are attempted and the report is
-always complete.
+A table that fails an early phase carries that failure forward on its run and
+is skipped by execution, so all tables are attempted and the report is always
+complete.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 import logging
 
@@ -35,16 +36,12 @@ from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
-    CatalogState,
-    ExecutionSummary,
-    Failure,
     ReadFailed,
     SyncReport,
     TablePresent,
     TableRunReport,
 )
 from delta_engine.application.validation import validate_plan
-from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
 from delta_engine.domain.plan.differ import compute_plan
@@ -75,22 +72,21 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs five phases across all tables in sequence:
-        read → plan → validate → resolve → execute. Resolve runs after
-        validate so that validation failures propagate to FK dependents the
-        same way FK-structural failures do.
+        Runs the phases as a chain, each transforming the per-table runs:
+        read → plan → validate → resolve → execute. Each ``TableRunReport``
+        is born in the read phase and accretes its plan, failures, and
+        execution as later phases run.
 
-        A table that fails in an early phase is skipped in later phases;
-        its partial result is included in the final report.
+        A table that fails an early phase carries that failure forward and is
+        skipped by execution; its partial run is still included in the report.
 
         Args:
             registry: The tables to synchronize.
             dry_run: When True, run read → plan → validate → resolve but skip
-                execution entirely (zero catalog mutations). Every table's
-                ``execution`` is ``None`` while its ``plan`` still records the
-                actions that would be applied, and the report is returned
-                instead of raising ``SyncFailedError`` even when a table would
-                fail — so the caller can inspect what would happen.
+                execution (zero catalog mutations). Every run's ``execution``
+                stays ``None`` while its ``plan`` still records the actions that
+                would be applied, and the report is returned instead of raising
+                ``SyncFailedError`` even when a table would fail.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -104,68 +100,133 @@ class Engine:
         run_started = datetime.now(UTC)
         logger.info("Starting sync for %d table(s)", len(registry))
 
-        tables = tuple(registry)
-        catalog_states = self._read(tables)
-        plans = self._plan(tables, catalog_states)
-
-        # One accumulator for every failure across all phases. Filled in order:
-        # read failures, validation failures, FK failures from resolve, then
-        # execution failures mirrored in after the execute phase. This makes
-        # `failures` on each TableRunReport the single place to read what went wrong.
-        pre_execution: dict[QualifiedName, list[Failure]] = {
-            table.qualified_name: [] for table in tables
-        }
-
-        for table in tables:
-            state = catalog_states[table.qualified_name]
-            if isinstance(state, ReadFailed):
-                pre_execution[table.qualified_name].append(state.failure)
-
-        for qualified_name, result in self._validate_plans(plans).items():
-            pre_execution[qualified_name].extend(result)
-
-        blocked = {qualified_name for qualified_name, failures in pre_execution.items() if failures}
-
-        candidates = resolve(tables, blocked=blocked)
-        for candidate in candidates:
-            pre_execution[candidate.qualified_name].extend(candidate.fk_failures)
-
-        plans_to_execute = {
-            candidate.qualified_name: plans[candidate.qualified_name]
-            for candidate in candidates
-            if not pre_execution[candidate.qualified_name]
-        }
-        executions: dict[QualifiedName, ExecutionSummary] = (
-            {} if dry_run else self._execute(plans_to_execute)
-        )
-
-        # Mirror execution failures into the one stream so `failures` is the
-        # single place to read what went wrong; ExecutionSummary stays for the
-        # per-action diff/preview.
-        for qualified_name, summary in executions.items():
-            pre_execution[qualified_name].extend(summary.failures)
-
-        table_reports = tuple(
-            TableRunReport(
-                qualified_name=candidate.qualified_name,
-                desired=candidate.table,
-                read=catalog_states[candidate.qualified_name],
-                plan=plans[candidate.qualified_name],
-                failures=tuple(pre_execution[candidate.qualified_name]),
-                execution=executions.get(candidate.qualified_name),
-            )
-            for candidate in candidates
-        )
+        runs = self._read(tuple(registry))
+        runs = self._plan(runs)
+        runs = self._validate(runs)
+        runs = self._resolve(runs)
+        runs = self._execute(runs, dry_run=dry_run)
 
         report = SyncReport(
             started_at=run_started,
             ended_at=datetime.now(UTC),
-            table_reports=table_reports,
+            table_reports=runs,
         )
-
         if not dry_run and report.any_failures:
             raise SyncFailedError(report)
+        self._log_outcome(report, dry_run=dry_run)
+        return report
 
+    def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[TableRunReport, ...]:
+        """Fetch current catalog state for every table, birthing one run each."""
+        runs: list[TableRunReport] = []
+        for table in tables:
+            qualified_name = table.qualified_name
+            state = self.reader.fetch_state(qualified_name)
+            if isinstance(state, ReadFailed):
+                logger.error(
+                    "Read failed for %s: %s - %s",
+                    qualified_name,
+                    state.failure.exception_type,
+                    state.failure.message,
+                )
+                runs.append(
+                    TableRunReport(
+                        qualified_name=qualified_name,
+                        desired=table,
+                        read=state,
+                        failures=(state.failure,),
+                    )
+                )
+            else:
+                logger.info(
+                    "Read state for %s: %s",
+                    qualified_name,
+                    "present" if isinstance(state, TablePresent) else "absent",
+                )
+                runs.append(
+                    TableRunReport(qualified_name=qualified_name, desired=table, read=state)
+                )
+        return tuple(runs)
+
+    def _plan(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+        """Compute an action plan for each run; read-failed runs get an empty plan."""
+        planned: list[TableRunReport] = []
+        for run in runs:
+            if isinstance(run.read, ReadFailed):
+                planned.append(replace(run, plan=ActionPlan()))
+                continue
+            observed = run.read.table if isinstance(run.read, TablePresent) else None
+            plan = compute_plan(desired=run.desired, observed=observed)
+            logger.info("Planned %d action(s) for %s", len(plan), run.qualified_name)
+            planned.append(replace(run, plan=plan))
+        return tuple(planned)
+
+    def _validate(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+        """Validate every run's plan, appending any validation failures."""
+        validated: list[TableRunReport] = []
+        for run in runs:
+            result = validate_plan(run.plan)
+            if result.failed:
+                logger.error(
+                    "Validation failed for %s (%d failure(s))",
+                    run.qualified_name,
+                    len(result.failures),
+                )
+            else:
+                logger.info("Validation passed for %s", run.qualified_name)
+            validated.append(replace(run, failures=run.failures + tuple(result.failures)))
+        return tuple(validated)
+
+    def _resolve(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+        """
+        Order runs by FK dependency and fold in FK failures.
+
+        Runs that already carry a failure (read or validation) seed the
+        blocked set, so their FK dependents are blocked with
+        BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
+        """
+        blocked = frozenset(run.qualified_name for run in runs if run.failures)
+        result = resolve(tuple(run.desired for run in runs), blocked=blocked)
+        by_name = {run.qualified_name: run for run in runs}
+        return tuple(
+            replace(
+                by_name[name],
+                failures=by_name[name].failures + result.fk_failures.get(name, ()),
+            )
+            for name in result.ordered_names
+        )
+
+    def _execute(
+        self, runs: tuple[TableRunReport, ...], *, dry_run: bool
+    ) -> tuple[TableRunReport, ...]:
+        """
+        Execute the plan of every run with no failures and a non-empty plan.
+
+        Skipped runs pass through unchanged. Execution failures are appended to
+        the run's ``failures`` and the summary is set on ``execution``. A dry run
+        executes nothing and returns the runs unchanged.
+        """
+        if dry_run:
+            return runs
+        executed: list[TableRunReport] = []
+        for run in runs:
+            if run.failures or not run.plan:
+                executed.append(run)
+                continue
+            summary = self.executor.execute(run.qualified_name, run.plan)
+            logger.info(
+                "Executed %d action(s) for %s (%d failed)",
+                len(summary.results),
+                run.qualified_name,
+                summary.failed_count,
+            )
+            executed.append(
+                replace(run, execution=summary, failures=run.failures + summary.failures)
+            )
+        return tuple(executed)
+
+    def _log_outcome(self, report: SyncReport, *, dry_run: bool) -> None:
+        """Log the run outcome (dry-run notice or success line)."""
         if dry_run:
             logger.info(
                 "Dry run complete for %d table(s); no changes were applied",
@@ -173,97 +234,3 @@ class Engine:
             )
         else:
             logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
-        return report
-
-    def _read(
-        self,
-        tables: tuple[DesiredTable, ...],
-    ) -> dict[QualifiedName, CatalogState]:
-        """Fetch current catalog state for every table."""
-        catalog_states: dict[QualifiedName, CatalogState] = {}
-        for table in tables:
-            qualified_name = table.qualified_name
-            catalog_state = self.reader.fetch_state(qualified_name)
-            catalog_states[qualified_name] = catalog_state
-            if isinstance(catalog_state, ReadFailed):
-                logger.error(
-                    "Read failed for %s: %s - %s",
-                    qualified_name,
-                    catalog_state.failure.exception_type,
-                    catalog_state.failure.message,
-                )
-            else:
-                logger.info(
-                    "Read state for %s: %s",
-                    qualified_name,
-                    "present" if isinstance(catalog_state, TablePresent) else "absent",
-                )
-        return catalog_states
-
-    def _plan(
-        self,
-        tables: tuple[DesiredTable, ...],
-        catalog_states: dict[QualifiedName, CatalogState],
-    ) -> dict[QualifiedName, ActionPlan]:
-        """
-        Compute an action plan for each table.
-
-        Tables that failed to read get an empty plan.
-        """
-        plans: dict[QualifiedName, ActionPlan] = {}
-        for table in tables:
-            qualified_name = table.qualified_name
-            catalog_state = catalog_states[qualified_name]
-            if isinstance(catalog_state, ReadFailed):
-                plans[qualified_name] = ActionPlan()
-                continue
-
-            observed = catalog_state.table if isinstance(catalog_state, TablePresent) else None
-            plan = compute_plan(desired=table, observed=observed)
-            plans[qualified_name] = plan
-            logger.info("Planned %d action(s) for %s", len(plan), qualified_name)
-
-        return plans
-
-    def _validate_plans(
-        self,
-        plans: dict[QualifiedName, ActionPlan],
-    ) -> dict[QualifiedName, tuple[Failure, ...]]:
-        """
-        Validate every plan and return per-table failures.
-
-        All tables are validated. The returned dict is passed to `resolve()` so
-        that validation-failed tables block their FK dependents.
-        """
-        validation_failures: dict[QualifiedName, tuple[Failure, ...]] = {}
-        for qualified_name, plan in plans.items():
-            result = validate_plan(plan)
-            validation_failures[qualified_name] = tuple(result.failures)
-            if result.failed:
-                logger.error(
-                    "Validation failed for %s (%d failure(s))",
-                    qualified_name,
-                    len(result.failures),
-                )
-            else:
-                logger.info("Validation passed for %s", qualified_name)
-        return validation_failures
-
-    def _execute(
-        self,
-        plans: dict[QualifiedName, ActionPlan],
-    ) -> dict[QualifiedName, ExecutionSummary]:
-        """Execute every plan in the given dict."""
-        executions: dict[QualifiedName, ExecutionSummary] = {}
-        for qualified_name, plan in plans.items():
-            if not plan:
-                continue
-            execution = self.executor.execute(qualified_name, plan)
-            executions[qualified_name] = execution
-            logger.info(
-                "Executed %d action(s) for %s (%d failed)",
-                len(execution.results),
-                qualified_name,
-                execution.failed_count,
-            )
-        return executions

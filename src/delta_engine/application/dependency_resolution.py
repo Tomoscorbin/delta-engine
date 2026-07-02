@@ -2,13 +2,8 @@
 Foreign key dependency resolution for sync ordering and failure classification.
 
 The public entry point is `resolve`, which takes the registered tables and
-returns them as a tuple of :class:`SyncCandidate` objects in dependency-first
-order — referenced tables before their dependents.
-
-Each candidate carries the table it represents and only the FK failures that
-`resolve` found for it (CYCLE, UNRESOLVABLE_REFERENCE, REFERENCED_COLUMNS_NOT_A_KEY,
-or BLOCKED_BY_FAILED_DEPENDENCY). A candidate with an empty `fk_failures` tuple
-may be executed; one with failures must be excluded.
+returns a :class:`ResolveResult` with all table names in dependency-first order
+and a mapping of FK failures per table.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm, reverse-reachability propagation) are
@@ -17,7 +12,7 @@ hidden behind that interface.
 
 from __future__ import annotations
 
-from collections.abc import Set as AbstractSet
+from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
 from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
@@ -35,37 +30,29 @@ def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True, slots=True)
-class SyncCandidate:
+class ResolveResult:
     """
-    A table prepared for the sync loop, with the FK failures resolution found for it.
+    The outcome of foreign-key resolution across all registered tables.
 
     Attributes:
-        table: The desired table to sync.
-        fk_failures: Foreign-key failures this table incurred during resolution
-            (CYCLE / UNRESOLVABLE_REFERENCE / REFERENCED_COLUMNS_NOT_A_KEY /
-            BLOCKED_BY_FAILED_DEPENDENCY). Empty when resolution found none.
+        ordered_names: All table names in dependency-first order — referenced
+            tables before their dependents. Every registered table appears,
+            including ones that failed resolution (the engine gates those out
+            by their recorded failures).
+        fk_failures: The foreign-key failures resolution found, keyed by table.
+            A table absent from this mapping had no FK failure.
 
     """
 
-    table: DesiredTable
-    fk_failures: tuple[ForeignKeyFailure, ...] = ()
-
-    @property
-    def qualified_name(self) -> QualifiedName:
-        """The fully qualified name of the table this candidate represents."""
-        return self.table.qualified_name
-
-    @property
-    def can_execute(self) -> bool:
-        """True when resolution found no foreign-key failures for this table."""
-        return not self.fk_failures
+    ordered_names: tuple[QualifiedName, ...]
+    fk_failures: Mapping[QualifiedName, tuple[ForeignKeyFailure, ...]]
 
 
 def resolve(
     tables: tuple[DesiredTable, ...],
     *,
     blocked: AbstractSet[QualifiedName] = frozenset(),
-) -> tuple[SyncCandidate, ...]:
+) -> ResolveResult:
     """
     Resolve foreign key dependencies across all registered tables.
 
@@ -82,8 +69,9 @@ def resolve(
             phase that produced them.
 
     Returns:
-        A tuple of :class:`SyncCandidate` objects in dependency-first order,
-        each carrying only the FK failures resolution found for it.
+        A :class:`ResolveResult` with all tables in dependency-first
+        ``ordered_names`` and ``fk_failures`` keyed by table (absent means
+        no FK failure for that table).
 
     """
     already_failed = {str(qualified_name) for qualified_name in blocked}
@@ -96,13 +84,8 @@ def resolve(
     ordered = _order_tables(tables, components)
     failures_by_table = _classify_failures(tables, registered_names, cycle_members, already_failed)
 
-    return tuple(
-        SyncCandidate(
-            table=table,
-            fk_failures=failures_by_table.get(table.qualified_name, ()),
-        )
-        for table in ordered
-    )
+    ordered_names = tuple(table.qualified_name for table in ordered)
+    return ResolveResult(ordered_names=ordered_names, fk_failures=failures_by_table)
 
 
 def _build_dependency_graph(
@@ -193,8 +176,8 @@ def _order_tables(
 
     Tarjan emits components dependency-first, so concatenating their members
     yields an order in which every referenced table precedes its dependents.
-    Candidates that cannot execute (FK failures) appear too — the engine gates
-    them out via can_execute.
+    Tables that cannot execute (FK failures) appear too — the engine gates
+    them out by their recorded failures.
     """
     table_by_name = {str(table.qualified_name): table for table in tables}
     return [table_by_name[name] for component in components for name in component]
