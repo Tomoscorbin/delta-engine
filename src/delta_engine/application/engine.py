@@ -27,7 +27,7 @@ complete.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
 
@@ -36,17 +36,51 @@ from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.ports import CatalogStateReader, PlanExecutor
 from delta_engine.application.registry import Registry
 from delta_engine.application.results import (
+    CatalogState,
+    ExecutionSummary,
+    Failure,
     ReadFailed,
     SyncReport,
     TablePresent,
     TableRunReport,
 )
 from delta_engine.application.validation import validate_plan
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
 from delta_engine.domain.plan.differ import compute_plan
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _TableRun:
+    """
+    Mutable per-table record threaded through the sync phases.
+
+    Born in the read phase, it accretes its plan, failures, and execution as the
+    phase chain proceeds, then is frozen into a public :class:`TableRunReport`
+    once complete. Kept private to the engine so the published report stays
+    immutable while the phases mutate in place.
+    """
+
+    qualified_name: QualifiedName
+    desired: DesiredTable
+    read: CatalogState
+    plan: ActionPlan = field(default_factory=ActionPlan)
+    failures: list[Failure] = field(default_factory=list)
+    execution: ExecutionSummary | None = None
+
+    def to_report(self) -> TableRunReport:
+        """Freeze this run into its public, immutable report."""
+        return TableRunReport(
+            qualified_name=self.qualified_name,
+            desired=self.desired,
+            read=self.read,
+            plan=self.plan,
+            failures=tuple(self.failures),
+            execution=self.execution,
+        )
 
 
 class Engine:
@@ -109,19 +143,20 @@ class Engine:
         report = SyncReport(
             started_at=run_started,
             ended_at=datetime.now(UTC),
-            table_reports=runs,
+            table_reports=tuple(run.to_report() for run in runs),
         )
         if not dry_run and report.any_failures:
             raise SyncFailedError(report)
         self._log_outcome(report, dry_run=dry_run)
         return report
 
-    def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[TableRunReport, ...]:
+    def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
         """Fetch current catalog state for every table, birthing one run each."""
-        runs: list[TableRunReport] = []
+        runs: list[_TableRun] = []
         for table in tables:
             qualified_name = table.qualified_name
             state = self.reader.fetch_state(qualified_name)
+            run = _TableRun(qualified_name=qualified_name, desired=table, read=state)
             if isinstance(state, ReadFailed):
                 logger.error(
                     "Read failed for %s: %s - %s",
@@ -129,41 +164,28 @@ class Engine:
                     state.failure.exception_type,
                     state.failure.message,
                 )
-                runs.append(
-                    TableRunReport(
-                        qualified_name=qualified_name,
-                        desired=table,
-                        read=state,
-                        failures=(state.failure,),
-                    )
-                )
+                run.failures.append(state.failure)
             else:
                 logger.info(
                     "Read state for %s: %s",
                     qualified_name,
                     "present" if isinstance(state, TablePresent) else "absent",
                 )
-                runs.append(
-                    TableRunReport(qualified_name=qualified_name, desired=table, read=state)
-                )
+            runs.append(run)
         return tuple(runs)
 
-    def _plan(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
-        """Compute an action plan for each run; read-failed runs get an empty plan."""
-        planned: list[TableRunReport] = []
+    def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """Compute an action plan for each run; read-failed runs keep their empty plan."""
         for run in runs:
             if isinstance(run.read, ReadFailed):
-                planned.append(replace(run, plan=ActionPlan()))
                 continue
             observed = run.read.table if isinstance(run.read, TablePresent) else None
-            plan = compute_plan(desired=run.desired, observed=observed)
-            logger.info("Planned %d action(s) for %s", len(plan), run.qualified_name)
-            planned.append(replace(run, plan=plan))
-        return tuple(planned)
+            run.plan = compute_plan(desired=run.desired, observed=observed)
+            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+        return runs
 
-    def _validate(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+    def _validate(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """Validate every run's plan, appending any validation failures."""
-        validated: list[TableRunReport] = []
         for run in runs:
             result = validate_plan(run.plan)
             if result.failed:
@@ -174,10 +196,10 @@ class Engine:
                 )
             else:
                 logger.info("Validation passed for %s", run.qualified_name)
-            validated.append(replace(run, failures=run.failures + tuple(result.failures)))
-        return tuple(validated)
+            run.failures.extend(result.failures)
+        return runs
 
-    def _resolve(self, runs: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+    def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
         Order runs by FK dependency and fold in FK failures.
 
@@ -188,17 +210,17 @@ class Engine:
         blocked = frozenset(run.qualified_name for run in runs if run.failures)
         result = resolve(tuple(run.desired for run in runs), blocked=blocked)
         by_name = {run.qualified_name: run for run in runs}
-        return tuple(
-            replace(
-                by_name[name],
-                failures=by_name[name].failures + result.fk_failures.get(name, ()),
-            )
-            for name in result.ordered_names
-        )
+        for name, fk_failures in result.fk_failures.items():
+            if fk_failures:
+                logger.error(
+                    "Foreign key resolution failed for %s (%d failure(s))",
+                    name,
+                    len(fk_failures),
+                )
+                by_name[name].failures.extend(fk_failures)
+        return tuple(by_name[name] for name in result.ordered_names)
 
-    def _execute(
-        self, runs: tuple[TableRunReport, ...], *, dry_run: bool
-    ) -> tuple[TableRunReport, ...]:
+    def _execute(self, runs: tuple[_TableRun, ...], *, dry_run: bool) -> tuple[_TableRun, ...]:
         """
         Execute the plan of every run with no failures and a non-empty plan.
 
@@ -208,10 +230,8 @@ class Engine:
         """
         if dry_run:
             return runs
-        executed: list[TableRunReport] = []
         for run in runs:
             if run.failures or not run.plan:
-                executed.append(run)
                 continue
             summary = self.executor.execute(run.qualified_name, run.plan)
             logger.info(
@@ -220,10 +240,9 @@ class Engine:
                 run.qualified_name,
                 summary.failed_count,
             )
-            executed.append(
-                replace(run, execution=summary, failures=run.failures + summary.failures)
-            )
-        return tuple(executed)
+            run.execution = summary
+            run.failures.extend(summary.failures)
+        return runs
 
     def _log_outcome(self, report: SyncReport, *, dry_run: bool) -> None:
         """Log the run outcome (dry-run notice or success line)."""
