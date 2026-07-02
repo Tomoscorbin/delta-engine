@@ -27,7 +27,6 @@ complete.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
 
@@ -56,10 +55,9 @@ from delta_engine.domain.plan.differ import compute_plan
 logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
 class _TableRun:
     """
-    Mutable per-table record threaded through the sync phases.
+    Mutable scratch pad threaded through the sync phases.
 
     Born in the read phase, it accretes its plan, failures, and execution as the
     phase chain proceeds, then is frozen into a public :class:`TableRunReport`
@@ -67,12 +65,18 @@ class _TableRun:
     immutable while the phases mutate in place.
     """
 
-    qualified_name: QualifiedName
-    desired: DesiredTable
-    read: CatalogState
-    plan: ActionPlan = field(default_factory=ActionPlan)
-    failures: list[Failure] = field(default_factory=list)
-    execution: ExecutionSummary | None = None
+    def __init__(
+        self,
+        qualified_name: QualifiedName,
+        desired: DesiredTable,
+        read: CatalogState,
+    ) -> None:
+        self.qualified_name = qualified_name
+        self.desired = desired
+        self.read = read
+        self.plan = ActionPlan()
+        self.failures: list[Failure] = []
+        self.execution: ExecutionSummary | None = None
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
