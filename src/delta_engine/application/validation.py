@@ -64,16 +64,19 @@ class NonNullableColumnAdd:
 
     def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    f"Operation not allowed: cannot add non-nullable column '{action.column.name}'"
-                ),
-            )
-            for action in plan
-            if isinstance(action, AddColumn) and not action.column.nullable
-        )
+        failures: list[ValidationFailure] = []
+        for action in plan:
+            if isinstance(action, AddColumn) and not action.column.nullable:
+                failures.append(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: cannot add non-nullable column"
+                            f" '{action.column.name}'"
+                        ),
+                    )
+                )
+        return tuple(failures)
 
 
 class NullabilityTighteningOnExistingColumn:
@@ -92,18 +95,20 @@ class NullabilityTighteningOnExistingColumn:
 
     def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag every action that tightens an existing column to NOT NULL."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    "Operation not allowed: cannot tighten existing column"
-                    f" '{action.column_name}' to NOT NULL. Keep it nullable,"
-                    " backfill any NULLs in a separate step, then set NOT NULL."
-                ),
-            )
-            for action in plan
-            if isinstance(action, SetColumnNullability) and not action.nullable
-        )
+        failures: list[ValidationFailure] = []
+        for action in plan:
+            if isinstance(action, SetColumnNullability) and not action.nullable:
+                failures.append(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: cannot tighten existing column"
+                            f" '{action.column_name}' to NOT NULL. Keep it nullable,"
+                            " backfill any NULLs in a separate step, then set NOT NULL."
+                        ),
+                    )
+                )
+        return tuple(failures)
 
 
 class UnsupportedColumnTypeChange:
@@ -120,19 +125,21 @@ class UnsupportedColumnTypeChange:
 
     def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag every ColumnTypeChange action in the plan."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    "Operation not allowed: cannot change the type of existing"
-                    f" column '{action.column_name}' from {action.from_type} to"
-                    f" {action.to_type}. Type migrations are not supported;"
-                    " recreate the table to change a column's type."
-                ),
-            )
-            for action in plan
-            if isinstance(action, ColumnTypeChange)
-        )
+        failures: list[ValidationFailure] = []
+        for action in plan:
+            if isinstance(action, ColumnTypeChange):
+                failures.append(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: cannot change the type of existing"
+                            f" column '{action.column_name}' from {action.from_type} to"
+                            f" {action.to_type}. Type migrations are not supported;"
+                            " recreate the table to change a column's type."
+                        ),
+                    )
+                )
+        return tuple(failures)
 
 
 class DisallowPartitioningChange:
@@ -148,19 +155,21 @@ class DisallowPartitioningChange:
 
     def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
         """Flag the plan if it contains a PartitioningChange action."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    "Operation not allowed: partitioning changes are not supported."
-                    f" Current partition columns: {action.observed_partitioning}"
-                    f" - Requested partition columns: {action.desired_partitioning}."
-                    " Recreate the table with the desired partitioning."
-                ),
-            )
-            for action in plan
-            if isinstance(action, PartitioningChange)
-        )
+        failures: list[ValidationFailure] = []
+        for action in plan:
+            if isinstance(action, PartitioningChange):
+                failures.append(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: partitioning changes are not supported."
+                            f" Current partition columns: {action.observed_partitioning}"
+                            f" - Requested partition columns: {action.desired_partitioning}."
+                            " Recreate the table with the desired partitioning."
+                        ),
+                    )
+                )
+        return tuple(failures)
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -194,5 +203,7 @@ def validate_plan(
         A :class:`ValidationResult` carrying a failure from each broken rule.
 
     """
-    failures = tuple(failure for rule in rules for failure in rule.evaluate(plan))
-    return ValidationResult(failures=failures)
+    failures: list[ValidationFailure] = []
+    for rule in rules:
+        failures.extend(rule.evaluate(plan))
+    return ValidationResult(failures=tuple(failures))
