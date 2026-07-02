@@ -144,7 +144,7 @@ def _(action: PartitioningChange) -> str:
 
 def render_diff_block(report: TableRunReport) -> str:
     """Render one table's change block: its name then one line per planned action."""
-    from delta_engine.application.results import ReadFailed
+    from delta_engine.application.ports import ReadFailed
 
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailed):

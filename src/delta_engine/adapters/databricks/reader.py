@@ -19,7 +19,7 @@ from delta_engine.adapters.databricks.sql import (
     quote_literal,
 )
 from delta_engine.application.failures import ReadFailure
-from delta_engine.application.results import (
+from delta_engine.application.ports import (
     CatalogState,
     ReadFailed,
     TableAbsent,

@@ -1,12 +1,46 @@
-"""Application ports / adapter interfaces."""
+"""
+Application ports: adapter contracts and the message types they exchange.
+
+Each boundary is defined in full here — the vocabulary an adapter returns
+(``CatalogState`` for reads, ``ExecutionSummary`` for execution) sits beside
+the Protocol that requires it, so an adapter author reads one file to learn
+the whole contract.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from delta_engine.application.results import CatalogState, ExecutionSummary
-from delta_engine.domain.model import QualifiedName
+from delta_engine.application.failures import ExecutionFailure, ReadFailure
+from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
+
+# ---------- CatalogState ----------
+
+
+@dataclass(frozen=True, slots=True)
+class TablePresent:
+    """The catalog holds a live table; ``table`` is its observed schema."""
+
+    table: ObservedTable
+
+
+@dataclass(frozen=True, slots=True)
+class TableAbsent:
+    """The catalog confirmed the table does not exist; the engine will create it."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReadFailed:
+    """A catalog read that raised before any state could be determined."""
+
+    failure: ReadFailure
+
+
+# The three answers a catalog can give about a table: it is there, it is not
+# there, or it could not be read.
+CatalogState = TablePresent | TableAbsent | ReadFailed
 
 
 @runtime_checkable
@@ -34,6 +68,63 @@ class CatalogStateReader(Protocol):
 
         """
         ...
+
+
+# ---------- ExecutionResult ----------
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionSucceeded:
+    """A single plan action that executed without error."""
+
+    action: str
+    action_index: int
+    statement_preview: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionFailed:
+    """A single plan action that raised while executing."""
+
+    action: str
+    failure: ExecutionFailure
+
+
+# An executed action either succeeds or fails. The split makes "succeeded but
+# carries a failure" (and "failed but carries none") unrepresentable, so no
+# runtime invariant guard is needed.
+ExecutionResult = ExecutionSucceeded | ExecutionFailed
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionSummary:
+    """
+    The outcome of running a whole action plan.
+
+    Mirrors :class:`ValidationResult`: a frozen container over the phase's raw
+    results that answers ``failed`` and exposes its ``failures``. It owns the
+    single pass that separates failed actions from successful ones, so callers
+    read a property instead of re-deriving the split with ``isinstance``.
+    """
+
+    results: tuple[ExecutionResult, ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        """True when any action in the plan failed."""
+        return any(isinstance(result, ExecutionFailed) for result in self.results)
+
+    @property
+    def failures(self) -> tuple[ExecutionFailure, ...]:
+        """The failure detail from each failed action, in execution order."""
+        return tuple(
+            result.failure for result in self.results if isinstance(result, ExecutionFailed)
+        )
+
+    @property
+    def failed_count(self) -> int:
+        """How many of the plan's actions failed."""
+        return len(self.failures)
 
 
 @runtime_checkable

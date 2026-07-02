@@ -9,13 +9,15 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.results import (
+from delta_engine.application.ports import (
     CatalogState,
     ExecutionFailed,
     ExecutionSummary,
     ReadFailed,
-    SyncReport,
     TableAbsent,
+)
+from delta_engine.application.results import (
+    SyncReport,
     TableRunReport,
 )
 from delta_engine.domain.model import Column, Integer, QualifiedName

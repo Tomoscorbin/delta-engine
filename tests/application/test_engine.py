@@ -10,17 +10,19 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.registry import Registry
-from delta_engine.application.results import (
+from delta_engine.application.ports import (
     CatalogState,
     ExecutionFailed,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadFailed,
-    SyncReport,
     TableAbsent,
     TablePresent,
+)
+from delta_engine.application.registry import Registry
+from delta_engine.application.results import (
+    SyncReport,
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName

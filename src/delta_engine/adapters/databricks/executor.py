@@ -19,7 +19,7 @@ from delta_engine.adapters.databricks.sql import (
     sql_preview,
 )
 from delta_engine.application.failures import ExecutionFailure
-from delta_engine.application.results import (
+from delta_engine.application.ports import (
     ExecutionFailed,
     ExecutionResult,
     ExecutionSucceeded,
