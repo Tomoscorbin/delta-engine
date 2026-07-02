@@ -47,6 +47,36 @@ customers = DeltaTable(
 
 `DeltaTable` describes what you want. No SQL runs yet.
 
+## Declare partitioning (optional)
+
+Pass `partitioned_by` to `DeltaTable` when the table should be partitioned at
+creation time:
+
+```python
+from delta_engine import Column, Date, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("event_date", Date()),
+        Column("event_type", String()),
+        Column("payload", String()),
+    ],
+    partitioned_by=["event_date"],
+)
+```
+
+Every name in `partitioned_by` must appear in `columns`. Partition columns are
+declared as regular columns too: `partitioned_by` names them, and `columns`
+defines their types and nullability.
+
+Partitioning is fixed once the table exists. Declaring a different
+`partitioned_by` value for an existing table raises `SyncFailedError` during
+validation, before any SQL runs. To change partitioning, drop and recreate the
+table out of band, then re-sync.
+
 ## Register the table
 
 A `Registry` holds the set of tables the engine will manage:

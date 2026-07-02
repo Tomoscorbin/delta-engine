@@ -28,7 +28,7 @@ engine.sync(registry)  # creates the table, or no-ops if it already matches
 
 - [Getting started](docs/tutorial-getting-started.md) — define a table and run your first sync
 - [Handle sync failures](docs/how-to-handle-sync-failures.md) — inspect `SyncReport` and act on each status
-- [Declare partitioned tables](docs/how-to-declare-partitioned-tables.md) — use `partitioned_by`
+- [Declare partitioning](docs/tutorial-getting-started.md#declare-partitioning-optional) — use `partitioned_by`
 - [Configure table properties](docs/how-to-configure-properties.md) — `Property` enum, defaults, overrides
 
 ## Reference
