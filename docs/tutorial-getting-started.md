@@ -13,6 +13,14 @@ This tutorial walks you through defining your first Delta table, registering it,
 - A Databricks workspace with Unity Catalog enabled
 - An active `SparkSession` (a Databricks notebook provides one automatically as `spark`)
 
+## Databricks feature compatibility
+
+delta-engine does not check Databricks Runtime or Delta Lake protocol versions before
+emitting supported DDL. Features such as informational primary and foreign keys,
+change data feed, and table properties depend on the runtime and table version in
+your workspace. If Databricks rejects a statement because the runtime or table does
+not support it, the engine surfaces that backend error in the sync failure report.
+
 ## Install delta-engine
 
 ```bash
