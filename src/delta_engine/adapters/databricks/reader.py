@@ -40,9 +40,7 @@ class _ColumnMapping:
     is_partition: bool
 
 
-def _foreign_key_from_rows(
-    constraint_name: str, rows: tuple[Any, ...]
-) -> ForeignKeyConstraint:
+def _foreign_key_from_rows(constraint_name: str, rows: tuple[Any, ...]) -> ForeignKeyConstraint:
     """Build one observed foreign key from its ordered information_schema rows."""
     first = rows[0]
     return ForeignKeyConstraint(
@@ -317,9 +315,7 @@ class DatabricksReader:
 
         return tuple(
             _foreign_key_from_rows(constraint_name, tuple(group_rows))
-            for constraint_name, group_rows in groupby(
-                rows, key=lambda row: row.constraint_name
-            )
+            for constraint_name, group_rows in groupby(rows, key=lambda row: row.constraint_name)
         )
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
