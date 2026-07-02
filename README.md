@@ -37,7 +37,7 @@ engine.sync(registry)  # creates the table, or no-ops if it already matches
 - [Safe-change rules](docs/reference-safe-change-rules.md) — changes the engine blocks at validation
 - [API reference](docs/reference-api.md) — full public API
 
-## Advanced
+## Developer
 
 - [Architecture](docs/explanation-architecture.md) — layers, design decisions, why hexagonal
 - [Implement a custom adapter](docs/how-to-implement-adapter.md) — `CatalogStateReader` and `PlanExecutor` protocols
