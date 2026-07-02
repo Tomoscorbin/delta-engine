@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from itertools import groupby
 import logging
 from types import MappingProxyType
+from typing import Any
 
 from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import SparkSession
@@ -36,6 +38,19 @@ logger = logging.getLogger(__name__)
 class _ColumnMapping:
     column: DomainColumn
     is_partition: bool
+
+
+def _foreign_key_from_rows(
+    constraint_name: str, rows: tuple[Any, ...]
+) -> ForeignKeyConstraint:
+    """Build one observed foreign key from its ordered information_schema rows."""
+    first = rows[0]
+    return ForeignKeyConstraint(
+        local_columns=tuple(row.local_column.casefold() for row in rows),
+        references=f"{first.ref_catalog}.{first.ref_schema}.{first.ref_table}".casefold(),
+        referenced_columns=tuple(row.ref_column.casefold() for row in rows),
+        constraint_name=constraint_name.casefold(),
+    )
 
 
 def _to_column_mapping(
@@ -300,34 +315,11 @@ class DatabricksReader:
             # there are no FK constraints to observe.
             return ()
 
-        # One row per local FK column, already ordered by ordinal_position within
-        # each constraint. Grouping by name preserves that order, so local and
-        # referenced columns stay positionally aligned (row K of the constraint
-        # is the K-th local column and its matching parent-key column).
-        grouped: dict[str, dict] = {}
-        for row in rows:
-            constraint_name = row.constraint_name
-            if constraint_name not in grouped:
-                grouped[constraint_name] = {
-                    "local_columns": [],
-                    "ref_catalog": row.ref_catalog,
-                    "ref_schema": row.ref_schema,
-                    "ref_table": row.ref_table,
-                    "referenced_columns": [],
-                }
-            grouped[constraint_name]["local_columns"].append(row.local_column.casefold())
-            grouped[constraint_name]["referenced_columns"].append(row.ref_column.casefold())
-
         return tuple(
-            ForeignKeyConstraint(
-                local_columns=tuple(data["local_columns"]),
-                references=(
-                    f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold()
-                ),
-                referenced_columns=tuple(data["referenced_columns"]),
-                constraint_name=constraint_name.casefold(),
+            _foreign_key_from_rows(constraint_name, tuple(group_rows))
+            for constraint_name, group_rows in groupby(
+                rows, key=lambda row: row.constraint_name
             )
-            for constraint_name, data in grouped.items()
         )
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
