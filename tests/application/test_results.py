@@ -447,3 +447,41 @@ def test_unset_column_tag_renders_a_minus_column_tag_line():
 
     # Then it renders as a removal line naming the column and tag
     assert line == "- column tag email.pii"
+
+
+def test_each_failure_kind_declares_its_producing_phase():
+    # Given the four failure kinds
+    # Then each declares the phase that produced it, ordered read < validation < fk < execution
+    from delta_engine.application.results import FailurePhase
+
+    assert ReadFailure("E", "m").phase is FailurePhase.READ
+    assert ValidationFailure("R", "m").phase is FailurePhase.VALIDATION
+    assert (
+        ForeignKeyFailure(
+            table=QualifiedName("c", "s", "t"),
+            local_columns=("x",),
+            references="c.s.o",
+            reason=ForeignKeyFailureReason.CYCLE,
+        ).phase
+        is FailurePhase.FOREIGN_KEY
+    )
+    assert (
+        ExecutionFailure(
+            action_index=0, exception_type="E", message="m", statement_preview="SQL"
+        ).phase
+        is FailurePhase.EXECUTION
+    )
+    assert (
+        FailurePhase.READ
+        < FailurePhase.VALIDATION
+        < FailurePhase.FOREIGN_KEY
+        < FailurePhase.EXECUTION
+    )
+
+
+def test_foreign_key_reason_detail_is_defined_for_every_member():
+    # Given every FK failure reason
+    # Then each renders a non-empty human-readable detail string from the enum itself
+    for reason in ForeignKeyFailureReason:
+        assert reason.detail
+        assert isinstance(reason.detail, str)

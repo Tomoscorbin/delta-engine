@@ -13,8 +13,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 import functools
+from typing import ClassVar
 
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.plan.actions import (
@@ -39,6 +40,16 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 
+
+class FailurePhase(IntEnum):
+    """The sync phase that produced a failure. Ordered so the earliest wins."""
+
+    READ = 1
+    VALIDATION = 2
+    FOREIGN_KEY = 3
+    EXECUTION = 4
+
+
 # ---------- Status enums ----------
 
 
@@ -60,26 +71,27 @@ class ForeignKeyFailureReason(StrEnum):
     BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
     REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
 
-
-_FOREIGN_KEY_REASON_DETAIL: dict[ForeignKeyFailureReason, str] = {
-    ForeignKeyFailureReason.CYCLE: "it is part of a foreign key dependency cycle",
-    ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE: (
-        "it references a table that is not registered"
-    ),
-    ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY: (
-        "it references a table that failed to sync"
-    ),
-    ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY: (
-        "its referenced columns are not the primary key of the referenced table"
-    ),
-}
+    @property
+    def detail(self) -> str:
+        """Human-readable reason clause for a failure message."""
+        match self:
+            case ForeignKeyFailureReason.CYCLE:
+                return "it is part of a foreign key dependency cycle"
+            case ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE:
+                return "it references a table that is not registered"
+            case ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY:
+                return "it references a table that failed to sync"
+            case ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY:
+                return "its referenced columns are not the primary key of the referenced table"
 
 
 # ---------- Failure value objects ----------
 
 
 class Failure(ABC):
-    """A failure that can render itself as display lines."""
+    """A failure that can render itself as display lines, tagged with its phase."""
+
+    phase: ClassVar[FailurePhase]
 
     @abstractmethod
     def format_lines(self) -> tuple[str, ...]:
@@ -91,6 +103,7 @@ class Failure(ABC):
 class ReadFailure(Failure):
     """Failure reading current catalog state for a table."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.READ
     exception_type: str
     message: str
 
@@ -102,6 +115,7 @@ class ReadFailure(Failure):
 class ValidationFailure(Failure):
     """Description of a validation rule failure."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.VALIDATION
     rule_name: str
     message: str
 
@@ -113,6 +127,7 @@ class ValidationFailure(Failure):
 class ExecutionFailure(Failure):
     """Details about a failed action execution."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.EXECUTION
     action_index: int
     exception_type: str
     message: str
@@ -130,6 +145,7 @@ class ExecutionFailure(Failure):
 class ForeignKeyFailure(Failure):
     """A foreign key constraint that could not be applied, failing its whole table."""
 
+    phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
     table: QualifiedName
     local_columns: tuple[str, ...]
     references: str
@@ -139,7 +155,7 @@ class ForeignKeyFailure(Failure):
         columns = ", ".join(self.local_columns)
         return (
             f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
-            f"{_FOREIGN_KEY_REASON_DETAIL[self.reason]}.",
+            f"{self.reason.detail}.",
         )
 
 
