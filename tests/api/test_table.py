@@ -7,9 +7,9 @@ from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
 def test_user_overrides_take_precedence_over_defaults():
-    # Given default properties include deletion vectors=true, column mapping=name
+    # Given the sole default property (column mapping=name) is overridden by the user
     user_properties = {
-        Property.ENABLE_DELETION_VECTORS.value: "false",  # user wants to disable
+        Property.COLUMN_MAPPING_MODE.value: "none",  # user wants to disable
     }
     table = DeltaTable(
         catalog="coredev",
@@ -22,9 +22,8 @@ def test_user_overrides_take_precedence_over_defaults():
     # When computing effective properties
     effective = table.effective_properties
 
-    # Then user value wins; other defaults still present
-    assert effective[Property.ENABLE_DELETION_VECTORS.value] == "false"
-    assert effective[Property.COLUMN_MAPPING_MODE.value] == "name"
+    # Then the user value wins over the default
+    assert effective[Property.COLUMN_MAPPING_MODE.value] == "none"
 
 
 def test_defaults_are_applied_when_no_user_properties_given():
@@ -39,9 +38,9 @@ def test_defaults_are_applied_when_no_user_properties_given():
     # When computing effective properties
     effective = table.effective_properties
 
-    # Then all defaults are present
-    assert effective[Property.ENABLE_DELETION_VECTORS.value] == "true"
-    assert effective[Property.COLUMN_MAPPING_MODE.value] == "name"
+    # Then the column-mapping default is present and no other property is defaulted in
+    # (deletion vectors is left to the Databricks runtime default, not managed here)
+    assert effective == {Property.COLUMN_MAPPING_MODE.value: "name"}
 
 
 @pytest.mark.parametrize(
@@ -165,7 +164,7 @@ def test_to_desired_table_preserves_columns_and_metadata():
 
 
 def test_to_desired_table_carries_effective_properties_with_defaults():
-    # Given a table where the user overrides one default property
+    # Given a table where the user declares a property alongside the defaults
     table = DeltaTable(
         catalog="cat",
         schema="core",

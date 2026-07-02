@@ -73,8 +73,11 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     """
     Build the present-state read of a table that is already fully in sync with _spec.
 
-    Includes the default Delta properties that _spec produces so that diffing
-    against _spec yields an empty plan.
+    Includes the default Delta property that _spec produces (column mapping) so
+    that diffing against _spec yields an empty plan. Also carries an
+    observed-only ``delta.enableDeletionVectors`` (as the Databricks runtime
+    enables autonomously) to confirm the engine leaves undeclared properties
+    untouched rather than emitting a spurious action.
     """
     catalog, schema, name = fqn.split(".")
     return TablePresent(

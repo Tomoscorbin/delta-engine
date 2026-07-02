@@ -9,14 +9,15 @@ tags:
 
 ## Default properties
 
-Every `DeltaTable` applies two defaults unless you override them:
+Every `DeltaTable` applies one default unless you override it:
 
 | Property | Default value |
 |---|---|
-| `Property.ENABLE_DELETION_VECTORS` | `"true"` |
 | `Property.COLUMN_MAPPING_MODE` | `"name"` |
 
 `COLUMN_MAPPING_MODE=name` is required for column drops to work. Override it to `none` only if you never drop columns.
+
+Deletion vectors are intentionally **not** defaulted here — current Databricks runtimes enable them automatically. The engine reconciles only the properties you declare, so leaving `ENABLE_DELETION_VECTORS` undeclared lets the runtime own it. Declare it explicitly if you need to pin a specific value.
 
 ## Override a default
 
@@ -29,7 +30,7 @@ table = DeltaTable(
     name="events",
     columns=[Column("id", String())],
     properties={
-        Property.ENABLE_DELETION_VECTORS: "false",
+        Property.COLUMN_MAPPING_MODE: "none",
     },
 )
 ```

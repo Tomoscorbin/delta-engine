@@ -23,7 +23,6 @@ class DeltaTable:
 
     default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
         {
-            Property.ENABLE_DELETION_VECTORS.value: "true",
             Property.COLUMN_MAPPING_MODE.value: "name",
         }
     )
