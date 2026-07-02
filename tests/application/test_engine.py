@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, String
+from delta_engine.api import Column, DeltaTable, ForeignKey, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import (
@@ -25,13 +25,30 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunStatus,
 )
-from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable
 
 # --------- helpers/fakes
+
+
+class _DomainTableSource:
+    """
+    Register a pre-built ``DesiredTable`` domain model.
+
+    Cyclic and unresolvable foreign-key layouts can't be expressed through the
+    public ``DeltaTable`` API (each FK names its target by object), so those
+    tests build ``DesiredTable`` directly and wrap it in this trivial
+    ``DesiredTableSource`` for the registry.
+    """
+
+    def __init__(self, desired: DesiredTable) -> None:
+        self._desired = desired
+
+    def to_desired_table(self) -> DesiredTable:
+        return self._desired
 
 
 def _spec(fqn: str) -> DeltaTable:
@@ -396,8 +413,19 @@ def test_validate_phase_validates_all_tables_before_any_execution():
     assert tr_b.status is TableRunStatus.SUCCESS
 
 
+def _referenced_table(references: str) -> DeltaTable:
+    """Build a bare table object to name a FK target (registered separately, or not at all)."""
+    catalog, schema, name = references.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String(), nullable=False, primary_key=True),),
+    )
+
+
 def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
-    """Build a table spec with a single FK to another table."""
+    """Build a table spec with a single FK to another table (named by its object)."""
     catalog, schema, name = fqn.split(".")
     return DeltaTable(
         catalog,
@@ -408,9 +436,9 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
             Column("ref_id", String()),
         ),
         foreign_keys=[
-            ForeignKeyConstraint(
+            ForeignKey(
                 local_columns=("ref_id",),
-                references=references,
+                references=_referenced_table(references),
                 referenced_columns=("id",),
             )
         ],
@@ -472,35 +500,41 @@ def test_sync_processes_tables_in_fk_dependency_order():
 
 
 def test_sync_fails_all_tables_in_a_detected_cycle():
-    # Given A -> B and B -> A (cycle)
-    constraint_a_to_b = ForeignKeyConstraint(
-        local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
-    )
-    constraint_b_to_a = ForeignKeyConstraint(
-        local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
-    )
-    table_a = DeltaTable(
-        "cat",
-        "sch",
-        "a",
+    # Given A -> B and B -> A (cycle). A cycle cannot be expressed through the
+    # public DeltaTable API (each FK names its target by object), so the cyclic
+    # tables are built as domain models directly and wrapped for registration.
+    table_a = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "a"),
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("b_id", String()),
         ),
-        foreign_keys=[constraint_a_to_b],
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        foreign_keys=(
+            ForeignKeyConstraint(
+                local_columns=("b_id",),
+                references=QualifiedName("cat", "sch", "b"),
+                referenced_columns=("id",),
+            ),
+        ),
     )
-    table_b = DeltaTable(
-        "cat",
-        "sch",
-        "b",
+    table_b = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "b"),
         columns=(
             Column("id", String(), nullable=False, primary_key=True),
             Column("a_id", String()),
         ),
-        foreign_keys=[constraint_b_to_a],
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        foreign_keys=(
+            ForeignKeyConstraint(
+                local_columns=("a_id",),
+                references=QualifiedName("cat", "sch", "a"),
+                referenced_columns=("id",),
+            ),
+        ),
     )
     registry = Registry()
-    registry.register(table_a, table_b)
+    registry.register(_DomainTableSource(table_a), _DomainTableSource(table_b))
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
 
     # When syncing
@@ -586,9 +620,9 @@ def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
         name,
         columns=(Column("id", String()), Column("ref_id", String(), nullable=False)),
         foreign_keys=[
-            ForeignKeyConstraint(
+            ForeignKey(
                 local_columns=("ref_id",),
-                references=references,
+                references=_referenced_table(references),
                 referenced_columns=("id",),
             )
         ],

@@ -140,7 +140,7 @@ orders = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references=f"{CATALOG}.{SCHEMA}.customers",
+            references=customers,
             referenced_columns=("id",),
         )
     ],
@@ -524,7 +524,7 @@ customers = DeltaTable(
     foreign_keys=[  # <-- foreign key added to the existing table
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
+            references=regions,
             referenced_columns=("region_id",),
         )
     ],
@@ -591,7 +591,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
+            references=regions,
             referenced_columns=("region_id",),
         )
     ],
@@ -811,6 +811,14 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 
 # COMMAND ----------
 
+# `products` is defined but never registered, so its foreign key cannot resolve.
+products = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="products",
+    columns=[Column("product_id", Long(), nullable=False, primary_key=True)],
+)
+
 line_items = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -822,14 +830,14 @@ line_items = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("product_id",),
-            references=f"{CATALOG}.{SCHEMA}.products",  # <-- never registered
+            references=products,  # <-- never registered
             referenced_columns=("product_id",),
         )
     ],
 )
 
 registry = Registry()
-registry.register(line_items)
+registry.register(line_items)  # note: products is intentionally not registered
 report = sync_expecting_failure(registry)
 
 [line_items_report] = report.table_reports
@@ -873,7 +881,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
+            references=regions,
             referenced_columns=("region_id",),
         )
     ],
@@ -964,7 +972,7 @@ try:
         foreign_keys=[
             ForeignKey(
                 local_columns=("missing_id",),  # <-- no such column on this table
-                references=f"{CATALOG}.{SCHEMA}.customers",
+                references=customers,
                 referenced_columns=("id",),
             )
         ],
@@ -976,25 +984,46 @@ except ValueError as error:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 8c. A foreign key reference that is not fully qualified
+# MAGIC ### 8c. A foreign key that references its own table
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Build a `ForeignKey` whose `references` is a bare table name rather than a
-# MAGIC `catalog.schema.table` name. This guard lives on `ForeignKey` itself, so it
-# MAGIC trips before a `DeltaTable` is even involved.
+# MAGIC Declare a table with a foreign key whose `references` is the table itself.
+# MAGIC A `ForeignKey` names its target by the referenced `DeltaTable` object, so a
+# MAGIC table cannot reference itself — the object does not exist yet inside its own
+# MAGIC definition. Self-referential foreign keys are not supported.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Rejected: `references` must be a fully qualified `catalog.schema.table` name.
+# MAGIC Rejected: a foreign key must not reference its own table.
 
 # COMMAND ----------
 
 try:
-    ForeignKey(
-        local_columns=("customer_id",),
-        references="customers",  # <-- not catalog.schema.table
-        referenced_columns=("id",),
+    employees = DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="employees",
+        columns=[
+            Column("id", Long(), nullable=False, primary_key=True),
+            Column("manager_id", Long()),
+        ],
+    )
+    DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="employees",
+        columns=[
+            Column("id", Long(), nullable=False, primary_key=True),
+            Column("manager_id", Long()),
+        ],
+        foreign_keys=[
+            ForeignKey(
+                local_columns=("manager_id",),
+                references=employees,  # <-- references its own table
+                referenced_columns=("id",),
+            )
+        ],
     )
     raise AssertionError("expected ValueError")
 except ValueError as error:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Self
 
+from delta_engine.domain.model.qualified_name import QualifiedName
+
 
 @dataclass(frozen=True, slots=True)
 class ForeignKeyConstraint:
@@ -13,7 +15,7 @@ class ForeignKeyConstraint:
 
     Attributes:
         local_columns: Ordered tuple of local column names in the constraint.
-        references: Fully qualified name of the referenced table (catalog.schema.name).
+        references: Qualified name of the referenced table.
         referenced_columns: Ordered tuple of column names in the referenced table,
             positionally aligned with ``local_columns``.
         constraint_name: The constraint name. Populated from the catalog for an
@@ -25,7 +27,7 @@ class ForeignKeyConstraint:
     """
 
     local_columns: tuple[str, ...]
-    references: str
+    references: QualifiedName
     referenced_columns: tuple[str, ...]
     constraint_name: str | None = None
 
@@ -56,21 +58,11 @@ class ForeignKeyConstraint:
                 f" got {len(self.local_columns)} local and"
                 f" {len(self.referenced_columns)} referenced"
             )
-        if self.references.count(".") != 2:
-            raise ValueError(
-                "references must be a fully qualified 'catalog.schema.table' name;"
-                f" got: {self.references!r}"
-            )
-        for part in self.references.split("."):
-            if not part.strip():
-                raise ValueError(f"references must not have a blank part; got: {self.references!r}")
-            if part != part.casefold():
-                raise ValueError(f"references must be lowercase; got: {self.references!r}")
         if self.constraint_name is not None and not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank when provided")
 
     @property
-    def signature(self) -> tuple[tuple[str, ...], str, tuple[str, ...]]:
+    def signature(self) -> tuple[tuple[str, ...], QualifiedName, tuple[str, ...]]:
         """
         Content identity: local columns, referenced table, referenced columns.
 

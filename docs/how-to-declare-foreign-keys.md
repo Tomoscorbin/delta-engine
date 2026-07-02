@@ -5,10 +5,20 @@ tags:
 
 # How to declare a foreign key
 
-Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns, the fully qualified table it references, and the referenced columns.
+Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns, the referenced table (as its `DeltaTable` object), and the referenced columns.
 
 ```python
 from delta_engine import Column, DeltaTable, ForeignKey, Integer, String
+
+customers = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customers",
+    columns=[
+        Column("id", Integer(), nullable=False, primary_key=True),
+        Column("name", String()),
+    ],
+)
 
 orders = DeltaTable(
     catalog="dev",
@@ -22,14 +32,14 @@ orders = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references="dev.silver.customers",
+            references=customers,
             referenced_columns=("id",),
         ),
     ],
 )
 ```
 
-The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. To set the name yourself, pass `constraint_name`.
+Naming the referenced table by its object means a typo'd or undeclared reference is a Python error at definition time rather than a sync failure later. The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above.
 
 ## Composite foreign keys
 
@@ -38,7 +48,7 @@ List the local and referenced columns in matching order. The first local column 
 ```python
 ForeignKey(
     local_columns=("tenant_id", "customer_id"),
-    references="dev.silver.customers",
+    references=customers,
     referenced_columns=("tenant_id", "id"),
 )
 ```
@@ -47,13 +57,13 @@ ForeignKey(
 
 The engine syncs a referenced table before the tables that depend on it. Declare `orders` and `customers` in any order — the engine reorders them so `customers` exists before `orders` adds its foreign key.
 
-A foreign key that references the table it belongs to is allowed. The engine creates the table first, then adds the constraint.
+A foreign key cannot reference the table it belongs to: because `references` is the referenced `DeltaTable` object, a table's own object does not exist yet inside its definition. Self-referential foreign keys are not supported.
 
 ## All-or-nothing across dependencies
 
 A foreign key fails its whole table when:
 
-- It references a table missing from the registry (`UNRESOLVABLE_REFERENCE`).
+- It references a table missing from the registry (`UNRESOLVABLE_REFERENCE`). The referenced `DeltaTable` object exists but was never registered.
 - It forms a dependency cycle with other tables (`CYCLE`).
 - The table it references won't reach its desired state this sync, for any reason (`BLOCKED_BY_FAILED_DEPENDENCY`).
 

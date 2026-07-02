@@ -2,7 +2,8 @@ import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model import Column as DomainColumn, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -279,10 +280,16 @@ def test_delta_table_pk_column_order_matches_declaration_order():
 
 
 def test_delta_table_accepts_foreign_keys_parameter():
-    # Given a FK referencing another table
+    # Given a FK referencing another table (identified by its DeltaTable object)
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
     fk = ForeignKey(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        references=customers,
         referenced_columns=("id",),
     )
 
@@ -295,8 +302,16 @@ def test_delta_table_accepts_foreign_keys_parameter():
         foreign_keys=[fk],
     )
 
-    # Then the FK is accessible, carrying its engine-generated constraint name
-    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    # Then the FK is stored, carrying its engine-generated constraint name and
+    # the referenced table's qualified name
+    assert table.foreign_keys == (
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            references=QualifiedName("cat", "sch", "customers"),
+            referenced_columns=("id",),
+            constraint_name="orders_customer_id_fk",
+        ),
+    )
 
 
 def test_delta_table_defaults_to_no_foreign_keys():
@@ -314,9 +329,15 @@ def test_delta_table_defaults_to_no_foreign_keys():
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
     # Given a FK whose local column is not declared in the table
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
     fk = ForeignKey(
         local_columns=("nonexistent",),
-        references="cat.sch.customers",
+        references=customers,
         referenced_columns=("id",),
     )
 

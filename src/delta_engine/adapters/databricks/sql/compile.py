@@ -206,8 +206,7 @@ def _(action: SetForeignKey, backticked_table_name: str) -> str:
     constraint = backtick(foreign_key.constraint_name)
     local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
     ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
-    # references is a dotted qualified name — split and backtick each part
-    backticked_ref = ".".join(backtick(part) for part in foreign_key.references.split("."))
+    backticked_ref = backtick_qualified_name(foreign_key.references)
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint}"

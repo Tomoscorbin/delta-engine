@@ -321,8 +321,10 @@ class DatabricksReader:
         return tuple(
             ForeignKeyConstraint(
                 local_columns=tuple(data["local_columns"]),
-                references=(
-                    f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold()
+                references=QualifiedName(
+                    data["ref_catalog"].casefold(),
+                    data["ref_schema"].casefold(),
+                    data["ref_table"].casefold(),
                 ),
                 referenced_columns=tuple(data["referenced_columns"]),
                 constraint_name=constraint_name.casefold(),

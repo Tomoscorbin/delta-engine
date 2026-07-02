@@ -106,6 +106,14 @@ class DesiredTable(TableSnapshot):
         Checking the column *set* (order-insensitive) also rejects a reordered
         duplicate.
 
+        A foreign key must not reference its own table. Self-referential
+        constraints are not supported: the public API identifies a referenced
+        table by its ``DeltaTable`` object, which cannot exist yet inside its
+        own definition. Rejected here (not just made unrepresentable upstream)
+        so a domain-level caller gets the same rule. Observed tables are
+        exempt — a catalog may hold self-referential FKs created elsewhere,
+        and they must stay representable.
+
         A primary key column must be NOT NULL — a nullable primary key is not a
         well-formed desired schema, independent of any migration. Enforcing it
         here (rather than as a plan-validation rule) keeps the planning layer
@@ -121,6 +129,11 @@ class DesiredTable(TableSnapshot):
         TableSnapshot.__post_init__(self)
         seen: set[frozenset[str]] = set()
         for foreign_key in self.foreign_keys:
+            if foreign_key.references == self.qualified_name:
+                raise ValueError(
+                    f"Foreign key on {self.qualified_name} references its own table;"
+                    " self-referential foreign keys are not supported"
+                )
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
                 raise ValueError(
