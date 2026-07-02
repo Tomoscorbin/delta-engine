@@ -2,6 +2,28 @@
 
 Declarative schema management for Delta Lake tables on Databricks. Define the schema you want; the engine plans, validates, and applies the DDL.
 
+## Quickstart
+
+```python
+from delta_engine import Column, DeltaTable, Integer, String, Registry, build_databricks_engine
+
+customers = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customers",
+    columns=[
+        Column("id", Integer()),
+        Column("name", String()),
+    ],
+)
+
+registry = Registry()
+registry.register(customers)
+
+engine = build_databricks_engine(spark)
+engine.sync(registry)  # creates the table, or no-ops if it already matches
+```
+
 ## How-to guides
 
 - [Getting started](docs/tutorial-getting-started.md) — define a table and run your first sync
