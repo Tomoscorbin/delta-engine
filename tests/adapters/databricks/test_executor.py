@@ -67,10 +67,11 @@ def test_execute_maps_success_and_failure_without_leakage():
     # Then the success and failure are mapped with correct metadata and no leakage
     results = summary.results
     assert [r.action for r in results] == ["AddColumn", "DropColumn"]
-    assert [r.action_index for r in results] == [0, 1]
     assert isinstance(results[0], ExecutionSucceeded)
     assert isinstance(results[1], ExecutionFailed)
-    assert results[1].failure is not None
+    # Then the success carries its index and the failure carries its index on the detail
+    assert results[0].action_index == 0
+    assert results[1].failure.action_index == 1
 
 
 def test_execute_stops_at_first_failure_to_avoid_half_migrating():
@@ -99,7 +100,8 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     # And the report covers only the attempted actions, ending at the failure
     results = summary.results
     assert [type(r) for r in results] == [ExecutionSucceeded, ExecutionFailed]
-    assert [r.action_index for r in results] == [0, 1]
+    assert results[0].action_index == 0
+    assert results[1].failure.action_index == 1
 
 
 def test_execute_returns_empty_summary_for_empty_plan():

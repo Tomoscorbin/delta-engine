@@ -118,7 +118,6 @@ def _ok_exec(idx: int = 0) -> ExecutionResult:
 def _failed_exec(idx: int = 0, exc="AnalysisException", msg="boom") -> ExecutionResult:
     return ExecutionFailed(
         action="X",
-        action_index=idx,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview="-- bad sql"
         ),

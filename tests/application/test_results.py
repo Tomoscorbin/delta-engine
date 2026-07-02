@@ -58,7 +58,6 @@ def _failed_exec(
 ):
     return ExecutionFailed(
         action=action,
-        action_index=idx,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
@@ -184,7 +183,6 @@ def test_execution_outcome_variants_carry_the_right_payload():
     succeeded = ExecutionSucceeded(action="AddColumn", action_index=0, statement_preview="SQL")
     failed = ExecutionFailed(
         action="AddColumn",
-        action_index=1,
         failure=ExecutionFailure(
             action_index=1, exception_type="E", message="m", statement_preview="SQL"
         ),
@@ -246,7 +244,6 @@ _EXECUTION_RESULT = st.one_of(
     st.builds(
         ExecutionFailed,
         action=st.just("AddColumn"),
-        action_index=st.integers(min_value=0, max_value=100),
         failure=st.builds(
             ExecutionFailure,
             action_index=st.integers(min_value=0, max_value=100),
@@ -485,3 +482,17 @@ def test_foreign_key_reason_detail_is_defined_for_every_member():
     for reason in ForeignKeyFailureReason:
         assert reason.detail
         assert isinstance(reason.detail, str)
+
+
+def test_execution_failed_carries_index_only_on_its_failure_detail():
+    # Given a failed action
+    failed = ExecutionFailed(
+        action="AddColumn",
+        failure=ExecutionFailure(
+            action_index=3, exception_type="E", message="m", statement_preview="SQL"
+        ),
+    )
+
+    # Then the index lives on the failure detail, not duplicated on the carrier
+    assert failed.failure.action_index == 3
+    assert not hasattr(failed, "action_index")

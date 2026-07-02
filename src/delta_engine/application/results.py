@@ -218,7 +218,6 @@ class ExecutionFailed:
     """A single plan action that raised while executing."""
 
     action: str
-    action_index: int
     failure: ExecutionFailure
 
 
