@@ -16,7 +16,7 @@ from delta_engine.application.ports import (
     ReadFailed,
     TableAbsent,
 )
-from delta_engine.application.results import (
+from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )

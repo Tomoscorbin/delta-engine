@@ -8,7 +8,7 @@ SQL previews for any failed actions.
 
 from __future__ import annotations
 
-from delta_engine.application.results import SyncReport, TableRunReport
+from delta_engine.application.report import SyncReport, TableRunReport
 
 
 class SyncFailedError(Exception):

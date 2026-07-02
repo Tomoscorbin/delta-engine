@@ -1,7 +1,7 @@
 """
 Diff and grid rendering for table and sync run reports.
 
-Separates display logic from the result/report value types in results.py.
+Separates display logic from the result/report value types in report.py.
 The three public entry points are render_diff_block, render_grid, and
 run_summary_footer; action_diff_line handles per-action diff lines via
 singledispatch.
@@ -34,7 +34,7 @@ from delta_engine.domain.plan.actions import (
 )
 
 if TYPE_CHECKING:
-    from delta_engine.application.results import SyncReport, TableRunReport
+    from delta_engine.application.report import SyncReport, TableRunReport
 
 
 def _type_name(data_type: object) -> str:

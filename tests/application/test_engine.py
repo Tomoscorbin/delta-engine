@@ -21,7 +21,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import (
+from delta_engine.application.report import (
     SyncReport,
     TableRunStatus,
 )

@@ -10,7 +10,7 @@ from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import TableRunStatus
+from delta_engine.application.report import TableRunStatus
 from tests.config import TEST_CATALOG
 
 

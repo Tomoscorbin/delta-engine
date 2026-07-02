@@ -15,13 +15,13 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.results import (
-    ActionPlan,
+from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
     TableRunStatus,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.plan.actions import ActionPlan
 
 # ---------- test builders
 

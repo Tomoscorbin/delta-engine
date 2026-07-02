@@ -1,10 +1,8 @@
 """
-Result and reporting types for engine runs.
+Run reports: per-table and run-level outcome aggregates.
 
-Defines status enums, lightweight failure value objects, and aggregates used to
-propagate outcomes from the foreign-key resolution, read, validation, and
-execution phases. Provides table- and run-level reports that summarize status,
-failures, and timing.
+`TableRunReport` carries one table's phase-ordered failure stream and derives
+its status from the earliest failing phase; `SyncReport` aggregates a run.
 """
 
 from __future__ import annotations
