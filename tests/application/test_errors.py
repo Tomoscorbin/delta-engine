@@ -1,20 +1,22 @@
 from datetime import UTC, datetime
 
 from delta_engine.application.errors import SyncFailedError
-from delta_engine.application.results import (
-    CatalogState,
-    ExecutionFailed,
+from delta_engine.application.failures import (
     ExecutionFailure,
-    ExecutionSummary,
     Failure,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
-    ReadFailed,
     ReadFailure,
+    ValidationFailure,
+)
+from delta_engine.application.results import (
+    CatalogState,
+    ExecutionFailed,
+    ExecutionSummary,
+    ReadFailed,
     SyncReport,
     TableAbsent,
     TableRunReport,
-    ValidationFailure,
 )
 from delta_engine.domain.model import Column, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable

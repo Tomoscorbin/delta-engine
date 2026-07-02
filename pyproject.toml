@@ -98,6 +98,7 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
 # abstract method (Action.subject, Failure.format_lines). Concrete overrides
 # only restate it, so we don't require a docstring on every override.
 "src/delta_engine/domain/plan/actions.py" = ["D102"]
+"src/delta_engine/application/failures.py" = ["D102"]
 "src/delta_engine/application/results.py" = ["D102"]
 # Example notebooks in Databricks source format. Databricks injects `spark`,
 # `dbutils`, and `display` at runtime; the first line must be the notebook

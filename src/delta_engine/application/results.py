@@ -9,26 +9,21 @@ failures, and timing.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import IntEnum, StrEnum
-from typing import ClassVar
+from enum import StrEnum
 
+from delta_engine.application.failures import (
+    ExecutionFailure,
+    Failure,
+    FailurePhase,
+    ReadFailure,
+    ValidationFailure,
+)
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
-
-
-class FailurePhase(IntEnum):
-    """The sync phase that produced a failure. Ordered so the earliest wins."""
-
-    READ = 1
-    VALIDATION = 2
-    FOREIGN_KEY = 3
-    EXECUTION = 4
-
 
 # ---------- Status enums ----------
 
@@ -41,102 +36,6 @@ class TableRunStatus(StrEnum):
     VALIDATION_FAILED = "VALIDATION_FAILED"
     FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
-
-
-class ForeignKeyFailureReason(StrEnum):
-    """Why a foreign key constraint could not be applied, failing its whole table."""
-
-    CYCLE = "CYCLE"
-    UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
-    BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
-    REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
-
-    @property
-    def detail(self) -> str:
-        """Human-readable reason clause for a failure message."""
-        match self:
-            case ForeignKeyFailureReason.CYCLE:
-                return "it is part of a foreign key dependency cycle"
-            case ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE:
-                return "it references a table that is not registered"
-            case ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY:
-                return "it references a table that failed to sync"
-            case ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY:
-                return "its referenced columns are not the primary key of the referenced table"
-
-
-# ---------- Failure value objects ----------
-
-
-class Failure(ABC):
-    """A failure that can render itself as display lines, tagged with its phase."""
-
-    phase: ClassVar[FailurePhase]
-
-    @abstractmethod
-    def format_lines(self) -> tuple[str, ...]:
-        """Return one or more human-readable lines describing this failure."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class ReadFailure(Failure):
-    """Failure reading current catalog state for a table."""
-
-    phase: ClassVar[FailurePhase] = FailurePhase.READ
-    exception_type: str
-    message: str
-
-    def format_lines(self) -> tuple[str, ...]:
-        return (f"Read error: {self.exception_type} - {self.message}",)
-
-
-@dataclass(frozen=True, slots=True)
-class ValidationFailure(Failure):
-    """Description of a validation rule failure."""
-
-    phase: ClassVar[FailurePhase] = FailurePhase.VALIDATION
-    rule_name: str
-    message: str
-
-    def format_lines(self) -> tuple[str, ...]:
-        return (f"Validation failed: {self.rule_name} - {self.message}",)
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionFailure(Failure):
-    """Details about a failed action execution."""
-
-    phase: ClassVar[FailurePhase] = FailurePhase.EXECUTION
-    action_index: int
-    exception_type: str
-    message: str
-    statement_preview: str
-
-    def format_lines(self) -> tuple[str, ...]:
-        return (
-            f"Execution failed at action {self.action_index}: "
-            f"{self.exception_type} - {self.message}",
-            f"    SQL preview: {self.statement_preview}",
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class ForeignKeyFailure(Failure):
-    """A foreign key constraint that could not be applied, failing its whole table."""
-
-    phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
-    table: QualifiedName
-    local_columns: tuple[str, ...]
-    references: str
-    reason: ForeignKeyFailureReason
-
-    def format_lines(self) -> tuple[str, ...]:
-        columns = ", ".join(self.local_columns)
-        return (
-            f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
-            f"{self.reason.detail}.",
-        )
 
 
 # ---------- CatalogState ----------

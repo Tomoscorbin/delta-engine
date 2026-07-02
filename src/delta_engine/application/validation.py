@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import ClassVar, Protocol
 
-from delta_engine.application.results import ValidationFailure, ValidationResult
+from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.results import ValidationResult
 from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,

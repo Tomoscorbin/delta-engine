@@ -18,9 +18,9 @@ from delta_engine.adapters.databricks.sql import (
     exception_type_name,
     sql_preview,
 )
+from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.results import (
     ExecutionFailed,
-    ExecutionFailure,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,

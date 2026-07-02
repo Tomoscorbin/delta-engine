@@ -15,7 +15,8 @@ Both live in `delta_engine.application.ports`. Both are `runtime_checkable` Prot
 
 ```python
 from delta_engine.application.ports import CatalogStateReader
-from delta_engine.application.results import CatalogState, ReadFailed, TableAbsent, TablePresent, ReadFailure
+from delta_engine.application.failures import ReadFailure
+from delta_engine.application.results import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 
 class MyReader:
@@ -40,7 +41,8 @@ class MyReader:
 
 ```python
 from delta_engine.application.ports import PlanExecutor
-from delta_engine.application.results import ExecutionSummary, ExecutionSucceeded, ExecutionFailed, ExecutionFailure
+from delta_engine.application.failures import ExecutionFailure
+from delta_engine.application.results import ExecutionSummary, ExecutionSucceeded, ExecutionFailed
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 

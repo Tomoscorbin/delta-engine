@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
-from delta_engine.application.results import ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.table import DesiredTable

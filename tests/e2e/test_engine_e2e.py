@@ -8,8 +8,9 @@ from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.registry import Registry
-from delta_engine.application.results import TableRunStatus, ValidationFailure
+from delta_engine.application.results import TableRunStatus
 from tests.config import TEST_CATALOG
 
 
