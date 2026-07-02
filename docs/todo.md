@@ -8,7 +8,7 @@
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
-- [ ] add scripts/example.ipynb for example notebook
+- [x] add scripts/example.ipynb for example notebook
 - [ ] where does backticked_table_name belong? Should it be constructed inside the compiler dispatches?
 - [ ] should all of the sql statements live in a dedicated file and be imported into reader/exeecutor?
 - [ ] should databricks rules live in validator?
