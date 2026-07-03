@@ -113,7 +113,7 @@ class DeltaTable:
         comment: str = "",
         properties: dict[str, str] | None = None,
         tags: dict[str, str] | None = None,
-        partitioned_by: Iterable[str] | None = None,
+        partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
     ) -> None:
         user_properties = dict(properties or {})
@@ -152,7 +152,7 @@ class DeltaTable:
             comment=comment,
             properties=effective_properties,
             tags=dict(tags or {}),
-            partitioned_by=tuple(partitioned_by) if partitioned_by is not None else (),
+            partitioned_by=tuple(partitioned_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
         )

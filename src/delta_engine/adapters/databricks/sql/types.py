@@ -75,9 +75,9 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             raise TypeError(f"Unsupported DataType variant: {cls}")
 
 
-def domain_type_from_spark(spark_type: str | SparkType) -> DataType | None:
+def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
     """
-    Map a Spark SQL type (instance or DDL string) to a domain type.
+    Map a ``pyspark`` type instance to a domain type.
 
     Returns ``None`` when the type has no domain mapping (e.g. ``BINARY``,
     ``STRUCT``, ``VARIANT``, ``TIMESTAMP_NTZ``). An unmappable element inside an
@@ -85,10 +85,12 @@ def domain_type_from_spark(spark_type: str | SparkType) -> DataType | None:
     routine, expected condition -- new Spark types appear over time -- so it is a
     ``None`` return, not an exception. Callers decide what to do with ``None``
     (the reader skips the column and logs a warning).
-    """
-    if isinstance(spark_type, str):
-        spark_type = SparkType.fromDDL(spark_type)
 
+    Takes an already-parsed type instance, not a DDL string: parsing catalog DDL
+    text is the reader's concern (``SparkType.fromDDL``), kept out of this
+    module. Operating on instances also means the whole mapping table needs no
+    ``SparkSession`` to exercise.
+    """
     match spark_type:
         case IntegerType():
             return Integer()
