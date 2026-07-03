@@ -3,10 +3,10 @@ delta-engine: declarative schema management for Delta Lake tables.
 
 This is the curated entry point. The common workflow imports from here directly::
 
-    from delta_engine import DeltaTable, Column, Integer, Registry, build_databricks_engine
+    from delta_engine import DeltaTable, Column, Integer, Engine, build_databricks_engine
 
-The schema and engine surface (defining tables, building a registry, the engine
-and its result types) is pyspark-free and eagerly available. ``build_databricks_engine``
+The schema and engine surface (defining tables, the engine and its result types)
+is pyspark-free and eagerly available. ``build_databricks_engine``
 and ``configure_logging`` are exposed here too but imported lazily, so
 ``import delta_engine`` never requires pyspark -- tables can be defined and
 planned without a Spark install.
@@ -35,7 +35,6 @@ from delta_engine.api import (
 from delta_engine.application import (
     Engine,
     Failure,
-    Registry,
     SyncFailedError,
     SyncReport,
     TableRunStatus,
@@ -65,7 +64,6 @@ __all__ = [
     "Long",
     "Map",
     "Property",
-    "Registry",
     "Self",
     "String",
     "SyncFailedError",

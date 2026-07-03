@@ -34,7 +34,6 @@ _EAGER = {
     "Timestamp",
     # application: run a sync and read the outcome
     "Engine",
-    "Registry",
     "SyncReport",
     "SyncFailedError",
     "Failure",
@@ -46,18 +45,17 @@ _LAZY = {"build_databricks_engine", "configure_logging"}
 def test_eager_names_are_importable_and_identical_to_their_source():
     # Given the curated root namespace
     # Then every pyspark-free name resolves to the same object as its source module
-    from delta_engine import Column, DeltaTable, Engine, Property, Registry
+    from delta_engine import Column, DeltaTable, Engine, Property
     from delta_engine.api import (
         Column as ColumnImpl,
         DeltaTable as DeltaTableImpl,
         Property as PropertyImpl,
     )
-    from delta_engine.application import Engine as EngineImpl, Registry as RegistryImpl
+    from delta_engine.application import Engine as EngineImpl
 
     assert DeltaTable is DeltaTableImpl
     assert Column is ColumnImpl
     assert Engine is EngineImpl
-    assert Registry is RegistryImpl
     assert Property is PropertyImpl
 
 
@@ -93,7 +91,7 @@ def test_eager_surface_imports_without_pyspark_installed():
     program = (
         "import sys; sys.modules['pyspark'] = None\n"
         "from delta_engine import (\n"
-        "    DeltaTable, Column, Integer, Property, Registry, Engine,\n"
+        "    DeltaTable, Column, Integer, Property, Engine,\n"
         "    SyncReport, SyncFailedError, Failure,\n"
         ")\n"
         "print('ok')\n"
