@@ -88,6 +88,18 @@ def test_table_status_success_when_all_actions_succeed():
     assert report.execution.failures == ()
 
 
+def test_sync_report_with_no_tables_renders_grid_header_and_zero_footer():
+    # Given a run over no tables
+    sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=())
+
+    # When rendered
+    # Then the general grid+footer path produces a header row and a zero-count
+    # footer -- no dedicated empty-run sentinel string
+    rendered = str(sr)
+    assert rendered.splitlines()[0].split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (300.0s)")
+
+
 def test_sync_report_any_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
