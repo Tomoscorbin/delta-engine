@@ -1,0 +1,157 @@
+import pytest
+
+from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, Self
+from delta_engine.domain.model import QualifiedName
+
+
+def _customers() -> DeltaTable:
+    return DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
+
+
+def test_foreign_key_declaration_has_only_local_columns_and_references():
+    # Given / When / Then the public declaration rejects internal fields
+    with pytest.raises(TypeError):
+        ForeignKey(  # type: ignore[call-arg]
+            local_columns=("customer_id",),
+            references=_customers(),
+            referenced_columns=("id",),
+        )
+    with pytest.raises(TypeError):
+        ForeignKey(  # type: ignore[call-arg]
+            local_columns=("customer_id",),
+            references=_customers(),
+            constraint_name="orders_customer_id_fk",
+        )
+
+
+def test_delta_table_infers_referenced_columns_from_referenced_primary_key():
+    # Given a referenced table with a single-column primary key
+    customers = _customers()
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer()), Column("customer_id", Integer())],
+        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+    )
+
+    # Then the FK is lowered with the referenced primary key inferred
+    [foreign_key] = orders.foreign_keys
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.referenced_columns == ("id",)
+    assert foreign_key.constraint_name == "orders_customer_id_fk"
+
+
+def test_delta_table_infers_composite_primary_key_in_declaration_order():
+    # Given a referenced table with a composite primary key (tenant_id, id)
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False, primary_key=True),
+        ],
+    )
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[
+            Column("tenant_id", Integer()),
+            Column("customer_id", Integer()),
+        ],
+        foreign_keys=[ForeignKey(local_columns=("tenant_id", "customer_id"), references=customers)],
+    )
+
+    # Then referenced columns follow the referenced PK's declaration order
+    [foreign_key] = orders.foreign_keys
+    assert foreign_key.local_columns == ("tenant_id", "customer_id")
+    assert foreign_key.referenced_columns == ("tenant_id", "id")
+
+
+def test_delta_table_supports_self_referential_foreign_key():
+    # Given a table referencing its own primary key via the Self sentinel
+    employee = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="employee",
+        columns=[
+            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("manager_id", Integer()),
+        ],
+        foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
+    )
+
+    # Then the FK targets the table's own qualified name and primary key
+    [foreign_key] = employee.foreign_keys
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "employee")
+    assert foreign_key.referenced_columns == ("id",)
+
+
+def test_delta_table_rejects_reference_to_table_with_no_primary_key():
+    # Given a referenced table with no primary key
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer())],
+    )
+
+    # When / Then construction fails because there is no key to infer
+    with pytest.raises(ValueError, match="no primary key"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("id", Integer()), Column("customer_id", Integer())],
+            foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        )
+
+
+def test_delta_table_rejects_self_reference_without_primary_key():
+    # Given a table with no primary key that references itself
+    # When / Then the same no-primary-key error names the table
+    with pytest.raises(ValueError, match="no primary key"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="employee",
+            columns=[Column("manager_id", Integer())],
+            foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
+        )
+
+
+def test_delta_table_rejects_local_column_count_mismatch():
+    # Given a referenced single-column PK but two local columns
+    customers = _customers()
+
+    # When / Then the arity mismatch is rejected with both counts named
+    with pytest.raises(ValueError, match="primary key"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("a", Integer()), Column("b", Integer())],
+            foreign_keys=[ForeignKey(local_columns=("a", "b"), references=customers)],
+        )
+
+
+def test_delta_table_rejects_non_table_reference():
+    # Given a reference that is neither a DeltaTable nor Self
+    # When / Then a TypeError names the accepted types
+    with pytest.raises(TypeError, match="DeltaTable or Self"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("customer_id", Integer())],
+            foreign_keys=[
+                ForeignKey(local_columns=("customer_id",), references="cat.sch.customers")  # type: ignore[arg-type]
+            ],
+        )

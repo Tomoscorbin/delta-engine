@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, String
+from delta_engine.api import Column, DeltaTable, ForeignKey, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import (
@@ -26,7 +26,6 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable
@@ -396,6 +395,17 @@ def test_validate_phase_validates_all_tables_before_any_execution():
     assert tr_b.status is TableRunStatus.SUCCESS
 
 
+def _referenced_spec(fqn: str) -> DeltaTable:
+    """Build a minimal table with a single-column PK for use as an FK target."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String(), nullable=False, primary_key=True),),
+    )
+
+
 def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
     """Build a table spec with a single FK to another table."""
     catalog, schema, name = fqn.split(".")
@@ -408,11 +418,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
             Column("ref_id", String()),
         ),
         foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("ref_id",),
-                referenced_table=QualifiedName.parse(references),
-                referenced_columns=("id",),
-            )
+            ForeignKey(local_columns=("ref_id",), references=_referenced_spec(references))
         ],
     )
 
@@ -472,17 +478,10 @@ def test_sync_processes_tables_in_fk_dependency_order():
 
 
 def test_sync_fails_all_tables_in_a_detected_cycle():
-    # Given A -> B and B -> A (cycle)
-    constraint_a_to_b = ForeignKeyConstraint(
-        local_columns=("b_id",),
-        referenced_table=QualifiedName.parse("cat.sch.b"),
-        referenced_columns=("id",),
-    )
-    constraint_b_to_a = ForeignKeyConstraint(
-        local_columns=("a_id",),
-        referenced_table=QualifiedName.parse("cat.sch.a"),
-        referenced_columns=("id",),
-    )
+    # Given A -> B and B -> A (cycle).
+    # The cycle is constructed sequentially: build a stub b for a's FK target,
+    # then build a, then build b referencing a (which now exists).
+    stub_b = _referenced_spec("cat.sch.b")
     table_a = DeltaTable(
         "cat",
         "sch",
@@ -491,7 +490,7 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
             Column("id", String(), nullable=False, primary_key=True),
             Column("b_id", String()),
         ),
-        foreign_keys=[constraint_a_to_b],
+        foreign_keys=[ForeignKey(local_columns=("b_id",), references=stub_b)],
     )
     table_b = DeltaTable(
         "cat",
@@ -501,7 +500,7 @@ def test_sync_fails_all_tables_in_a_detected_cycle():
             Column("id", String(), nullable=False, primary_key=True),
             Column("a_id", String()),
         ),
-        foreign_keys=[constraint_b_to_a],
+        foreign_keys=[ForeignKey(local_columns=("a_id",), references=table_a)],
     )
     registry = Registry()
     registry.register(table_a, table_b)
@@ -590,11 +589,7 @@ def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
         name,
         columns=(Column("id", String()), Column("ref_id", String(), nullable=False)),
         foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("ref_id",),
-                referenced_table=QualifiedName.parse(references),
-                referenced_columns=("id",),
-            )
+            ForeignKey(local_columns=("ref_id",), references=_referenced_spec(references))
         ],
     )
 
