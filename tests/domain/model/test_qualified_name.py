@@ -38,3 +38,31 @@ def test_raises_when_any_part_is_blank(catalog: str, schema: str, name: str) -> 
     # When/Then construction fails rather than producing invalid SQL
     with pytest.raises(ValueError, match="blank"):
         QualifiedName(catalog, schema, name)
+
+
+def test_parse_reads_a_canonical_three_part_name() -> None:
+    # Given a canonical catalog.schema.name string
+    # When parsing it
+    parsed = QualifiedName.parse("core.public.orders")
+
+    # Then each part is populated
+    assert parsed == QualifiedName("core", "public", "orders")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["orders", "schema.orders", "cat.schema.orders.extra", ""],
+    ids=["one-part", "two-parts", "four-parts", "empty"],
+)
+def test_parse_rejects_names_without_exactly_three_parts(raw: str) -> None:
+    # Given a string that is not catalog.schema.name
+    # When / Then parsing fails
+    with pytest.raises(ValueError, match="fully qualified"):
+        QualifiedName.parse(raw)
+
+
+def test_parse_delegates_part_validation_to_the_constructor() -> None:
+    # Given a three-part string with an uppercase part
+    # When / Then parse raises the same lowercase error the constructor enforces
+    with pytest.raises(ValueError, match="lowercase"):
+        QualifiedName.parse("Core.public.orders")

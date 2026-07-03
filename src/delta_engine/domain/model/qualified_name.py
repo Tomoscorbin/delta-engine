@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Self
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,17 @@ class QualifiedName:
     catalog: str
     schema: str
     name: str
+
+    @classmethod
+    def parse(cls, raw: str) -> Self:
+        """Parse a canonical ``catalog.schema.name`` string into a qualified name."""
+        parts = raw.split(".")
+        if len(parts) != 3:
+            raise ValueError(
+                f"QualifiedName must be a fully qualified 'catalog.schema.table' name; got: {raw!r}"
+            )
+        catalog, schema, name = parts
+        return cls(catalog=catalog, schema=schema, name=name)
 
     def __post_init__(self) -> None:
         """Raise if any part is blank or contains uppercase characters."""
