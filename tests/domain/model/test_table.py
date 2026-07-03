@@ -80,7 +80,9 @@ def test_table_snapshot_rejects_pk_column_not_in_columns():
         DesiredTable(
             qualified_name=_QN,
             columns=(_COL,),
-            primary_key=PrimaryKeyConstraint(columns=("missing_col",)),
+            primary_key=PrimaryKeyConstraint.generate(
+                table_name="orders", columns=("missing_col",)
+            ),
         )
 
 
@@ -89,11 +91,11 @@ def test_observed_table_has_primary_key_field():
     table = ObservedTable(
         qualified_name=_QN,
         columns=(_COL,),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
     # Then the field is readable and returns the value object
-    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
 def test_desired_table_rejects_nullable_primary_key_column():
@@ -103,7 +105,7 @@ def test_desired_table_rejects_nullable_primary_key_column():
         DesiredTable(
             qualified_name=_QN,
             columns=(Column("id", Integer(), nullable=True),),
-            primary_key=PrimaryKeyConstraint(columns=("id",)),
+            primary_key=PrimaryKeyConstraint.generate(table_name="orders", columns=("id",)),
         )
 
 
@@ -117,7 +119,9 @@ def test_desired_table_reports_the_offending_nullable_primary_key_column():
                 Column("id", Integer(), nullable=False),
                 Column("tenant_id", Integer(), nullable=True),
             ),
-            primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id")),
+            primary_key=PrimaryKeyConstraint.generate(
+                table_name="orders", columns=("id", "tenant_id")
+            ),
         )
 
 
@@ -126,12 +130,12 @@ def test_observed_table_allows_a_nullable_primary_key_column():
     table = ObservedTable(
         qualified_name=_QN,
         columns=(Column("id", Integer(), nullable=True),),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
     # Then it is accepted — an observed schema must stay representable, whatever
     # its shape, so the differ can plan against it
-    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
 def test_table_snapshot_defaults_to_no_foreign_keys():
@@ -146,8 +150,9 @@ def test_table_snapshot_defaults_to_no_foreign_keys():
 
 
 def test_table_snapshot_stores_foreign_keys():
-    # Given a foreign key referencing another table
-    fk = ForeignKeyConstraint(
+    # Given a foreign key referencing another table (name generated at the API layer)
+    fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
@@ -159,19 +164,27 @@ def test_table_snapshot_stores_foreign_keys():
     )
 
     # Then the FK is stored, carrying its engine-generated constraint name
-    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    assert table.foreign_keys == (
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=QualifiedName("cat", "sch", "customers"),
+            referenced_columns=("id",),
+            constraint_name="orders_customer_id_fk",
+        ),
+    )
     assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
-    # Given a FK whose local column is not declared
-    fk = ForeignKeyConstraint(
+    # Given a FK whose local column is not declared (name provided so construction succeeds)
+    fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("nonexistent",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
 
-    # When / Then
+    # When / Then the DesiredTable rejects the FK referencing a column that does not exist
     with pytest.raises(ValueError, match="nonexistent"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -181,20 +194,22 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
 
 
 def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
-    # Given two FKs on the same local columns, neither with an explicit name
+    # Given two FKs on the same local columns with distinct names (construction succeeds;
+    # the DesiredTable rejects them because the same local-column set is incoherent)
     first = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     second = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "vips"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_vips_fk",
     )
 
     # When / Then — both FKs govern the same local-column set, which is incoherent
-    # and would derive the same constraint name under the adapter's naming policy
     with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -204,17 +219,19 @@ def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
 
 
 def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
-    # Given two FKs whose local-column sets are identical (would collide on the
-    # derived name and are semantically incoherent)
+    # Given two FKs whose local-column sets are identical (semantically incoherent;
+    # each carries a distinct name so construction succeeds)
     fk_one = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "accounts"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_accounts_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected
@@ -228,16 +245,18 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
 
 def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
     # Given two FKs over the same columns in a different order (the reorder case
-    # the old name-based guard missed)
+    # the old name-based guard missed); each carries a distinct name so construction succeeds
     fk_one = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("tenant_id", "id"),
+        constraint_name="orders_tenant_id_customer_id_fk",
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id", "tenant_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id", "tenant_id"),
+        constraint_name="orders_customer_id_tenant_id_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected
@@ -247,6 +266,26 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
             columns=(Column("tenant_id", Integer()), Column("customer_id", Integer())),
             foreign_keys=(fk_one, fk_two),
         )
+
+
+def test_desired_table_accepts_an_already_named_foreign_key():
+    # Given a FK that already carries a name (as the API layer will produce it)
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
+
+    # When building a DesiredTable with it
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+
+    # Then the name is preserved (not regenerated, not rejected)
+    assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():

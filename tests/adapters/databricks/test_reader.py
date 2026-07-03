@@ -525,15 +525,17 @@ def test_fetch_state_lowercases_primary_key_column_names_from_catalog():
     spark = FakeSparkWithPrimaryKey(
         catalog=catalog,
         describe_rows=[{"properties": {}}],
-        pk_column_rows=[{"column_name": "OrderID"}],
+        pk_column_rows=[{"column_name": "OrderID", "constraint_name": "T_PK"}],
     )
 
     # When we fetch state
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then the primary key column is normalised to lowercase at the adapter boundary
+    # Then the primary key column and name are normalised to lowercase at the adapter boundary
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == PrimaryKeyConstraint(columns=("orderid",))
+    assert result.table.primary_key == PrimaryKeyConstraint(
+        columns=("orderid",), constraint_name="t_pk"
+    )
 
 
 def test_fetch_state_includes_primary_key_in_observed_table():
@@ -549,15 +551,15 @@ def test_fetch_state_includes_primary_key_in_observed_table():
     spark = FakeSparkWithPrimaryKey(
         catalog=catalog,
         describe_rows=[{"properties": {}}],
-        pk_column_rows=[{"column_name": "id"}],
+        pk_column_rows=[{"column_name": "id", "constraint_name": "t_pk"}],
     )
 
     # When
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then: primary_key is populated on the ObservedTable
+    # Then: primary_key is populated on the ObservedTable, carrying the catalog name
     assert isinstance(result, TablePresent)
-    assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",))
+    assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
 def test_fetch_state_primary_key_is_empty_when_none_defined():

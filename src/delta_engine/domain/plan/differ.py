@@ -267,7 +267,7 @@ def _diff_primary_key(
     Compares the key columns as a set so column order does not trigger a
     spurious change; declaration order from desired is preserved in the emitted
     SetPrimaryKey.columns. The constraint name is read off the desired
-    constraint, which was generated when the DesiredTable was built.
+    constraint, which the API layer generated when the DeltaTable was lowered.
     """
     desired_columns_in_key = set(desired_pk.columns) if desired_pk else set()
     observed_columns_in_key = set(observed_pk.columns) if observed_pk else set()
@@ -279,7 +279,6 @@ def _diff_primary_key(
     if observed_columns_in_key:
         actions.append(DropPrimaryKey())
     if desired_pk is not None:
-        assert desired_pk.constraint_name is not None  # generated when DesiredTable was built
         actions.append(
             SetPrimaryKey(columns=desired_pk.columns, constraint_name=desired_pk.constraint_name)
         )
@@ -307,15 +306,14 @@ def _diff_foreign_keys(
     one created outside this engine — produces no action, so a sync over an
     unchanged catalog stays idempotent.
 
-    Setting a desired FK carries the FK content, including the name generated
-    when the DesiredTable was built. Dropping an observed FK uses its
-    catalog-stored name, so the correct constraint is removed. Order does not
-    matter — ActionPlan sorts every plan by execution phase.
+    Setting a desired FK carries the FK content, including the name the API
+    layer generated when the DeltaTable was lowered. Dropping an observed FK
+    uses its catalog-stored name, so the correct constraint is removed. Order
+    does not matter — ActionPlan sorts every plan by execution phase.
     """
     matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
     set_actions: list[Action] = []
     for foreign_key in matched.added:
-        assert foreign_key.constraint_name is not None  # generated when DesiredTable was built
         set_actions.append(
             SetForeignKey(
                 local_columns=foreign_key.local_columns,
@@ -327,8 +325,5 @@ def _diff_foreign_keys(
     drop_actions = tuple(
         DropForeignKey(constraint_name=foreign_key.constraint_name)
         for foreign_key in matched.dropped
-        # An observed FK always carries the catalog name set by the reader; this guard
-        # is a type-narrowing safeguard against a reader bug — never false in practice.
-        if foreign_key.constraint_name is not None
     )
     return tuple(set_actions) + drop_actions

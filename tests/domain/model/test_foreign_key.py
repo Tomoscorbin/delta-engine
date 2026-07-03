@@ -9,13 +9,14 @@ def _customers() -> QualifiedName:
 
 
 def test_signature_ignores_constraint_name():
-    # Given two FKs with identical content but different explicit names
-    unnamed = ForeignKeyConstraint(
+    # Given two FKs with identical content but different names
+    one = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
-    named = ForeignKeyConstraint(
+    two = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
@@ -23,7 +24,7 @@ def test_signature_ignores_constraint_name():
     )
 
     # Then their signatures are equal — name is not part of content identity
-    assert unnamed.signature == named.signature
+    assert one.signature == two.signature
 
 
 def test_signature_differs_when_referenced_table_differs():
@@ -32,11 +33,13 @@ def test_signature_differs_when_referenced_table_differs():
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "old_customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     to_new = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("main", "sales", "new_customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
 
     # Then their signatures differ
@@ -50,6 +53,7 @@ def test_rejects_empty_local_columns():
             local_columns=(),
             referenced_table=_customers(),
             referenced_columns=("id",),
+            constraint_name="x_fk",
         )
 
 
@@ -60,6 +64,7 @@ def test_rejects_empty_referenced_columns():
             local_columns=("customer_id",),
             referenced_table=_customers(),
             referenced_columns=(),
+            constraint_name="x_fk",
         )
 
 
@@ -71,6 +76,7 @@ def test_rejects_mismatched_column_counts():
             local_columns=("a", "b"),
             referenced_table=_customers(),
             referenced_columns=("id",),
+            constraint_name="x_fk",
         )
 
 
@@ -85,29 +91,29 @@ def test_rejects_blank_explicit_constraint_name():
         )
 
 
-def test_generated_name_follows_table_and_local_columns():
-    # Given an unnamed desired constraint
-    constraint = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=_customers(),
-        referenced_columns=("id",),
-    )
-
-    # When the engine generates its name from the owning table
-    named = constraint.with_generated_name("orders")
-
-    # Then the name follows {table}_{local_cols}_fk
-    assert named.constraint_name == "orders_customer_id_fk"
-
-
 def test_foreign_key_constraint_is_frozen():
     # Given a constraint
     constraint = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=_customers(),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
 
     # When / Then assignment is rejected (frozen dataclass)
     with pytest.raises(AttributeError):
         constraint.referenced_table = _customers()  # type: ignore[misc]
+
+
+def test_generate_names_constraint_from_table_and_local_columns():
+    # Given a table name and foreign key content
+    # When the engine generates the constraint
+    constraint = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+
+    # Then the name follows {table}_{local_cols}_fk
+    assert constraint.constraint_name == "orders_customer_id_fk"
