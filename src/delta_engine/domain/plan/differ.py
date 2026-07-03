@@ -3,9 +3,9 @@ Compute the actions required to reconcile a table to its desired schema.
 
 `compute_plan` is the single public entry point: given the desired definition and
 the currently observed one (or ``None`` when the table is missing), it returns
-the `ActionPlan` that closes the gap. The per-dimension diffs (columns,
-properties, table comment) are private helpers — they exist only to keep
-`compute_plan` readable and have no meaning outside it.
+the `ActionPlan` that closes the gap. The per-dimension diffs (column structure,
+column comments, properties, table comment, tags, keys) are private helpers —
+they exist only to keep `compute_plan` readable and have no meaning outside it.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def match_by_key[T](
 
 def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """
-    Compute the actions required to reach the desired schema.
+    Compute the actions required to reach the desired state.
 
     Args:
         desired: Desired table definition.
@@ -94,73 +94,93 @@ def compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> Actio
 
     """
     if observed is None:
-        body: tuple[Action, ...] = (CreateTable(desired),)
-        observed_foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
-        observed_tags: Mapping[str, str] = {}
-        observed_columns: tuple[Column, ...] = ()
-    else:
-        body = (
-            _diff_columns(desired.columns, observed.columns)
-            + _diff_properties(desired.properties, observed.properties)
-            + _diff_table_comment(desired.comment, observed.comment)
-            + _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
-            + _diff_primary_key(desired.primary_key, observed.primary_key)
-        )
-        observed_foreign_keys = observed.foreign_keys
-        observed_tags = observed.tags
-        observed_columns = observed.columns
-
-    # Tags, foreign keys, and column tags are reconciled once for both the
-    # new-table and existing-table cases. A missing table has no observed tags
-    # (empty mapping), no observed foreign keys (empty tuple), and no observed
-    # column tags (empty column tuple), so every desired value is set and none
-    # is unset. None of these can be declared inline in CREATE TABLE, so they
-    # are always applied as follow-up actions.
-    return ActionPlan(
-        body
-        + _diff_table_tags(desired.tags, observed_tags)
-        + _diff_column_tags(desired.columns, observed_columns)
-        + _diff_foreign_keys(desired.foreign_keys, observed_foreign_keys)
-    )
+        return _plan_for_missing_table(desired)
+    return _plan_for_existing_table(desired, observed)
 
 
-def _diff_columns(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> tuple[Action, ...]:
-    """Return the column-level actions to transform `observed` into `desired`."""
-    matched = match_by_key(desired, observed, key=lambda column: column.name)
+def _plan_for_missing_table(desired: DesiredTable) -> ActionPlan:
+    """
+    Plan the creation of a table that does not exist yet.
 
+    CREATE TABLE instantiates the full declaration; tags and foreign keys
+    cannot be declared inline in CREATE TABLE, so they are always applied as
+    follow-up actions. A missing table has no observed tags or foreign keys,
+    so every desired value is set and none is unset.
+    """
+    actions: tuple[Action, ...] = (CreateTable(desired),)
+    actions += _diff_table_tags(desired.tags, {})
+    actions += _diff_column_tags(desired.columns, ())
+    actions += _diff_foreign_keys(desired.foreign_keys, ())
+    return ActionPlan(actions)
+
+
+def _plan_for_existing_table(desired: DesiredTable, observed: ObservedTable) -> ActionPlan:
+    """
+    Plan the reconciliation of an existing table toward the desired state.
+
+    Columns are matched by name once; the structural diff (add/drop/type/
+    nullability) and the comment diff read the same match, so the two cannot
+    disagree about which columns exist on both sides.
+    """
+    matched = match_by_key(desired.columns, observed.columns, key=lambda column: column.name)
+
+    actions: tuple[Action, ...] = ()
+    actions += _diff_column_structure(matched)
+    actions += _diff_column_comments(matched.common)
+    actions += _diff_properties(desired.properties, observed.properties)
+    actions += _diff_table_comment(desired.comment, observed.comment)
+    actions += _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
+    actions += _diff_primary_key(desired.primary_key, observed.primary_key)
+    actions += _diff_table_tags(desired.tags, observed.tags)
+    actions += _diff_column_tags(desired.columns, observed.columns)
+    actions += _diff_foreign_keys(desired.foreign_keys, observed.foreign_keys)
+    return ActionPlan(actions)
+
+
+def _diff_column_structure(matched: Matched[Column]) -> tuple[Action, ...]:
+    """
+    Return the structural column actions: adds, drops, nullability, and types.
+
+    Comments are deliberately excluded — they are metadata, reconciled by
+    `_diff_column_comments` over the same match.
+    """
     add_actions = tuple(AddColumn(column=column) for column in matched.added)
     drop_actions = tuple(DropColumn(column.name) for column in matched.dropped)
-    change_actions = tuple(
-        action
-        for desired_column, observed_column in matched.common
-        for action in _reconcile_column(desired_column, observed_column)
-    )
-    return add_actions + drop_actions + change_actions
-
-
-def _reconcile_column(desired: Column, observed: Column) -> tuple[Action, ...]:
-    """
-    Return the actions to align one existing column with its desired form.
-
-    A column present on both sides can differ in comment, nullability, and/or
-    data type; each difference is an independent action, and an unchanged column
-    yields none. Reconciling all three attributes of a matched pair in one place
-    keeps the per-attribute checks from drifting apart and visits each pair once.
-    """
-    actions: list[Action] = []
-    if desired.comment != observed.comment:
-        actions.append(SetColumnComment(desired.name, desired.comment))
-    if desired.nullable != observed.nullable:
-        actions.append(SetColumnNullability(column_name=desired.name, nullable=desired.nullable))
-    if desired.data_type != observed.data_type:
-        actions.append(
-            ColumnTypeChange(
-                column_name=desired.name,
-                from_type=observed.data_type,
-                to_type=desired.data_type,
+    change_actions: list[Action] = []
+    for desired_column, observed_column in matched.common:
+        if desired_column.nullable != observed_column.nullable:
+            change_actions.append(
+                SetColumnNullability(
+                    column_name=desired_column.name, nullable=desired_column.nullable
+                )
             )
-        )
-    return tuple(actions)
+        if desired_column.data_type != observed_column.data_type:
+            change_actions.append(
+                ColumnTypeChange(
+                    column_name=desired_column.name,
+                    from_type=observed_column.data_type,
+                    to_type=desired_column.data_type,
+                )
+            )
+    return add_actions + drop_actions + tuple(change_actions)
+
+
+def _diff_column_comments(
+    pairs: tuple[tuple[Column, Column], ...],
+) -> tuple[Action, ...]:
+    """
+    Return the comment actions for name-matched column pairs.
+
+    Matching is by name only, so no structural action can arise here: a column
+    whose type or nullability drifted still gets its comment reconciled. An
+    added column never appears in ``pairs`` — its comment is rendered inline in
+    its ADD COLUMN DDL.
+    """
+    return tuple(
+        SetColumnComment(desired_column.name, desired_column.comment)
+        for desired_column, observed_column in pairs
+        if desired_column.comment != observed_column.comment
+    )
 
 
 def _diff_properties(
