@@ -168,7 +168,8 @@ class DatabricksReader:
         """
         catalog = backtick(qualified_name.catalog)
         query = (
-            f"SELECT constraint_columns.column_name"
+            f"SELECT table_constraints_info.constraint_name,"
+            f" constraint_columns.column_name"
             f" FROM {catalog}.information_schema.constraint_column_usage"
             f" AS constraint_columns"
             f" JOIN {catalog}.information_schema.table_constraints"
@@ -190,7 +191,8 @@ class DatabricksReader:
         columns = tuple(row["column_name"].casefold() for row in rows)
         if not columns:
             return None
-        return PrimaryKeyConstraint(columns=columns)
+        constraint_name = rows[0]["constraint_name"].casefold()
+        return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
 
     def _fetch_table_tags(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """
