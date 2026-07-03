@@ -25,4 +25,4 @@ autodoc_typehints = "description"
 autodoc_mock_imports = ["pyspark", "delta"]
 napoleon_use_ivar = True
 
-exclude_patterns = ["_build", "superpowers", "todo.md"]
+exclude_patterns = ["_build", "superpowers", "todo"]
