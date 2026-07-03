@@ -8,7 +8,7 @@ tags:
 Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns and the table they reference; the referenced columns are inferred from that table's primary key.
 
 ```python
-from delta_engine import Column, DeltaTable, ForeignKey, Integer, Long, String
+from delta_engine import Column, DeltaTable, ForeignKey, Long, String
 
 customers = DeltaTable(
     catalog="dev",
@@ -63,12 +63,34 @@ employees = DeltaTable(
 
 ## Composite foreign keys
 
-For a composite primary key, list `local_columns` in the referenced table's primary-key declaration order. Referenced columns are inferred one-to-one in that same order.
+For a composite primary key, list `local_columns` in the referenced table's primary-key declaration order. The referenced columns are inferred one-to-one in that same order.
 
 ```python
-ForeignKey(
-    local_columns=("tenant_id", "customer_id"),
-    references=customers,  # customers PK declared as (tenant_id, id)
+customer_accounts = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customer_accounts",
+    columns=[
+        Column("tenant_id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False, primary_key=True),
+    ],
+)
+
+order_lines = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="order_lines",
+    columns=[
+        Column("order_line_id", Long(), nullable=False, primary_key=True),
+        Column("tenant_id", Long(), nullable=False),
+        Column("customer_id", Long(), nullable=False),
+    ],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("tenant_id", "customer_id"),  # aligns with customer_accounts PK (tenant_id, id)
+            references=customer_accounts,
+        ),
+    ],
 )
 ```
 
