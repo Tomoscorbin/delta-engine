@@ -251,7 +251,7 @@ def _set_table_comment(comment: str) -> str:
     return f"COMMENT {quote_literal(comment)}"
 
 
-def _set_properties(props: Mapping[str, str] | None) -> str:
+def _set_properties(props: Mapping[str, str]) -> str:
     if not props:
         return ""
     pairs = ", ".join(f"{quote_literal(k)}={quote_literal(v)}" for k, v in sorted(props.items()))

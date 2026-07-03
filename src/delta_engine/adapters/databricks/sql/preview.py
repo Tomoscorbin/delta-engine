@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 
-def sql_preview(sql: str, *, max_chars: int = 240, single_line: bool = True) -> str:
+def sql_preview(sql: str, *, max_chars: int = 240) -> str:
     """
     Return a compact, bounded preview of a SQL statement for logs/errors.
 
-    - Normalizes whitespace to a single line when single_line=True.
+    - Normalizes all runs of whitespace to single spaces on one line.
     - Truncates with an ellipsis when longer than max_chars.
     """
-    s = sql.strip()
-    if single_line:
-        s = " ".join(s.split())
+    s = " ".join(sql.split())
     return s if len(s) <= max_chars else (s[:max_chars] + "…")
 
 
