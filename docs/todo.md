@@ -1,7 +1,7 @@
 # Open questions and decisions
 
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
-- [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet declared in the registry)
+- [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
@@ -31,7 +31,6 @@
 - [ ] Do we need some kind of container linking QualifiedName to ActionPlan so that engine methods dont keep having to construct dictionaries? Seems like we keep building dictionaries and discarding them only to build them again
 - [ ] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
-- [ ] is there a more natural alternative to tuple(registry) in engine?
 - [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] should DesiredTableSource live in ports.py?
