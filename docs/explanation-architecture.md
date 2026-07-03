@@ -21,7 +21,7 @@ Most code lives in one of four packages:
 | `delta_engine.domain` | Backend-free schema snapshots, action plans, and diffing | `DesiredTable`, `ObservedTable`, `ActionPlan`, `compute_plan` |
 | `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
 
-```{mermaid}
+```mermaid
 flowchart TB
     User[User code] --> API[api<br/>DeltaTable, ForeignKey]
     API --> Domain[domain<br/>DesiredTable, ObservedTable, ActionPlan]
@@ -44,7 +44,7 @@ so importing table declarations does not require PySpark.
 The application owns the ports. Adapters implement them; the engine only sees the
 protocols and typed return values.
 
-```{mermaid}
+```mermaid
 flowchart LR
     Engine[Engine] --> ReaderPort[CatalogStateReader<br/>fetch_state]
     Engine --> ExecutorPort[PlanExecutor<br/>execute]
@@ -73,7 +73,7 @@ reporting the rest of the run.
 the sync; that run accumulates read state, a plan, failures, and execution
 results before being frozen into a public `TableRunReport`.
 
-```{mermaid}
+```mermaid
 sequenceDiagram
     participant User
     participant API as DeltaTable/API
@@ -167,7 +167,7 @@ table must be synced before a dependent table tries to apply its FK constraint.
 Resolution also propagates failures: if a dependency cannot reach its desired
 state in this run, every downstream table that depends on it is blocked.
 
-```{mermaid}
+```mermaid
 flowchart LR
     Customers[customers<br/>validation failed] --> Orders[orders<br/>blocked by failed dependency]
     Orders --> Shipments[shipments<br/>blocked by failed dependency]
