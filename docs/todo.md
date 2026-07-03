@@ -45,3 +45,7 @@
 - [ ] review types hints; things like Mapping, AbstractSet, etc
 - [ ] review Matched and Matched.common, particularly in _diff_columns
 - [ ] Add tags, comment, schema, etc as properties to DeltaTable
+- [ ] put domain constraints into single file
+- [ ] Place QualifiedName parse method after post init
+- [ ] Improve module docstrings for the ones that need more info
+- [ ] improve Report display formatting
