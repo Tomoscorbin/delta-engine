@@ -282,8 +282,10 @@ def validate_plan(
     the same inputs always yield the same result. The caller reads
     ``ValidationResult.failed`` to gate execution; it does not assemble the verdict.
 
-    Creation plans pass all rules automatically because none of the blocked
-    action types appear in them.
+    Creation plans (a ``CreateTable`` and its follow-up actions) pass all
+    rules automatically because none of the blocked action types appear in
+    them. A missing table whose definition cannot create it produces a
+    ``TargetTableMissing`` plan instead, which ``MissingTargetTable`` rejects.
 
     Args:
         plan: The action plan to reach the desired state.

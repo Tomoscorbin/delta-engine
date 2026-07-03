@@ -454,7 +454,7 @@ def test_metadata_only_table_still_lowers_the_full_schema():
     # differ reads, not what gets lowered
     desired = table.to_desired_table()
     assert tuple(column.name for column in desired.columns) == ("id", "name")
-    assert desired.properties  # default properties still lowered
+    assert desired.properties == dict(DeltaTable.default_properties)
 
 
 def test_metadata_aspects_excludes_structure_properties_and_partitioning():
