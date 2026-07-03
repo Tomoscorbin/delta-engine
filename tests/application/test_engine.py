@@ -791,3 +791,51 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     assert orders.execution is None
     # customers is a clean create with no FK — it is not itself foreign-key-failed
     assert reports["cat.sch.customers"].status is TableRunStatus.SUCCESS
+
+
+def _metadata_only_spec_with_ghost_column(fqn: str) -> DeltaTable:
+    """Build a metadata-only spec whose commented column does not exist live."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(
+            Column("id", String()),
+            Column("ghost", String(), comment="does not exist live"),
+        ),
+        metadata_only=True,
+    )
+
+
+def test_metadata_only_drift_fails_validation_and_skips_execution():
+    # Given a live table without the declared 'ghost' column
+    fqn = "cat.sch.orders"
+    reader = _FakeReader({fqn: _existing_id_table(fqn)})
+    executor = _FakeExecutor(results=())
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing the metadata-only definition
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(_metadata_only_spec_with_ghost_column(fqn))
+
+    # Then the run fails at validation and nothing executes
+    report = exc_info.value.report.table_reports[0]
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert report.execution is None
+    assert any("ghost" in failure.format_lines()[0] for failure in report.failures)
+
+
+def test_metadata_only_dry_run_reports_broken_targets_without_raising():
+    # Given the same drifted state
+    fqn = "cat.sch.orders"
+    reader = _FakeReader({fqn: _existing_id_table(fqn)})
+    engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
+
+    # When dry-running
+    report = engine.sync(_metadata_only_spec_with_ghost_column(fqn), dry_run=True)
+
+    # Then the report renders the descriptive plan instead of raising
+    table_report = report.table_reports[0]
+    assert table_report.execution is None
+    assert any("ghost" in line for line in report.diff().splitlines())
