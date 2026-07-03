@@ -19,7 +19,7 @@
 - [ ] Review foreign key logic
 - [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row
 - [ ] utilise __init__ __all__ so that we can reduce the number of import line
-- [ ] Add more to architecture documentation, including visualisations
+- [x] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
 - [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
 - [ ] should report.any_failures be report.has_any_failures?

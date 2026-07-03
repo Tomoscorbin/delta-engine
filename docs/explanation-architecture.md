@@ -5,42 +5,125 @@ tags:
 
 # Architecture
 
-delta-engine uses a hexagonal (ports and adapters) architecture layered over a domain-driven design. This keeps the core planning logic independent of any backend, so the Databricks adapter can be swapped or extended without touching the domain or application layers.
+delta-engine uses a hexagonal (ports and adapters) architecture layered over a
+small domain model. The goal is to keep the planning core independent of any
+backend, so a Databricks implementation can be replaced or extended without
+changing the domain or application orchestration.
 
-## The four layers
+## Package structure
 
-Dependencies point strictly inward: Adapters → Ports → Application → Domain.
+Most code lives in one of four packages:
 
+| Package | Responsibility | Examples |
+|---|---|---|
+| `delta_engine.api` | User-facing declarations and import surface | `DeltaTable`, `ForeignKey`, `Property` |
+| `delta_engine.application` | Use-case orchestration, ports, failures, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_plan`, `resolve` |
+| `delta_engine.domain` | Backend-free schema snapshots, action plans, and diffing | `DesiredTable`, `ObservedTable`, `ActionPlan`, `compute_plan` |
+| `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
+
+```{mermaid}
+flowchart TB
+    User[User code] --> API[api<br/>DeltaTable, ForeignKey]
+    API --> Domain[domain<br/>DesiredTable, ObservedTable, ActionPlan]
+    App[application<br/>Engine, validation, reports] --> Domain
+    Adapters[adapters<br/>Databricks reader, executor, SQL compiler] --> Ports[application ports<br/>CatalogStateReader, PlanExecutor]
+    App --> Ports
+    Public[delta_engine.__init__<br/>curated public exports] --> API
+    Public --> App
+    Public -. lazy .-> Adapters
 ```
-Adapters  (databricks reader, executor, SQL compiler)
-   │
-Ports     (CatalogStateReader, PlanExecutor — Python Protocols)
-   │
-Application  (Engine, validate_plan, result types)
-   │
-Domain    (DeltaTable model, Column, ActionPlan, differ)
+
+The arrows show dependencies. Backend-specific code depends inward on the
+application ports and domain vocabulary; the domain does not depend on Spark,
+Databricks, or adapter code. The top-level `delta_engine` package eagerly exposes
+the pure-Python API and application surface, and lazily exposes Databricks helpers
+so importing table declarations does not require PySpark.
+
+## Hexagonal boundary
+
+The application owns the ports. Adapters implement them; the engine only sees the
+protocols and typed return values.
+
+```{mermaid}
+flowchart LR
+    Engine[Engine] --> ReaderPort[CatalogStateReader<br/>fetch_state]
+    Engine --> ExecutorPort[PlanExecutor<br/>execute]
+    ReaderPort <|.. Reader[DatabricksReader]
+    ExecutorPort <|.. Executor[DatabricksExecutor]
+    Reader --> Catalog[Unity Catalog / Spark catalog]
+    Executor --> Compiler[SQL compiler]
+    Compiler --> Spark[Spark SQL]
 ```
 
-### Domain
+`CatalogStateReader.fetch_state(qualified_name)` returns one of:
 
-Pure Python — zero imports outside the standard library. Defines immutable value objects (`Column`, `QualifiedName`, data types) and the planning logic (`compute_plan`, `ActionPlan`, `Action` subtypes). No knowledge of Spark, Delta, or any backend.
+- `TablePresent(table=ObservedTable(...))`
+- `TableAbsent()`
+- `ReadFailed(failure=ReadFailure(...))`
 
-### Application
+`PlanExecutor.execute(qualified_name, plan)` returns an `ExecutionSummary` with
+one result per attempted action. Both ports are **total**: implementations catch
+backend exceptions and return typed failures instead of raising. That boundary is
+what lets one table fail while the engine continues reading, planning, and
+reporting the rest of the run.
 
-Orchestrates the sync loop: prepare the desired tables, fetch state via the reader port, compute a plan, validate it, execute via the executor port, collect results. Owns `Engine`, `validate_plan`, and all result/report types. No knowledge of Databricks.
+## Sync lifecycle
 
-### Ports
+`Engine.sync(...)` is a phase chain. Each table gets a private run object during
+the sync; that run accumulates read state, a plan, failures, and execution
+results before being frozen into a public `TableRunReport`.
 
-Two `Protocol` interfaces are the only seams the engine crosses:
+```{mermaid}
+sequenceDiagram
+    participant User
+    participant API as DeltaTable/API
+    participant Engine
+    participant Reader as CatalogStateReader
+    participant Domain as Domain planner
+    participant Validator
+    participant Resolver
+    participant Executor as PlanExecutor
 
-- `CatalogStateReader.fetch_state(qualified_name)` — returns the table's current state or a `ReadFailed`.
-- `PlanExecutor.execute(qualified_name, plan)` — executes the plan and returns an `ExecutionSummary`.
+    User->>Engine: sync(customers, orders)
+    Engine->>API: to_desired_table()
+    API-->>Engine: DesiredTable
+    Engine->>Reader: fetch_state(qualified_name)
+    Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
+    Engine->>Domain: compute_plan(desired, observed)
+    Domain-->>Engine: ActionPlan
+    Engine->>Validator: validate_plan(plan)
+    Validator-->>Engine: ValidationResult
+    Engine->>Resolver: resolve(tables, blocked=failed_tables)
+    Resolver-->>Engine: dependency order + FK failures
+    Engine->>Executor: execute(qualified_name, plan)
+    Executor-->>Engine: ExecutionSummary
+    Engine-->>User: SyncReport or SyncFailedError(report)
+```
 
-Both are **total**: implementations must catch all exceptions internally and return a typed failure rather than raising. This ensures a failure on one table never aborts the sync of others.
+The phases are:
 
-### Adapters
+1. **Prepare**: lower user-facing table declarations to `DesiredTable` values and
+   reject duplicate qualified names.
+2. **Read**: ask the reader port for the current catalog state of each table.
+3. **Plan**: diff desired state against observed state with `compute_plan`.
+4. **Validate**: reject unsafe plans before SQL runs.
+5. **Resolve**: order tables by foreign-key dependency and block dependents of
+   failed tables.
+6. **Execute**: execute non-empty plans for tables that have no failures.
+7. **Report**: return `SyncReport`, or raise `SyncFailedError` with the report on
+   real runs that failed.
 
-The `delta_engine.adapters.databricks` package implements both ports for Databricks/Spark. The SQL compiler uses `functools.singledispatch` — one registered handler per `Action` subtype. Type mapping uses structural `match`/`case` patterns.
+## Boundary data shapes
+
+| Shape | Produced by | Consumed by | Purpose |
+|---|---|---|---|
+| `DeltaTable` | User code | Application preparation | Public declaration object |
+| `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
+| `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
+| `ActionPlan` | `compute_plan` | Validation, executor, report | Ordered table-local changes |
+| `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
+| `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
+| `SyncReport` | Engine | User code | Immutable run result |
 
 ## Planning and determinism
 
@@ -77,6 +160,26 @@ This is a deliberate design choice. An object reference makes the dependency exp
 
 References by name are intentionally not supported in this iteration. If they are ever needed — for a table declared in another module, or one that exists in the catalog but is not managed here — the `references` union can be widened to also accept a `QualifiedName`. That is a backward-compatible addition: existing object-reference declarations keep working, and the new branch would require explicit referenced columns, since a bare name carries no primary key to infer from.
 
+## Foreign key dependency resolution
+
+Foreign keys affect table order, not just table-local SQL order. A referenced
+table must be synced before a dependent table tries to apply its FK constraint.
+Resolution also propagates failures: if a dependency cannot reach its desired
+state in this run, every downstream table that depends on it is blocked.
+
+```{mermaid}
+flowchart LR
+    Customers[customers<br/>validation failed] --> Orders[orders<br/>blocked by failed dependency]
+    Orders --> Shipments[shipments<br/>blocked by failed dependency]
+    Products[products<br/>success] --> OrderLines[order_lines<br/>success]
+    Orders --> OrderLines
+```
+
+The resolver treats read failures, validation failures, FK failures, and
+execution failures as table-level blockers for downstream FKs. It still includes
+every registered table in the final report, so users can see the full blast
+radius in one run.
+
 ## Validation
 
 Each rule implements a `Rule` protocol: a `name` class variable and an `evaluate(plan)` method returning zero or more `ValidationFailure` objects. `validate_plan` runs all rules in `DEFAULT_RULES` and aggregates failures. Rules receive the full plan, so they can reason across actions (e.g. "does this plan add a NOT NULL column to a table that already exists?").
@@ -84,3 +187,24 @@ Each rule implements a `Rule` protocol: a `name` class variable and an `evaluate
 ## Lazy pyspark import
 
 `delta_engine.__init__` uses PEP 562 `__getattr__` to defer import of `build_databricks_engine` and `configure_logging` until first access. This means `import delta_engine` and table declarations work without a Spark install — useful for testing and schema-only environments.
+
+## Where to make changes
+
+| Change | Main location | Notes |
+|---|---|---|
+| Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
+| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in the domain, emit it from the differ, then compile it in the backend adapter. |
+| Add a safety rule | `delta_engine.application.validation` | Rules inspect `ActionPlan` and return `ValidationFailure` values. |
+| Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
+| Change public declarations | `delta_engine.api` | Lower public API choices into domain snapshots before the engine phases begin. |
+| Change report output | `delta_engine.application.report` / `rendering` | Keep display formatting out of domain objects. |
+
+## Architectural rules
+
+- Keep PySpark and Databricks imports inside `delta_engine.adapters`.
+- Keep the domain backend-free and deterministic.
+- Put orchestration and failure policy in the application layer.
+- Put backend normalization at adapter boundaries, such as lowercasing catalog
+  identifiers or mapping Spark types to domain types.
+- Return typed failures across ports instead of raising backend exceptions.
+- Let `ActionPlan` own action ordering; callers should not sort plans manually.
