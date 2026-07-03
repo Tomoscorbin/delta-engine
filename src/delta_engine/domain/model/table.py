@@ -144,14 +144,17 @@ class DesiredTable(TableSnapshot):
                 )
 
         table_name = self.qualified_name.name
-        if self.primary_key is not None:
+        if self.primary_key is not None and self.primary_key.constraint_name is None:
             object.__setattr__(
                 self, "primary_key", self.primary_key.with_generated_name(table_name)
             )
         object.__setattr__(
             self,
             "foreign_keys",
-            tuple(fk.with_generated_name(table_name) for fk in self.foreign_keys),
+            tuple(
+                fk if fk.constraint_name is not None else fk.with_generated_name(table_name)
+                for fk in self.foreign_keys
+            ),
         )
 
 

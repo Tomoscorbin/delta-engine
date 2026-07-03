@@ -249,6 +249,26 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
         )
 
 
+def test_desired_table_accepts_an_already_named_foreign_key():
+    # Given a FK that already carries a name (as the API layer will produce it)
+    fk = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
+    )
+
+    # When building a DesiredTable with it
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+
+    # Then the name is preserved (not regenerated, not rejected)
+    assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
+
+
 def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
     # Given the same clashing FK pair, but as an OBSERVED table (a catalog fact
     # must stay representable and reconcilable, not rejected at read time)

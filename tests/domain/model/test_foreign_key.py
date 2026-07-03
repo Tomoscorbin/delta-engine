@@ -111,3 +111,17 @@ def test_foreign_key_constraint_is_frozen():
     # When / Then assignment is rejected (frozen dataclass)
     with pytest.raises(AttributeError):
         constraint.referenced_table = _customers()  # type: ignore[misc]
+
+
+def test_generate_names_constraint_from_table_and_local_columns():
+    # Given a table name and foreign key content
+    # When the engine generates the constraint
+    constraint = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+
+    # Then the name follows {table}_{local_cols}_fk
+    assert constraint.constraint_name == "orders_customer_id_fk"
