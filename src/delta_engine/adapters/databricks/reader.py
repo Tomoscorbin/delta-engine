@@ -95,8 +95,8 @@ class DatabricksReader:
         """
         Fetch the current state of a table: present, absent, or unreadable.
 
-        Returns ``TablePresent`` carrying the current columns, properties, and
-        table comment; ``TableAbsent`` when the table doesn't exist; or
+        Returns ``TablePresent`` carrying the current observed table snapshot;
+        ``TableAbsent`` when the table doesn't exist; or
         ``ReadFailed`` if catalog access raised an exception.
 
         Every failure mode is contained: anything that goes wrong reading this
@@ -204,8 +204,7 @@ class DatabricksReader:
             rows = self.spark.sql(query).collect()
         except AnalysisException:
             # information_schema is only available in Unity Catalog. On plain
-            # Spark (e.g. local tests), the table does not exist and there are
-            # no PK constraints to observe.
+            # Spark (e.g. local tests), there are no PK constraints to observe.
             return None
         columns = tuple(row["column_name"].casefold() for row in rows)
         if not columns:
@@ -280,8 +279,8 @@ class DatabricksReader:
         Returns an empty tuple when no FKs are defined, or on AnalysisException
         (plain Spark / non-Unity Catalog environment).
 
-        Constraint names are read from the catalog so the differ can compare them
-        directly without re-deriving them. Column names are lowercased at the
+        Constraint names are read from the catalog so observed-only constraints
+        can be dropped by their real names. Column names are lowercased at the
         adapter boundary, consistent with how primary key and column names are
         normalised throughout this reader.
         """

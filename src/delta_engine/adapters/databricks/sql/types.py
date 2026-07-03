@@ -1,8 +1,8 @@
 """
 Map between domain `DataType` and Spark SQL types.
 
-Provides conversions to Spark SQL DDL strings and from
-`pyspark.sql.types.DataType` instances or DDL strings back to domain types.
+Provides conversions to Spark SQL DDL strings and from parsed
+`pyspark.sql.types.DataType` instances back to domain types.
 
 Uses ``match``/``case`` rather than ``functools.singledispatch`` (which the plan
 compiler uses): ``DataType`` is a closed set and the mapping is a leaf lookup,

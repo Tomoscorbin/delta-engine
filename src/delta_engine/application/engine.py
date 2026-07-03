@@ -3,8 +3,8 @@ High-level orchestration of planning, validation, and execution.
 
 `Engine.sync` runs a chain of phases, each a pure transform over the per-table
 runs — one `TableRunReport` is born per table in the read phase and accretes
-its plan, failures, and execution as the chain proceeds. If any table fails,
-`SyncFailedError` is raised with a formatted summary.
+its plan, failures, and execution as the chain proceeds. On a real run, if any
+table fails, `SyncFailedError` is raised with a formatted summary.
 
 The five phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
@@ -135,8 +135,9 @@ class Engine:
 
         Raises:
             SyncFailedError: On a real run (``dry_run=False``), if any table
-                fails to read, validate, or execute. The report is available on
-                the exception's ``report`` attribute. A dry run never raises.
+                fails to read, validate, resolve foreign keys, or execute. The
+                report is available on the exception's ``report`` attribute. A
+                dry run never raises.
 
         """
         run_started = datetime.now(UTC)
