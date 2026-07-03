@@ -13,12 +13,6 @@ This tutorial walks you through defining your first Delta table, registering it,
 - A Databricks workspace with Unity Catalog enabled
 - An active `SparkSession` (a Databricks notebook provides one automatically as `spark`)
 
-## Install delta-engine
-
-```bash
-pip install delta-engine
-```
-
 ## Define a table
 
 Import the building blocks and describe your table:
