@@ -3,7 +3,7 @@ Application layer: the engine and the public outcome types.
 
 These are the names a library consumer depends on -- pass tables to an `Engine`
 and call `sync`, and handle the `SyncReport` it returns or the `SyncFailedError`
-it raises (whose failures render via `Failure.format_line`). The per-phase
+it raises (whose failures render via `Failure.format_lines`). The per-phase
 result types (`CatalogState`, `ExecutionSummary`, `TableRunReport`, ...) remain
 internal.
 """

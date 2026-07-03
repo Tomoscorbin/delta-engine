@@ -38,9 +38,10 @@ class Rule(Protocol):
 
         Args:
             plan: The action plan to reach the desired state. A creation plan
-                contains only a ``CreateTable`` action; a migration plan
-                contains the specific change actions. Rules inspect the actions
-                they care about and ignore the rest.
+                contains ``CreateTable`` plus any follow-up metadata actions
+                needed after creation; a migration plan contains the specific
+                change actions. Rules inspect the actions they care about and
+                ignore the rest.
 
         Returns:
             A tuple of failures — one per violation found. Empty when the rule
@@ -182,8 +183,8 @@ def validate_plan(
     the same inputs always yield the same result. The caller reads
     ``ValidationResult.failed`` to gate execution; it does not assemble the verdict.
 
-    Creation plans (containing only a ``CreateTable`` action) pass all rules
-    automatically because none of the blocked action types appear in them.
+    Creation plans pass all rules automatically because none of the blocked
+    action types appear in them.
 
     Args:
         plan: The action plan to reach the desired state.
