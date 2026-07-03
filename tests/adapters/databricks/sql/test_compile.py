@@ -3,7 +3,15 @@ import inspect
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    QualifiedName,
+    String,
+    TableAspect,
+)
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -24,6 +32,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -451,3 +462,30 @@ def test_set_column_tag_escapes_single_quotes_in_key_and_value():
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')"
     )
+
+
+def test_target_table_missing_never_reaches_the_compiler():
+    # Given a TargetTableMissing (validation rejects it first)
+    action = TargetTableMissing()
+
+    # Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
+        _compile_single(action)
+
+
+def test_target_column_missing_never_reaches_the_compiler():
+    # Given a TargetColumnMissing (validation rejects it first)
+    action = TargetColumnMissing(column_name="email", reasons=(TableAspect.COLUMN_TAGS,))
+
+    # Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
+        _compile_single(action)
+
+
+def test_unenforceable_primary_key_never_reaches_the_compiler():
+    # Given an UnenforceablePrimaryKey (validation rejects it first)
+    action = UnenforceablePrimaryKey(nullable_columns=("id",))
+
+    # Then compiling it is an internal-invariant violation
+    with pytest.raises(AssertionError):
+        _compile_single(action)

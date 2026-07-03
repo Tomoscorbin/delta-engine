@@ -35,6 +35,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -229,6 +232,37 @@ def _(action: PartitioningChange, backticked_table_name: str) -> str:
         f"Partitioning changes are not supported"
         f" ({action.observed_partitioning} -> {action.desired_partitioning})."
         " Recreate the table with the desired partitioning."
+    )
+
+
+@_compile_action.register
+def _(action: TargetTableMissing, backticked_table_name: str) -> str:
+    # Validation rejects this action before execution, so reaching here is an
+    # internal-invariant violation (AssertionError), not an unimplemented feature.
+    raise AssertionError(
+        f"Table {backticked_table_name} does not exist and this definition"
+        " cannot create it; validation (MissingTargetTable) should have blocked this"
+    )
+
+
+@_compile_action.register
+def _(action: TargetColumnMissing, backticked_table_name: str) -> str:
+    # Validation rejects this action before execution, so reaching here is an
+    # internal-invariant violation (AssertionError), not an unimplemented feature.
+    raise AssertionError(
+        f"Column '{action.column_name}' is missing from the live table;"
+        " validation (MissingTargetColumn) should have blocked this"
+    )
+
+
+@_compile_action.register
+def _(action: UnenforceablePrimaryKey, backticked_table_name: str) -> str:
+    # Validation rejects this action before execution, so reaching here is an
+    # internal-invariant violation (AssertionError), not an unimplemented feature.
+    raise AssertionError(
+        "Primary key over nullable live column(s)"
+        f" {', '.join(action.nullable_columns)}; validation"
+        " (UnenforceablePrimaryKeyChange) should have blocked this"
     )
 
 
