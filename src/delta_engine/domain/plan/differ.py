@@ -267,7 +267,7 @@ def _diff_primary_key(
     Compares the key columns as a set so column order does not trigger a
     spurious change; declaration order from desired is preserved in the emitted
     SetPrimaryKey.columns. The constraint name is read off the desired
-    constraint, which was generated when the DesiredTable was built.
+    constraint, which the API layer generated when the DeltaTable was lowered.
     """
     desired_columns_in_key = set(desired_pk.columns) if desired_pk else set()
     observed_columns_in_key = set(observed_pk.columns) if observed_pk else set()
@@ -306,10 +306,10 @@ def _diff_foreign_keys(
     one created outside this engine — produces no action, so a sync over an
     unchanged catalog stays idempotent.
 
-    Setting a desired FK carries the FK content, including the name generated
-    when the DesiredTable was built. Dropping an observed FK uses its
-    catalog-stored name, so the correct constraint is removed. Order does not
-    matter — ActionPlan sorts every plan by execution phase.
+    Setting a desired FK carries the FK content, including the name the API
+    layer generated when the DeltaTable was lowered. Dropping an observed FK
+    uses its catalog-stored name, so the correct constraint is removed. Order
+    does not matter — ActionPlan sorts every plan by execution phase.
     """
     matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
     set_actions: list[Action] = []
