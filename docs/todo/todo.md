@@ -36,3 +36,5 @@
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] improve Report display formatting
+- [ ] Put Propertiess into table.py alongside DeltaTable
+- [ ] Remove table.py from api/ and put it in src/delta_table??
