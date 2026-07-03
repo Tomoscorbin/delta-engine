@@ -563,7 +563,7 @@ def test_fetch_state_includes_primary_key_in_observed_table():
         pk_column_rows=[{"column_name": "id", "constraint_name": "t_pk"}],
     )
 
-    # When
+    # When fetching state for the table
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then: primary_key is populated on the ObservedTable, carrying the catalog name
@@ -587,7 +587,7 @@ def test_fetch_state_primary_key_is_empty_when_none_defined():
         pk_column_rows=[],
     )
 
-    # When
+    # When fetching state for the table
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then: primary_key is None (no constraint defined)
@@ -609,7 +609,7 @@ def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
         pk_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
     )
 
-    # When
+    # When fetching state for the table
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then: the read succeeds and primary_key is None (no UC = no PK constraints)
@@ -905,7 +905,7 @@ def test_fetch_state_lowercases_foreign_key_constraint_name():
     ]
     spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
 
-    # When
+    # When fetching state for the table
     result = DatabricksReader(spark).fetch_state(qn)
 
     # Then the observed constraint name is normalised to lowercase

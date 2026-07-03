@@ -294,7 +294,7 @@ def test_plan_orders_drop_foreign_key_before_drop_primary_key():
 
 
 def test_drop_foreign_key_subject_is_constraint_name():
-    # Given
+    # Given a DropForeignKey action with a constraint name
     action = DropForeignKey(constraint_name="orders_customer_id_fk")
 
     # Then subject is the constraint name (for deterministic ordering within the phase)
@@ -302,7 +302,7 @@ def test_drop_foreign_key_subject_is_constraint_name():
 
 
 def test_set_foreign_key_subject_is_local_columns_joined():
-    # Given
+    # Given a SetForeignKey action with one local column
     action = SetForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
