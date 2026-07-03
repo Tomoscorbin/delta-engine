@@ -402,17 +402,27 @@ def _find_broken_targets(
     planned key sits on live-nullable columns.
     """
     observed_column_names = frozenset(column.name for column in observed.columns)
+    foreign_key_local_columns = frozenset(
+        local_column
+        for foreign_key in desired.foreign_keys
+        for local_column in foreign_key.local_columns
+    )
+    # The walrus in the filter both tests and captures the reasons: the yield
+    # expression only evaluates when the condition is true, so `reasons` is
+    # always bound (and non-empty) where it is read.
     missing_target_actions = tuple(
         TargetColumnMissing(column_name=column.name, reasons=reasons)
         for column in desired.columns
         if column.name not in observed_column_names
-        and (reasons := _broken_target_reasons(column, desired))
+        and (reasons := _broken_target_reasons(column, desired, foreign_key_local_columns))
     )
     return missing_target_actions + _unenforceable_primary_key(desired, observed, planned)
 
 
 def _broken_target_reasons(
-    column: Column, desired: DesiredTable
+    column: Column,
+    desired: DesiredTable,
+    foreign_key_local_columns: frozenset[str],
 ) -> tuple[TableAspect, ...]:
     """
     Return the managed aspects whose metadata targets ``column``.
@@ -420,14 +430,11 @@ def _broken_target_reasons(
     A column earns a reason only when the aspect is managed AND the column
     actually carries that metadata — a bare stale column is benign drift.
     Reasons follow ``TableAspect`` declaration order so messages are
-    deterministic.
+    deterministic. ``foreign_key_local_columns`` is the pre-computed set of
+    all local columns referenced by desired FKs, hoisted by the caller to
+    avoid rebuilding it on every invocation.
     """
     managed = desired.managed_aspects
-    foreign_key_local_columns = frozenset(
-        local_column
-        for foreign_key in desired.foreign_keys
-        for local_column in foreign_key.local_columns
-    )
     reasons: list[TableAspect] = []
     if TableAspect.COLUMN_COMMENTS in managed and column.comment:
         reasons.append(TableAspect.COLUMN_COMMENTS)

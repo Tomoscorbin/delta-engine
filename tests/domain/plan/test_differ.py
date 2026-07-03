@@ -1225,6 +1225,29 @@ def test_metadata_only_missing_column_reports_every_reason_in_canonical_order():
     ]
 
 
+def test_metadata_only_missing_fk_local_column_reports_foreign_keys_reason():
+    # Given a declared FK whose local column is absent from the live table
+    foreign_key = ForeignKeyConstraint.generate(
+        owner_table_name="test",
+        local_columns=("ghost",),
+        referenced_table=QualifiedName("dev", "silver", "other"),
+        referenced_columns=("id",),
+    )
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()), Column("ghost", Integer())),
+        foreign_keys=(foreign_key,),
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then the broken target carries the FOREIGN_KEYS reason
+    expected = TargetColumnMissing(column_name="ghost", reasons=(TableAspect.FOREIGN_KEYS,))
+    assert expected in plan.actions
+
+
 def test_metadata_only_missing_column_without_metadata_is_benign_drift():
     # Given a declared column absent live that carries no managed metadata
     desired = _desired(
