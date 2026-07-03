@@ -55,19 +55,19 @@ class ForeignKey:
         ``owner_primary_key`` describe the enclosing table, used when
         ``references`` is :data:`Self`.
         """
-        reference = self.references
-        if isinstance(reference, _SelfReference):
-            referenced_table, referenced_columns = owner_name, owner_primary_key
-        elif isinstance(reference, DeltaTable):
-            target = reference.to_desired_table()
-            referenced_table = target.qualified_name
-            referenced_columns = (
-                target.primary_key.columns if target.primary_key is not None else ()
-            )
-        else:
-            raise TypeError(
-                f"foreign key references must be a DeltaTable or Self; got {reference!r}"
-            )
+        match self.references:
+            case _SelfReference():
+                referenced_table, referenced_columns = owner_name, owner_primary_key
+            case DeltaTable() as target:
+                desired = target.to_desired_table()
+                referenced_table = desired.qualified_name
+                referenced_columns = (
+                    desired.primary_key.columns if desired.primary_key is not None else ()
+                )
+            case other:
+                raise TypeError(
+                    f"foreign key references must be a DeltaTable or Self; got {other!r}"
+                )
 
         if not referenced_columns:
             raise ValueError(
