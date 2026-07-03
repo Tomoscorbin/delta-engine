@@ -36,6 +36,11 @@ class TableSnapshot:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
 
+    @property
+    def primary_key_columns(self) -> tuple[str, ...]:
+        """Primary key column names, or ``()`` when the table has no primary key."""
+        return self.primary_key.columns if self.primary_key is not None else ()
+
     def __post_init__(self) -> None:
         """
         Validate the snapshot's structural invariants.
@@ -53,31 +58,29 @@ class TableSnapshot:
                 raise ValueError(f"Duplicate column name: {column.name}")
             seen_names.add(column.name)
 
-        if self.partitioned_by:
-            for name in self.partitioned_by:
-                if name != name.casefold():
-                    raise ValueError(f"Partition column name must be lowercase: {name!r}")
+        for name in self.partitioned_by:
+            if name != name.casefold():
+                raise ValueError(f"Partition column name must be lowercase: {name!r}")
 
-            missing = [name for name in self.partitioned_by if name not in seen_names]
-            if missing:
-                raise ValueError(f"Partition column not found: {missing[0]}")
+        missing = [name for name in self.partitioned_by if name not in seen_names]
+        if missing:
+            raise ValueError(f"Partition column not found: {missing[0]}")
 
-            seen_partitions: set[str] = set()
-            for name in self.partitioned_by:
-                if name in seen_partitions:
-                    raise ValueError(f"Duplicate partition column: {name}")
-                seen_partitions.add(name)
+        seen_partitions: set[str] = set()
+        for name in self.partitioned_by:
+            if name in seen_partitions:
+                raise ValueError(f"Duplicate partition column: {name}")
+            seen_partitions.add(name)
 
         if self.primary_key is not None:
             missing_pk = [name for name in self.primary_key.columns if name not in seen_names]
             if missing_pk:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
-        if self.foreign_keys:
-            for foreign_key in self.foreign_keys:
-                missing = [col for col in foreign_key.local_columns if col not in seen_names]
-                if missing:
-                    raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
+        for foreign_key in self.foreign_keys:
+            missing = [col for col in foreign_key.local_columns if col not in seen_names]
+            if missing:
+                raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
 
         for tag_key in self.tags:
             if not tag_key.strip():

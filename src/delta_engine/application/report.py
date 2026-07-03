@@ -112,6 +112,4 @@ class SyncReport:
         """Render the run as an aligned grid followed by a summary footer."""
         from delta_engine.application.rendering import render_grid, run_summary_footer
 
-        if not self.table_reports:
-            return "Sync report: 0 tables"
         return f"{render_grid(self.table_reports)}\n\n{run_summary_footer(self)}"

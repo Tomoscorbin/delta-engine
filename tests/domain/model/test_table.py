@@ -73,6 +73,26 @@ def test_table_snapshot_primary_key_defaults_to_none():
     assert table.primary_key is None
 
 
+def test_primary_key_columns_is_empty_when_no_primary_key():
+    # Given a table with no primary key
+    table = DesiredTable(qualified_name=_QN, columns=(_COL,))
+
+    # Then primary_key_columns is the empty tuple, not None
+    assert table.primary_key_columns == ()
+
+
+def test_primary_key_columns_returns_the_constraint_columns():
+    # Given a table with a two-column primary key
+    table = ObservedTable(
+        qualified_name=_QN,
+        columns=(Column("id", Integer()), Column("tenant_id", Integer())),
+        primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id"), constraint_name="t_pk"),
+    )
+
+    # Then primary_key_columns returns those column names in declaration order
+    assert table.primary_key_columns == ("id", "tenant_id")
+
+
 def test_table_snapshot_rejects_pk_column_not_in_columns():
     # Given a primary_key naming a column that does not exist
     # Then construction raises ValueError

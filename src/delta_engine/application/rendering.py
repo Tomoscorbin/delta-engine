@@ -142,6 +142,12 @@ def _(action: PartitioningChange) -> str:
     return f"~ partitioning {action.observed_partitioning} → {action.desired_partitioning}"
 
 
+# Shown wherever a report has a readable state but no planned actions. One
+# spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
+# a standalone line in the diff block.
+_NO_CHANGES = "no changes"
+
+
 def render_diff_block(report: TableRunReport) -> str:
     """Render one table's change block: its name then one line per planned action."""
     from delta_engine.application.ports import ReadFailed
@@ -150,7 +156,7 @@ def render_diff_block(report: TableRunReport) -> str:
     if isinstance(report.read, ReadFailed):
         return f"{header}\n  (could not read — no diff)"
     if not report.plan:
-        return f"{header}\n  (no changes)"
+        return f"{header}\n  ({_NO_CHANGES})"
     lines = [f"  {action_diff_line(action)}" for action in report.plan]
     return "\n".join([header, *lines])
 
@@ -167,9 +173,7 @@ def _grid_detail(report: TableRunReport) -> str:
         first = failures[0].format_lines()[0]
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
-    if len(report.plan):
-        return ", ".join(type(action).__name__ for action in report.plan)
-    return "no changes"
+    return ", ".join(type(action).__name__ for action in report.plan) or _NO_CHANGES
 
 
 def _truncate(text: str, limit: int = _DETAIL_MAX_CHARS) -> str:

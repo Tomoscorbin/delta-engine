@@ -61,9 +61,7 @@ class ForeignKey:
             case DeltaTable() as target:
                 desired = target.to_desired_table()
                 referenced_table = desired.qualified_name
-                referenced_columns = (
-                    desired.primary_key.columns if desired.primary_key is not None else ()
-                )
+                referenced_columns = desired.primary_key_columns
             case _:
                 raise TypeError(
                     f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
@@ -165,8 +163,7 @@ class DeltaTable:
     @property
     def primary_key(self) -> tuple[str, ...]:
         """Column names declared as the primary key, in declaration order."""
-        constraint = self._desired_table.primary_key
-        return constraint.columns if constraint is not None else ()
+        return self._desired_table.primary_key_columns
 
     @property
     def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
