@@ -150,8 +150,9 @@ def test_table_snapshot_defaults_to_no_foreign_keys():
 
 
 def test_table_snapshot_stores_foreign_keys():
-    # Given a foreign key referencing another table
-    fk = ForeignKeyConstraint(
+    # Given a foreign key referencing another table (name generated at the API layer)
+    fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
@@ -175,14 +176,15 @@ def test_table_snapshot_stores_foreign_keys():
 
 
 def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
-    # Given a FK whose local column is not declared
-    fk = ForeignKeyConstraint(
+    # Given a FK whose local column is not declared (name provided so construction succeeds)
+    fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("nonexistent",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
 
-    # When / Then
+    # When / Then the DesiredTable rejects the FK referencing a column that does not exist
     with pytest.raises(ValueError, match="nonexistent"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -192,20 +194,22 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
 
 
 def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
-    # Given two FKs on the same local columns, neither with an explicit name
+    # Given two FKs on the same local columns with distinct names (construction succeeds;
+    # the DesiredTable rejects them because the same local-column set is incoherent)
     first = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     second = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "vips"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_vips_fk",
     )
 
     # When / Then — both FKs govern the same local-column set, which is incoherent
-    # and would derive the same constraint name under the adapter's naming policy
     with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -215,17 +219,19 @@ def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
 
 
 def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
-    # Given two FKs whose local-column sets are identical (would collide on the
-    # derived name and are semantically incoherent)
+    # Given two FKs whose local-column sets are identical (semantically incoherent;
+    # each carries a distinct name so construction succeeds)
     fk_one = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "accounts"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_accounts_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected
@@ -239,16 +245,18 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
 
 def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
     # Given two FKs over the same columns in a different order (the reorder case
-    # the old name-based guard missed)
+    # the old name-based guard missed); each carries a distinct name so construction succeeds
     fk_one = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("tenant_id", "id"),
+        constraint_name="orders_tenant_id_customer_id_fk",
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id", "tenant_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id", "tenant_id"),
+        constraint_name="orders_customer_id_tenant_id_fk",
     )
 
     # When / Then building a DesiredTable with both is rejected

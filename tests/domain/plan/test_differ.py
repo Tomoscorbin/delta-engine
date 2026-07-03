@@ -806,7 +806,8 @@ def test_fk_changed_emits_drop_and_set():
         referenced_columns=("id",),
         constraint_name="orders_customer_id_fk",
     )
-    new_fk = ForeignKeyConstraint(
+    new_fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "new_customers"),
         referenced_columns=("id",),
@@ -843,9 +844,10 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
 
 
 def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
-    # Given: desired FK has no explicit name (derives orders_customer_id_fk);
+    # Given: desired FK name is generated at the API layer (orders_customer_id_fk);
     #        observed has the same relationship but a name chosen outside this engine
-    desired_fk = ForeignKeyConstraint(
+    desired_fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
@@ -868,13 +870,13 @@ def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
 
 
 def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
-    # Given: desired has a FK with no explicit constraint_name;
-    #        observed has the same FK but with the catalog-stored derived name
-    desired_fk = ForeignKeyConstraint(
+    # Given: desired FK carries the engine-generated name (from the API layer);
+    #        observed has the same FK with the catalog-stored derived name
+    desired_fk = ForeignKeyConstraint.generate(
+        owner_table_name="orders",
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
-        # no constraint_name — user did not specify one
     )
     observed_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),

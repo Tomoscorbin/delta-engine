@@ -6,13 +6,13 @@ from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 def test_rejects_empty_columns():
     # Given / Then constructing with no columns is an error
     with pytest.raises(ValueError, match="columns must not be empty"):
-        PrimaryKeyConstraint(columns=())
+        PrimaryKeyConstraint(columns=(), constraint_name="t_pk")
 
 
 def test_rejects_duplicate_columns():
     # Given / Then a repeated column is an error
     with pytest.raises(ValueError, match=r"[Dd]uplicate"):
-        PrimaryKeyConstraint(columns=("id", "id"))
+        PrimaryKeyConstraint(columns=("id", "id"), constraint_name="t_pk")
 
 
 def test_rejects_blank_explicit_constraint_name():
@@ -24,7 +24,9 @@ def test_rejects_blank_explicit_constraint_name():
 def test_equal_by_value():
     # Given two primary keys with the same columns and name
     # Then they compare equal (frozen value object)
-    assert PrimaryKeyConstraint(columns=("a", "b")) == PrimaryKeyConstraint(columns=("a", "b"))
+    assert PrimaryKeyConstraint(columns=("a", "b"), constraint_name="t_pk") == PrimaryKeyConstraint(
+        columns=("a", "b"), constraint_name="t_pk"
+    )
 
 
 def test_generate_names_constraint_from_table():

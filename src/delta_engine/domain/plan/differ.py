@@ -279,7 +279,6 @@ def _diff_primary_key(
     if observed_columns_in_key:
         actions.append(DropPrimaryKey())
     if desired_pk is not None:
-        assert desired_pk.constraint_name is not None  # generated when DesiredTable was built
         actions.append(
             SetPrimaryKey(columns=desired_pk.columns, constraint_name=desired_pk.constraint_name)
         )
@@ -315,7 +314,6 @@ def _diff_foreign_keys(
     matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
     set_actions: list[Action] = []
     for foreign_key in matched.added:
-        assert foreign_key.constraint_name is not None  # generated when DesiredTable was built
         set_actions.append(
             SetForeignKey(
                 local_columns=foreign_key.local_columns,
@@ -327,8 +325,5 @@ def _diff_foreign_keys(
     drop_actions = tuple(
         DropForeignKey(constraint_name=foreign_key.constraint_name)
         for foreign_key in matched.dropped
-        # An observed FK always carries the catalog name set by the reader; this guard
-        # is a type-narrowing safeguard against a reader bug — never false in practice.
-        if foreign_key.constraint_name is not None
     )
     return tuple(set_actions) + drop_actions

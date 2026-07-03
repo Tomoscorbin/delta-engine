@@ -61,7 +61,6 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     if table.primary_key is not None:
         pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
         constraint_name = table.primary_key.constraint_name
-        assert constraint_name is not None  # generated when the DesiredTable was built
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
