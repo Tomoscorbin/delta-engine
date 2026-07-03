@@ -1,6 +1,5 @@
-from delta_engine.api.foreign_key import ForeignKey, Self
 from delta_engine.api.properties import Property
-from delta_engine.api.table import DeltaTable
+from delta_engine.api.table import DeltaTable, ForeignKey, Self
 from delta_engine.domain.model import (
     Array,
     Boolean,
