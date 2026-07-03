@@ -395,9 +395,10 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
     orders = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
         columns=(Column("id", String(), nullable=False), Column("ref_email", String())),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint.generate(table_name="orders", columns=("id",)),
         foreign_keys=(
-            ForeignKeyConstraint(
+            ForeignKeyConstraint.generate(
+                owner_table_name="orders",
                 local_columns=("ref_email",),
                 referenced_table=QualifiedName.parse("cat.sch.customers"),
                 referenced_columns=("email",),

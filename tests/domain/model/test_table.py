@@ -80,7 +80,9 @@ def test_table_snapshot_rejects_pk_column_not_in_columns():
         DesiredTable(
             qualified_name=_QN,
             columns=(_COL,),
-            primary_key=PrimaryKeyConstraint(columns=("missing_col",)),
+            primary_key=PrimaryKeyConstraint.generate(
+                table_name="orders", columns=("missing_col",)
+            ),
         )
 
 
@@ -89,11 +91,11 @@ def test_observed_table_has_primary_key_field():
     table = ObservedTable(
         qualified_name=_QN,
         columns=(_COL,),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
     # Then the field is readable and returns the value object
-    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
 def test_desired_table_rejects_nullable_primary_key_column():
@@ -103,7 +105,7 @@ def test_desired_table_rejects_nullable_primary_key_column():
         DesiredTable(
             qualified_name=_QN,
             columns=(Column("id", Integer(), nullable=True),),
-            primary_key=PrimaryKeyConstraint(columns=("id",)),
+            primary_key=PrimaryKeyConstraint.generate(table_name="orders", columns=("id",)),
         )
 
 
@@ -117,7 +119,9 @@ def test_desired_table_reports_the_offending_nullable_primary_key_column():
                 Column("id", Integer(), nullable=False),
                 Column("tenant_id", Integer(), nullable=True),
             ),
-            primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id")),
+            primary_key=PrimaryKeyConstraint.generate(
+                table_name="orders", columns=("id", "tenant_id")
+            ),
         )
 
 
@@ -126,12 +130,12 @@ def test_observed_table_allows_a_nullable_primary_key_column():
     table = ObservedTable(
         qualified_name=_QN,
         columns=(Column("id", Integer(), nullable=True),),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
     # Then it is accepted — an observed schema must stay representable, whatever
     # its shape, so the differ can plan against it
-    assert table.primary_key == PrimaryKeyConstraint(columns=("id",))
+    assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
 def test_table_snapshot_defaults_to_no_foreign_keys():
@@ -159,7 +163,14 @@ def test_table_snapshot_stores_foreign_keys():
     )
 
     # Then the FK is stored, carrying its engine-generated constraint name
-    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    assert table.foreign_keys == (
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=QualifiedName("cat", "sch", "customers"),
+            referenced_columns=("id",),
+            constraint_name="orders_customer_id_fk",
+        ),
+    )
     assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 

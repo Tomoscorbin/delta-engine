@@ -118,7 +118,11 @@ def _desired_table(draw: st.DrawFn) -> DesiredTable:
             unique=True,
         ).map(tuple)
     )
-    primary_key = PrimaryKeyConstraint(columns=primary_key_cols) if primary_key_cols else None
+    primary_key = (
+        PrimaryKeyConstraint.generate(table_name=_QUALIFIED_NAME.name, columns=primary_key_cols)
+        if primary_key_cols
+        else None
+    )
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=tuple(columns),
@@ -541,7 +545,11 @@ def _desired_with_pk(pk_columns: list[str]) -> DesiredTable:
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=all_columns,
-        primary_key=PrimaryKeyConstraint(columns=pk_tuple) if pk_tuple else None,
+        primary_key=(
+            PrimaryKeyConstraint.generate(table_name=_QUALIFIED_NAME.name, columns=pk_tuple)
+            if pk_tuple
+            else None
+        ),
     )
 
 
@@ -552,7 +560,9 @@ def _observed_with_pk(pk_columns: list[str]) -> ObservedTable:
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=all_columns,
-        primary_key=PrimaryKeyConstraint(columns=pk_tuple) if pk_tuple else None,
+        primary_key=(
+            PrimaryKeyConstraint(columns=pk_tuple, constraint_name="test_pk") if pk_tuple else None
+        ),
     )
 
 
@@ -613,7 +623,9 @@ def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id")),
+        primary_key=PrimaryKeyConstraint.generate(
+            table_name=_QUALIFIED_NAME.name, columns=("id", "tenant_id")
+        ),
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -621,7 +633,7 @@ def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
             Column("id", Integer(), nullable=False),
             Column("tenant_id", Integer(), nullable=False),
         ),
-        primary_key=PrimaryKeyConstraint(columns=("tenant_id", "id")),
+        primary_key=PrimaryKeyConstraint(columns=("tenant_id", "id"), constraint_name="test_pk"),
     )
 
     # When
@@ -641,7 +653,7 @@ def test_drop_primary_key_runs_before_add_column_in_plan():
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk"),
     )
 
     # When
@@ -660,7 +672,7 @@ def test_set_primary_key_runs_after_set_column_nullability_in_plan():
     desired = DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        primary_key=PrimaryKeyConstraint.generate(table_name=_QUALIFIED_NAME.name, columns=("id",)),
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -704,7 +716,8 @@ def _observed_orders(observed_fks: tuple[ForeignKeyConstraint, ...] = ()) -> Obs
     )
 
 
-_FK = ForeignKeyConstraint(
+_FK = ForeignKeyConstraint.generate(
+    owner_table_name="orders",
     local_columns=("customer_id",),
     referenced_table=QualifiedName("cat", "sch", "customers"),
     referenced_columns=("id",),

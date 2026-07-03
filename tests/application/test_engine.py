@@ -88,7 +88,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
             # columns; the table-level PrimaryKeyConstraint carries the PK.
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String(), nullable=False),),
-            primary_key=PrimaryKeyConstraint(columns=("id",)),
+            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{name}_pk"),
             properties={
                 "delta.columnMapping.mode": "name",
                 "delta.enableDeletionVectors": "true",
