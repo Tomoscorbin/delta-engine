@@ -66,7 +66,7 @@ class ForeignKey:
                 )
             case _:
                 raise TypeError(
-                    f"foreign key references must be a DeltaTable or Self; got {other!r}"
+                    f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
                 )
 
         if not referenced_columns:
