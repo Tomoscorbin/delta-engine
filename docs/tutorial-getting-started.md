@@ -33,6 +33,37 @@ customers = DeltaTable(
 
 `DeltaTable` describes what you want. No SQL runs yet.
 
+### Declare partitioning
+
+Pass `partitioned_by` to `DeltaTable` to set partition columns when the table is
+created:
+
+```python
+from delta_engine import Column, Date, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("event_date", Date()),
+        Column("event_type", String()),
+        Column("payload", String()),
+    ],
+    partitioned_by=["event_date"],
+)
+```
+
+Every name in `partitioned_by` must also appear in `columns`. Partition columns
+are still regular columns: `partitioned_by` names them, and `columns` defines
+their types and other column metadata.
+
+Partitioning is fixed after table creation. Declaring a different
+`partitioned_by` for an existing table fails validation before any SQL runs. To
+change partitioning, drop and recreate the table out of band, then re-sync. See
+[reference-safe-change-rules.md](reference-safe-change-rules.md) for the full
+list of changes the engine rejects at validation.
+
 ## Sync
 
 Build an engine and pass your table definitions straight to `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:

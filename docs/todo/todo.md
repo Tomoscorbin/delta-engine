@@ -15,7 +15,6 @@
 - [ ] do we need backticked things in sql compiler or can we do without?
 - [ ] allow a way for existing constraint names (PK/FK) to be passed to DeltaTable
 - [ ] Do we need action_index?
-- [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
 - [ ] consider replacing typle comps in validation with regular loops for readability
 - [ ] make sure tests have full given, when, then comments (Not the words Give, When, Then on their own without explanation)
 - [ ] Test hygiene sweep (low-risk, deferred from FK PR review): (1) rename ~60 abbreviated test locals — `reg`→registry, `fq`→fully_qualified_name, the `qn` fixture in test_reader.py→qualified_name, `tr`→table_run, `vf`/`sr`/`col`/`t`/`d`, module consts `_QN`/`_COL`; (2) fill in ~25 bare wordless Given/When/Then markers; (3) rename 4 meta-label/stale-class test names (`_happy_path` suffixes, `test_table_snapshot_...` that actually tests DesiredTable); (4) add GWT structure to ~12 tests in test_preview/test_dialect/test_types that lack it. (Themes 3/4/5 — private-method coupling, IntEnum-value asserts, implementation-string asserts — already fixed in the FK PR.)
