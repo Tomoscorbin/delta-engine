@@ -81,6 +81,8 @@ class FakeSparkForFetchState:
     def sql(self, query: str):
         if "referential_constraints" in query:
             return FakeDataFrame([])
+        if "column_tags" in query.lower():
+            return FakeDataFrame([])
         if "table_tags" in query.lower():
             return FakeDataFrame([])
         if self._describe_exc is not None:
@@ -268,13 +270,15 @@ def test_partition_columns_ignores_missing_or_false_flags():
 # ---------- tests: properties ----------
 
 
-def test_observed_properties_are_empty_and_read_only_when_describe_has_no_rows(qn):
-    # Given a present table whose DESCRIBE DETAIL yields no rows
+def test_observed_properties_are_empty_and_read_only_when_table_has_no_properties(qn):
+    # Given a present table whose DESCRIBE DETAIL yields a row with an empty properties map
     catalog = FakeCatalog(
         columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
-    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[]))
+    reader = DatabricksReader(
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
+    )
 
     # When we fetch state
     result = reader.fetch_state(qn)
@@ -285,6 +289,25 @@ def test_observed_properties_are_empty_and_read_only_when_describe_has_no_rows(q
     assert dict(properties) == {}
     with pytest.raises(TypeError):
         properties["x"] = "y"  # type: ignore[index]
+
+
+def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
+    # Given a table the existence probe reports present, but DESCRIBE DETAIL
+    # yields no row at all -- a race or catalog inconsistency, distinct from a
+    # table whose properties map is merely empty
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
+        table_comments={str(qn): ""},
+    )
+    reader = DatabricksReader(FakeSparkForFetchState(catalog=catalog, describe_rows=[]))
+
+    # When we fetch state
+    result = reader.fetch_state(qn)
+
+    # Then the read fails loud rather than reporting a property-less present table,
+    # so the differ never re-applies every managed property against a phantom state
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "RuntimeError"
 
 
 def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
@@ -395,8 +418,8 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     }
 
 
-def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_rows():
-    # Given a table that exists but DESCRIBE DETAIL returns no rows
+def test_fetch_state_returns_present_with_empty_properties_when_table_has_no_properties():
+    # Given a table that exists and whose DESCRIBE DETAIL row carries an empty properties map
     qn = QualifiedName("c", "s", "no_props")
     fq = str(qn)
 
@@ -405,7 +428,7 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
         table_comments={fq: ""},
     )
     reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[]),
+        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}]),
     )
 
     # When we fetch state
