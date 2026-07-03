@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 from typing import TYPE_CHECKING
 
+from delta_engine.domain.model import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
@@ -29,6 +30,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -140,6 +144,28 @@ def _(action: ColumnTypeChange) -> str:
 @action_diff_line.register
 def _(action: PartitioningChange) -> str:
     return f"~ partitioning {action.observed_partitioning} → {action.desired_partitioning}"
+
+
+def _aspect_label(aspect: TableAspect) -> str:
+    """Human-readable label for an aspect (e.g. ``column comments``)."""
+    return aspect.name.lower().replace("_", " ")
+
+
+@action_diff_line.register
+def _(action: TargetTableMissing) -> str:
+    return "! table does not exist (this definition cannot create it)"
+
+
+@action_diff_line.register
+def _(action: TargetColumnMissing) -> str:
+    reasons = ", ".join(_aspect_label(reason) for reason in action.reasons)
+    return f"! column {action.column_name} missing from live table (targeted by: {reasons})"
+
+
+@action_diff_line.register
+def _(action: UnenforceablePrimaryKey) -> str:
+    columns = ", ".join(action.nullable_columns)
+    return f"! primary key over nullable live columns: {columns}"
 
 
 # Shown wherever a report has a readable state but no planned actions. One
