@@ -137,4 +137,4 @@ depends on your Databricks environment. The engine does not preflight Databricks
 Runtime or Delta table protocol compatibility for you; if Databricks rejects the
 constraint DDL, `sync` reports an `EXECUTION_FAILED` table with the original
 error. See
-[how-to-handle-sync-failures.md](how-to-handle-sync-failures.md#runtime-and-delta-feature-compatibility).
+{ref}`runtime-and-delta-feature-compatibility`.

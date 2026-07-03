@@ -58,7 +58,7 @@ your Databricks Runtime or Delta table protocol supports each feature. For
 example, if you enable change data feed on a table or runtime that cannot support
 it, Databricks rejects the statement and `sync` reports an `EXECUTION_FAILED`
 table with the original error. See
-[how-to-handle-sync-failures.md](how-to-handle-sync-failures.md#runtime-and-delta-feature-compatibility).
+{ref}`runtime-and-delta-feature-compatibility`.
 
 ## Available properties
 
