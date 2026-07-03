@@ -45,13 +45,6 @@ tags:
    :members:
 ```
 
-### Registry
-
-```{eval-rst}
-.. autoclass:: delta_engine.Registry
-   :members:
-```
-
 ### Engine
 
 ```{eval-rst}

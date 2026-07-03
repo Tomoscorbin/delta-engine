@@ -16,7 +16,7 @@ Adapters  (databricks reader, executor, SQL compiler)
    │
 Ports     (CatalogStateReader, PlanExecutor — Python Protocols)
    │
-Application  (Engine, Registry, validate_plan, result types)
+Application  (Engine, validate_plan, result types)
    │
 Domain    (DeltaTable model, Column, ActionPlan, differ)
 ```
@@ -27,7 +27,7 @@ Pure Python — zero imports outside the standard library. Defines immutable val
 
 ### Application
 
-Orchestrates the sync loop: iterate the registry, fetch state via the reader port, compute a plan, validate it, execute via the executor port, collect results. Owns `Engine`, `Registry`, `validate_plan`, and all result/report types. No knowledge of Databricks.
+Orchestrates the sync loop: prepare the desired tables, fetch state via the reader port, compute a plan, validate it, execute via the executor port, collect results. Owns `Engine`, `validate_plan`, and all result/report types. No knowledge of Databricks.
 
 ### Ports
 

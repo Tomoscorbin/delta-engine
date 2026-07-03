@@ -5,7 +5,7 @@ tags:
 
 # How to handle sync failures
 
-`engine.sync(registry)` raises `SyncFailedError` when one or more tables fail. This guide shows how to catch it and act on the structured report it carries.
+`engine.sync(...)` raises `SyncFailedError` when one or more tables fail. This guide shows how to catch it and act on the structured report it carries.
 
 ## Catch the error
 
@@ -13,7 +13,7 @@ tags:
 from delta_engine import SyncFailedError
 
 try:
-    engine.sync(registry)
+    engine.sync(customers, orders)
 except SyncFailedError as error:
     report = error.report
 ```

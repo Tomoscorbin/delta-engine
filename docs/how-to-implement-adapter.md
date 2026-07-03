@@ -77,12 +77,10 @@ class MyExecutor:
 Pass your implementations to `Engine` directly:
 
 ```python
-from delta_engine import Engine, Registry
+from delta_engine import Engine
 
 engine = Engine(reader=MyReader(), executor=MyExecutor())
-registry = Registry()
-# ... register tables ...
-engine.sync(registry)
+engine.sync(my_table)
 ```
 
 ## Compile actions to statements
