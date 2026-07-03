@@ -159,7 +159,13 @@ class Engine:
         if not dry_run and report.any_failures:
             raise SyncFailedError(report)
 
-        self._log_outcome(report, dry_run=dry_run)
+        if dry_run:
+            logger.info(
+                "Dry run complete for %d table(s); no changes were applied",
+                len(report.table_reports),
+            )
+        else:
+            logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
 
         return report
 
@@ -256,13 +262,3 @@ class Engine:
             run.execution = summary
             run.failures.extend(summary.failures)
         return runs
-
-    def _log_outcome(self, report: SyncReport, *, dry_run: bool) -> None:
-        """Log the run outcome (dry-run notice or success line)."""
-        if dry_run:
-            logger.info(
-                "Dry run complete for %d table(s); no changes were applied",
-                len(report.table_reports),
-            )
-        else:
-            logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
