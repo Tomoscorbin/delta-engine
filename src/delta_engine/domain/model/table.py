@@ -9,6 +9,7 @@ from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,9 +99,14 @@ class DesiredTable(TableSnapshot):
     themselves.
     """
 
+    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
+
     def __post_init__(self) -> None:
         """
         Enforce desired-only invariants.
+
+        managed_aspects must be non-empty — scope governs reconciliation, and
+        an empty scope is a declaration error, not a no-op.
 
         No two foreign keys may govern the same set of local columns. Two FKs
         over the same local columns are incoherent, and would generate the same
@@ -116,6 +122,11 @@ class DesiredTable(TableSnapshot):
         layout (a legacy catalog schema) and must stay representable.
         """
         TableSnapshot.__post_init__(self)
+        if not self.managed_aspects:
+            raise ValueError(
+                "managed_aspects must not be empty: a table that manages no"
+                " aspect declares nothing for the engine to do"
+            )
         seen: set[frozenset[str]] = set()
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)

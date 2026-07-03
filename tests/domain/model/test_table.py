@@ -1,6 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import (
+    ALL_ASPECTS,
     Column,
     Date,
     DesiredTable,
@@ -8,6 +9,7 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     String,
+    TableAspect,
     TableSnapshot,
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
@@ -391,3 +393,36 @@ def test_observed_table_stores_tags():
 
     # Then the tag is readable on the observed snapshot
     assert dict(table.tags) == {"env": "prod"}
+
+
+def test_desired_table_manages_all_aspects_by_default():
+    # Given a desired table built without any scope argument
+    table = DesiredTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()),),
+    )
+
+    # Then every aspect is managed (today's full-management behaviour)
+    assert table.managed_aspects == ALL_ASPECTS
+
+
+def test_desired_table_accepts_a_partial_aspect_set():
+    # Given a desired table managing only tags
+    table = DesiredTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()),),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+
+    # Then the declared scope is preserved verbatim
+    assert table.managed_aspects == frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+
+
+def test_desired_table_rejects_an_empty_aspect_set():
+    # Given an empty scope — an engine that manages nothing is a declaration error
+    with pytest.raises(ValueError, match="managed_aspects"):
+        DesiredTable(
+            qualified_name=QualifiedName("dev", "silver", "orders"),
+            columns=(Column("id", Integer()),),
+            managed_aspects=frozenset(),
+        )
