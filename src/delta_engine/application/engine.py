@@ -154,9 +154,12 @@ class Engine:
             ended_at=datetime.now(UTC),
             table_reports=tuple(run.to_report() for run in runs),
         )
+
         if not dry_run and report.any_failures:
             raise SyncFailedError(report)
+          
         self._log_outcome(report, dry_run=dry_run)
+
         return report
 
     def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
