@@ -58,7 +58,6 @@ class MyExecutor:
             except Exception as exc:
                 results.append(ExecutionFailed(
                     action=repr(action),
-                    action_index=i,
                     failure=ExecutionFailure(
                         action_index=i,
                         exception_type=type(exc).__name__,
