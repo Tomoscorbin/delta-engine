@@ -79,7 +79,8 @@ class ForeignKey:
                 f" {owner_name} declares {len(self.local_columns)} local column(s)"
                 f" but {referenced_table}'s primary key has {len(referenced_columns)}"
             )
-        return ForeignKeyConstraint(
+        return ForeignKeyConstraint.generate(
+            owner_table_name=owner_name.name,
             local_columns=tuple(self.local_columns),
             referenced_table=referenced_table,
             referenced_columns=tuple(referenced_columns),
@@ -130,7 +131,9 @@ class DeltaTable:
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
         primary_key = (
-            PrimaryKeyConstraint(columns=primary_key_columns) if primary_key_columns else None
+            PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
+            if primary_key_columns
+            else None
         )
 
         qualified_name = QualifiedName(catalog, schema, name)
