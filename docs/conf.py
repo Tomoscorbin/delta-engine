@@ -12,10 +12,12 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
+    "sphinxcontrib.mermaid",
     "myst_parser",
 ]
 
 myst_enable_extensions = ["colon_fence"]
+myst_fence_as_directive = ["mermaid"]
 
 html_theme = "furo"
 html_title = "delta-engine"
