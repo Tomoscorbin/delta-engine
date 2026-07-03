@@ -86,6 +86,7 @@ inspector = CatalogInspector(CATALOG, SCHEMA)
 # MAGIC Every sync below prints its report the same way, so a small helper keeps the
 # MAGIC output consistent and the sync cells focused on the change under test.
 
+
 # COMMAND ----------
 def show_report(report: SyncReport) -> None:
     """Print a sync report and its diff under labelled section headers."""
@@ -269,7 +270,7 @@ customers = DeltaTable(
         Column("status", String(), nullable=False),
     ],
     comment="Customer master table (with contact details)",  # <-- added table comment
-    tags={"domain": "sales", "owner": "data-eng"},   # <-- set 2 tags
+    tags={"domain": "sales", "owner": "data-eng"},  # <-- set 2 tags
     properties={Property.CHANGE_DATA_FEED: "true"},  # <-- set a property
 )
 
