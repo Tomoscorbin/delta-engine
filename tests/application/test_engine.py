@@ -412,7 +412,7 @@ def test_sync_report_has_no_fk_failures_when_no_fks_declared():
     assert tr.status is TableRunStatus.SUCCESS
 
 
-def test_sync_fails_table_whose_fk_references_table_not_in_registry():
+def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     # Given orders references customers, but customers is not in the sync
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
 

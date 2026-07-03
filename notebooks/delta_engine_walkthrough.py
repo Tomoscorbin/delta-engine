@@ -782,7 +782,7 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 
 # COMMAND ----------
 
-# products is defined but never registered — the reference is intentionally unresolvable.
+# products is defined but never passed to the sync — the reference is intentionally unresolvable.
 products = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -803,7 +803,7 @@ line_items = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("product_id",),
-            references=products,  # <-- never registered
+            references=products,  # <-- never passed to the sync
         )
     ],
 )

@@ -1,8 +1,8 @@
 """
 The top-level `delta_engine` namespace is the curated one-import entry point.
 
-The pyspark-free surface (define a table, build a registry, the engine and its
-result types) is eagerly available. The Databricks factory and logging helper
+The pyspark-free surface (define a table, the engine and its result types) is
+eagerly available. The Databricks factory and logging helper
 are exposed too, but imported lazily so `import delta_engine` never requires
 pyspark — keeping the "define tables without Spark" capability intact.
 """

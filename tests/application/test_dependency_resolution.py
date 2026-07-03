@@ -66,7 +66,7 @@ def _failures_for(result: ResolveResult, fqn: str) -> tuple:
     return ()
 
 
-def test_resolve_with_no_fks_preserves_registry_order():
+def test_resolve_with_no_fks_preserves_input_order():
     # Given three tables with no FKs
     tables = (_table("cat.sch.a"), _table("cat.sch.b"), _table("cat.sch.c"))
 

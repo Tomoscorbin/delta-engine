@@ -61,7 +61,7 @@ def resolve(
     classifies every table's foreign-key failures.
 
     Args:
-        tables: All desired tables from the registry, in registry order.
+        tables: All desired tables to sync, in prepared (name-sorted) order.
         blocked: Tables already known to be failing before FK resolution
             (e.g. failed read or validation). Their FK dependents are blocked
             with BLOCKED_BY_FAILED_DEPENDENCY, but resolve records no failure
@@ -93,8 +93,8 @@ def _build_dependency_graph(
     """
     Build an adjacency map from table name to the set of table names it depends on.
 
-    Only in-registry references are included; FK references to tables outside
-    the registry are omitted here and classified as UNRESOLVABLE_REFERENCE later.
+    Only references to tables in this sync are included; FK references to tables
+    outside it are omitted here and classified as UNRESOLVABLE_REFERENCE later.
     A self-referential FK (references the owning table) is applicable:
     create the table, then add the constraint. Excluding the self-edge
     keeps the table a non-cyclic single-node component.
@@ -120,7 +120,7 @@ def _strongly_connected_components(
     Uses Tarjan's algorithm, which emits each component only after every
     component it depends on has been emitted — so a referenced table's component
     always precedes its dependents'. Neighbours are visited in sorted order and
-    nodes in graph (registry) insertion order, making the result deterministic
+    nodes in graph insertion order, making the result deterministic
     regardless of set-iteration order or hash seed.
 
     A component of more than one node is a true dependency cycle. (Self-loops are

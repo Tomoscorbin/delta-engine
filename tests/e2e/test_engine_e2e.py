@@ -250,7 +250,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
     fq_ok = f"{TEST_CATALOG}.{temp_schema}.{ok}"
     fq_bad = f"{TEST_CATALOG}.{temp_schema}.{bad}"
 
-    # seed both tables with specific names the registry will target
+    # seed both tables with specific names the sync will target
     spark.sql(
         f"CREATE TABLE {fq_ok} (id INT NOT NULL, name STRING)"
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
