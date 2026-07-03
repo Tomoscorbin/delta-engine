@@ -37,16 +37,8 @@ class ForeignKey:
     part of this declaration.
 
     ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
-    for a self-referential key.
-
-    Design note: ``references`` is an object reference rather than a string.
-    This keeps the dependency explicit and lets the engine infer the referenced
-    primary key, at the cost of requiring the referenced table to be declared as
-    a ``DeltaTable`` in scope. If referencing by name is ever needed (for
-    cross-module or external tables), the union can be widened to accept a
-    ``QualifiedName`` without breaking existing declarations — that branch would
-    require explicit referenced columns, since a name carries no primary key to
-    infer from.
+    for a self-referential key. See the architecture explanation doc for why the
+    reference is an object rather than a name.
     """
 
     local_columns: tuple[str, ...]

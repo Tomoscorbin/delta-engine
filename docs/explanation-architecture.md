@@ -61,6 +61,22 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 A key constraint's name is a property of the desired table: a pure function of the table name and its columns (`{table}_pk` for primary keys, `{table}_{columns}_fk` for foreign keys). It is generated once, when the `DesiredTable` is built (`DesiredTable.__post_init__` calls each constraint's `with_generated_name`), and then flows downstream as data — the differ and SQL compiler read the name off the constraint rather than deriving it. Constraint names are not user-definable today: `with_generated_name` rejects a name that is already set, so a user-supplied name fails loudly at construction rather than being silently ignored. Observed constraints carry the catalog's own name, read back by the adapter.
 
+## Foreign key references
+
+A `ForeignKey` declares its target by passing the referenced `DeltaTable` object directly (or the `Self` sentinel for a self-reference), not a dotted `catalog.schema.table` string:
+
+```python
+customers = DeltaTable(catalog="dev", schema="silver", name="customers", columns=[...])
+orders = DeltaTable(
+    ...,
+    foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+)
+```
+
+This is a deliberate design choice. An object reference makes the dependency explicit and lets the engine infer the referenced columns from the referenced table's primary key, so the declaration never restates them. The cost is that the referenced table must be declared as a `DeltaTable` in scope: within a module you declare the parent before the child, and a cross-module reference becomes an import. Note this constrains only the *source* order in which tables are declared — the engine still topologically sorts the actual sync order during dependency resolution, so a referenced table is always synced before its dependents regardless of declaration order.
+
+References by name are intentionally not supported in this iteration. If they are ever needed — for a table declared in another module, or one that exists in the catalog but is not managed here — the `references` union can be widened to also accept a `QualifiedName`. That is a backward-compatible addition: existing object-reference declarations keep working, and the new branch would require explicit referenced columns, since a bare name carries no primary key to infer from.
+
 ## Validation
 
 Each rule implements a `Rule` protocol: a `name` class variable and an `evaluate(plan)` method returning zero or more `ValidationFailure` objects. `validate_plan` runs all rules in `DEFAULT_RULES` and aggregates failures. Rules receive the full plan, so they can reason across actions (e.g. "does this plan add a NOT NULL column to a table that already exists?").
