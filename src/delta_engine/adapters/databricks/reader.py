@@ -13,7 +13,7 @@ from pyspark.sql.catalog import Column as SparkColumn
 from delta_engine.adapters.databricks.sql import (
     backtick,
     backtick_qualified_name,
-    domain_type_from_spark,
+    domain_type_from_ddl,
     error_preview,
     exception_type_name,
     quote_literal,
@@ -54,7 +54,7 @@ def _to_column_mapping(
     therefore derived from the already-normalised domain column name, not from
     the raw Spark object.
     """
-    domain_data_type = domain_type_from_spark(spark_column.dataType)
+    domain_data_type = domain_type_from_ddl(spark_column.dataType)
     if domain_data_type is None:
         logger.warning(
             "Skipping column %r in %s: unrecognised Spark type %r"

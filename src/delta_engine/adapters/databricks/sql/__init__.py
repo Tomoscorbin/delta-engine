@@ -19,7 +19,7 @@ from delta_engine.adapters.databricks.sql.preview import (
     sql_preview,
 )
 from delta_engine.adapters.databricks.sql.types import (
-    domain_type_from_spark,
+    domain_type_from_ddl,
     sql_type_for_data_type,
 )
 
@@ -27,7 +27,7 @@ __all__ = [
     "backtick",
     "backtick_qualified_name",
     "compile_plan",
-    "domain_type_from_spark",
+    "domain_type_from_ddl",
     "error_preview",
     "exception_type_name",
     "quote_literal",

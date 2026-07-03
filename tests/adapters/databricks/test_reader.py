@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from pyspark.errors.exceptions.base import AnalysisException
-import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
@@ -176,6 +175,20 @@ def make_catalog_col(
 # ---------- shared fixtures ----------
 
 
+@pytest.fixture(autouse=True)
+def _active_spark_session(spark):
+    """
+    Keep a live SparkSession up for every test in this module.
+
+    The reader maps each catalog column's DDL type string through
+    ``domain_type_from_ddl``, which delegates to ``SparkType.fromDDL`` — and that
+    parser needs an active session. Production always has one; requesting the
+    session fixture here exercises the column-mapping path against the same DDL
+    strings Unity Catalog reports, rather than pre-parsed type instances the
+    reader never actually receives.
+    """
+
+
 @pytest.fixture
 def qn() -> QualifiedName:
     return QualifiedName("c", "s", "t")
@@ -189,10 +202,8 @@ def test_columns_maps_name_nullability_and_comment(qn):
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
-                make_catalog_col(
-                    "id", dataType=T.IntegerType(), nullable=False, description="identifier"
-                ),
-                make_catalog_col("p_date", dataType=T.DateType(), nullable=True, description=""),
+                make_catalog_col("id", dataType="int", nullable=False, description="identifier"),
+                make_catalog_col("p_date", dataType="date", nullable=True, description=""),
             ]
         }
     )
@@ -214,9 +225,9 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
-                make_catalog_col("id", dataType=T.IntegerType(), isPartition=False),
-                make_catalog_col("p_store", dataType=T.StringType(), isPartition=True),
-                make_catalog_col("p_date", dataType=T.DateType(), isPartition=True),
+                make_catalog_col("id", dataType="int", isPartition=False),
+                make_catalog_col("p_store", dataType="string", isPartition=True),
+                make_catalog_col("p_date", dataType="date", isPartition=True),
             ]
         }
     )
@@ -239,8 +250,8 @@ def test_partition_columns_ignores_missing_or_false_flags():
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
-                NoIsPartition(name="a", dataType=T.IntegerType(), nullable=True, description=""),
-                make_catalog_col("b", dataType=T.StringType(), isPartition=False),
+                NoIsPartition(name="a", dataType="int", nullable=True, description=""),
+                make_catalog_col("b", dataType="string", isPartition=False),
             ]
         }
     )
@@ -260,7 +271,7 @@ def test_partition_columns_ignores_missing_or_false_flags():
 def test_observed_properties_are_empty_and_read_only_when_describe_has_no_rows(qn):
     # Given a present table whose DESCRIBE DETAIL yields no rows
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[]))
@@ -279,7 +290,7 @@ def test_observed_properties_are_empty_and_read_only_when_describe_has_no_rows(q
 def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
     # Given a present table whose DESCRIBE DETAIL returns properties the engine does not manage
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     describe_rows = [
@@ -318,7 +329,7 @@ def test_observed_comment_is_description_or_empty_string(desc_value, expected):
     # Given a present table whose catalog description may be set, None, or empty
     qualified_name = QualifiedName("c", "s", "t")
     catalog = FakeCatalog(
-        columns_by_table={str(qualified_name): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qualified_name): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qualified_name): desc_value},
     )
     reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog))
@@ -350,10 +361,8 @@ def test_fetch_state_returns_present_with_columns_partitions_comment_and_propert
     catalog = FakeCatalog(
         columns_by_table={
             fq: [
-                make_catalog_col(
-                    "id", dataType=T.IntegerType(), nullable=False, description="identifier"
-                ),
-                make_catalog_col("p_date", dataType=T.DateType(), isPartition=True),
+                make_catalog_col("id", dataType="int", nullable=False, description="identifier"),
+                make_catalog_col("p_date", dataType="date", isPartition=True),
             ]
         },
         table_comments={fq: "orders table"},
@@ -392,7 +401,7 @@ def test_fetch_state_returns_present_with_empty_properties_when_describe_has_no_
     fq = str(qn)
 
     catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("id", dataType=T.IntegerType(), nullable=False)]},
+        columns_by_table={fq: [make_catalog_col("id", dataType="int", nullable=False)]},
         table_comments={fq: ""},
     )
     reader = DatabricksReader(
@@ -446,7 +455,7 @@ def test_fetch_state_returns_failed_when_all_columns_are_unsupported():
     # Given a table whose only column has a type the engine cannot map (BinaryType)
     qn = QualifiedName("c", "s", "structy")
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("payload", dataType=T.BinaryType())]},
+        columns_by_table={str(qn): [make_catalog_col("payload", dataType="binary")]},
         table_comments={str(qn): ""},
     )
     reader = DatabricksReader(
@@ -467,9 +476,9 @@ def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact():
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
-                make_catalog_col("id", dataType=T.IntegerType()),
-                make_catalog_col("payload", dataType=T.BinaryType()),
-                make_catalog_col("name", dataType=T.StringType()),
+                make_catalog_col("id", dataType="int"),
+                make_catalog_col("payload", dataType="binary"),
+                make_catalog_col("name", dataType="string"),
             ]
         },
         table_comments={str(qn): ""},
@@ -492,8 +501,8 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
-                make_catalog_col("EventId", dataType=T.IntegerType()),
-                make_catalog_col("UserName", dataType=T.StringType(), isPartition=True),
+                make_catalog_col("EventId", dataType="int"),
+                make_catalog_col("UserName", dataType="string", isPartition=True),
             ]
         },
         table_comments={str(qn): ""},
@@ -519,7 +528,7 @@ def test_fetch_state_lowercases_primary_key_column_names_from_catalog():
     qn = QualifiedName("c", "s", "t")
     fq = str(qn)
     catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("orderid", dataType=T.IntegerType())]},
+        columns_by_table={fq: [make_catalog_col("orderid", dataType="int")]},
         table_comments={fq: ""},
     )
     spark = FakeSparkWithPrimaryKey(
@@ -544,7 +553,7 @@ def test_fetch_state_includes_primary_key_in_observed_table():
     fq = str(qn)
     catalog = FakeCatalog(
         columns_by_table={
-            fq: [make_catalog_col("id", dataType=T.IntegerType(), nullable=False)],
+            fq: [make_catalog_col("id", dataType="int", nullable=False)],
         },
         table_comments={fq: ""},
     )
@@ -568,7 +577,7 @@ def test_fetch_state_primary_key_is_empty_when_none_defined():
     fq = str(qn)
     catalog = FakeCatalog(
         columns_by_table={
-            fq: [make_catalog_col("id", dataType=T.IntegerType())],
+            fq: [make_catalog_col("id", dataType="int")],
         },
         table_comments={fq: ""},
     )
@@ -591,7 +600,7 @@ def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
     qn = QualifiedName("c", "s", "t")
     fq = str(qn)
     catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={fq: [make_catalog_col("id", dataType="int")]},
         table_comments={fq: ""},
     )
     spark = FakeSparkWithPrimaryKey(
@@ -617,8 +626,8 @@ def _orders_catalog() -> FakeCatalog:
     return FakeCatalog(
         columns_by_table={
             fq: [
-                make_catalog_col("tenant_id", dataType=T.IntegerType()),
-                make_catalog_col("customer_id", dataType=T.IntegerType()),
+                make_catalog_col("tenant_id", dataType="int"),
+                make_catalog_col("customer_id", dataType="int"),
             ]
         },
         table_comments={fq: ""},
@@ -910,7 +919,7 @@ def test_fetch_state_lowercases_foreign_key_constraint_name():
 def test_fetch_state_observes_table_tags(qn):
     # Given a present table whose information_schema.table_tags carries two tags
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     tag_rows = [
@@ -932,7 +941,7 @@ def test_fetch_state_observes_table_tags(qn):
 def test_fetch_state_preserves_tag_key_case(qn):
     # Given a catalog tag with a mixed-case key (UC tag keys are case-sensitive)
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(
@@ -951,7 +960,7 @@ def test_fetch_state_preserves_tag_key_case(qn):
 def test_fetch_state_tags_are_empty_when_none_defined(qn):
     # Given a present table whose table_tags query returns no rows
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(catalog=catalog, tag_rows=[])
@@ -967,7 +976,7 @@ def test_fetch_state_tags_are_empty_when_none_defined(qn):
 def test_fetch_state_tags_are_empty_when_information_schema_unavailable(qn):
     # Given the table_tags query raises (non-Unity-Catalog Spark, e.g. local tests)
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType=T.IntegerType())]},
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(
@@ -989,7 +998,7 @@ def test_fetch_state_tags_are_empty_when_information_schema_unavailable(qn):
 def test_fetch_state_observes_column_tags(qn):
     # Given a present table whose information_schema.column_tags carries tags on a column
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType=T.StringType())]},
+        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
         table_comments={str(qn): ""},
     )
     column_tag_rows = [
@@ -1010,7 +1019,7 @@ def test_fetch_state_observes_column_tags(qn):
 def test_fetch_state_lowercases_column_name_but_preserves_tag_key_case(qn):
     # Given a catalog that reports a mixed-case column name and a mixed-case tag key
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("Email", dataType=T.StringType())]},
+        columns_by_table={str(qn): [make_catalog_col("Email", dataType="string")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(
@@ -1033,7 +1042,7 @@ def test_fetch_state_lowercases_column_name_but_preserves_tag_key_case(qn):
 def test_fetch_state_column_tags_are_empty_when_none_defined(qn):
     # Given a present table whose column_tags query returns no rows
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType=T.StringType())]},
+        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(catalog=catalog, column_tag_rows=[])
@@ -1050,7 +1059,7 @@ def test_fetch_state_column_tags_are_empty_when_none_defined(qn):
 def test_fetch_state_column_tags_are_empty_when_information_schema_unavailable(qn):
     # Given the column_tags query raises (non-Unity-Catalog Spark, e.g. local tests)
     catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType=T.StringType())]},
+        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
         table_comments={str(qn): ""},
     )
     spark = FakeSparkWithPrimaryKey(
