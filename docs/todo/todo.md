@@ -37,4 +37,3 @@
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] improve Report display formatting
-- [ ] Work through the [special-case audit](2026-07-03-special-case-audit.md) (2026-07-03): quick-wins PR (clusters B–F), the named-constraint refactor (cluster A), and the four listed decisions (zero-table report string, reader empty-DESCRIBE fallback, compiler guards vs ValidatedActionPlan, observed PK naming)
