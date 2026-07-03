@@ -4,9 +4,9 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
+from delta_engine.api.foreign_key import ForeignKey, lower_foreign_key
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model import Column, DesiredTable, ForeignKeyConstraint, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -37,7 +37,7 @@ class DeltaTable:
         properties: dict[str, str] | None = None,
         tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] | None = None,
-        foreign_keys: Iterable[ForeignKeyConstraint] | None = None,
+        foreign_keys: Iterable[ForeignKey | ForeignKeyConstraint] | None = None,
     ) -> None:
         user_properties = dict(properties or {})
 
@@ -56,7 +56,11 @@ class DeltaTable:
         primary_key = (
             PrimaryKeyConstraint(columns=primary_key_columns) if primary_key_columns else None
         )
-        foreign_keys = tuple(foreign_keys) if foreign_keys is not None else ()
+        foreign_keys = (
+            tuple(lower_foreign_key(foreign_key) for foreign_key in foreign_keys)
+            if foreign_keys is not None
+            else ()
+        )
 
         # Building DesiredTable here enforces all domain invariants (non-empty
         # columns, unique names, partition columns must exist, FK local columns

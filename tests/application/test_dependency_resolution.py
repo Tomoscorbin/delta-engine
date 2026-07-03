@@ -114,7 +114,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
     assert len(failures) == 1
     assert failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert failures[0].local_columns == ("ref_id",)
-    assert failures[0].references == "cat.sch.customers"
+    assert failures[0].references == QualifiedName("cat", "sch", "customers")
 
 
 def test_resolve_fails_both_members_of_a_cycle():

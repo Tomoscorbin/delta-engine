@@ -5,10 +5,22 @@ tags:
 
 # How to declare a foreign key
 
-Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns, the fully qualified table it references, and the referenced columns.
+Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns and the table they reference.
+
+The preferred form is to reference another `DeltaTable`. When the referenced table has a primary key, the engine infers the referenced columns from that primary key:
 
 ```python
 from delta_engine import Column, DeltaTable, ForeignKey, Integer, String
+
+customers = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customers",
+    columns=[
+        Column("id", Integer(), nullable=False, primary_key=True),
+        Column("name", String()),
+    ],
+)
 
 orders = DeltaTable(
     catalog="dev",
@@ -22,14 +34,27 @@ orders = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references="dev.silver.customers",
-            referenced_columns=("id",),
+            references=customers,  # referenced_columns inferred as ("id",)
         ),
     ],
 )
 ```
 
-The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. To set the name yourself, pass `constraint_name`.
+The engine derives the physical constraint name internally as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. The public `ForeignKey` declaration does not accept `constraint_name`; explicit constraint naming is not currently part of the public API.
+
+## Referencing by name
+
+Use a fully qualified string when the referenced table object is not available, such as for a forward reference or a declaration split across modules. A string reference must include `referenced_columns` because a name alone carries no primary-key metadata:
+
+```python
+ForeignKey(
+    local_columns=("customer_id",),
+    references="dev.silver.customers",
+    referenced_columns=("id",),
+)
+```
+
+A `QualifiedName` value can be used the same way, also with explicit `referenced_columns`.
 
 ## Composite foreign keys
 
@@ -42,6 +67,8 @@ ForeignKey(
     referenced_columns=("tenant_id", "id"),
 )
 ```
+
+If you pass a referenced `DeltaTable` with a composite primary key and omit `referenced_columns`, the full primary-key column tuple is inferred in declaration order.
 
 ## Dependency ordering
 
@@ -79,4 +106,4 @@ Matching by content keeps syncs idempotent: a foreign key created outside this e
 
 Databricks foreign key constraints are informational, not enforced. They do not block inserts that violate referential integrity, but they enable query optimizations and document intent in Unity Catalog.
 
-The referenced table needs a matching primary or unique key for Databricks to accept the constraint at execution time.
+The referenced table needs a matching primary or unique key for Databricks to accept the constraint at execution time. delta-engine currently validates foreign keys against referenced primary keys declared in the registry.

@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import DataType
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 
 
 class ActionPhase(IntEnum):
@@ -271,17 +270,21 @@ class SetForeignKey(Action):
     """
     Add a foreign key constraint to a table.
 
-    Carries the full :class:`ForeignKeyConstraint`, whose engine-generated
-    ``constraint_name`` the compiler renders directly.
+    Carries compiler-ready fields, including the engine-generated
+    ``constraint_name``. The compiler renders these values directly rather than
+    parsing or validating a partially initialized domain constraint.
     """
 
-    foreign_key: ForeignKeyConstraint
+    local_columns: tuple[str, ...]
+    referenced_table: QualifiedName
+    referenced_columns: tuple[str, ...]
+    constraint_name: str
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
 
     @property
     def subject(self) -> str:
-        return ",".join(self.foreign_key.local_columns)
+        return ",".join(self.local_columns)
 
 
 @dataclass(frozen=True, slots=True)

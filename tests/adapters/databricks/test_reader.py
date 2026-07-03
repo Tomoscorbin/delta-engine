@@ -830,7 +830,7 @@ def test_fetch_state_composite_foreign_key_aligns_local_and_referenced_columns()
     [foreign_key] = result.table.foreign_keys
     assert foreign_key.local_columns == ("tenant_id", "customer_id")
     assert foreign_key.referenced_columns == ("tenant_id", "id")
-    assert foreign_key.references == "cat.sch.customers"
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
 
 
 def test_fetch_state_composite_foreign_key_does_not_duplicate_columns():

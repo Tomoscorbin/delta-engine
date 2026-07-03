@@ -4,7 +4,6 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -356,14 +355,13 @@ def test_drop_foreign_key_renders_drop_constraint_if_exists():
 
 
 def test_set_foreign_key_renders_add_constraint_foreign_key():
-    # Given a foreign key carrying its engine-generated constraint name
-    fk = ForeignKeyConstraint(
+    # Given a foreign key action carrying compiler-ready fields
+    action = SetForeignKey(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name="tbl_customer_id_fk",
     )
-    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)
@@ -377,14 +375,13 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
 
 
 def test_set_foreign_key_renders_composite_fk():
-    # Given a composite FK (two local columns) carrying its generated name
-    fk = ForeignKeyConstraint(
+    # Given a composite FK action (two local columns) carrying its generated name
+    action = SetForeignKey(
         local_columns=("tenant_id", "customer_id"),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("tenant_id", "id"),
         constraint_name="tbl_tenant_id_customer_id_fk",
     )
-    action = SetForeignKey(foreign_key=fk)
 
     # When
     statement = _compile_single(action)

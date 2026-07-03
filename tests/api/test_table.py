@@ -2,7 +2,7 @@ import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model import Column as DomainColumn, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -295,8 +295,12 @@ def test_delta_table_accepts_foreign_keys_parameter():
         foreign_keys=[fk],
     )
 
-    # Then the FK is accessible, carrying its engine-generated constraint name
-    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    # Then the FK is lowered to an internal constraint carrying its generated name
+    [foreign_key] = table.foreign_keys
+    assert foreign_key.local_columns == ("customer_id",)
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.referenced_columns == ("id",)
+    assert foreign_key.constraint_name == "orders_customer_id_fk"
 
 
 def test_delta_table_defaults_to_no_foreign_keys():
@@ -310,6 +314,117 @@ def test_delta_table_defaults_to_no_foreign_keys():
 
     # Then
     assert table.foreign_keys == ()
+
+
+def test_delta_table_accepts_foreign_key_referencing_qualified_name():
+    # Given a FK declared with a structured qualified-name reference
+    fk = ForeignKey(
+        local_columns=("customer_id",),
+        references=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+    )
+
+    # When constructing the table
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer()), Column("customer_id", Integer())],
+        foreign_keys=[fk],
+    )
+
+    # Then the qualified name is preserved in the lowered internal constraint
+    assert table.foreign_keys[0].referenced_table == QualifiedName("cat", "sch", "customers")
+    assert table.foreign_keys[0].referenced_columns == ("id",)
+
+
+def test_delta_table_inferrs_referenced_columns_from_referenced_table_primary_key():
+    # Given a referenced table with a primary key
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
+    fk = ForeignKey(local_columns=("customer_id",), references=customers)
+
+    # When constructing a table with an FK to that table
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer()), Column("customer_id", Integer())],
+        foreign_keys=[fk],
+    )
+
+    # Then the referenced primary key is inferred
+    [foreign_key] = orders.foreign_keys
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.referenced_columns == ("id",)
+
+
+def test_delta_table_rejects_inferred_fk_to_table_with_no_primary_key():
+    # Given a referenced table with no primary key
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer())],
+    )
+    fk = ForeignKey(local_columns=("customer_id",), references=customers)
+
+    # When / Then construction fails because there is no key to infer
+    with pytest.raises(ValueError, match="no primary key"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("id", Integer()), Column("customer_id", Integer())],
+            foreign_keys=[fk],
+        )
+
+
+def test_delta_table_rejects_string_fk_reference_without_referenced_columns():
+    # Given a string reference with no referenced columns
+    fk = ForeignKey(local_columns=("customer_id",), references="cat.sch.customers")
+
+    # When / Then construction fails because a string carries no key metadata
+    with pytest.raises(ValueError, match="referenced_columns"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("id", Integer()), Column("customer_id", Integer())],
+            foreign_keys=[fk],
+        )
+
+
+def test_delta_table_rejects_qualified_name_fk_reference_without_referenced_columns():
+    # Given a qualified-name reference with no referenced columns
+    fk = ForeignKey(
+        local_columns=("customer_id",), references=QualifiedName("cat", "sch", "customers")
+    )
+
+    # When / Then construction fails because a QualifiedName carries no key metadata
+    with pytest.raises(ValueError, match="referenced_columns"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("id", Integer()), Column("customer_id", Integer())],
+            foreign_keys=[fk],
+        )
+
+
+def test_delta_table_rejects_public_foreign_key_constraint_name_argument():
+    # Given / When / Then the public FK declaration does not expose internal names
+    with pytest.raises(TypeError, match="constraint_name"):
+        ForeignKey(  # type: ignore[call-arg]
+            local_columns=("customer_id",),
+            references="cat.sch.customers",
+            referenced_columns=("id",),
+            constraint_name="orders_customer_id_fk",
+        )
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():

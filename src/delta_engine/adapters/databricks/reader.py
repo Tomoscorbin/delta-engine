@@ -26,7 +26,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint, ReferencedKey
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 logger = logging.getLogger(__name__)
@@ -321,10 +321,14 @@ class DatabricksReader:
         return tuple(
             ForeignKeyConstraint(
                 local_columns=tuple(data["local_columns"]),
-                references=(
-                    f"{data['ref_catalog']}.{data['ref_schema']}.{data['ref_table']}".casefold()
+                references=ReferencedKey(
+                    table=QualifiedName(
+                        data["ref_catalog"].casefold(),
+                        data["ref_schema"].casefold(),
+                        data["ref_table"].casefold(),
+                    ),
+                    columns=tuple(data["referenced_columns"]),
                 ),
-                referenced_columns=tuple(data["referenced_columns"]),
                 constraint_name=constraint_name.casefold(),
             )
             for constraint_name, data in grouped.items()

@@ -1,3 +1,4 @@
+from delta_engine.api.foreign_key import ForeignKey
 from delta_engine.api.properties import Property
 from delta_engine.api.table import DeltaTable
 from delta_engine.domain.model import (
@@ -14,7 +15,6 @@ from delta_engine.domain.model import (
     String,
     Timestamp,
 )
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint as ForeignKey
 
 __all__ = [
     "Array",

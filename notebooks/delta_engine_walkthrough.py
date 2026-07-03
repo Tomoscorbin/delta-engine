@@ -140,8 +140,7 @@ orders = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references=f"{CATALOG}.{SCHEMA}.customers",
-            referenced_columns=("id",),
+            references=customers,  # referenced_columns inferred from customers' primary key
         )
     ],
 )
@@ -524,8 +523,7 @@ customers = DeltaTable(
     foreign_keys=[  # <-- foreign key added to the existing table
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,  # referenced_columns inferred from regions' primary key
         )
     ],
 )
@@ -591,8 +589,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,  # referenced_columns inferred from regions' primary key
         )
     ],
 )
@@ -873,8 +870,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,  # referenced_columns inferred from regions' primary key
         )
     ],
 )
@@ -964,8 +960,7 @@ try:
         foreign_keys=[
             ForeignKey(
                 local_columns=("missing_id",),  # <-- no such column on this table
-                references=f"{CATALOG}.{SCHEMA}.customers",
-                referenced_columns=("id",),
+                references=customers,  # referenced_columns inferred from customers' primary key
             )
         ],
     )
@@ -980,21 +975,29 @@ except ValueError as error:
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Build a `ForeignKey` whose `references` is a bare table name rather than a
-# MAGIC `catalog.schema.table` name. This guard lives on `ForeignKey` itself, so it
-# MAGIC trips before a `DeltaTable` is even involved.
+# MAGIC Build a table whose `ForeignKey.references` is a bare table name rather than a
+# MAGIC `catalog.schema.table` name. The `ForeignKey` declaration itself is lightweight;
+# MAGIC the guard trips when `DeltaTable` lowers it into the internal schema model.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Rejected: `references` must be a fully qualified `catalog.schema.table` name.
+# MAGIC Rejected: string references must be fully qualified `catalog.schema.table` names.
 
 # COMMAND ----------
 
 try:
-    ForeignKey(
-        local_columns=("customer_id",),
-        references="customers",  # <-- not catalog.schema.table
-        referenced_columns=("id",),
+    DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="bad_fk_reference",
+        columns=[Column("customer_id", Long())],
+        foreign_keys=[
+            ForeignKey(
+                local_columns=("customer_id",),
+                references="customers",  # <-- not catalog.schema.table
+                referenced_columns=("id",),
+            )
+        ],
     )
     raise AssertionError("expected ValueError")
 except ValueError as error:

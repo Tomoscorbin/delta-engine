@@ -708,6 +708,16 @@ _FK_WITH_EXPLICIT_NAME = ForeignKeyConstraint(
 )
 
 
+def _assert_set_fk_action_matches_constraint(
+    action: SetForeignKey, foreign_key: ForeignKeyConstraint
+) -> None:
+    """Assert a compiler-ready SetForeignKey action carries a constraint's content."""
+    assert action.local_columns == foreign_key.local_columns
+    assert action.referenced_table == foreign_key.referenced_table
+    assert action.referenced_columns == foreign_key.referenced_columns
+    assert action.constraint_name == foreign_key.constraint_name
+
+
 def test_no_fk_on_either_side_produces_no_fk_actions():
     # Given tables with no FKs
     desired = DesiredTable(
@@ -739,8 +749,8 @@ def test_new_fk_on_desired_only_emits_set_foreign_key():
     # engine-generated name (DesiredTable resolved it at construction)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == desired.foreign_keys[0]
-    assert set_actions[0].foreign_key.constraint_name == "orders_customer_id_fk"
+    _assert_set_fk_action_matches_constraint(set_actions[0], desired.foreign_keys[0])
+    assert set_actions[0].constraint_name == "orders_customer_id_fk"
 
 
 def test_fk_removed_from_desired_emits_drop_then_no_set():
@@ -816,7 +826,7 @@ def test_fk_changed_emits_drop_and_set():
     assert len(drop_actions) == 1
     assert drop_actions[0].constraint_name == "orders_customer_id_fk"
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == desired.foreign_keys[0]
+    _assert_set_fk_action_matches_constraint(set_actions[0], desired.foreign_keys[0])
 
 
 def test_new_table_with_fk_includes_set_foreign_key_in_plan():
@@ -831,7 +841,7 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     assert any(isinstance(a, CreateTable) for a in plan)
     set_actions = [a for a in plan if isinstance(a, SetForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == desired.foreign_keys[0]
+    _assert_set_fk_action_matches_constraint(set_actions[0], desired.foreign_keys[0])
 
 
 def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
@@ -905,7 +915,7 @@ def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
     set_actions = [a for a in actions if isinstance(a, SetForeignKey)]
     drop_actions = [a for a in actions if isinstance(a, DropForeignKey)]
     assert len(set_actions) == 1
-    assert set_actions[0].foreign_key == desired.foreign_keys[0]
+    _assert_set_fk_action_matches_constraint(set_actions[0], desired.foreign_keys[0])
     assert drop_actions == []
 
 
