@@ -131,3 +131,10 @@ Matching by content keeps syncs idempotent: a foreign key created outside this e
 Databricks foreign key constraints are informational, not enforced. They do not block inserts that violate referential integrity, but they enable query optimizations and document intent in Unity Catalog.
 
 The referenced table needs a matching primary or unique key for Databricks to accept the constraint at execution time.
+
+Key-constraint support, including unique constraints used as referenced keys,
+depends on your Databricks environment. The engine does not preflight Databricks
+Runtime or Delta table protocol compatibility for you; if Databricks rejects the
+constraint DDL, `sync` reports an `EXECUTION_FAILED` table with the original
+error. See
+[how-to-handle-sync-failures.md](how-to-handle-sync-failures.md#runtime-and-delta-feature-compatibility).
