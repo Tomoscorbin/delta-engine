@@ -2,7 +2,13 @@ import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn, QualifiedName
+from delta_engine.api.table import METADATA_ASPECTS
+from delta_engine.domain.model import (
+    ALL_ASPECTS,
+    Column as DomainColumn,
+    QualifiedName,
+    TableAspect,
+)
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -399,3 +405,65 @@ def test_delta_table_preserves_tag_key_case():
 
     # Then the key case is preserved
     assert "CostCentre" in dict(table.to_desired_table().tags)
+
+
+def test_delta_table_manages_all_aspects_by_default():
+    # Given a table declared without the metadata_only flag
+    table = DeltaTable(
+        catalog="dev", schema="silver", name="orders", columns=[Column("id", Integer())]
+    )
+
+    # Then the lowered desired table manages everything (today's behaviour)
+    assert table.to_desired_table().managed_aspects == ALL_ASPECTS
+
+
+def test_metadata_only_table_manages_metadata_aspects():
+    # Given a metadata-only declaration
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        metadata_only=True,
+    )
+
+    # Then the lowered scope is exactly the metadata aspects: comments, tags, keys
+    assert table.to_desired_table().managed_aspects == frozenset(
+        {
+            TableAspect.TABLE_COMMENT,
+            TableAspect.COLUMN_COMMENTS,
+            TableAspect.TABLE_TAGS,
+            TableAspect.COLUMN_TAGS,
+            TableAspect.PRIMARY_KEY,
+            TableAspect.FOREIGN_KEYS,
+        }
+    )
+
+
+def test_metadata_only_table_still_lowers_the_full_schema():
+    # Given a metadata-only declaration with full schema detail
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer(), nullable=False), Column("name", String())],
+        metadata_only=True,
+    )
+
+    # Then everything the user declared is lowered — scope controls what the
+    # differ reads, not what gets lowered
+    desired = table.to_desired_table()
+    assert tuple(column.name for column in desired.columns) == ("id", "name")
+    assert desired.properties  # default properties still lowered
+
+
+def test_metadata_aspects_excludes_structure_properties_and_partitioning():
+    # Given the named metadata-only mode
+    # Then physical-behaviour aspects are excluded by design
+    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
+        {
+            TableAspect.COLUMN_STRUCTURE,
+            TableAspect.PROPERTIES,
+            TableAspect.PARTITIONING,
+        }
+    )

@@ -8,7 +8,13 @@ from types import MappingProxyType
 from typing import ClassVar, Final
 
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import (
+    ALL_ASPECTS,
+    Column,
+    DesiredTable,
+    QualifiedName,
+    TableAspect,
+)
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
@@ -23,6 +29,22 @@ class _SelfReference:
 
 
 Self: Final = _SelfReference()
+
+# The metadata-only management scope: comments, tags, and key constraints.
+# Column structure, properties, and partitioning are deliberately excluded —
+# properties change physical Delta behaviour (CDF, retention, column mapping),
+# so "metadata" here means catalog metadata only. This constant defines a
+# named API mode; the domain stays general over any aspect set.
+METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {
+        TableAspect.TABLE_COMMENT,
+        TableAspect.COLUMN_COMMENTS,
+        TableAspect.TABLE_TAGS,
+        TableAspect.COLUMN_TAGS,
+        TableAspect.PRIMARY_KEY,
+        TableAspect.FOREIGN_KEYS,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +116,15 @@ class DeltaTable:
     here. If you override that property to ``none``, a sync that removes a column
     will fail at execution time. Keep column mapping enabled on tables whose
     columns may be dropped.
+
+    When ``metadata_only=True``, the engine manages only catalog metadata —
+    comments, tags, and primary/foreign key constraints. Column structure,
+    properties, and partitioning are read for diff context but never changed:
+    a sync can never add, drop, or alter a column. The full schema is still
+    required and still declared here; it states the expected shape of the
+    table and lets the engine fail loudly when metadata targets a column that
+    does not exist in the live table. A metadata-only definition cannot create
+    a missing table.
     """
 
     default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
@@ -113,6 +144,7 @@ class DeltaTable:
         tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
+        metadata_only: bool = False,
     ) -> None:
         user_properties = dict(properties or {})
 
@@ -153,6 +185,7 @@ class DeltaTable:
             partitioned_by=tuple(partitioned_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
+            managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
         )
 
     @property
