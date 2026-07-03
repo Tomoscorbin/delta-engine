@@ -313,7 +313,7 @@ def test_delta_table_defaults_to_no_foreign_keys():
         columns=[Column("id", Integer())],
     )
 
-    # Then
+    # Then foreign_keys defaults to an empty tuple
     assert table.foreign_keys == ()
 
 

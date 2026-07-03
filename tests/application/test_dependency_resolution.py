@@ -70,7 +70,7 @@ def test_resolve_with_no_fks_preserves_input_order():
     # Given three tables with no FKs
     tables = (_table("cat.sch.a"), _table("cat.sch.b"), _table("cat.sch.c"))
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then order is unchanged and all tables have no FK failures
@@ -85,7 +85,7 @@ def test_resolve_orders_referenced_table_before_dependent():
         _table("cat.sch.customers"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then customers appears before orders and all tables have no FK failures
@@ -102,7 +102,7 @@ def test_resolve_handles_chain_of_dependencies():
         _table("cat.sch.a"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then a before b before c
@@ -114,7 +114,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
     # Given orders references customers but customers is not registered
     tables = (_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then orders has one UNRESOLVABLE_REFERENCE failure with the FK's columns
@@ -132,7 +132,7 @@ def test_resolve_fails_both_members_of_a_cycle():
         _table_with_fk("cat.sch.b", "cat.sch.a"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then both tables cannot execute, each with CYCLE
@@ -149,7 +149,7 @@ def test_resolve_ordering_includes_failed_tables():
         _table_with_fk("cat.sch.b", "cat.sch.a"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then both tables still appear in the ordering (the engine gates them out via their failures)
@@ -163,7 +163,7 @@ def test_resolve_blocks_table_that_references_an_unresolvable_table():
         _table_with_fk("cat.sch.customers", "cat.sch.archive"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then customers fails directly, and orders cannot execute because customers will not build
@@ -186,7 +186,7 @@ def test_resolve_propagates_block_along_a_chain():
         _table_with_fk("cat.sch.a", "cat.sch.missing"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then a fails directly and b, c, d are all blocked transitively
@@ -209,7 +209,7 @@ def test_resolve_blocks_table_that_depends_on_a_cycle():
         _table_with_fk("cat.sch.c", "cat.sch.b"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then b and c fail as CYCLE, and a cannot execute because b will not build
@@ -228,7 +228,7 @@ def test_resolve_does_not_block_an_unrelated_sibling():
         _table("cat.sch.unrelated"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then only orders cannot execute; the unrelated table is fine
@@ -249,7 +249,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
         foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
     ).to_desired_table()
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve((table,))
 
     # Then the self-referencing FK does not prevent execution
@@ -281,7 +281,7 @@ def test_resolve_propagates_block_through_a_diamond():
         _table_with_fk("cat.sch.a", "cat.sch.missing"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then a fails directly; b, c, and d are all blocked
@@ -299,10 +299,11 @@ def test_resolve_propagates_block_through_a_diamond():
 
 
 def test_resolve_with_empty_tables_returns_empty_tuple():
-    # Given / When
+    # Given no tables are passed to the resolver
+    # When resolving the empty input
     result = resolve(())
 
-    # Then
+    # Then the ordered names and FK failures are both empty
     assert result.ordered_names == () and result.fk_failures == {}
 
 
@@ -344,7 +345,7 @@ def test_resolve_passes_when_fk_targets_the_parents_primary_key():
         _table("cat.sch.customers"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then every table can execute
@@ -364,7 +365,7 @@ def test_resolve_fails_fk_that_targets_a_non_key_column():
         customers_no_pk,
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then orders cannot execute: its referenced columns are not the parent's PK
@@ -406,7 +407,7 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
         ),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve((orders, customers))
 
     # Then orders is rejected: email is not customers' primary key
@@ -437,7 +438,7 @@ def test_resolve_valid_chain_with_primary_keys_executes():
         _table("cat.sch.b"),
     )
 
-    # When
+    # When resolving foreign-key dependencies
     result = resolve(tables)
 
     # Then the whole chain validates and executes

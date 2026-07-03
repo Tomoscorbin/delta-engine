@@ -148,7 +148,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
         execution=ExecutionSummary(),
     )
 
-    # When
+    # When aggregating the sync report
     sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
 
     # Then only the failed table appears, keyed by its QualifiedName, with its failures

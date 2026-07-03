@@ -217,7 +217,7 @@ def test_no_actions_when_desired_equals_observed():
         partitioned_by=("event_date",),
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: nothing to do
@@ -250,7 +250,7 @@ def test_combines_column_property_comment_and_partition_diffs():
         partitioned_by=("event_date",),  # different partition spec
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: the plan contains the expected representative actions
@@ -276,7 +276,7 @@ def test_no_column_actions_when_columns_are_identical():
     # Given: desired and observed have the same columns, comments, and nullability
     columns = (Column("id", Integer()), Column("name", String(), comment="customer name"))
 
-    # When
+    # When computing the plan
     plan = compute_plan(_desired(columns=columns), _observed(columns=columns))
 
     # Then: nothing to do
@@ -288,7 +288,7 @@ def test_adds_columns_present_only_in_desired():
     desired = _desired(columns=(Column("id", Integer()), Column("age", Integer())))
     observed = _observed(columns=(Column("id", Integer()),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: an AddColumn for "age" is produced
@@ -300,7 +300,7 @@ def test_drops_columns_present_only_in_observed():
     desired = _desired(columns=(Column("id", Integer()),))
     observed = _observed(columns=(Column("id", Integer()), Column("legacy", String())))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a DropColumn for "legacy" is produced
@@ -312,7 +312,7 @@ def test_sets_column_comment_when_desired_differs_from_observed():
     desired = _desired(columns=(Column("name", String(), comment="customer"),))
     observed = _observed(columns=(Column("name", String(), comment=""),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a SetColumnComment aligns the comment
@@ -324,7 +324,7 @@ def test_clears_column_comment_when_desired_is_empty_and_observed_is_not():
     desired = _desired(columns=(Column("name", String(), comment=""),))
     observed = _observed(columns=(Column("name", String(), comment="customer"),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a SetColumnComment clears it to empty
@@ -336,7 +336,7 @@ def test_sets_column_nullability_when_flag_differs():
     desired = _desired(columns=(Column("active", String(), nullable=False),))
     observed = _observed(columns=(Column("active", String(), nullable=True),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a SetColumnNullability aligns the flag
@@ -355,7 +355,7 @@ def test_combines_column_add_drop_and_updates_without_duplicates():
         columns=(Column("keep", Integer(), comment=""), Column("drop_me", String()))
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: exactly three actions — no redundant comment/nullability for the added column
@@ -376,7 +376,7 @@ def test_adding_column_to_existing_table_emits_only_add_column():
     )
     observed = _observed(columns=(Column("id", Integer()),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: only one AddColumn; no redundant SetColumnComment or SetColumnNullability
@@ -390,7 +390,7 @@ def test_emits_column_type_change_action_when_type_differs():
     desired = _desired(columns=(Column("id", String()),))
     observed = _observed(columns=(Column("id", Integer()),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: the drift is surfaced as a ColumnTypeChange action
@@ -407,7 +407,7 @@ def test_emits_partitioning_change_action_when_partition_spec_differs():
     desired = _desired(columns=columns, partitioned_by=("ds",))
     observed = _observed(columns=columns, partitioned_by=())
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: the conflict is surfaced as a PartitioningChange action
@@ -436,7 +436,7 @@ def test_no_property_actions_when_mappings_are_identical():
     # Given: desired and observed have identical properties
     props = {"delta.appendOnly": "true", "owner": "cdm"}
 
-    # When
+    # When computing the plan
     plan = compute_plan(_desired(properties=props), _observed(properties=props))
 
     # Then: nothing to do
@@ -448,7 +448,7 @@ def test_sets_property_when_missing_in_observed():
     desired = _desired(properties={"delta.appendOnly": "true"})
     observed = _observed(properties={})
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a SetProperty is emitted with the desired value
@@ -460,7 +460,7 @@ def test_updates_property_when_value_differs():
     desired = _desired(properties={"delta.appendOnly": "false"})
     observed = _observed(properties={"delta.appendOnly": "true"})
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a single SetProperty updates the value
@@ -473,7 +473,7 @@ def test_ignores_observed_only_properties():
     desired = _desired(properties={"owner": "cdm"})
     observed = _observed(properties={"owner": "cdm", "delta.minReaderVersion": "2"})
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: the undeclared property is left untouched — no unset is emitted
@@ -487,7 +487,7 @@ def test_no_comment_action_when_comments_match():
     # Given: same comment on desired and observed
     plan = compute_plan(_desired(comment="core table"), _observed(comment="core table"))
 
-    # Then
+    # Then no table-comment action is emitted
     assert plan.actions == ()
 
 
@@ -579,7 +579,7 @@ def test_emits_set_primary_key_when_desired_has_pk_and_observed_has_none():
     desired = _desired_with_pk(["id"])
     observed = _observed_with_pk([])
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a SetPrimaryKey is emitted carrying the PK column names; no DropPrimaryKey
@@ -594,7 +594,7 @@ def test_emits_drop_primary_key_when_desired_has_no_pk_and_observed_has_one():
     desired = _desired(columns=(Column("id", Integer()),))
     observed = _observed_with_pk(["id"])
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: a DropPrimaryKey is emitted; no SetPrimaryKey
@@ -607,7 +607,7 @@ def test_emits_drop_and_set_when_pk_columns_change():
     desired = _desired_with_pk(["id"])
     observed = _observed_with_pk(["name"])
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: both DropPrimaryKey and SetPrimaryKey are emitted
@@ -636,7 +636,7 @@ def test_no_pk_actions_when_pk_columns_match_regardless_of_order():
         primary_key=PrimaryKeyConstraint(columns=("tenant_id", "id"), constraint_name="test_pk"),
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then: order difference alone does not trigger a PK change
@@ -656,7 +656,7 @@ def test_drop_primary_key_runs_before_add_column_in_plan():
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk"),
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     types = [type(a) for a in plan.actions]
@@ -680,7 +680,7 @@ def test_set_primary_key_runs_after_set_column_nullability_in_plan():
         primary_key=None,
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     types = [type(a) for a in plan.actions]
@@ -735,10 +735,10 @@ def test_no_fk_on_either_side_produces_no_fk_actions():
         columns=(Column("id", Integer()),),
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
-    # Then
+    # Then no foreign-key actions are emitted
     fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
     assert fk_actions == []
 
@@ -748,7 +748,7 @@ def test_new_fk_on_desired_only_emits_set_foreign_key():
     desired = _orders_with_fk(_FK)
     observed = _observed_orders()
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then exactly one SetForeignKey is emitted, carrying the desired FK with its
@@ -773,7 +773,7 @@ def test_fk_removed_from_desired_emits_drop_then_no_set():
     )
     observed = _observed_orders((observed_fk,))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then a DropForeignKey is emitted using the observed catalog name, no SetForeignKey
@@ -789,7 +789,7 @@ def test_fk_same_on_both_sides_produces_no_fk_actions():
     desired = _orders_with_fk(_FK)
     observed = _observed_orders((_FK,))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then no FK actions
@@ -815,7 +815,7 @@ def test_fk_changed_emits_drop_and_set():
     desired = _orders_with_fk(new_fk)
     observed = _observed_orders((old_fk,))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then drop the old one (using the catalog name), set the new one carrying
@@ -832,7 +832,7 @@ def test_new_table_with_fk_includes_set_foreign_key_in_plan():
     # Given a brand-new table (observed=None) with a FK
     desired = _orders_with_fk(_FK)
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, None)
 
     # Then plan contains CreateTable — and a SetForeignKey (FK applied after creation)
@@ -861,7 +861,7 @@ def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
     desired = _orders_with_fk(desired_fk)
     observed = _observed_orders((observed_fk,))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then no FK actions — the relationship already exists, name notwithstanding
@@ -895,7 +895,7 @@ def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
         foreign_keys=(observed_fk,),
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then no FK actions are emitted — the FK is already in the right state
@@ -935,7 +935,7 @@ def test_no_tag_actions_when_tag_maps_are_identical():
     # Given desired and observed carry the same tags
     tags = {"env": "prod", "domain": "sales"}
 
-    # When
+    # When computing the plan
     plan = compute_plan(_desired(tags=tags), _observed(tags=tags))
 
     # Then nothing to do
@@ -1001,7 +1001,7 @@ def test_no_column_tag_actions_when_tags_match():
     desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
     observed = _observed(columns=(Column("email", String(), tags={"pii": "true"}),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then nothing to do
@@ -1013,7 +1013,7 @@ def test_sets_column_tag_when_absent_in_observed():
     desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
     observed = _observed(columns=(Column("email", String()),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then a SetColumnTag is emitted for that column
@@ -1025,7 +1025,7 @@ def test_updates_column_tag_when_value_differs():
     desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
     observed = _observed(columns=(Column("email", String(), tags={"pii": "false"}),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then a single SetColumnTag updates the value
@@ -1037,7 +1037,7 @@ def test_unsets_observed_only_column_tag_under_full_state_ownership():
     desired = _desired(columns=(Column("email", String()),))
     observed = _observed(columns=(Column("email", String(), tags={"legacy": "1"}),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then the engine unsets it — column tags are full-state
@@ -1049,7 +1049,7 @@ def test_sets_and_unsets_column_tags_in_one_plan():
     desired = _desired(columns=(Column("email", String(), tags={"pii": "true"}),))
     observed = _observed(columns=(Column("email", String(), tags={"pii": "false", "legacy": "1"}),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then the changed tag is set and the undeclared tag is unset
@@ -1066,7 +1066,7 @@ def test_no_unset_column_tag_for_a_dropped_column():
         columns=(Column("id", Integer()), Column("legacy", String(), tags={"pii": "true"}))
     )
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then the column is dropped and NO UnsetColumnTag is emitted (drop removes its tags)
@@ -1081,7 +1081,7 @@ def test_new_column_gets_all_its_tags_set():
     )
     observed = _observed(columns=(Column("id", Integer()),))
 
-    # When
+    # When computing the plan
     plan = compute_plan(desired, observed)
 
     # Then the column is added and its tag is set afterwards

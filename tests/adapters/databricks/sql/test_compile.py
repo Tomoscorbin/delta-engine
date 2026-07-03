@@ -342,13 +342,13 @@ def test_create_table_without_pk_omits_constraint_clause():
 
 
 def test_drop_foreign_key_renders_drop_constraint_if_exists():
-    # Given
+    # Given a DropForeignKey action with a catalog constraint name
     action = DropForeignKey(constraint_name="orders_customer_id_fk")
 
-    # When
+    # When compiling the action
     statement = _compile_single(action)
 
-    # Then
+    # Then the SQL drops that constraint if it exists
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`"
     )

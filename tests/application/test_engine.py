@@ -212,7 +212,7 @@ def test_engine_reads_all_tables_then_raises_on_any_read_failure():
     executor = _FakeExecutor(results=(_ok_exec(0),))  # irrelevant for a; used for b
     engine = Engine(reader=reader, executor=executor)
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec("c.s.a"), _spec("c.s.b"))
 
@@ -237,7 +237,7 @@ def test_engine_validates_all_tables_executes_only_the_passing_ones_then_raises(
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))  # used only for b
     engine = Engine(reader=reader, executor=executor)
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec_adding_not_null("c.s.a"), _spec("c.s.b"))
 
@@ -265,7 +265,7 @@ def test_engine_executes_all_tables_then_raises_if_any_execution_failed():
     )
     engine = Engine(reader=reader, executor=executor)
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec("c.s.a"), _spec("c.s.b"))
 
@@ -290,7 +290,7 @@ def test_engine_executes_remaining_tables_even_if_first_execution_fails():
     )
     engine = Engine(reader=reader, executor=executor)
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec("c.s.a"), _spec("c.s.b"))
 
@@ -328,7 +328,7 @@ def test_read_phase_attempts_all_tables_before_any_execution():
     executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(0)))
     engine = Engine(_TrackingReader(), executor)
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec("c.s.a"), _spec("c.s.b"), _spec("c.s.c"))
 
@@ -359,7 +359,7 @@ def test_validate_phase_validates_all_tables_before_any_execution():
 
     engine = Engine(reader, _TrackingExecutor())
 
-    # When
+    # When syncing the requested tables
     with pytest.raises(SyncFailedError) as err:
         engine.sync(_spec_adding_not_null("c.s.a"), _spec("c.s.b"))
 
@@ -403,7 +403,7 @@ def test_sync_report_has_no_fk_failures_when_no_fks_declared():
     # Given a table with no FKs
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))
 
-    # When
+    # When syncing the requested tables
     report = engine.sync(_spec("cat.sch.tbl"))
 
     # Then the single table has no failures and succeeds
@@ -438,7 +438,7 @@ def test_sync_processes_tables_in_fk_dependency_order():
 
     engine = Engine(_FakeReader({}), _OrderCapturingExecutor())
 
-    # When
+    # When syncing the requested tables
     engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"), _spec("cat.sch.customers"))
 
     # Then customers syncs before orders regardless of the order they were passed
