@@ -138,7 +138,24 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 ## Sentinel actions
 
-`ColumnTypeChange` and `PartitioningChange` are actions that are never executed. The differ emits them to describe drift it detected — a column whose type differs, or a changed partition spec — without judging whether that drift is allowed; deciding what is permitted is the validation layer's job (`UnsupportedColumnTypeChange` and `DisallowPartitioningChange` reject them with a clear message). The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first.
+`ColumnTypeChange`, `PartitioningChange`, `TargetTableMissing`, `TargetColumnMissing`, and `UnenforceablePrimaryKey` are actions that are never executed. The differ emits them to describe drift it detected — a column whose type differs, or a changed partition spec — without judging whether that drift is allowed; deciding what is permitted is the validation layer's job (`UnsupportedColumnTypeChange` and `DisallowPartitioningChange` reject them with a clear message). The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first. The three broken-target actions describe managed metadata that cannot land — a missing table, a missing column, or a primary key over live-nullable columns — and are emitted only when column structure is unmanaged.
+
+## Managed aspects
+
+Every `DesiredTable` carries `managed_aspects`, a `frozenset[TableAspect]`
+naming the dimensions of table state the engine reconciles for that table:
+column structure, table comment, column comments, table tags, column tags,
+properties, partitioning, primary key, foreign keys. The differ runs each
+diff dimension only when its aspect is managed; unmanaged dimensions are
+ignored entirely (not diffed, so never blocked). The default is all aspects —
+full management.
+
+Scope controls what the differ reads, not what gets lowered: the public API
+always lowers the complete declaration, so "unset" (an empty tags mapping
+means remove all tags) and "unmanaged" (the aspect is out of scope) stay
+distinct. The public API exposes named modes only — `DeltaTable(
+metadata_only=True)` maps to the metadata aspects (comments, tags, keys) —
+and the enum stays internal.
 
 ## Constraint-name generation
 
