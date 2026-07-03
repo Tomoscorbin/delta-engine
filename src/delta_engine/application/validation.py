@@ -6,12 +6,16 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.domain.model import TableAspect
 from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
     ColumnTypeChange,
     PartitioningChange,
     SetColumnNullability,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
 )
 
 
@@ -164,11 +168,106 @@ class DisallowPartitioningChange:
         )
 
 
+def _aspect_label(aspect: TableAspect) -> str:
+    """Human-readable label for an aspect (e.g. ``column comments``)."""
+    return aspect.name.lower().replace("_", " ")
+
+
+class MissingTargetTable:
+    """
+    Disallow a sync against a table that is absent and cannot be created.
+
+    The differ emits :class:`~delta_engine.domain.plan.TargetTableMissing` when
+    the table does not exist but the desired table does not manage column
+    structure — there is no schema to create it from, and metadata has nothing
+    to attach to.
+    """
+
+    name: ClassVar[str] = "MissingTargetTable"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag the plan if it describes an uncreatable missing table."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: the table does not exist and this"
+                    " definition does not manage column structure, so it cannot"
+                    " be created. Create the table first, or manage it fully."
+                ),
+            )
+            for action in plan
+            if isinstance(action, TargetTableMissing)
+        )
+
+
+class MissingTargetColumn:
+    """
+    Disallow managed metadata that targets a column absent from the live table.
+
+    The differ emits :class:`~delta_engine.domain.plan.TargetColumnMissing` per
+    declared column that is absent live while carrying managed metadata. With
+    column structure unmanaged the column will never be added, so the metadata
+    can never land — failing at plan time beats failing mid-plan at execution.
+    """
+
+    name: ClassVar[str] = "MissingTargetColumn"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag every metadata target column that is missing from the live table."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: column '{action.column_name}' is"
+                    " missing from the live table but is targeted by managed"
+                    f" metadata ({', '.join(_aspect_label(r) for r in action.reasons)})."
+                    " Add the column out-of-band, or remove its metadata from"
+                    " the declaration."
+                ),
+            )
+            for action in plan
+            if isinstance(action, TargetColumnMissing)
+        )
+
+
+class UnenforceablePrimaryKeyChange:
+    """
+    Disallow setting a primary key over columns that are nullable live.
+
+    The differ emits :class:`~delta_engine.domain.plan.UnenforceablePrimaryKey`
+    when a SetPrimaryKey is planned while nullability is unmanaged and the live
+    key columns are nullable: no tightening precedes the constraint, so the ADD
+    CONSTRAINT would fail at execution time.
+    """
+
+    name: ClassVar[str] = "UnenforceablePrimaryKeyChange"
+
+    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+        """Flag every planned primary key whose live columns are nullable."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: cannot set a primary key over"
+                    " nullable live column(s):"
+                    f" {', '.join(action.nullable_columns)}. Tighten"
+                    " nullability out-of-band, then re-sync."
+                ),
+            )
+            for action in plan
+            if isinstance(action, UnenforceablePrimaryKey)
+        )
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     UnsupportedColumnTypeChange(),
     DisallowPartitioningChange(),
+    MissingTargetTable(),
+    MissingTargetColumn(),
+    UnenforceablePrimaryKeyChange(),
 )
 
 

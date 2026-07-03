@@ -1,19 +1,35 @@
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
+    DEFAULT_RULES,
     DisallowPartitioningChange,
+    MissingTargetColumn,
+    MissingTargetTable,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
+    UnenforceablePrimaryKeyChange,
     UnsupportedColumnTypeChange,
     ValidationResult,
     validate_plan,
 )
-from delta_engine.domain.model import Column, Integer, Long, String
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    QualifiedName,
+    String,
+    TableAspect,
+)
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     ColumnTypeChange,
+    CreateTable,
     PartitioningChange,
     SetColumnNullability,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
 )
 
 
@@ -247,3 +263,97 @@ def test_validation_result_failed_property_reflects_presence_of_failures():
 # A nullable primary key column is rejected when the DesiredTable is built (a
 # desired-schema well-formedness invariant), not by a plan-validation rule — see
 # tests/domain/model/test_table.py.
+
+
+# ---- MissingTargetTable
+
+
+def test_rejects_missing_table_that_this_definition_cannot_create():
+    # Given a plan describing an absent table with column structure unmanaged
+    rule = MissingTargetTable()
+
+    failures = rule.evaluate(_plan(TargetTableMissing()))
+
+    # Then the violation is flagged with a pointer to the resolution
+    assert len(failures) == 1
+    assert failures[0].rule_name == "MissingTargetTable"
+    assert "does not exist" in failures[0].message
+
+
+def test_missing_target_table_ignores_creation_plan():
+    # Given an ordinary creation plan
+    rule = MissingTargetTable()
+    table = DesiredTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()),),
+    )
+
+    # Then no failure is raised
+    assert rule.evaluate(_plan(CreateTable(table))) == ()
+
+
+# ---- MissingTargetColumn
+
+
+def test_rejects_metadata_targeting_a_column_missing_from_the_live_table():
+    # Given a declared column absent live, targeted by a comment and tags
+    rule = MissingTargetColumn()
+
+    failures = rule.evaluate(
+        _plan(
+            TargetColumnMissing(
+                column_name="email",
+                reasons=(TableAspect.COLUMN_COMMENTS, TableAspect.COLUMN_TAGS),
+            )
+        )
+    )
+
+    # Then the failure names the column and every reason
+    assert len(failures) == 1
+    assert failures[0].rule_name == "MissingTargetColumn"
+    assert "email" in failures[0].message
+    assert "column comments" in failures[0].message
+    assert "column tags" in failures[0].message
+
+
+def test_rejects_every_missing_target_column_in_a_single_pass():
+    # Given two broken target columns
+    rule = MissingTargetColumn()
+
+    failures = rule.evaluate(
+        _plan(
+            TargetColumnMissing(column_name="a", reasons=(TableAspect.PRIMARY_KEY,)),
+            TargetColumnMissing(column_name="b", reasons=(TableAspect.FOREIGN_KEYS,)),
+        )
+    )
+
+    # Then both violations are reported at once
+    assert len(failures) == 2
+
+
+# ---- UnenforceablePrimaryKeyChange
+
+
+def test_rejects_primary_key_over_nullable_live_columns():
+    # Given a planned PK whose columns are nullable in the live table
+    rule = UnenforceablePrimaryKeyChange()
+
+    failures = rule.evaluate(_plan(UnenforceablePrimaryKey(nullable_columns=("id", "region"))))
+
+    # Then the failure names the nullable columns and the safe path
+    assert len(failures) == 1
+    assert failures[0].rule_name == "UnenforceablePrimaryKeyChange"
+    assert "id" in failures[0].message
+    assert "region" in failures[0].message
+
+
+def test_new_rules_are_in_the_default_rule_set():
+    # Given the production rule set
+    rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
+
+    # Then all three broken-target rules are active by default
+    assert {
+        "MissingTargetTable",
+        "MissingTargetColumn",
+        "UnenforceablePrimaryKeyChange",
+    } <= rule_names
