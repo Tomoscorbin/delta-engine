@@ -124,7 +124,7 @@ def _strongly_connected_components(
     index_counter = 0
     indices: dict[QualifiedName, int] = {}
     low_links: dict[QualifiedName, int] = {}
-    on_stack: dict[QualifiedName, bool] = {}
+    on_stack: set[QualifiedName] = set()
     stack: list[QualifiedName] = []
     components: list[list[QualifiedName]] = []
 
@@ -134,20 +134,20 @@ def _strongly_connected_components(
         low_links[node] = index_counter
         index_counter += 1
         stack.append(node)
-        on_stack[node] = True
+        on_stack.add(node)
 
         for neighbour in sorted(graph[node], key=str):
             if neighbour not in indices:
                 strong_connect(neighbour)
                 low_links[node] = min(low_links[node], low_links[neighbour])
-            elif on_stack.get(neighbour):
+            elif neighbour in on_stack:
                 low_links[node] = min(low_links[node], indices[neighbour])
 
         if low_links[node] == indices[node]:
             component: list[QualifiedName] = []
             while True:
                 member = stack.pop()
-                on_stack[member] = False
+                on_stack.discard(member)
                 component.append(member)
                 if member == node:
                     break
