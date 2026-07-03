@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 
-from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model import Column, DesiredTable, ObservedTable, TableAspect
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
@@ -34,6 +34,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -102,15 +105,27 @@ def _plan_for_missing_table(desired: DesiredTable) -> ActionPlan:
     """
     Plan the creation of a table that does not exist yet.
 
-    CREATE TABLE instantiates the full declaration; tags and foreign keys
-    cannot be declared inline in CREATE TABLE, so they are always applied as
-    follow-up actions. A missing table has no observed tags or foreign keys,
-    so every desired value is set and none is unset.
+    Creation requires the column structure aspect: CREATE TABLE instantiates
+    the full declaration. A definition that does not manage structure cannot
+    create the table, so its plan is the descriptive ``TargetTableMissing`` —
+    no metadata follow-ups are emitted against a table that will not exist.
+
+    In the create case, tags and foreign keys cannot be declared inline in
+    CREATE TABLE, so they are applied as follow-up actions, each gated on its
+    own aspect. A missing table has no observed tags or foreign keys, so every
+    desired value is set and none is unset.
     """
+    managed = desired.managed_aspects
+    if TableAspect.COLUMN_STRUCTURE not in managed:
+        return ActionPlan((TargetTableMissing(),))
+
     actions: tuple[Action, ...] = (CreateTable(desired),)
-    actions += _diff_table_tags(desired.tags, {})
-    actions += _diff_column_tags(desired.columns, ())
-    actions += _diff_foreign_keys(desired.foreign_keys, ())
+    if TableAspect.TABLE_TAGS in managed:
+        actions += _diff_table_tags(desired.tags, {})
+    if TableAspect.COLUMN_TAGS in managed:
+        actions += _diff_column_tags(desired.columns, ())
+    if TableAspect.FOREIGN_KEYS in managed:
+        actions += _diff_foreign_keys(desired.foreign_keys, ())
     return ActionPlan(actions)
 
 
@@ -118,22 +133,44 @@ def _plan_for_existing_table(desired: DesiredTable, observed: ObservedTable) -> 
     """
     Plan the reconciliation of an existing table toward the desired state.
 
-    Columns are matched by name once; the structural diff (add/drop/type/
-    nullability) and the comment diff read the same match, so the two cannot
-    disagree about which columns exist on both sides.
+    Every diff dimension runs only when its aspect is managed. Columns are
+    matched by name once; structural and metadata diffs read the same match.
+    With column structure unmanaged, column metadata reconciles over the
+    name-matched subset only — a desired-only column will never come into
+    existence, so metadata targeting it is reported as a broken target
+    (``_find_broken_targets``) instead of planned.
     """
+    managed = desired.managed_aspects
     matched = match_by_key(desired.columns, observed.columns, key=lambda column: column.name)
+    structure_is_managed = TableAspect.COLUMN_STRUCTURE in managed
+    reconcilable_columns = (
+        desired.columns
+        if structure_is_managed
+        else tuple(desired_column for desired_column, _ in matched.common)
+    )
 
     actions: tuple[Action, ...] = ()
-    actions += _diff_column_structure(matched)
-    actions += _diff_column_comments(matched.common)
-    actions += _diff_properties(desired.properties, observed.properties)
-    actions += _diff_table_comment(desired.comment, observed.comment)
-    actions += _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
-    actions += _diff_primary_key(desired.primary_key, observed.primary_key)
-    actions += _diff_table_tags(desired.tags, observed.tags)
-    actions += _diff_column_tags(desired.columns, observed.columns)
-    actions += _diff_foreign_keys(desired.foreign_keys, observed.foreign_keys)
+    if structure_is_managed:
+        actions += _diff_column_structure(matched)
+    if TableAspect.COLUMN_COMMENTS in managed:
+        actions += _diff_column_comments(matched.common)
+    if TableAspect.PROPERTIES in managed:
+        actions += _diff_properties(desired.properties, observed.properties)
+    if TableAspect.TABLE_COMMENT in managed:
+        actions += _diff_table_comment(desired.comment, observed.comment)
+    if TableAspect.PARTITIONING in managed:
+        actions += _diff_partitioning(desired.partitioned_by, observed.partitioned_by)
+    if TableAspect.PRIMARY_KEY in managed:
+        actions += _diff_primary_key(desired.primary_key, observed.primary_key)
+    if TableAspect.TABLE_TAGS in managed:
+        actions += _diff_table_tags(desired.tags, observed.tags)
+    if TableAspect.COLUMN_TAGS in managed:
+        actions += _diff_column_tags(reconcilable_columns, observed.columns)
+    if TableAspect.FOREIGN_KEYS in managed:
+        actions += _diff_foreign_keys(desired.foreign_keys, observed.foreign_keys)
+
+    if not structure_is_managed:
+        actions += _find_broken_targets(desired, observed, actions)
     return ActionPlan(actions)
 
 
@@ -347,3 +384,83 @@ def _diff_foreign_keys(
         for foreign_key in matched.dropped
     )
     return tuple(set_actions) + drop_actions
+
+
+def _find_broken_targets(
+    desired: DesiredTable,
+    observed: ObservedTable,
+    planned: tuple[Action, ...],
+) -> tuple[Action, ...]:
+    """
+    Report every place managed metadata cannot land, as descriptive actions.
+
+    Only meaningful when column structure is unmanaged: with structure managed,
+    every declared column either exists or is being added, and nullability is
+    tightened before a primary key is set. Emits at most one
+    ``TargetColumnMissing`` per column (all reasons on one action, in
+    ``TableAspect`` declaration order) plus ``UnenforceablePrimaryKey`` when a
+    planned key sits on live-nullable columns.
+    """
+    observed_column_names = frozenset(column.name for column in observed.columns)
+    missing_target_actions = tuple(
+        TargetColumnMissing(column_name=column.name, reasons=reasons)
+        for column in desired.columns
+        if column.name not in observed_column_names
+        and (reasons := _broken_target_reasons(column, desired))
+    )
+    return missing_target_actions + _unenforceable_primary_key(desired, observed, planned)
+
+
+def _broken_target_reasons(
+    column: Column, desired: DesiredTable
+) -> tuple[TableAspect, ...]:
+    """
+    Return the managed aspects whose metadata targets ``column``.
+
+    A column earns a reason only when the aspect is managed AND the column
+    actually carries that metadata — a bare stale column is benign drift.
+    Reasons follow ``TableAspect`` declaration order so messages are
+    deterministic.
+    """
+    managed = desired.managed_aspects
+    foreign_key_local_columns = frozenset(
+        local_column
+        for foreign_key in desired.foreign_keys
+        for local_column in foreign_key.local_columns
+    )
+    reasons: list[TableAspect] = []
+    if TableAspect.COLUMN_COMMENTS in managed and column.comment:
+        reasons.append(TableAspect.COLUMN_COMMENTS)
+    if TableAspect.COLUMN_TAGS in managed and column.tags:
+        reasons.append(TableAspect.COLUMN_TAGS)
+    if TableAspect.PRIMARY_KEY in managed and column.name in desired.primary_key_columns:
+        reasons.append(TableAspect.PRIMARY_KEY)
+    if TableAspect.FOREIGN_KEYS in managed and column.name in foreign_key_local_columns:
+        reasons.append(TableAspect.FOREIGN_KEYS)
+    return tuple(reasons)
+
+
+def _unenforceable_primary_key(
+    desired: DesiredTable,
+    observed: ObservedTable,
+    planned: tuple[Action, ...],
+) -> tuple[Action, ...]:
+    """
+    Flag a planned primary key whose columns are nullable in the live table.
+
+    Fires only when a ``SetPrimaryKey`` is actually planned: a live key that
+    already matches the declaration emits no action, so live nullability is
+    irrelevant. Key columns missing from the live table entirely are covered
+    by ``TargetColumnMissing`` and are not double-reported here.
+    """
+    if not any(isinstance(action, SetPrimaryKey) for action in planned):
+        return ()
+    live_nullable_columns = frozenset(
+        column.name for column in observed.columns if column.nullable
+    )
+    nullable_key_columns = tuple(
+        name for name in desired.primary_key_columns if name in live_nullable_columns
+    )
+    if not nullable_key_columns:
+        return ()
+    return (UnenforceablePrimaryKey(nullable_columns=nullable_key_columns),)

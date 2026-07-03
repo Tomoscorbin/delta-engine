@@ -1,4 +1,7 @@
+import dataclasses
+
 from hypothesis import given, strategies as st
+import pytest
 
 from delta_engine.domain.model import (
     Boolean,
@@ -13,6 +16,7 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     String,
+    TableAspect,
     Timestamp,
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
@@ -34,6 +38,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -145,6 +152,7 @@ def _desired(
     tags=None,
     partitioned_by=(),
     primary_key=None,
+    managed_aspects=None,
 ) -> DesiredTable:
     """Build a DesiredTable, defaulting every dimension to a no-op baseline."""
     return DesiredTable(
@@ -155,6 +163,7 @@ def _desired(
         tags=tags or {},
         partitioned_by=partitioned_by,
         primary_key=primary_key,
+        managed_aspects=managed_aspects or frozenset(TableAspect),
     )
 
 
@@ -1101,3 +1110,297 @@ def test_new_table_sets_all_column_tags_after_creation():
     assert any(isinstance(a, CreateTable) for a in plan)
     set_tags = [a for a in plan if isinstance(a, SetColumnTag)]
     assert set_tags == [SetColumnTag(column_name="email", name="pii", value="true")]
+
+
+# ---------- managed aspects ----------
+
+# The metadata-only scope: everything except column structure, properties,
+# and partitioning. Mirrors the API layer's METADATA_ASPECTS without importing
+# it — the domain tests must not depend on API policy.
+_METADATA_ONLY = frozenset(TableAspect) - {
+    TableAspect.COLUMN_STRUCTURE,
+    TableAspect.PROPERTIES,
+    TableAspect.PARTITIONING,
+}
+
+_TAGS_ONLY = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+
+
+def test_metadata_only_ignores_benign_schema_drift():
+    # Given a live table with an extra column and a type-drifted column
+    desired = _desired(
+        columns=(Column("id", Integer()),),
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(
+        columns=(Column("id", Long()), Column("extra", String())),
+    )
+
+    # When diffing
+    plan = compute_plan(desired, observed)
+
+    # Then no structural action is produced: the drift is not the engine's business
+    assert plan.actions == ()
+
+
+def test_metadata_only_reconciles_comment_on_a_type_drifted_column():
+    # Given a matched column whose type drifted and whose comment differs
+    desired = _desired(
+        columns=(Column("id", Integer(), comment="surrogate key"),),
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Long()),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then only the comment is reconciled — the DDL targets the column by name
+    assert plan.actions == (SetColumnComment("id", "surrogate key"),)
+
+
+def test_metadata_only_reconciles_column_tags_on_matched_columns_only():
+    # Given a desired-only column carrying tags (it will never be created)
+    desired = _desired(
+        columns=(
+            Column("id", Integer(), tags={"pii": "false"}),
+            Column("ghost", String(), tags={"pii": "true"}),
+        ),
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then the matched column's tag is set, and the ghost column is reported
+    # as a broken target rather than tagged
+    assert SetColumnTag(column_name="id", name="pii", value="false") in plan.actions
+    assert TargetColumnMissing(column_name="ghost", reasons=(TableAspect.COLUMN_TAGS,)) in (
+        plan.actions
+    )
+    assert not any(
+        isinstance(action, SetColumnTag) and action.column_name == "ghost"
+        for action in plan.actions
+    )
+
+
+def test_metadata_only_missing_table_plans_a_single_target_table_missing():
+    # Given a metadata-only definition for a table that does not exist
+    desired = _desired(
+        tags={"env": "prod"},
+        managed_aspects=_METADATA_ONLY,
+    )
+
+    # When diffing against a missing table
+    plan = compute_plan(desired, observed=None)
+
+    # Then the plan is exactly the descriptive action — no create, no metadata
+    assert plan.actions == (TargetTableMissing(),)
+
+
+def test_metadata_only_missing_column_reports_every_reason_in_canonical_order():
+    # Given a declared column absent live, carrying a comment, tags, and PK membership
+    pk = PrimaryKeyConstraint.generate(table_name="test", columns=("ghost",))
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("ghost", Integer(), nullable=False, comment="x", tags={"pii": "true"}),
+        ),
+        primary_key=pk,
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then one action carries all reasons, in TableAspect declaration order
+    broken = [action for action in plan.actions if isinstance(action, TargetColumnMissing)]
+    assert broken == [
+        TargetColumnMissing(
+            column_name="ghost",
+            reasons=(
+                TableAspect.COLUMN_COMMENTS,
+                TableAspect.COLUMN_TAGS,
+                TableAspect.PRIMARY_KEY,
+            ),
+        )
+    ]
+
+
+def test_metadata_only_missing_column_without_metadata_is_benign_drift():
+    # Given a declared column absent live that carries no managed metadata
+    desired = _desired(
+        columns=(Column("id", Integer()), Column("bare", String())),
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then nothing is planned: the column is stale declaration, not a broken target
+    assert plan.actions == ()
+
+
+def test_metadata_only_pk_change_over_nullable_live_columns_is_unenforceable():
+    # Given a desired PK over a column that is nullable in the live table
+    pk = PrimaryKeyConstraint.generate(table_name="test", columns=("id",))
+    desired = _desired(
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=pk,
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(columns=(Column("id", Integer(), nullable=True),))
+
+    plan = compute_plan(desired, observed)
+
+    # Then the PK set is planned but flagged as unenforceable
+    assert any(isinstance(action, SetPrimaryKey) for action in plan.actions)
+    assert UnenforceablePrimaryKey(nullable_columns=("id",)) in plan.actions
+
+
+def test_metadata_only_matching_live_pk_over_nullable_columns_needs_no_action():
+    # Given a live PK that already matches the declaration, over a nullable live column
+    pk = PrimaryKeyConstraint.generate(table_name="test", columns=("id",))
+    desired = _desired(
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=pk,
+        managed_aspects=_METADATA_ONLY,
+    )
+    observed = _observed(
+        columns=(Column("id", Integer(), nullable=True),),
+        primary_key=pk,
+    )
+
+    plan = compute_plan(desired, observed)
+
+    # Then no SetPrimaryKey is emitted, so live nullability is irrelevant
+    assert plan.actions == ()
+
+
+def test_tags_only_scope_manages_tags_and_nothing_else():
+    # Given a tags-only definition (the future StreamingTable scope) whose
+    # comment, properties, and columns all drift from the live table
+    desired = _desired(
+        comment="",
+        tags={"env": "prod"},
+        columns=(Column("id", Integer(), tags={"pii": "false"}),),
+        managed_aspects=_TAGS_ONLY,
+    )
+    observed = _observed(
+        comment="live comment",
+        tags={"stale": "yes"},
+        properties={"delta.appendOnly": "true"},
+        columns=(Column("id", Long()), Column("extra", String())),
+    )
+
+    plan = compute_plan(desired, observed)
+
+    # Then tags reconcile full-state and every other dimension is untouched
+    assert set(plan.actions) == {
+        SetTableTag(name="env", value="prod"),
+        UnsetTableTag(name="stale"),
+        SetColumnTag(column_name="id", name="pii", value="false"),
+    }
+
+
+def test_full_scope_gates_nothing():
+    # Given the default scope and drift in a managed dimension
+    desired = _desired(comment="new")
+    observed = _observed(comment="old")
+
+    plan = compute_plan(desired, observed)
+
+    # Then behaviour is identical to today
+    assert plan.actions == (SetTableComment(comment="new"),)
+
+
+# One (desired, observed) drift pair per aspect, each differing ONLY in that
+# dimension, so the gating tests can assert "actions when managed, nothing
+# when unmanaged" uniformly across every aspect.
+_ASPECT_DRIFT_CASES = [
+    (
+        TableAspect.COLUMN_STRUCTURE,
+        _desired(columns=(Column("id", Integer()), Column("added", String()))),
+        _observed(columns=(Column("id", Integer()),)),
+    ),
+    (
+        TableAspect.TABLE_COMMENT,
+        _desired(comment="new"),
+        _observed(comment="old"),
+    ),
+    (
+        TableAspect.COLUMN_COMMENTS,
+        _desired(columns=(Column("id", Integer(), comment="pk"),)),
+        _observed(columns=(Column("id", Integer()),)),
+    ),
+    (
+        TableAspect.TABLE_TAGS,
+        _desired(tags={"env": "prod"}),
+        _observed(),
+    ),
+    (
+        TableAspect.COLUMN_TAGS,
+        _desired(columns=(Column("id", Integer(), tags={"pii": "true"}),)),
+        _observed(columns=(Column("id", Integer()),)),
+    ),
+    (
+        TableAspect.PROPERTIES,
+        _desired(properties={"delta.appendOnly": "true"}),
+        _observed(),
+    ),
+    (
+        TableAspect.PARTITIONING,
+        _desired(partitioned_by=("id",)),
+        _observed(),
+    ),
+    (
+        TableAspect.PRIMARY_KEY,
+        _desired(
+            columns=(Column("id", Integer(), nullable=False),),
+            primary_key=PrimaryKeyConstraint.generate(table_name="test", columns=("id",)),
+        ),
+        _observed(columns=(Column("id", Integer(), nullable=False),)),
+    ),
+    (
+        TableAspect.FOREIGN_KEYS,
+        _desired(
+            columns=(Column("id", Integer()),),
+        ),
+        _observed(columns=(Column("id", Integer()),)),
+    ),
+]
+# FOREIGN_KEYS drift can't be expressed through _desired (the builder takes no
+# foreign_keys parameter); build it in place instead.
+_ASPECT_FK = ForeignKeyConstraint.generate(
+    owner_table_name="test",
+    local_columns=("id",),
+    referenced_table=QualifiedName("dev", "silver", "other"),
+    referenced_columns=("id",),
+)
+_ASPECT_DRIFT_CASES[-1] = (
+    TableAspect.FOREIGN_KEYS,
+    DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        foreign_keys=(_ASPECT_FK,),
+    ),
+    _observed(columns=(Column("id", Integer()),)),
+)
+
+
+@pytest.mark.parametrize(("aspect", "desired", "observed"), _ASPECT_DRIFT_CASES)
+def test_each_aspect_produces_actions_when_managed(aspect, desired, observed):
+    # Given drift in exactly one dimension, with that aspect managed (default scope)
+    plan = compute_plan(desired, observed)
+
+    # Then the drift produces at least one action
+    assert plan.actions != ()
+
+
+@pytest.mark.parametrize(("aspect", "desired", "observed"), _ASPECT_DRIFT_CASES)
+def test_each_aspect_produces_nothing_when_unmanaged(aspect, desired, observed):
+    # Given the same drift with only that aspect removed from scope
+    scoped = dataclasses.replace(desired, managed_aspects=frozenset(TableAspect) - {aspect})
+
+    plan = compute_plan(scoped, observed)
+
+    # Then the drift is invisible: not diffed, so no action and no failure
+    assert plan.actions == ()
