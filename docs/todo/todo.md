@@ -49,4 +49,8 @@
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] improve Report display formatting
-- [ ] Work through the [special-case audit](2026-07-03-special-case-audit.md) (2026-07-03): quick-wins PR (clusters B–F), the named-constraint refactor (cluster A), and the four listed decisions (zero-table report string, reader empty-DESCRIBE fallback, compiler guards vs ValidatedActionPlan, observed PK naming)
+- [ ] Work through the [special-case audit](2026-07-03-special-case-audit.md) (2026-07-03): quick-wins PR (clusters B–F), the named-constraint refactor (cluster A — has an [implementation plan](2026-07-03-constraint-naming-plan.md)), and the four listed decisions (zero-table report string, reader empty-DESCRIBE fallback, compiler guards vs ValidatedActionPlan, observed PK naming)
+- [ ] Make dry run explicit in dry run report. Like this is what *would* have happened
+- [ ] Create node objects for the dependency graph?
+- [ ] fk_failures on ResolveResult could just be failures
+- [ ] should prepare_desired_tables live in engine.py?

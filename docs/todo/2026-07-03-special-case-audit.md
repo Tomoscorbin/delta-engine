@@ -28,6 +28,8 @@ Every finding is grouped by root cause. Sections A–G are eliminable (or mostly
 
 **Effort:** medium — touches `foreign_key.py`, `primary_key.py`, `table.py`, `differ.py`, `compile.py`, `reader.py`. Supersedes and expands the existing todo item on tightening `ForeignKeyConstraint.constraint_name`.
 
+**Implementation plan:** [2026-07-03-constraint-naming-plan.md](2026-07-03-constraint-naming-plan.md). It takes the always-named route (a required `constraint_name: str` with a `generate()` factory, the reader fetching the observed PK name) rather than the named-variant route sketched above — the same guards are eliminated, and there is no lingering unnamed type. Decision 4 below is resolved there as "fetch the observed PK name".
+
 ---
 
 ## B. Optional-collection widening on the public API
