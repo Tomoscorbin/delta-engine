@@ -32,7 +32,6 @@ from delta_engine import (
     ForeignKey,
     Long,
     Property,
-    Registry,
     Self,
     String,
     SyncFailedError,
@@ -104,7 +103,7 @@ def show_report(report: SyncReport) -> None:
 # MAGIC **Goal**
 # MAGIC
 # MAGIC Define two tables — `customers` and `orders` — and sync them. `orders` has a
-# MAGIC foreign key to `customers` and is declared **first** in the registry, on
+# MAGIC foreign key to `customers` and is declared **first** in the sync call, on
 # MAGIC purpose. The `customers` baseline is deliberately plain (no tags, no extra
 # MAGIC properties, no foreign key) so later steps can add them.
 # MAGIC
@@ -147,11 +146,10 @@ orders = DeltaTable(
     ],
 )
 
-registry = Registry()
-registry.register(orders, customers)  # declared orders-first on purpose
+tables = [orders, customers]  # passed orders-first on purpose
 
 engine = build_databricks_engine(spark)
-report = engine.sync(registry)
+report = engine.sync(*tables)
 show_report(report)
 
 # COMMAND ----------
@@ -188,7 +186,7 @@ inspector.display_schema("orders")
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Snapshot the live `customers` schema, sync the exact same registry a second
+# MAGIC Snapshot the live `customers` schema, sync the exact same tables a second
 # MAGIC time with the catalog already matching the declaration, then compare.
 # MAGIC
 # MAGIC **Outcome**
@@ -201,7 +199,7 @@ inspector.display_schema("orders")
 
 schema_before = spark.table(inspector.fqname("customers")).schema
 
-report = engine.sync(registry)
+report = engine.sync(*tables)
 show_report(report)
 
 # COMMAND ----------
@@ -274,9 +272,7 @@ customers = DeltaTable(
     properties={Property.CHANGE_DATA_FEED: "true"},  # <-- set a property
 )
 
-registry = Registry()
-registry.register(customers, orders)
-report = engine.sync(registry)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
@@ -332,9 +328,7 @@ customers = DeltaTable(
     properties={Property.CHANGE_DATA_FEED: "true"},
 )
 
-registry = Registry()
-registry.register(customers, orders)
-report = engine.sync(registry)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
@@ -381,9 +375,7 @@ customers = DeltaTable(
     properties={Property.CHANGE_DATA_FEED: "true"},
 )
 
-registry = Registry()
-registry.register(customers, orders)
-report = engine.sync(registry)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
@@ -431,9 +423,7 @@ customers = DeltaTable(
     properties={Property.CHANGE_DATA_FEED: "true"},
 )
 
-registry = Registry()
-registry.register(customers, orders)
-report = engine.sync(registry)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
@@ -459,9 +449,7 @@ customers = DeltaTable(
     properties={Property.CHANGE_DATA_FEED: "true"},
 )
 
-registry = Registry()
-registry.register(customers, orders)
-report = engine.sync(registry)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
@@ -499,9 +487,7 @@ regions = DeltaTable(
     comment="Region dimension",
 )
 
-registry = Registry()
-registry.register(regions)
-report = engine.sync(registry)
+report = engine.sync(regions)
 show_report(report)
 assert report.any_failures is False
 assert spark.catalog.tableExists(inspector.fqname("regions"))
@@ -530,9 +516,7 @@ customers = DeltaTable(
     ],
 )
 
-registry = Registry()
-registry.register(customers, orders, regions)
-report = engine.sync(registry)
+report = engine.sync(customers, orders, regions)
 show_report(report)
 
 # COMMAND ----------
@@ -596,9 +580,7 @@ customers = DeltaTable(
     ],
 )
 
-registry = Registry()
-registry.register(customers, orders, regions)
-report = engine.sync(registry)
+report = engine.sync(customers, orders, regions)
 show_report(report)
 
 # COMMAND ----------
@@ -644,10 +626,10 @@ def define_events(*, columns, partitioned_by=("event_date",)):
     )
 
 
-def sync_expecting_failure(registry: Registry) -> SyncReport:
-    """Sync a registry that must fail, print the failed report, and return it."""
+def sync_expecting_failure(*tables: DeltaTable) -> SyncReport:
+    """Sync tables that must fail, print the failed report, and return it."""
     try:
-        engine.sync(registry)
+        engine.sync(*tables)
     except SyncFailedError as error:
         show_report(error.report)
         return error.report
@@ -661,9 +643,7 @@ events_baseline_columns = [
     Column("created_at", Timestamp()),
 ]
 
-registry = Registry()
-registry.register(define_events(columns=events_baseline_columns))
-report = engine.sync(registry)
+report = engine.sync(define_events(columns=events_baseline_columns))
 show_report(report)
 
 assert report.any_failures is False
@@ -689,9 +669,7 @@ print("events baseline created.")
 # <-- new NOT NULL column added to a table that already has rows
 new_column = Column("region", String(), nullable=False)
 
-registry = Registry()
-registry.register(define_events(columns=[*events_baseline_columns, new_column]))
-report = sync_expecting_failure(registry)
+report = sync_expecting_failure(define_events(columns=[*events_baseline_columns, new_column]))
 
 # The report shows the change was planned but blocked at validation — nothing ran.
 [events_report] = report.table_reports
@@ -715,8 +693,7 @@ print("Step 5a verified: NOT NULL add blocked, table untouched.")
 
 # COMMAND ----------
 
-registry = Registry()
-registry.register(
+report = sync_expecting_failure(
     define_events(
         columns=[
             Column("event_id", Long(), nullable=False, primary_key=True),
@@ -726,7 +703,6 @@ registry.register(
         ]
     )
 )
-report = sync_expecting_failure(registry)
 
 [events_report] = report.table_reports
 assert events_report.status is TableRunStatus.VALIDATION_FAILED
@@ -749,8 +725,7 @@ print("Step 5b verified: tightening blocked, event_date still nullable.")
 
 # COMMAND ----------
 
-registry = Registry()
-registry.register(
+report = sync_expecting_failure(
     define_events(
         columns=[
             Column("event_id", Long(), nullable=False, primary_key=True),
@@ -760,7 +735,6 @@ registry.register(
         ]
     )
 )
-report = sync_expecting_failure(registry)
 
 [events_report] = report.table_reports
 assert events_report.status is TableRunStatus.VALIDATION_FAILED
@@ -783,10 +757,8 @@ print("Step 5c verified: type change blocked, amount still Decimal.")
 
 # COMMAND ----------
 
-registry = Registry()
 # <-- partitioning dropped (was partitioned by event_date)
-registry.register(define_events(columns=events_baseline_columns, partitioned_by=()))
-report = sync_expecting_failure(registry)
+report = sync_expecting_failure(define_events(columns=events_baseline_columns, partitioned_by=()))
 
 [events_report] = report.table_reports
 assert events_report.status is TableRunStatus.VALIDATION_FAILED
@@ -800,8 +772,8 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Sync `line_items`, which references `products` — a table that is not in the
-# MAGIC registry.
+# MAGIC Sync `line_items`, which references `products` — a table that is not passed
+# MAGIC to the sync call.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
@@ -836,9 +808,7 @@ line_items = DeltaTable(
     ],
 )
 
-registry = Registry()
-registry.register(line_items)
-report = sync_expecting_failure(registry)
+report = sync_expecting_failure(line_items)
 
 [line_items_report] = report.table_reports
 assert line_items_report.status is TableRunStatus.FOREIGN_KEY_FAILED
@@ -853,7 +823,7 @@ print("Step 6 verified: unresolved foreign key blocked, no table created.")
 # MAGIC **Goal**
 # MAGIC
 # MAGIC Add a nullable `phone` column and preview it with a dry run, then sync the
-# MAGIC same registry for real.
+# MAGIC same tables for real.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
@@ -886,10 +856,7 @@ customers = DeltaTable(
     ],
 )
 
-registry = Registry()
-registry.register(customers, orders, regions)
-
-preview = engine.sync(registry, dry_run=True)
+preview = engine.sync(customers, orders, regions, dry_run=True)
 show_report(preview)
 
 # COMMAND ----------
@@ -918,7 +885,7 @@ print("Dry run verified: plan shown, nothing executed.")
 # MAGIC **Outcome**
 # MAGIC
 # MAGIC Each `DeltaTable(...)` raises `ValueError` before it exists — a malformed
-# MAGIC definition never reaches a registry, the engine, or the catalog.
+# MAGIC definition never reaches the engine or the catalog.
 
 # COMMAND ----------
 
