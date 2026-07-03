@@ -2,7 +2,6 @@ from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -216,17 +215,17 @@ def test_plan_orders_set_primary_key_after_set_column_nullability():
 
 def test_plan_full_phase_order_with_all_action_types():
     # Given one action from each phase, handed to the plan in scrambled order
-    fk = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-    )
     plan = ActionPlan(
         (
             PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()),
             ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
             SetPrimaryKey(columns=("id",), constraint_name="tbl_pk"),
-            SetForeignKey(foreign_key=fk),
+            SetForeignKey(
+                local_columns=("customer_id",),
+                referenced_table=QualifiedName("cat", "sch", "customers"),
+                referenced_columns=("id",),
+                constraint_name="tbl_customer_id_fk",
+            ),
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
@@ -304,12 +303,12 @@ def test_drop_foreign_key_subject_is_constraint_name():
 
 def test_set_foreign_key_subject_is_local_columns_joined():
     # Given
-    fk = ForeignKeyConstraint(
+    action = SetForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="tbl_customer_id_fk",
     )
-    action = SetForeignKey(foreign_key=fk)
 
     # Then subject is the local columns joined (used for deterministic ordering within the phase)
     assert action.subject == "customer_id"
