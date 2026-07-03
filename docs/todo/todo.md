@@ -14,7 +14,6 @@
 - [ ] make the nested if else statments in engine more readable
 - [ ] do we need backticked things in sql compiler or can we do without?
 - [ ] allow a way for existing constraint names (PK/FK) to be passed to DeltaTable
-- [ ] Test that table order is kept from resolve through to execute on engine
 - [ ] Do we need action_index?
 - [ ] How to declare partitioned tables doesnt need its own doc. Put it alongside general how to
 - [ ] consider replacing typle comps in validation with regular loops for readability
