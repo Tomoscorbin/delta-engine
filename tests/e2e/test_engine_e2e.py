@@ -291,3 +291,71 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
 
     bad_cols = {f.name for f in spark.table(fq_bad).schema.fields}
     assert "age" not in bad_cols
+
+
+def test_engine_metadata_only_updates_comments_without_touching_schema(
+    spark, monkeypatch, temp_schema
+):
+    # Given an existing table with an extra live column and no comments
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"e2e_meta_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id INT, extra_col STRING) USING DELTA")
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When syncing a metadata-only definition that omits the extra column
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Integer(), comment="surrogate key"),),
+            comment="metadata-only table",
+            metadata_only=True,
+        )
+    )
+
+    # Then the sync succeeds, comments are applied, and the schema is untouched
+    assert report.any_failures is False
+    fields = {f.name: f for f in spark.table(fq).schema.fields}
+    assert set(fields) == {"id", "extra_col"}  # extra_col NOT dropped
+    assert fields["id"].metadata.get("comment") == "surrogate key"
+    assert spark.catalog.getTable(fq).description == "metadata-only table"
+
+
+def test_engine_metadata_only_fails_when_a_commented_column_is_missing_live(
+    spark, monkeypatch, temp_schema
+):
+    # Given an existing table that lacks the declared 'ghost' column
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"e2e_meta_drift_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id INT) USING DELTA")
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When syncing metadata that targets the missing column
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                table_name,
+                columns=(
+                    Column("id", Integer()),
+                    Column("ghost", String(), comment="cannot land"),
+                ),
+                metadata_only=True,
+            )
+        )
+
+    # Then the failure is a plan-time validation failure naming the column,
+    # and the live table is unchanged
+    report = exc_info.value.report.table_reports[0]
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert any(
+        isinstance(failure, ValidationFailure) and "ghost" in failure.message
+        for failure in report.failures
+    )
+    assert {f.name for f in spark.table(fq).schema.fields} == {"id"}
