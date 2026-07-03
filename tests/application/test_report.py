@@ -158,7 +158,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
-                references="cat.sch.customers",
+                references=QualifiedName("cat", "sch", "customers"),
                 reason=ForeignKeyFailureReason.CYCLE,
             ),
         ),
@@ -197,7 +197,7 @@ def test_table_run_report_status_is_validation_failed_when_both_fk_and_validatio
             ForeignKeyFailure(
                 table=QualifiedName("cat", "sch", "orders"),
                 local_columns=("customer_id",),
-                references="cat.sch.customers",
+                references=QualifiedName("cat", "sch", "customers"),
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
         ),

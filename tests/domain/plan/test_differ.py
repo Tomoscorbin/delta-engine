@@ -696,13 +696,13 @@ def _observed_orders(observed_fks: tuple[ForeignKeyConstraint, ...] = ()) -> Obs
 
 _FK = ForeignKeyConstraint(
     local_columns=("customer_id",),
-    references="cat.sch.customers",
+    referenced_table=QualifiedName("cat", "sch", "customers"),
     referenced_columns=("id",),
 )
 
 _FK_WITH_EXPLICIT_NAME = ForeignKeyConstraint(
     local_columns=("customer_id",),
-    references="cat.sch.customers",
+    referenced_table=QualifiedName("cat", "sch", "customers"),
     referenced_columns=("id",),
     constraint_name="custom_fk_name",
 )
@@ -747,7 +747,7 @@ def test_fk_removed_from_desired_emits_drop_then_no_set():
     # Given observed has a FK (catalog-stored name, as the reader always sets) but desired has none
     observed_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name="orders_customer_id_fk",
     )
@@ -794,13 +794,13 @@ def test_fk_changed_emits_drop_and_set():
     # The observed FK carries a catalog-stored name (as the reader always sets).
     old_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.old_customers",
+        referenced_table=QualifiedName("cat", "sch", "old_customers"),
         referenced_columns=("id",),
         constraint_name="orders_customer_id_fk",
     )
     new_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.new_customers",
+        referenced_table=QualifiedName("cat", "sch", "new_customers"),
         referenced_columns=("id",),
     )
     desired = _orders_with_fk(new_fk)
@@ -839,12 +839,12 @@ def test_sync_is_idempotent_when_catalog_fk_has_externally_chosen_name():
     #        observed has the same relationship but a name chosen outside this engine
     desired_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     observed_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name="fk_made_in_the_console",
     )
@@ -864,13 +864,13 @@ def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
     #        observed has the same FK but with the catalog-stored derived name
     desired_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         # no constraint_name — user did not specify one
     )
     observed_fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name="orders_customer_id_fk",  # catalog stored the derived name
     )

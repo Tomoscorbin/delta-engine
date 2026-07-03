@@ -151,7 +151,7 @@ def test_message_renders_fk_failure_detail():
             ForeignKeyFailure(
                 table=_QN,
                 local_columns=("ref_id",),
-                references="cat.sch.other",
+                references=QualifiedName("cat", "sch", "other"),
                 reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
             ),
         ),

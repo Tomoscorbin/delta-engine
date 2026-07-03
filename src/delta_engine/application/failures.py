@@ -111,7 +111,7 @@ class ForeignKeyFailure(Failure):
     phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
     table: QualifiedName
     local_columns: tuple[str, ...]
-    references: str
+    references: QualifiedName
     reason: ForeignKeyFailureReason
 
     def format_lines(self) -> tuple[str, ...]:

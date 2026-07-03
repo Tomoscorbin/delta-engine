@@ -38,7 +38,7 @@ def _table_with_fk(fqn: str, references: str) -> DesiredTable:
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_id",),
-                references=references,
+                referenced_table=QualifiedName.parse(references),
                 referenced_columns=("id",),
             )
         ],
@@ -114,7 +114,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
     assert len(failures) == 1
     assert failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert failures[0].local_columns == ("ref_id",)
-    assert failures[0].references == "cat.sch.customers"
+    assert failures[0].references == QualifiedName("cat", "sch", "customers")
 
 
 def test_resolve_fails_both_members_of_a_cycle():
@@ -241,7 +241,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("manager_id",),
-                references="cat.sch.employees",
+                referenced_table=QualifiedName.parse("cat.sch.employees"),
                 referenced_columns=("id",),
             )
         ],
@@ -269,10 +269,14 @@ def test_resolve_propagates_block_through_a_diamond():
         ),
         foreign_keys=[
             ForeignKeyConstraint(
-                local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
+                local_columns=("b_id",),
+                referenced_table=QualifiedName.parse("cat.sch.b"),
+                referenced_columns=("id",),
             ),
             ForeignKeyConstraint(
-                local_columns=("c_id",), references="cat.sch.c", referenced_columns=("id",)
+                local_columns=("c_id",),
+                referenced_table=QualifiedName.parse("cat.sch.c"),
+                referenced_columns=("id",),
             ),
         ],
     ).to_desired_table()
@@ -399,7 +403,7 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_email",),
-                references="cat.sch.customers",
+                referenced_table=QualifiedName.parse("cat.sch.customers"),
                 referenced_columns=("email",),
             )
         ],
@@ -428,7 +432,9 @@ def test_resolve_valid_chain_with_primary_keys_executes():
         ),
         foreign_keys=[
             ForeignKeyConstraint(
-                local_columns=("ref_id",), references="cat.sch.b", referenced_columns=("id",)
+                local_columns=("ref_id",),
+                referenced_table=QualifiedName.parse("cat.sch.b"),
+                referenced_columns=("id",),
             )
         ],
     ).to_desired_table()

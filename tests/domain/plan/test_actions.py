@@ -218,7 +218,7 @@ def test_plan_full_phase_order_with_all_action_types():
     # Given one action from each phase, handed to the plan in scrambled order
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     plan = ActionPlan(
@@ -306,7 +306,7 @@ def test_set_foreign_key_subject_is_local_columns_joined():
     # Given
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     action = SetForeignKey(foreign_key=fk)

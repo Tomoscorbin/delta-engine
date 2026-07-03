@@ -410,7 +410,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_id",),
-                references=references,
+                referenced_table=QualifiedName.parse(references),
                 referenced_columns=("id",),
             )
         ],
@@ -474,10 +474,14 @@ def test_sync_processes_tables_in_fk_dependency_order():
 def test_sync_fails_all_tables_in_a_detected_cycle():
     # Given A -> B and B -> A (cycle)
     constraint_a_to_b = ForeignKeyConstraint(
-        local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
+        local_columns=("b_id",),
+        referenced_table=QualifiedName.parse("cat.sch.b"),
+        referenced_columns=("id",),
     )
     constraint_b_to_a = ForeignKeyConstraint(
-        local_columns=("a_id",), references="cat.sch.a", referenced_columns=("id",)
+        local_columns=("a_id",),
+        referenced_table=QualifiedName.parse("cat.sch.a"),
+        referenced_columns=("id",),
     )
     table_a = DeltaTable(
         "cat",
@@ -588,7 +592,7 @@ def _spec_with_fk_and_not_null_col(fqn: str, references: str) -> DeltaTable:
         foreign_keys=[
             ForeignKeyConstraint(
                 local_columns=("ref_id",),
-                references=references,
+                referenced_table=QualifiedName.parse(references),
                 referenced_columns=("id",),
             )
         ],

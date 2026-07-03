@@ -49,7 +49,7 @@ def test_foreign_key_failure_renders_a_descriptive_line():
     failure = ForeignKeyFailure(
         table=QualifiedName("cat", "sch", "orders"),
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        references=QualifiedName("cat", "sch", "customers"),
         reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
     )
 
@@ -68,7 +68,7 @@ def test_foreign_key_failure_renders_not_a_key_reason():
     failure = ForeignKeyFailure(
         table=QualifiedName("cat", "sch", "orders"),
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        references=QualifiedName("cat", "sch", "customers"),
         reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
     )
 
@@ -91,7 +91,7 @@ def test_each_failure_kind_declares_its_producing_phase():
         ForeignKeyFailure(
             table=QualifiedName("c", "s", "t"),
             local_columns=("x",),
-            references="c.s.o",
+            references=QualifiedName("c", "s", "o"),
             reason=ForeignKeyFailureReason.CYCLE,
         ).phase
         is FailurePhase.FOREIGN_KEY

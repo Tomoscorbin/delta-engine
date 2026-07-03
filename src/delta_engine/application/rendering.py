@@ -121,7 +121,7 @@ def _(action: DropPrimaryKey) -> str:
 @action_diff_line.register
 def _(action: SetForeignKey) -> str:
     columns = ", ".join(action.foreign_key.local_columns)
-    return f"+ foreign key ({columns}) → {action.foreign_key.references}"
+    return f"+ foreign key ({columns}) → {action.foreign_key.referenced_table}"
 
 
 @action_diff_line.register

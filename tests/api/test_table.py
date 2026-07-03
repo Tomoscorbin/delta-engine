@@ -1,8 +1,9 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
+from delta_engine.api import Column, DeltaTable, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model import Column as DomainColumn, QualifiedName
+from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -280,9 +281,9 @@ def test_delta_table_pk_column_order_matches_declaration_order():
 
 def test_delta_table_accepts_foreign_keys_parameter():
     # Given a FK referencing another table
-    fk = ForeignKey(
+    fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
 
@@ -314,9 +315,9 @@ def test_delta_table_defaults_to_no_foreign_keys():
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
     # Given a FK whose local column is not declared in the table
-    fk = ForeignKey(
+    fk = ForeignKeyConstraint(
         local_columns=("nonexistent",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
 
