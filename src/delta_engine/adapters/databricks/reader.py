@@ -153,15 +153,29 @@ class DatabricksReader:
         return self.spark.catalog.tableExists(str(qualified_name))
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
-        """Return all catalog table properties as a read-only mapping."""
+        """
+        Return all catalog table properties as a read-only mapping.
+
+        Raises when ``DESCRIBE DETAIL`` yields no row for a table the existence
+        probe just reported present: an empty result there is not "a table with
+        no properties" (that is a present row with an empty map) but a race or a
+        catalog inconsistency. Failing loud lets ``fetch_state``'s error boundary
+        return ``ReadFailed`` — the honest outcome for "could not determine
+        state" — rather than a ``TablePresent`` with no properties, which would
+        make the differ re-apply every managed property on every sync.
+        """
         # The name is interpolated into SQL text here, so it must be backtick-quoted
         # to stay an identifier (and escape any embedded backtick). This differs
         # deliberately from the catalog.* calls, which take the plain ``str()`` form
         # because they parse the dot-separated parts themselves. Don't unify the two.
         query = f"DESCRIBE DETAIL {backtick_qualified_name(qualified_name)}"
         row = self.spark.sql(query).first()
-        if not row:
-            return MappingProxyType({})
+        if row is None:
+            raise RuntimeError(
+                f"DESCRIBE DETAIL returned no rows for {qualified_name}, which the"
+                " existence probe just reported as present — the table was dropped"
+                " mid-read or the catalog is inconsistent."
+            )
         return MappingProxyType(dict(row["properties"]))
 
     def _fetch_primary_key(self, qualified_name: QualifiedName) -> PrimaryKeyConstraint | None:
