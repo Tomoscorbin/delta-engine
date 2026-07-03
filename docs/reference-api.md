@@ -32,6 +32,12 @@ tags:
    :undoc-members:
 ```
 
+### Self
+
+```{eval-rst}
+.. autodata:: delta_engine.Self
+```
+
 ### Property
 
 ```{eval-rst}
