@@ -92,3 +92,17 @@ See [how-to-declare-foreign-keys.md](how-to-declare-foreign-keys.md) for how dep
 ## Act on execution failures
 
 Execution failures are partial: actions before the failure ran and committed; actions after were not attempted. Fix the root cause and re-run — the engine re-reads live state and plans only the remaining drift.
+
+(runtime-and-delta-feature-compatibility)=
+
+## Runtime and Delta feature compatibility
+
+delta-engine does not preflight Databricks Runtime or Delta table protocol
+versions for every feature it can declare. If you use a Databricks feature such
+as key constraints, tags, deletion vectors, or change data feed, make sure your
+workspace, runtime, table protocol, and privileges support that feature.
+
+When Databricks rejects a statement because the runtime or Delta table version is
+too old, the engine reports it as an `EXECUTION_FAILED` table with the original
+exception type, message, and SQL preview. Upgrade or configure the Databricks
+environment, then re-run `sync`.

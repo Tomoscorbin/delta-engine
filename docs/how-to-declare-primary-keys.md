@@ -59,3 +59,9 @@ Column order within the key is ignored when detecting drift — `(a, b)` and `(b
 Databricks primary key constraints are informational, not enforced. They do not prevent duplicate or null values at write time, but they enable query optimizations in Unity Catalog.
 
 A primary key column must be `NOT NULL` — a nullable primary key is not a well-formed table definition, and Databricks rejects it at execution time regardless. The engine enforces this when you construct the `DeltaTable`: declaring a primary key on a nullable column raises `ValueError` at definition time, before any sync runs.
+
+Key-constraint support depends on your Databricks environment. The engine does
+not preflight Databricks Runtime or Delta table protocol compatibility for you;
+if Databricks rejects the constraint DDL, `sync` reports an `EXECUTION_FAILED`
+table with the original error. See
+{ref}`runtime-and-delta-feature-compatibility`.
