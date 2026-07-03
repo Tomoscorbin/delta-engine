@@ -336,7 +336,7 @@ def test_engine_metadata_only_fails_when_a_commented_column_is_missing_live(
     engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
 
     # When syncing metadata that targets the missing column
-    with pytest.raises(SyncFailedError) as exc_info:
+    with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(
             DeltaTable(
                 TEST_CATALOG,
@@ -352,7 +352,7 @@ def test_engine_metadata_only_fails_when_a_commented_column_is_missing_live(
 
     # Then the failure is a plan-time validation failure naming the column,
     # and the live table is unchanged
-    report = exc_info.value.report.table_reports[0]
+    report = excinfo.value.report.table_reports[0]
     assert report.status is TableRunStatus.VALIDATION_FAILED
     assert any(
         isinstance(failure, ValidationFailure) and "ghost" in failure.message
