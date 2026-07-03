@@ -1,7 +1,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -20,6 +20,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -398,3 +401,34 @@ def test_plan_orders_set_column_tag_before_unset_column_tag():
 
     # Then sets run before unsets (documented phase precedence)
     assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]
+
+
+# ----- TargetTableMissing / TargetColumnMissing / UnenforceablePrimaryKey
+
+
+def test_target_table_missing_targets_the_whole_table():
+    # Given the descriptive action for an uncreatable missing table
+    action = TargetTableMissing()
+
+    # Then it targets the table as a whole
+    assert action.subject == ""
+
+
+def test_target_column_missing_targets_the_named_column():
+    # Given a declared column absent live, targeted by managed metadata
+    action = TargetColumnMissing(
+        column_name="email",
+        reasons=(TableAspect.COLUMN_COMMENTS, TableAspect.COLUMN_TAGS),
+    )
+
+    # Then the action is subject-keyed by the column name
+    assert action.subject == "email"
+    assert action.reasons == (TableAspect.COLUMN_COMMENTS, TableAspect.COLUMN_TAGS)
+
+
+def test_unenforceable_primary_key_targets_the_whole_table():
+    # Given a planned PK whose columns are nullable live
+    action = UnenforceablePrimaryKey(nullable_columns=("id",))
+
+    # Then it targets the table as a whole (the PK is a table-level constraint)
+    assert action.subject == ""

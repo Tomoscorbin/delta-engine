@@ -17,6 +17,9 @@ from delta_engine.domain.plan.actions import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TargetColumnMissing,
+    TargetTableMissing,
+    UnenforceablePrimaryKey,
     UnsetColumnTag,
     UnsetTableTag,
 )
@@ -40,6 +43,9 @@ __all__ = [
     "SetProperty",
     "SetTableComment",
     "SetTableTag",
+    "TargetColumnMissing",
+    "TargetTableMissing",
+    "UnenforceablePrimaryKey",
     "UnsetColumnTag",
     "UnsetTableTag",
 ]

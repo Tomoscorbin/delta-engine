@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, QualifiedName, TableAspect
 from delta_engine.domain.model.data_type import DataType
 
 
@@ -41,6 +41,9 @@ class ActionPhase(IntEnum):
     SET_FOREIGN_KEY = auto()
     COLUMN_TYPE_CHANGE = auto()
     PARTITIONING_CHANGE = auto()
+    TARGET_TABLE_MISSING = auto()
+    TARGET_COLUMN_MISSING = auto()
+    UNENFORCEABLE_PRIMARY_KEY = auto()
 
 
 class Action(ABC):
@@ -325,6 +328,65 @@ class PartitioningChange(Action):
     observed_partitioning: tuple[str, ...]
 
     phase: ClassVar[ActionPhase] = ActionPhase.PARTITIONING_CHANGE
+
+    @property
+    def subject(self) -> str:
+        return ""
+
+
+@dataclass(frozen=True, slots=True)
+class TargetTableMissing(Action):
+    """
+    Records that the table does not exist and this definition cannot create it.
+
+    A descriptive action, like :class:`ColumnTypeChange`: emitted when the
+    table is absent but the desired table does not manage column structure, so
+    there is no schema to create it from. The validator rejects it
+    (MissingTargetTable); it is never executed.
+    """
+
+    phase: ClassVar[ActionPhase] = ActionPhase.TARGET_TABLE_MISSING
+
+    @property
+    def subject(self) -> str:
+        return ""
+
+
+@dataclass(frozen=True, slots=True)
+class TargetColumnMissing(Action):
+    """
+    Records that managed metadata targets a column absent from the live table.
+
+    A descriptive action: with column structure unmanaged the column will never
+    come into existence, so the metadata that targets it (``reasons``, in
+    ``TableAspect`` declaration order) cannot land. The validator rejects it
+    (MissingTargetColumn); it is never executed.
+    """
+
+    column_name: str
+    reasons: tuple[TableAspect, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.TARGET_COLUMN_MISSING
+
+    @property
+    def subject(self) -> str:
+        return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class UnenforceablePrimaryKey(Action):
+    """
+    Records that a planned primary key's columns are nullable in the live table.
+
+    A descriptive action: with nullability unmanaged, no tightening precedes the
+    constraint, so ``ADD CONSTRAINT ... PRIMARY KEY`` would fail at execution.
+    The validator rejects it (UnenforceablePrimaryKeyChange); it is never
+    executed.
+    """
+
+    nullable_columns: tuple[str, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.UNENFORCEABLE_PRIMARY_KEY
 
     @property
     def subject(self) -> str:
