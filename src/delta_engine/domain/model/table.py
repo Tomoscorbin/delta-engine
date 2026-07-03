@@ -36,6 +36,11 @@ class TableSnapshot:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
 
+    @property
+    def primary_key_columns(self) -> tuple[str, ...]:
+        """Primary key column names, or ``()`` when the table has no primary key."""
+        return self.primary_key.columns if self.primary_key is not None else ()
+
     def __post_init__(self) -> None:
         """
         Validate the snapshot's structural invariants.

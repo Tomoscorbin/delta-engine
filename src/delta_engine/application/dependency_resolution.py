@@ -24,11 +24,6 @@ from delta_engine.domain.model.table import DesiredTable
 # recursion depth of the SCC traversal below stays far under Python's limit.
 
 
-def _primary_key_columns(table: DesiredTable) -> tuple[str, ...]:
-    """Return the table's primary key column names (empty when it has none)."""
-    return table.primary_key.columns if table.primary_key is not None else ()
-
-
 @dataclass(frozen=True, slots=True)
 class ResolveResult:
     """
@@ -224,9 +219,7 @@ def _classify_failures(
     # referenced table's primary key (Databricks rejects other targets at DDL
     # time). Compared as sets: a primary key's declaration order is not part of
     # its identity, and referenced_columns is aligned to local_columns, not PK order.
-    primary_key_by_name = {
-        table.qualified_name: set(_primary_key_columns(table)) for table in tables
-    }
+    primary_key_by_name = {table.qualified_name: set(table.primary_key_columns) for table in tables}
 
     # Pass 1 — direct failures.
     for table in tables:
