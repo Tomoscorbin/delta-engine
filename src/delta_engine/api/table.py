@@ -64,7 +64,7 @@ class ForeignKey:
                 referenced_columns = (
                     desired.primary_key.columns if desired.primary_key is not None else ()
                 )
-            case other:
+            case _:
                 raise TypeError(
                     f"foreign key references must be a DeltaTable or Self; got {other!r}"
                 )
