@@ -74,13 +74,13 @@ class MyExecutor:
 
 ## Wire the engine
 
-Pass your implementations to `Engine` directly:
+Pass your implementations to `Engine`, then sync your declared tables through it. `sync` is variadic — pass one or more `DeltaTable` definitions directly:
 
 ```python
 from delta_engine import Engine
 
 engine = Engine(reader=MyReader(), executor=MyExecutor())
-engine.sync(my_table)
+engine.sync(customers, orders)  # your DeltaTable definitions
 ```
 
 ## Compile actions to statements
