@@ -9,11 +9,12 @@ from types import MappingProxyType
 from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
+from pyspark.sql.types import DataType as SparkType
 
 from delta_engine.adapters.databricks.sql import (
     backtick,
     backtick_qualified_name,
-    domain_type_from_ddl,
+    domain_type_from_spark,
     error_preview,
     exception_type_name,
     quote_literal,
@@ -53,8 +54,12 @@ def _to_column_mapping(
     mismatch out of the domain. The partition name in ``_ColumnMapping`` is
     therefore derived from the already-normalised domain column name, not from
     the raw Spark object.
+
+    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``);
+    parsing that into a ``SparkType`` is this adapter's job, so the domain-type
+    mapper receives a parsed instance.
     """
-    domain_data_type = domain_type_from_ddl(spark_column.dataType)
+    domain_data_type = domain_type_from_spark(SparkType.fromDDL(spark_column.dataType))
     if domain_data_type is None:
         logger.warning(
             "Skipping column %r in %s: unrecognised Spark type %r"

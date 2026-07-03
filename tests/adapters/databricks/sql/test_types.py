@@ -2,8 +2,7 @@ import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.sql.types import (
-    domain_type_from_ddl,
-    domain_type_from_spark_type,
+    domain_type_from_spark,
     sql_type_for_data_type,
 )
 from delta_engine.domain.model.data_type import (
@@ -43,42 +42,39 @@ def test_sql_type_for_decimal_array_map_recursive() -> None:
     assert sql_type_for_data_type(nested) == "ARRAY<MAP<STRING,DECIMAL(9,0)>>"
 
 
-def test_domain_type_from_spark_type_returns_none_for_unmappable_type() -> None:
+def test_domain_type_from_spark_returns_none_for_unmappable_type() -> None:
     # Given a Spark type the engine does not map
     # Then the conversion returns None rather than raising
-    assert domain_type_from_spark_type(T.BinaryType()) is None
+    assert domain_type_from_spark(T.BinaryType()) is None
 
 
-def test_domain_type_from_spark_type_returns_domain_type_for_known_type() -> None:
-    # Given a Spark type the engine maps
-    # Then the domain type is returned
-    assert domain_type_from_spark_type(T.IntegerType()) == Integer()
+def test_domain_type_from_spark_maps_primitives() -> None:
+    # Given each Spark primitive the engine supports
+    # Then it maps to the matching domain type
+    assert domain_type_from_spark(T.IntegerType()) == Integer()
+    assert domain_type_from_spark(T.LongType()) == Long()
+    assert domain_type_from_spark(T.FloatType()) == Float()
+    assert domain_type_from_spark(T.DoubleType()) == Double()
+    assert domain_type_from_spark(T.BooleanType()) == Boolean()
+    assert domain_type_from_spark(T.StringType()) == String()
+    assert domain_type_from_spark(T.DateType()) == Date()
+    assert domain_type_from_spark(T.TimestampType()) == Timestamp()
 
 
-def test_domain_type_from_spark_type_returns_none_when_collection_element_is_unmappable() -> None:
+def test_domain_type_from_spark_maps_decimal_and_nested_collections() -> None:
+    # Given decimal, array, and map types (including nesting)
+    # Then the mapping recurses into element and key/value types
+    assert domain_type_from_spark(T.DecimalType(12, 3)) == Decimal(12, 3)
+    assert domain_type_from_spark(T.ArrayType(T.StringType())) == Array(String())
+    assert domain_type_from_spark(T.MapType(T.StringType(), T.IntegerType())) == Map(
+        String(), Integer()
+    )
+    nested = T.ArrayType(T.MapType(T.StringType(), T.DecimalType(9, 0)))
+    assert domain_type_from_spark(nested) == Array(Map(String(), Decimal(9, 0)))
+
+
+def test_domain_type_from_spark_returns_none_when_collection_element_is_unmappable() -> None:
     # Given a collection whose element type has no domain mapping
     # Then the whole type is unmappable
-    assert domain_type_from_spark_type(T.ArrayType(T.BinaryType())) is None
-    assert domain_type_from_spark_type(T.MapType(T.StringType(), T.BinaryType())) is None
-
-
-def test_domain_type_from_ddl_primitives(spark) -> None:
-    # Given DDL type strings as the catalog reports them, the fromDDL parse path
-    # maps each to its domain primitive
-    assert domain_type_from_ddl("int") == Integer()
-    assert domain_type_from_ddl("bigint") == Long()
-    assert domain_type_from_ddl("float") == Float()
-    assert domain_type_from_ddl("double") == Double()
-    assert domain_type_from_ddl("boolean") == Boolean()
-    assert domain_type_from_ddl("string") == String()
-    assert domain_type_from_ddl("date") == Date()
-    assert domain_type_from_ddl("timestamp") == Timestamp()
-
-
-def test_domain_type_from_ddl_decimal_array_map_recursive(spark) -> None:
-    assert domain_type_from_ddl("decimal(12,3)") == Decimal(12, 3)
-    assert domain_type_from_ddl("array<string>") == Array(String())
-    assert domain_type_from_ddl("map<string,int>") == Map(String(), Integer())
-    assert domain_type_from_ddl("array<map<string,decimal(9,0)>>") == Array(
-        Map(String(), Decimal(9, 0))
-    )
+    assert domain_type_from_spark(T.ArrayType(T.BinaryType())) is None
+    assert domain_type_from_spark(T.MapType(T.StringType(), T.BinaryType())) is None
