@@ -33,26 +33,15 @@ customers = DeltaTable(
 
 `DeltaTable` describes what you want. No SQL runs yet.
 
-## Register the table
-
-A `Registry` holds the set of tables the engine will manage:
-
-```python
-from delta_engine import Registry
-
-registry = Registry()
-registry.register(customers)
-```
-
 ## Sync
 
-Build an engine and call `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:
+Build an engine and pass your table definitions straight to `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:
 
 ```python
 from delta_engine import build_databricks_engine
 
 engine = build_databricks_engine(spark)
-engine.sync(registry)
+engine.sync(customers)
 ```
 
 If the table does not exist, the engine creates it. If it already matches your declaration, `sync` is a no-op.
@@ -65,7 +54,7 @@ Call `configure_logging()` before `sync` to see colored progress output:
 from delta_engine import configure_logging
 
 configure_logging()
-engine.sync(registry)
+engine.sync(customers)
 ```
 
 ## What to do when sync fails

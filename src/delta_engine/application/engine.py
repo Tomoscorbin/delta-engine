@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 import logging
 
 from delta_engine.application.dependency_resolution import resolve
+from delta_engine.application.desired_tables import DesiredTableSource, prepare_desired_tables
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import Failure
 from delta_engine.application.ports import (
@@ -41,7 +42,6 @@ from delta_engine.application.ports import (
     ReadFailed,
     TablePresent,
 )
-from delta_engine.application.registry import Registry
 from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
@@ -109,7 +109,7 @@ class Engine:
         self.reader = reader
         self.executor = executor
 
-    def sync(self, registry: Registry, *, dry_run: bool = False) -> SyncReport:
+    def sync(self, *tables: DesiredTableSource, dry_run: bool = False) -> SyncReport:
         """
         Synchronize all registered tables to their desired state.
 
@@ -122,7 +122,8 @@ class Engine:
         skipped by execution; its partial run is still included in the report.
 
         Args:
-            registry: The tables to synchronize.
+            *tables: The table specifications to synchronize. Duplicate
+                qualified names raise ``ValueError`` before any phase runs.
             dry_run: When True, run read → plan → validate → resolve but skip
                 execution (zero catalog mutations). Every run's ``execution``
                 stays ``None`` while its ``plan`` still records the actions that
@@ -139,9 +140,10 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        logger.info("Starting sync for %d table(s)", len(registry))
+        desired = prepare_desired_tables(*tables)
+        logger.info("Starting sync for %d table(s)", len(desired))
 
-        runs = self._read(tuple(registry))
+        runs = self._read(desired)
         runs = self._plan(runs)
         runs = self._validate(runs)
         runs = self._resolve(runs)

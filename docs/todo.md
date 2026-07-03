@@ -1,7 +1,7 @@
 # Open questions and decisions
 
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
-- [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet declared in the registry)
+- [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
@@ -28,11 +28,9 @@
 - [ ] Clean up the `external_failures` assembly in `Engine.sync`: the read-failure merge loop has a dead-code guard — `if isinstance(state, ReadFailed) and not external_failures.get(qn)` can never be false when the isinstance is true, because a `ReadFailed` table always gets an empty plan and so has no validation failures. Read and validation failures are mutually exclusive per table, so the merge collapses to one comprehension. Consider extracting a `_failures_before_resolve(tables, catalog_states, plans)` method and renaming `qn`→`qualified_name`. (Do we even need `external_failures` as a separate concept? — revisit alongside the failure-unification review)
 - [ ] Architectural question for the FK PR: should foreign keys be declared inside the `CREATE TABLE` statement the way the primary key already is (compile.py inlines `CONSTRAINT ... PRIMARY KEY`), rather than tacked on as separate `SetForeignKey` actions? Current answer is no — self-referential FKs can't be inlined (table doesn't exist yet) and the late-resolution failure-propagation model relies on each FK being an independently-applicable step. Revisit alongside the FK graph/dependency rework
 - [ ] utilise __init__ __all__ so that we can reduce the number of import line
-- [ ] given that resolve() is a phase of sync() on the engine, should it live on the engine?
 - [ ] Do we need some kind of container linking QualifiedName to ActionPlan so that engine methods dont keep having to construct dictionaries? Seems like we keep building dictionaries and discarding them only to build them again
 - [ ] Add more to architecture documentation, including visualisations
 - [ ] Add build docs to pre-commit?
-- [ ] is there a more natural alternative to tuple(registry) in engine?
 - [ ] add validation rule to check if `delta.columnMapping.mode`` is ``name`` if there is a drop column action
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] should DesiredTableSource live in ports.py?

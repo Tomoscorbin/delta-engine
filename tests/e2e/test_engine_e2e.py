@@ -9,7 +9,6 @@ from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.application.registry import Registry
 from delta_engine.application.report import TableRunStatus
 from tests.config import TEST_CATALOG
 
@@ -28,8 +27,11 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
     # Given a desired table definition in an empty temp schema
     _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_happy_{uuid4().hex[:8]}"
-    registry = Registry()
-    registry.register(
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When we sync
+    report = engine.sync(
         DeltaTable(
             TEST_CATALOG,
             temp_schema,
@@ -41,11 +43,6 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
             comment="E2E happy path table",
         )
     )
-
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
-
-    # When we sync
-    report = engine.sync(registry)
 
     # Then the run is reported as a successful SyncReport for the caller
     assert report.any_failures is False
@@ -79,8 +76,10 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypat
     )
 
     # And a desired definition that drops `to_remove` and adds `age` (nullable)
-    registry = Registry()
-    registry.register(
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When we sync desired -> observed
+    engine.sync(
         DeltaTable(
             TEST_CATALOG,
             temp_schema,
@@ -93,11 +92,6 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypat
             comment="unchanged",
         )
     )
-
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
-
-    # When we sync desired -> observed
-    engine.sync(registry)
 
     # Then the table schema reflects the add/drop with correct nullability
     df = spark.table(fq).limit(0)
@@ -136,26 +130,23 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
     )
 
     # And a desired definition that adds a NOT NULL column 'age' (should fail validation)
-    registry = Registry()
-    registry.register(
-        DeltaTable(
-            TEST_CATALOG,
-            temp_schema,
-            table_name,
-            columns=(
-                Column("id", Integer(), nullable=False),
-                Column("name", String()),
-                Column("age", Integer(), nullable=False),  # non-nullable add -> invalid
-            ),
-            comment="unchanged",
-        )
-    )
-
     engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
 
     # When we sync desired -> observed
     with pytest.raises(SyncFailedError) as excinfo:
-        engine.sync(registry)
+        engine.sync(
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                table_name,
+                columns=(
+                    Column("id", Integer(), nullable=False),
+                    Column("name", String()),
+                    Column("age", Integer(), nullable=False),  # non-nullable add -> invalid
+                ),
+                comment="unchanged",
+            )
+        )
 
     # Then the table is reported VALIDATION_FAILED with a validation failure,
     # and the error message names the offending column so an operator can act
@@ -175,8 +166,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
     table_name = f"idem_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
-    reg = Registry()
-    reg.register(
+    tables = [
         DeltaTable(
             TEST_CATALOG,
             temp_schema,
@@ -184,13 +174,13 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
             columns=(Column("id", Integer(), nullable=False), Column("name", String())),
             comment="idempotency test",
         )
-    )
+    ]
     engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
 
-    engine.sync(reg)
+    engine.sync(*tables)
 
     # When syncing a second time against an already-correct table
-    second_report = engine.sync(reg)
+    second_report = engine.sync(*tables)
 
     # Then no actions were executed (true no-op, not just a schema-equal re-apply)
     assert all(t.execution is None for t in second_report.table_reports)
@@ -208,8 +198,8 @@ def test_engine_loosen_nullability_sets_column_nullable(
         tblprops={"delta.columnMapping.mode": "name"},
     )
 
-    reg = Registry()
-    reg.register(
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine.sync(
         DeltaTable(
             TEST_CATALOG,
             temp_schema,
@@ -218,8 +208,6 @@ def test_engine_loosen_nullability_sets_column_nullable(
             comment="unchanged",
         )
     )
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
-    engine.sync(reg)
 
     field = next(f for f in spark.table(fq).schema.fields if f.name == "id")
     assert isinstance(field.dataType, T.IntegerType)
@@ -232,8 +220,8 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
     table_name = f"part_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
-    reg = Registry()
-    reg.register(
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine.sync(
         DeltaTable(
             TEST_CATALOG,
             temp_schema,
@@ -247,8 +235,6 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
             comment="partitioned table",
         )
     )
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
-    engine.sync(reg)
 
     assert spark.catalog.tableExists(f"{temp_schema}.{table_name}")
     parts = tuple(c.name for c in spark.catalog.listColumns(fq) if getattr(c, "isPartition", False))
@@ -264,7 +250,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
     fq_ok = f"{TEST_CATALOG}.{temp_schema}.{ok}"
     fq_bad = f"{TEST_CATALOG}.{temp_schema}.{bad}"
 
-    # seed both tables with specific names the registry will target
+    # seed both tables with specific names the sync will target
     spark.sql(
         f"CREATE TABLE {fq_ok} (id INT NOT NULL, name STRING)"
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
@@ -274,33 +260,30 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
     )
 
-    reg = Registry()
-    reg.register(
-        DeltaTable(
-            TEST_CATALOG,
-            temp_schema,
-            ok,
-            columns=(
-                Column("id", Integer(), nullable=False),
-                Column("name", String()),
-                Column("age", Integer(), nullable=True),
-            ),
-        ),
-        DeltaTable(
-            TEST_CATALOG,
-            temp_schema,
-            bad,
-            columns=(
-                Column("id", Integer(), nullable=False),
-                Column("name", String()),
-                Column("age", Integer(), nullable=False),
-            ),
-        ),  # invalid add
-    )
-
     engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
     with pytest.raises(SyncFailedError) as excinfo:
-        engine.sync(reg)
+        engine.sync(
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                ok,
+                columns=(
+                    Column("id", Integer(), nullable=False),
+                    Column("name", String()),
+                    Column("age", Integer(), nullable=True),
+                ),
+            ),
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                bad,
+                columns=(
+                    Column("id", Integer(), nullable=False),
+                    Column("name", String()),
+                    Column("age", Integer(), nullable=False),
+                ),
+            ),  # invalid add
+        )
     assert bad in str(excinfo.value)
 
     ok_fields = {f.name: f for f in spark.table(fq_ok).schema.fields}

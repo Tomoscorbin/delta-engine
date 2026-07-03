@@ -104,7 +104,7 @@ A foreign key that references the table it belongs to is allowed. The engine cre
 
 A foreign key fails its whole table when:
 
-- It references a table missing from the registry (`UNRESOLVABLE_REFERENCE`).
+- It references a table not passed to `sync` (`UNRESOLVABLE_REFERENCE`).
 - It forms a dependency cycle with other tables (`CYCLE`).
 - The table it references won't reach its desired state this sync, for any reason (`BLOCKED_BY_FAILED_DEPENDENCY`).
 
