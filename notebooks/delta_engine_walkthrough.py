@@ -33,6 +33,7 @@ from delta_engine import (
     Long,
     Property,
     Registry,
+    Self,
     String,
     SyncFailedError,
     SyncReport,
@@ -84,6 +85,7 @@ inspector = CatalogInspector(CATALOG, SCHEMA)
 # MAGIC %md
 # MAGIC Every sync below prints its report the same way, so a small helper keeps the
 # MAGIC output consistent and the sync cells focused on the change under test.
+
 
 # COMMAND ----------
 def show_report(report: SyncReport) -> None:
@@ -140,8 +142,7 @@ orders = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references=f"{CATALOG}.{SCHEMA}.customers",
-            referenced_columns=("id",),
+            references=customers,
         )
     ],
 )
@@ -269,7 +270,7 @@ customers = DeltaTable(
         Column("status", String(), nullable=False),
     ],
     comment="Customer master table (with contact details)",  # <-- added table comment
-    tags={"domain": "sales", "owner": "data-eng"},   # <-- set 2 tags
+    tags={"domain": "sales", "owner": "data-eng"},  # <-- set 2 tags
     properties={Property.CHANGE_DATA_FEED: "true"},  # <-- set a property
 )
 
@@ -524,8 +525,7 @@ customers = DeltaTable(
     foreign_keys=[  # <-- foreign key added to the existing table
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,
         )
     ],
 )
@@ -591,8 +591,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,
         )
     ],
 )
@@ -811,6 +810,16 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 
 # COMMAND ----------
 
+# products is defined but never registered — the reference is intentionally unresolvable.
+products = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="products",
+    columns=[
+        Column("product_id", Long(), nullable=False, primary_key=True),
+    ],
+)
+
 line_items = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -822,8 +831,7 @@ line_items = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("product_id",),
-            references=f"{CATALOG}.{SCHEMA}.products",  # <-- never registered
-            referenced_columns=("product_id",),
+            references=products,  # <-- never registered
         )
     ],
 )
@@ -873,8 +881,7 @@ customers = DeltaTable(
     foreign_keys=[
         ForeignKey(
             local_columns=("region_id",),
-            references=f"{CATALOG}.{SCHEMA}.regions",
-            referenced_columns=("region_id",),
+            references=regions,
         )
     ],
 )
@@ -964,8 +971,7 @@ try:
         foreign_keys=[
             ForeignKey(
                 local_columns=("missing_id",),  # <-- no such column on this table
-                references=f"{CATALOG}.{SCHEMA}.customers",
-                referenced_columns=("id",),
+                references=customers,
             )
         ],
     )
@@ -976,25 +982,39 @@ except ValueError as error:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 8c. A foreign key reference that is not fully qualified
+# MAGIC ### 8c. A foreign key referencing a table with no primary key
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Build a `ForeignKey` whose `references` is a bare table name rather than a
-# MAGIC `catalog.schema.table` name. This guard lives on `ForeignKey` itself, so it
-# MAGIC trips before a `DeltaTable` is even involved.
+# MAGIC Reference a `DeltaTable` that has no primary key. Referenced columns are
+# MAGIC inferred from the referenced table's primary key, so there is nothing to
+# MAGIC infer from — the engine rejects this at construction time.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Rejected: `references` must be a fully qualified `catalog.schema.table` name.
+# MAGIC Rejected: referenced table declares no primary key, so referenced columns
+# MAGIC cannot be inferred.
 
 # COMMAND ----------
 
 try:
-    ForeignKey(
-        local_columns=("customer_id",),
-        references="customers",  # <-- not catalog.schema.table
-        referenced_columns=("id",),
+    no_pk_table = DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="no_pk",
+        columns=[Column("id", Long())],  # <-- no primary_key=True
+    )
+    DeltaTable(
+        catalog=CATALOG,
+        schema=SCHEMA,
+        name="bad_fk_no_pk",
+        columns=[Column("id", Long(), nullable=False, primary_key=True)],
+        foreign_keys=[
+            ForeignKey(
+                local_columns=("id",),
+                references=no_pk_table,  # <-- no primary key to infer from
+            )
+        ],
     )
     raise AssertionError("expected ValueError")
 except ValueError as error:

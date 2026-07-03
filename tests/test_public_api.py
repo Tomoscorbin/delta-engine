@@ -29,6 +29,7 @@ _EAGER = {
     "Long",
     "Map",
     "Property",
+    "Self",
     "String",
     "Timestamp",
     # application: run a sync and read the outcome

@@ -2,7 +2,7 @@ import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn
+from delta_engine.domain.model import Column as DomainColumn, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -279,24 +279,29 @@ def test_delta_table_pk_column_order_matches_declaration_order():
 
 
 def test_delta_table_accepts_foreign_keys_parameter():
-    # Given a FK referencing another table
-    fk = ForeignKey(
-        local_columns=("customer_id",),
-        references="cat.sch.customers",
-        referenced_columns=("id",),
+    # Given a referenced table with a primary key
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
     )
 
-    # When constructing the table
+    # When constructing a table with a FK to it
     table = DeltaTable(
         catalog="cat",
         schema="sch",
         name="orders",
         columns=[Column("id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[fk],
+        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
     )
 
-    # Then the FK is accessible, carrying its engine-generated constraint name
-    assert table.foreign_keys == (fk.with_generated_name("orders"),)
+    # Then the FK is lowered to an internal constraint carrying its generated name
+    [foreign_key] = table.foreign_keys
+    assert foreign_key.local_columns == ("customer_id",)
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
+    assert foreign_key.referenced_columns == ("id",)
+    assert foreign_key.constraint_name == "orders_customer_id_fk"
 
 
 def test_delta_table_defaults_to_no_foreign_keys():
@@ -313,21 +318,22 @@ def test_delta_table_defaults_to_no_foreign_keys():
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
-    # Given a FK whose local column is not declared in the table
-    fk = ForeignKey(
-        local_columns=("nonexistent",),
-        references="cat.sch.customers",
-        referenced_columns=("id",),
+    # Given a referenced table and a FK whose local column is not declared
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
     )
 
-    # When / Then — domain validation fires at construction time
+    # When / Then domain validation fires at construction time
     with pytest.raises(ValueError, match="nonexistent"):
         DeltaTable(
             catalog="cat",
             schema="sch",
             name="orders",
             columns=[Column("id", Integer())],
-            foreign_keys=[fk],
+            foreign_keys=[ForeignKey(local_columns=("nonexistent",), references=customers)],
         )
 
 

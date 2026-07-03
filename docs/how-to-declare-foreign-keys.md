@@ -5,41 +5,92 @@ tags:
 
 # How to declare a foreign key
 
-Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns, the fully qualified table it references, and the referenced columns.
+Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns and the table they reference; the referenced columns are inferred from that table's primary key.
 
 ```python
-from delta_engine import Column, DeltaTable, ForeignKey, Integer, String
+from delta_engine import Column, DeltaTable, ForeignKey, Long, String
+
+customers = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String()),
+    ],
+)
 
 orders = DeltaTable(
     catalog="dev",
     schema="silver",
     name="orders",
     columns=[
-        Column("order_id", Integer(), nullable=False, primary_key=True),
-        Column("customer_id", Integer(), nullable=False),
+        Column("order_id", Long(), nullable=False, primary_key=True),
+        Column("customer_id", Long(), nullable=False),
         Column("status", String()),
     ],
     foreign_keys=[
         ForeignKey(
             local_columns=("customer_id",),
-            references="dev.silver.customers",
-            referenced_columns=("id",),
+            references=customers,
         ),
     ],
 )
 ```
 
-The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. To set the name yourself, pass `constraint_name`.
+The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. This name is internal; `constraint_name` is not part of the public API.
+
+## Self-referential foreign keys
+
+Use the `Self` sentinel when a table references itself:
+
+```python
+from delta_engine import Self
+
+employees = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="employees",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("manager_id", Long()),
+    ],
+    foreign_keys=[
+        ForeignKey(local_columns=("manager_id",), references=Self),
+    ],
+)
+```
 
 ## Composite foreign keys
 
-List the local and referenced columns in matching order. The first local column maps to the first referenced column, and so on.
+For a composite primary key, list `local_columns` in the referenced table's primary-key declaration order. The referenced columns are inferred one-to-one in that same order.
 
 ```python
-ForeignKey(
-    local_columns=("tenant_id", "customer_id"),
-    references="dev.silver.customers",
-    referenced_columns=("tenant_id", "id"),
+customer_accounts = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="customer_accounts",
+    columns=[
+        Column("tenant_id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False, primary_key=True),
+    ],
+)
+
+order_lines = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="order_lines",
+    columns=[
+        Column("order_line_id", Long(), nullable=False, primary_key=True),
+        Column("tenant_id", Long(), nullable=False),
+        Column("customer_id", Long(), nullable=False),
+    ],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("tenant_id", "customer_id"),  # aligns with customer_accounts PK (tenant_id, id)
+            references=customer_accounts,
+        ),
+    ],
 )
 ```
 

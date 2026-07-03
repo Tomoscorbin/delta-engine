@@ -313,7 +313,17 @@ def _diff_foreign_keys(
     matter — ActionPlan sorts every plan by execution phase.
     """
     matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
-    set_actions = tuple(SetForeignKey(foreign_key=foreign_key) for foreign_key in matched.added)
+    set_actions: list[Action] = []
+    for foreign_key in matched.added:
+        assert foreign_key.constraint_name is not None  # generated when DesiredTable was built
+        set_actions.append(
+            SetForeignKey(
+                local_columns=foreign_key.local_columns,
+                referenced_table=foreign_key.referenced_table,
+                referenced_columns=foreign_key.referenced_columns,
+                constraint_name=foreign_key.constraint_name,
+            )
+        )
     drop_actions = tuple(
         DropForeignKey(constraint_name=foreign_key.constraint_name)
         for foreign_key in matched.dropped
@@ -321,4 +331,4 @@ def _diff_foreign_keys(
         # is a type-narrowing safeguard against a reader bug — never false in practice.
         if foreign_key.constraint_name is not None
     )
-    return set_actions + drop_actions
+    return tuple(set_actions) + drop_actions

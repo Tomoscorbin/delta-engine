@@ -201,13 +201,10 @@ def _(action: DropForeignKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    foreign_key = action.foreign_key
-    assert foreign_key.constraint_name is not None  # generated when the DesiredTable was built
-    constraint = backtick(foreign_key.constraint_name)
-    local_cols = ", ".join(backtick(col) for col in foreign_key.local_columns)
-    ref_cols = ", ".join(backtick(col) for col in foreign_key.referenced_columns)
-    # references is a dotted qualified name — split and backtick each part
-    backticked_ref = ".".join(backtick(part) for part in foreign_key.references.split("."))
+    constraint = backtick(action.constraint_name)
+    local_cols = ", ".join(backtick(col) for col in action.local_columns)
+    ref_cols = ", ".join(backtick(col) for col in action.referenced_columns)
+    backticked_ref = backtick_qualified_name(action.referenced_table)
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint}"

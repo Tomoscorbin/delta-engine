@@ -74,15 +74,13 @@ def resolve(
         no FK failure for that table).
 
     """
-    already_failed = {str(qualified_name) for qualified_name in blocked}
-
-    registered_names = {str(table.qualified_name) for table in tables}
+    registered_names = {table.qualified_name for table in tables}
     graph = _build_dependency_graph(tables, registered_names)
     components = _strongly_connected_components(graph)
 
     cycle_members = {name for component in components if _is_cycle(component) for name in component}
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(tables, registered_names, cycle_members, already_failed)
+    failures_by_table = _classify_failures(tables, registered_names, cycle_members, set(blocked))
 
     ordered_names = tuple(table.qualified_name for table in ordered)
     return ResolveResult(ordered_names=ordered_names, fk_failures=failures_by_table)
@@ -90,8 +88,8 @@ def resolve(
 
 def _build_dependency_graph(
     tables: tuple[DesiredTable, ...],
-    registered_names: set[str],
-) -> dict[str, set[str]]:
+    registered_names: set[QualifiedName],
+) -> dict[QualifiedName, set[QualifiedName]]:
     """
     Build an adjacency map from table name to the set of table names it depends on.
 
@@ -101,16 +99,21 @@ def _build_dependency_graph(
     create the table, then add the constraint. Excluding the self-edge
     keeps the table a non-cyclic single-node component.
     """
-    graph: dict[str, set[str]] = {str(table.qualified_name): set() for table in tables}
+    graph: dict[QualifiedName, set[QualifiedName]] = {
+        table.qualified_name: set() for table in tables
+    }
     for table in tables:
-        table_name = str(table.qualified_name)
+        table_name = table.qualified_name
         for foreign_key in table.foreign_keys:
-            if foreign_key.references in registered_names and foreign_key.references != table_name:
-                graph[table_name].add(foreign_key.references)
+            referenced_table = foreign_key.referenced_table
+            if referenced_table in registered_names and referenced_table != table_name:
+                graph[table_name].add(referenced_table)
     return graph
 
 
-def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]]:
+def _strongly_connected_components(
+    graph: dict[QualifiedName, set[QualifiedName]],
+) -> list[list[QualifiedName]]:
     """
     Return the graph's strongly-connected components in dependency-first order.
 
@@ -124,13 +127,13 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
     excluded from the graph, so a single node is never cyclic.)
     """
     index_counter = 0
-    indices: dict[str, int] = {}
-    low_links: dict[str, int] = {}
-    on_stack: dict[str, bool] = {}
-    stack: list[str] = []
-    components: list[list[str]] = []
+    indices: dict[QualifiedName, int] = {}
+    low_links: dict[QualifiedName, int] = {}
+    on_stack: dict[QualifiedName, bool] = {}
+    stack: list[QualifiedName] = []
+    components: list[list[QualifiedName]] = []
 
-    def strong_connect(node: str) -> None:
+    def strong_connect(node: QualifiedName) -> None:
         nonlocal index_counter
         indices[node] = index_counter
         low_links[node] = index_counter
@@ -138,7 +141,7 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
         stack.append(node)
         on_stack[node] = True
 
-        for neighbour in sorted(graph[node]):
+        for neighbour in sorted(graph[node], key=str):
             if neighbour not in indices:
                 strong_connect(neighbour)
                 low_links[node] = min(low_links[node], low_links[neighbour])
@@ -146,7 +149,7 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
                 low_links[node] = min(low_links[node], indices[neighbour])
 
         if low_links[node] == indices[node]:
-            component: list[str] = []
+            component: list[QualifiedName] = []
             while True:
                 member = stack.pop()
                 on_stack[member] = False
@@ -162,14 +165,14 @@ def _strongly_connected_components(graph: dict[str, set[str]]) -> list[list[str]
     return components
 
 
-def _is_cycle(component: list[str]) -> bool:
+def _is_cycle(component: list[QualifiedName]) -> bool:
     """Return True if the component is a true multi-node dependency cycle."""
     return len(component) > 1
 
 
 def _order_tables(
     tables: tuple[DesiredTable, ...],
-    components: list[list[str]],
+    components: list[list[QualifiedName]],
 ) -> list[DesiredTable]:
     """
     Flatten the SCC components into tables in dependency-first sync order.
@@ -179,15 +182,15 @@ def _order_tables(
     Tables that cannot execute (FK failures) appear too — the engine gates
     them out by their recorded failures.
     """
-    table_by_name = {str(table.qualified_name): table for table in tables}
+    table_by_name = {table.qualified_name: table for table in tables}
     return [table_by_name[name] for component in components for name in component]
 
 
 def _classify_failures(
     tables: tuple[DesiredTable, ...],
-    registered_names: set[str],
-    cycle_members: set[str],
-    already_failed: set[str],
+    registered_names: set[QualifiedName],
+    cycle_members: set[QualifiedName],
+    already_failed: set[QualifiedName],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.
@@ -211,7 +214,7 @@ def _classify_failures(
             ForeignKeyFailure(
                 table=table.qualified_name,
                 local_columns=foreign_key.local_columns,
-                references=foreign_key.references,
+                references=foreign_key.referenced_table,
                 reason=reason,
             )
         )
@@ -222,33 +225,34 @@ def _classify_failures(
     # time). Compared as sets: a primary key's declaration order is not part of
     # its identity, and referenced_columns is aligned to local_columns, not PK order.
     primary_key_by_name = {
-        str(table.qualified_name): set(_primary_key_columns(table)) for table in tables
+        table.qualified_name: set(_primary_key_columns(table)) for table in tables
     }
 
     # Pass 1 — direct failures.
     for table in tables:
-        table_name = str(table.qualified_name)
+        table_name = table.qualified_name
         for foreign_key in table.foreign_keys:
-            if foreign_key.references not in registered_names:
+            referenced_table = foreign_key.referenced_table
+            if referenced_table not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
             # Checked before cycle membership so that a structural FK-target problem is
             # reported per-FK even when the table also participates in a cycle.
-            elif set(foreign_key.referenced_columns) != primary_key_by_name[foreign_key.references]:
+            elif set(foreign_key.referenced_columns) != primary_key_by_name[referenced_table]:
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif table_name in cycle_members:
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 
     # Pass 2 — propagate to dependents until no new table is blocked.
     # Seed with both FK direct failures and any externally supplied failed names.
-    failed_names = {str(qualified_name) for qualified_name in failures} | already_failed
+    failed_names = set(failures) | already_failed
     changed = True
     while changed:
         changed = False
         for table in tables:
-            table_name = str(table.qualified_name)
+            table_name = table.qualified_name
             if table_name in failed_names:
                 continue
-            blocking = [fk for fk in table.foreign_keys if fk.references in failed_names]
+            blocking = [fk for fk in table.foreign_keys if fk.referenced_table in failed_names]
             if blocking:
                 for foreign_key in blocking:
                     record(table, foreign_key, ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY)

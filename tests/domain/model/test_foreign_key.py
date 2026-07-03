@@ -1,18 +1,23 @@
 import pytest
 
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+
+
+def _customers() -> QualifiedName:
+    return QualifiedName("main", "sales", "customers")
 
 
 def test_signature_ignores_constraint_name():
     # Given two FKs with identical content but different explicit names
     unnamed = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="main.sales.customers",
+        referenced_table=_customers(),
         referenced_columns=("id",),
     )
     named = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="main.sales.customers",
+        referenced_table=_customers(),
         referenced_columns=("id",),
         constraint_name="chosen_elsewhere",
     )
@@ -25,12 +30,12 @@ def test_signature_differs_when_referenced_table_differs():
     # Given two FKs that differ only in the referenced table
     to_old = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="main.sales.old_customers",
+        referenced_table=QualifiedName("main", "sales", "old_customers"),
         referenced_columns=("id",),
     )
     to_new = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="main.sales.new_customers",
+        referenced_table=QualifiedName("main", "sales", "new_customers"),
         referenced_columns=("id",),
     )
 
@@ -39,85 +44,70 @@ def test_signature_differs_when_referenced_table_differs():
 
 
 def test_rejects_empty_local_columns():
-    # Given / When / Then
-    with pytest.raises(ValueError, match="local_columns"):
+    # Given / When / Then an empty local-column tuple is rejected
+    with pytest.raises(ValueError, match="local_columns must not be empty"):
         ForeignKeyConstraint(
             local_columns=(),
-            references="main.sales.customers",
+            referenced_table=_customers(),
             referenced_columns=("id",),
         )
 
 
 def test_rejects_empty_referenced_columns():
-    with pytest.raises(ValueError, match="referenced_columns"):
+    # Given / When / Then an empty referenced-column tuple is rejected
+    with pytest.raises(ValueError, match="referenced_columns must not be empty"):
         ForeignKeyConstraint(
             local_columns=("customer_id",),
-            references="main.sales.customers",
+            referenced_table=_customers(),
             referenced_columns=(),
         )
 
 
 def test_rejects_mismatched_column_counts():
-    with pytest.raises(ValueError, match="must have the same number"):
+    # Given local and referenced column tuples of different lengths
+    # When / Then construction is rejected
+    with pytest.raises(ValueError, match="same number of entries"):
         ForeignKeyConstraint(
             local_columns=("a", "b"),
-            references="main.sales.customers",
-            referenced_columns=("id",),
-        )
-
-
-def test_rejects_references_without_three_parts():
-    # Given / When / Then
-    with pytest.raises(ValueError, match=r"catalog\.schema\.table"):
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            references="schema.table",  # missing catalog
-            referenced_columns=("id",),
-        )
-
-
-def test_rejects_references_with_uppercase_characters():
-    # Given a references value that is not lowercase
-    # When / Then — must match QualifiedName's lowercase rule so registry lookups align
-    with pytest.raises(ValueError, match="lowercase"):
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            references="MAIN.sales.customers",
-            referenced_columns=("id",),
-        )
-
-
-def test_rejects_references_with_a_blank_part():
-    # Given a references value with an empty middle part (".sch.tbl"-style)
-    # When / Then — every part must be a real identifier so compiled SQL is valid
-    with pytest.raises(ValueError, match="blank"):
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            references="main..customers",
+            referenced_table=_customers(),
             referenced_columns=("id",),
         )
 
 
 def test_rejects_blank_explicit_constraint_name():
-    # Given an explicit but blank constraint name
-    # When / Then — a blank name would compile to invalid `ADD CONSTRAINT `` ...`
-    with pytest.raises(ValueError, match="constraint_name"):
+    # Given / When / Then a blank explicit constraint name is rejected
+    with pytest.raises(ValueError, match="constraint_name must not be blank"):
         ForeignKeyConstraint(
             local_columns=("customer_id",),
-            references="main.sales.customers",
+            referenced_table=_customers(),
             referenced_columns=("id",),
             constraint_name="   ",
         )
 
 
-def test_foreign_key_constraint_is_frozen():
-    # Given
-    fk = ForeignKeyConstraint(
+def test_generated_name_follows_table_and_local_columns():
+    # Given an unnamed desired constraint
+    constraint = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="main.sales.customers",
+        referenced_table=_customers(),
         referenced_columns=("id",),
     )
 
-    # When / Then — frozen dataclass raises on mutation
+    # When the engine generates its name from the owning table
+    named = constraint.with_generated_name("orders")
+
+    # Then the name follows {table}_{local_cols}_fk
+    assert named.constraint_name == "orders_customer_id_fk"
+
+
+def test_foreign_key_constraint_is_frozen():
+    # Given a constraint
+    constraint = ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=_customers(),
+        referenced_columns=("id",),
+    )
+
+    # When / Then assignment is rejected (frozen dataclass)
     with pytest.raises(AttributeError):
-        fk.references = "other"  # type: ignore[misc]
+        constraint.referenced_table = _customers()  # type: ignore[misc]

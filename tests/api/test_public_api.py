@@ -19,6 +19,7 @@ _EXPECTED = {
     "Long",
     "Map",
     "Property",
+    "Self",
     "String",
     "Timestamp",
 }

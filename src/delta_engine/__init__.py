@@ -28,6 +28,7 @@ from delta_engine.api import (
     Long,
     Map,
     Property,
+    Self,
     String,
     Timestamp,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "Map",
     "Property",
     "Registry",
+    "Self",
     "String",
     "SyncFailedError",
     "SyncReport",

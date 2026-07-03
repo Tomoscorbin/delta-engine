@@ -7,11 +7,12 @@ self-reference handling, and the per-table fail-closed verdict
 transitive propagation to dependents.
 """
 
-from delta_engine.api import Column, DeltaTable, String
+from delta_engine.api import Column, DeltaTable, ForeignKey, Self, String
 from delta_engine.application.dependency_resolution import ResolveResult, resolve
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
 
 
@@ -25,6 +26,17 @@ def _table(fqn: str) -> DesiredTable:
     ).to_desired_table()
 
 
+def _referenced_table(fqn: str) -> DeltaTable:
+    """Build a minimal table with a single-column PK for use as an FK target."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String(), nullable=False, primary_key=True),),
+    )
+
+
 def _table_with_fk(fqn: str, references: str) -> DesiredTable:
     catalog, schema, name = fqn.split(".")
     return DeltaTable(
@@ -36,11 +48,7 @@ def _table_with_fk(fqn: str, references: str) -> DesiredTable:
             Column("ref_id", String()),
         ),
         foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("ref_id",),
-                references=references,
-                referenced_columns=("id",),
-            )
+            ForeignKey(local_columns=("ref_id",), references=_referenced_table(references))
         ],
     ).to_desired_table()
 
@@ -114,7 +122,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
     assert len(failures) == 1
     assert failures[0].reason == ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     assert failures[0].local_columns == ("ref_id",)
-    assert failures[0].references == "cat.sch.customers"
+    assert failures[0].references == QualifiedName("cat", "sch", "customers")
 
 
 def test_resolve_fails_both_members_of_a_cycle():
@@ -238,13 +246,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
             Column("id", String(), nullable=False, primary_key=True),
             Column("manager_id", String()),
         ),
-        foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("manager_id",),
-                references="cat.sch.employees",
-                referenced_columns=("id",),
-            )
-        ],
+        foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
     ).to_desired_table()
 
     # When
@@ -268,12 +270,8 @@ def test_resolve_propagates_block_through_a_diamond():
             Column("c_id", String()),
         ),
         foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("b_id",), references="cat.sch.b", referenced_columns=("id",)
-            ),
-            ForeignKeyConstraint(
-                local_columns=("c_id",), references="cat.sch.c", referenced_columns=("id",)
-            ),
+            ForeignKey(local_columns=("b_id",), references=_referenced_table("cat.sch.b")),
+            ForeignKey(local_columns=("c_id",), references=_referenced_table("cat.sch.c")),
         ],
     ).to_desired_table()
     tables = (
@@ -380,7 +378,10 @@ def test_resolve_fails_fk_that_targets_a_non_key_column():
 
 
 def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
-    # Given customers' PK is (id) but orders references customers(email)
+    # Given customers' PK is (id) but the FK is constructed to reference (email) instead.
+    # This state cannot arise via the public ForeignKey API (which always infers the PK),
+    # so we construct the DesiredTable directly at the domain level to verify that resolve()
+    # correctly flags REFERENCED_COLUMNS_NOT_A_KEY when the constraint is non-conforming.
     catalog, schema, name = "cat.sch.customers".split(".")
     customers = DeltaTable(
         catalog,
@@ -391,19 +392,18 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
             Column("email", String()),
         ),
     ).to_desired_table()
-    orders = DeltaTable(
-        "cat",
-        "sch",
-        "orders",
-        columns=(Column("id", String()), Column("ref_email", String())),
-        foreign_keys=[
+    orders = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "orders"),
+        columns=(Column("id", String(), nullable=False), Column("ref_email", String())),
+        primary_key=PrimaryKeyConstraint(columns=("id",)),
+        foreign_keys=(
             ForeignKeyConstraint(
                 local_columns=("ref_email",),
-                references="cat.sch.customers",
+                referenced_table=QualifiedName.parse("cat.sch.customers"),
                 referenced_columns=("email",),
-            )
-        ],
-    ).to_desired_table()
+            ),
+        ),
+    )
 
     # When
     result = resolve((orders, customers))
@@ -427,9 +427,7 @@ def test_resolve_valid_chain_with_primary_keys_executes():
             Column("ref_id", String()),
         ),
         foreign_keys=[
-            ForeignKeyConstraint(
-                local_columns=("ref_id",), references="cat.sch.b", referenced_columns=("id",)
-            )
+            ForeignKey(local_columns=("ref_id",), references=_referenced_table("cat.sch.b"))
         ],
     ).to_desired_table()
     tables = (

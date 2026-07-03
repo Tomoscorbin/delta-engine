@@ -149,7 +149,7 @@ def test_table_snapshot_stores_foreign_keys():
     # Given a foreign key referencing another table
     fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     table = DesiredTable(
@@ -167,7 +167,7 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
     # Given a FK whose local column is not declared
     fk = ForeignKeyConstraint(
         local_columns=("nonexistent",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
 
@@ -184,12 +184,12 @@ def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
     # Given two FKs on the same local columns, neither with an explicit name
     first = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     second = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.vips",
+        referenced_table=QualifiedName("cat", "sch", "vips"),
         referenced_columns=("id",),
     )
 
@@ -208,12 +208,12 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
     # derived name and are semantically incoherent)
     fk_one = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.accounts",
+        referenced_table=QualifiedName("cat", "sch", "accounts"),
         referenced_columns=("id",),
     )
 
@@ -231,12 +231,12 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
     # the old name-based guard missed)
     fk_one = ForeignKeyConstraint(
         local_columns=("tenant_id", "customer_id"),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("tenant_id", "id"),
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id", "tenant_id"),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id", "tenant_id"),
     )
 
@@ -254,13 +254,13 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
     # must stay representable and reconcilable, not rejected at read time)
     fk_one = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.customers",
+        referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name="a_fk",
     )
     fk_two = ForeignKeyConstraint(
         local_columns=("customer_id",),
-        references="cat.sch.accounts",
+        referenced_table=QualifiedName("cat", "sch", "accounts"),
         referenced_columns=("id",),
         constraint_name="b_fk",
     )
