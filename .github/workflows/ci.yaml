@@ -49,6 +49,9 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      - name: Check import architecture
+        run: uv run lint-imports
+
   test:
     runs-on: ubuntu-latest
     steps:
