@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
@@ -36,13 +38,15 @@ class Rule(Protocol):
 
     name: ClassVar[str]
 
-    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
         """
         Evaluate the rule against a drift's dimensions.
 
-        Receives all dimensions from a ``TableDrift``; inspect the ones relevant
-        to this rule and ignore the rest. Never called for a ``TableMissing``
-        diff — creation is always safe.
+        Receives all dimensions from a ``TableDrift`` and the desired table.
+        Never called for a ``TableMissing`` diff — that case is handled
+        directly in ``validate_diff``.
         """
         ...
 
@@ -52,7 +56,9 @@ class NonNullableColumnAdd:
 
     name: ClassVar[str] = "NonNullableColumnAdd"
 
-    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
         cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
@@ -74,7 +80,9 @@ class NullabilityTighteningOnExistingColumn:
 
     name: ClassVar[str] = "NullabilityTighteningOnExistingColumn"
 
-    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag every existing column tightened to NOT NULL."""
         cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
@@ -98,7 +106,9 @@ class ColumnDataTypeChangeNotSupported:
 
     name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
 
-    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag every in-place column type change."""
         cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
@@ -124,7 +134,9 @@ class PartitioningChangeNotSupported:
 
     name: ClassVar[str] = "PartitioningChangeNotSupported"
 
-    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
         """Flag every in-place partitioning change."""
         return tuple(
             ValidationFailure(
@@ -141,32 +153,80 @@ class PartitioningChangeNotSupported:
         )
 
 
+def _aspect_label(aspect: TableAspect) -> str:
+    """Human-readable label for a TableAspect (e.g. COLUMN_STRUCTURE -> 'column structure')."""
+    return aspect.name.lower().replace("_", " ")
+
+
+class UnmanagedDimensionDrift:
+    """Disallow any drift in a dimension the desired table does not manage."""
+
+    name: ClassVar[str] = "UnmanagedDimensionDrift"
+
+    def evaluate(
+        self, dimensions: tuple[Dimension, ...], desired: DesiredTable
+    ) -> tuple[ValidationFailure, ...]:
+        """Fail for every dimension that drifted but is not in managed_aspects."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: {_aspect_label(d.aspect)} has drifted"
+                    " but is not managed by this definition. Sync the table fully"
+                    " or update the declaration to match the live schema."
+                ),
+            )
+            for d in dimensions
+            if d.aspect not in desired.managed_aspects
+        )
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     ColumnDataTypeChangeNotSupported(),
     PartitioningChangeNotSupported(),
+    UnmanagedDimensionDrift(),
 )
 
 
 def validate_diff(
     diff: TableDiff,
+    desired: DesiredTable,
     rules: tuple[Rule, ...] = DEFAULT_RULES,
 ) -> ValidationResult:
     """
     Evaluate every rule against a table diff and return the verdict.
 
-    A missing table passes automatically. For a drift, every rule is evaluated
-    against the dimensions and failures are collected.
+    A missing table passes automatically when column structure is managed
+    (creation is valid). When structure is unmanaged, the table cannot be
+    created and the diff fails immediately. For a drift, every rule is
+    evaluated against the dimensions and failures are collected.
     """
     match diff:
         case TableMissing():
+            if TableAspect.COLUMN_STRUCTURE not in desired.managed_aspects:
+                return ValidationResult(
+                    failures=(
+                        ValidationFailure(
+                            rule_name="MissingTableUnmanaged",
+                            message=(
+                                "Operation not allowed: the table does not exist and this"
+                                " definition does not manage column structure, so it cannot"
+                                " be created. Manage the table fully or create it out-of-band"
+                                " first."
+                            ),
+                        ),
+                    )
+                )
             return ValidationResult()
         case TableDrift() as drift:
             return ValidationResult(
                 failures=tuple(
-                    failure for rule in rules for failure in rule.evaluate(drift.dimensions)
+                    failure
+                    for rule in rules
+                    for failure in rule.evaluate(drift.dimensions, desired)
                 )
             )
-        case _:
-            assert_never(diff)
+        case _ as unreachable:
+            assert_never(unreachable)
