@@ -21,12 +21,10 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -97,8 +95,7 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
     The guard makes that contract loud -- it fires only if validation was
     bypassed or a custom rule set let a NOT NULL add through, rather than
     silently emitting an add that drops the constraint. It is an unconditional
-    ``raise`` (not ``assert``) so the invariant survives ``python -O``, matching
-    the ColumnTypeChange and PartitioningChange guards below.
+    ``raise`` (not ``assert``) so the invariant survives ``python -O``.
     """
     if not action.column.nullable:
         raise AssertionError(
@@ -208,27 +205,6 @@ def _(action: SetForeignKey, backticked_table_name: str) -> str:
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint}"
         f" FOREIGN KEY ({local_cols}) REFERENCES {backticked_ref} ({ref_cols})"
-    )
-
-
-@_compile_action.register
-def _(action: ColumnTypeChange, backticked_table_name: str) -> str:
-    # Validation rejects this action before execution, so reaching here is an
-    # internal-invariant violation (AssertionError), not an unimplemented feature.
-    raise AssertionError(
-        f"Column type changes are not supported: column '{action.column_name}'"
-        f" ({action.from_type} -> {action.to_type}). Recreate the table to change a column's type."
-    )
-
-
-@_compile_action.register
-def _(action: PartitioningChange, backticked_table_name: str) -> str:
-    # Validation rejects this action before execution, so reaching here is an
-    # internal-invariant violation (AssertionError), not an unimplemented feature.
-    raise AssertionError(
-        f"Partitioning changes are not supported"
-        f" ({action.observed_partitioning} -> {action.desired_partitioning})."
-        " Recreate the table with the desired partitioning."
     )
 
 

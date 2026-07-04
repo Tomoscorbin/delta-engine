@@ -9,7 +9,6 @@ from enum import IntEnum, auto
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
-from delta_engine.domain.model.data_type import DataType
 
 
 class ActionPhase(IntEnum):
@@ -39,8 +38,6 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
-    COLUMN_TYPE_CHANGE = auto()
-    PARTITIONING_CHANGE = auto()
 
 
 class Action(ABC):
@@ -286,49 +283,6 @@ class SetForeignKey(Action):
     @property
     def subject(self) -> str:
         return ",".join(self.local_columns)
-
-
-@dataclass(frozen=True, slots=True)
-class ColumnTypeChange(Action):
-    """
-    Records that a column's data type differs between desired and observed.
-
-    A descriptive action: it states the drift, not whether the drift is
-    permitted — deciding what is allowed is the validator's job. It carries the
-    observed and desired types so a validation rule can reason about them and
-    render a clear message.
-    """
-
-    column_name: str
-    from_type: DataType
-    to_type: DataType
-
-    phase: ClassVar[ActionPhase] = ActionPhase.COLUMN_TYPE_CHANGE
-
-    @property
-    def subject(self) -> str:
-        return self.column_name
-
-
-@dataclass(frozen=True, slots=True)
-class PartitioningChange(Action):
-    """
-    Records that the desired and observed partition specs differ.
-
-    A descriptive action: it states the drift, not whether the drift is
-    permitted — deciding what is allowed is the validator's job. It carries the
-    observed and desired partition columns so a validation rule can reason about
-    them and render a clear message.
-    """
-
-    desired_partitioning: tuple[str, ...]
-    observed_partitioning: tuple[str, ...]
-
-    phase: ClassVar[ActionPhase] = ActionPhase.PARTITIONING_CHANGE
-
-    @property
-    def subject(self) -> str:
-        return ""
 
 
 def _execution_order(action: Action) -> tuple[int, str]:

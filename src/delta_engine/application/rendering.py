@@ -15,12 +15,10 @@ from typing import TYPE_CHECKING
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -127,19 +125,6 @@ def _(action: SetForeignKey) -> str:
 @action_diff_line.register
 def _(action: DropForeignKey) -> str:
     return f"- foreign key {action.constraint_name}"
-
-
-@action_diff_line.register
-def _(action: ColumnTypeChange) -> str:
-    return (
-        f"~ column {action.column_name} type "
-        f"{_type_name(action.from_type)} → {_type_name(action.to_type)}"
-    )
-
-
-@action_diff_line.register
-def _(action: PartitioningChange) -> str:
-    return f"~ partitioning {action.observed_partitioning} → {action.desired_partitioning}"
 
 
 # Shown wherever a report has a readable state but no planned actions. One

@@ -3,19 +3,17 @@ import inspect
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -254,24 +252,6 @@ def test_every_action_type_has_a_registered_compiler():
         if _compile_action.dispatch(action_type) is fallback
     ]
     assert unregistered == []
-
-
-def test_column_type_change_raises_at_compile_time():
-    # Given a ColumnTypeChange (validation rejects it first; it must never reach the compiler)
-    action = ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long())
-
-    # When / Then compiling it is an internal-invariant violation
-    with pytest.raises(AssertionError):
-        _compile_single(action)
-
-
-def test_partitioning_change_raises_at_compile_time():
-    # Given a PartitioningChange (validation rejects it first; it must never reach the compiler)
-    action = PartitioningChange(desired_partitioning=("ds",), observed_partitioning=())
-
-    # When / Then compiling it is an internal-invariant violation
-    with pytest.raises(AssertionError):
-        _compile_single(action)
 
 
 def test_drop_primary_key_renders_alter_drop_primary_key():

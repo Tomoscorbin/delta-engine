@@ -6,12 +6,10 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -217,8 +215,6 @@ def test_plan_full_phase_order_with_all_action_types():
     # Given one action from each phase, handed to the plan in scrambled order
     plan = ActionPlan(
         (
-            PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()),
-            ColumnTypeChange(column_name="ct_col", from_type=Integer(), to_type=Integer()),
             SetPrimaryKey(columns=("id",), constraint_name="tbl_pk"),
             SetForeignKey(
                 local_columns=("customer_id",),
@@ -259,8 +255,6 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnNullability,
         SetPrimaryKey,
         SetForeignKey,
-        ColumnTypeChange,
-        PartitioningChange,
     ]
 
 
