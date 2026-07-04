@@ -131,7 +131,7 @@ The phases are:
 
 ## Planning and determinism
 
-`compute_plan(desired, observed)` returns an `ActionPlan`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
+An `ActionPlan` is produced by iterating each dimension's `.actions()`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
 The phase ordering encodes dependency constraints. Each ordering below exists because Databricks rejects the operation otherwise:
 
