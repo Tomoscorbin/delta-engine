@@ -3,7 +3,12 @@ import pytest
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
 from delta_engine.api.table import METADATA_ASPECTS
-from delta_engine.domain.model import ALL_ASPECTS, Column as DomainColumn, QualifiedName, TableAspect
+from delta_engine.domain.model import (
+    ALL_ASPECTS,
+    Column as DomainColumn,
+    QualifiedName,
+    TableAspect,
+)
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
