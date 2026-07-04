@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+from typing import assert_never
 
 from delta_engine.application.dependency_resolution import resolve
 from delta_engine.application.desired_tables import DesiredTableSource, prepare_desired_tables
@@ -50,9 +51,15 @@ from delta_engine.application.report import (
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan
-from delta_engine.domain.plan.diff import TableDiff, diff_table
-from delta_engine.domain.plan.lower import lower_diff
+from delta_engine.domain.plan.actions import (
+    Action,
+    ActionPlan,
+    CreateTable,
+    SetColumnTag,
+    SetForeignKey,
+    SetTableTag,
+)
+from delta_engine.domain.plan.diff import TableDiff, TableDrift, TableMissing, diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -225,13 +232,45 @@ class Engine:
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Lower every run's diff into its action plan; read-failed runs keep their empty plan."""
+        """Build the action plan for each run by iterating its diff's dimensions."""
         for run in runs:
             if run.diff is None:
                 continue
-            run.plan = lower_diff(run.diff)
+            match run.diff:
+                case TableMissing(desired=desired):
+                    run.plan = self._plan_missing(desired)
+                case TableDrift() as drift:
+                    run.plan = ActionPlan(
+                        tuple(action for d in drift.dimensions for action in d.actions())
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
+
+    @staticmethod
+    def _plan_missing(desired: DesiredTable) -> ActionPlan:
+        """Create the action plan for a missing table: CREATE TABLE plus tag and FK follow-ups."""
+        tag_actions: tuple[Action, ...] = tuple(
+            SetTableTag(name=name, value=value) for name, value in desired.tags.items()
+        )
+        column_tag_actions: tuple[Action, ...] = tuple(
+            SetColumnTag(column_name=column.name, name=name, value=value)
+            for column in desired.columns
+            for name, value in column.tags.items()
+        )
+        foreign_key_actions: tuple[Action, ...] = tuple(
+            SetForeignKey(
+                local_columns=fk.local_columns,
+                referenced_table=fk.referenced_table,
+                referenced_columns=fk.referenced_columns,
+                constraint_name=fk.constraint_name,
+            )
+            for fk in desired.foreign_keys
+        )
+        return ActionPlan(
+            (CreateTable(desired), *tag_actions, *column_tag_actions, *foreign_key_actions)
+        )
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
