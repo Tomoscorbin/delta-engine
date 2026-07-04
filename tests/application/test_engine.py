@@ -815,7 +815,7 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
 
 
 def _metadata_only_spec(fqn: str) -> DeltaTable:
-    """A metadata-only spec with a comment on its only column."""
+    """Build a metadata-only spec with a comment on its only column."""
     catalog, schema, name = fqn.split(".")
     return DeltaTable(
         catalog,
@@ -828,7 +828,7 @@ def _metadata_only_spec(fqn: str) -> DeltaTable:
 
 
 def _existing_matching_table(fqn: str) -> TablePresent:
-    """An observed table whose schema exactly matches _metadata_only_spec."""
+    """Build an observed table whose schema exactly matches _metadata_only_spec."""
     catalog, schema, name = fqn.split(".")
     return TablePresent(
         table=ObservedTable(

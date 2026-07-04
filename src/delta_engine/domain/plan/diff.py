@@ -28,10 +28,10 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
-from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -202,7 +202,9 @@ type ForeignKeyDrift = Added[ForeignKeyConstraint] | Removed[ForeignKeyConstrain
 class ColumnStructureDimension:
     """Column structure drift: additions, removals, type changes, nullability changes."""
 
-    entries: tuple[ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged, ...]
+    entries: tuple[
+        ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged, ...
+    ]
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
@@ -213,7 +215,9 @@ class ColumnStructureDimension:
         """Return a ColumnStructureDimension for any structural differences, or None."""
         desired_by_name = {col.name: col for col in desired}
         observed_by_name = {col.name: col for col in observed}
-        result: list[ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged] = []
+        result: list[
+            ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged
+        ] = []
         for name, col in desired_by_name.items():
             if name not in observed_by_name:
                 result.append(ColumnAdded(column=col))
@@ -228,14 +232,20 @@ class ColumnStructureDimension:
                 result.append(
                     ColumnDataTypeChanged(
                         column_name=name,
-                        change=Changed(desired=desired_col.data_type, observed=observed_col.data_type),
+                        change=Changed(
+                            desired=desired_col.data_type,
+                            observed=observed_col.data_type,
+                        ),
                     )
                 )
             elif desired_col.nullable != observed_col.nullable:
                 result.append(
                     ColumnNullabilityChanged(
                         column_name=name,
-                        change=Changed(desired=desired_col.nullable, observed=observed_col.nullable),
+                        change=Changed(
+                            desired=desired_col.nullable,
+                            observed=observed_col.nullable,
+                        ),
                     )
                 )
         return ColumnStructureDimension(entries=tuple(result)) if result else None

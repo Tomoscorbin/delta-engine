@@ -153,7 +153,9 @@ class DeltaTable:
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
-        effective_properties = {} if metadata_only else {**self.default_properties, **user_properties}
+        effective_properties = (
+            {} if metadata_only else {**self.default_properties, **user_properties}
+        )
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)

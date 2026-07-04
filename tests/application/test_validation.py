@@ -7,13 +7,19 @@ from delta_engine.application.validation import (
     ValidationResult,
     validate_diff,
 )
-from delta_engine.domain.model import ALL_ASPECTS, Column, DesiredTable, Integer, Long, QualifiedName, String
-from delta_engine.domain.model import TableAspect
+from delta_engine.domain.model import (
+    ALL_ASPECTS,
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    QualifiedName,
+    String,
+    TableAspect,
+)
 from delta_engine.domain.plan.diff import (
     Changed,
     ColumnAdded,
-    ColumnCommentChanged,
-    ColumnCommentsDimension,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnStructureDimension,
@@ -53,7 +59,9 @@ def test_rejects_add_of_non_nullable_column():
     # Given a dimensions tuple containing a columns dimension with a NOT NULL addition
     rule = NonNullableColumnAdd()
     dimensions = (
-        ColumnStructureDimension(entries=(ColumnAdded(Column("order_id", Integer(), nullable=False)),)),
+        ColumnStructureDimension(
+            entries=(ColumnAdded(Column("order_id", Integer(), nullable=False)),)
+        ),
     )
 
     # When
@@ -249,7 +257,9 @@ def test_validation_uses_the_default_rules_when_none_are_supplied():
     # Given a drift with a NOT NULL column addition and no explicit rules argument
     diff = TableDrift(
         dimensions=(
-            ColumnStructureDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
+            ColumnStructureDimension(
+                entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)
+            ),
         )
     )
 
@@ -265,7 +275,9 @@ def test_validation_passes_when_empty_rule_set_is_supplied():
     # ColumnAdded breaks no rule when rules=() — ColumnDataTypeChangeNotSupported is suppressed too
     diff = TableDrift(
         dimensions=(
-            ColumnStructureDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
+            ColumnStructureDimension(
+                entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)
+            ),
         )
     )
 
