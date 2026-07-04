@@ -261,12 +261,12 @@ class Engine:
         )
         foreign_key_actions: tuple[Action, ...] = tuple(
             SetForeignKey(
-                local_columns=fk.local_columns,
-                referenced_table=fk.referenced_table,
-                referenced_columns=fk.referenced_columns,
-                constraint_name=fk.constraint_name,
+                local_columns=foreign_key.local_columns,
+                referenced_table=foreign_key.referenced_table,
+                referenced_columns=foreign_key.referenced_columns,
+                constraint_name=foreign_key.constraint_name,
             )
-            for fk in desired.foreign_keys
+            for foreign_key in desired.foreign_keys
         )
         return ActionPlan(
             (CreateTable(desired), *tag_actions, *column_tag_actions, *foreign_key_actions)

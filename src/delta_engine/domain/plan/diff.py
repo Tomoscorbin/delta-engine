@@ -187,13 +187,7 @@ class ColumnsDimension:
             result.append(SetColumnComment(changed.column_name, changed.comment.desired))
         for tag_entry in changed.tags:
             match tag_entry:
-                case Added(item=pair):
-                    result.append(
-                        SetColumnTag(
-                            column_name=changed.column_name, name=pair.name, value=pair.value
-                        )
-                    )
-                case Changed(desired=pair):
+                case Added(item=pair) | Changed(desired=pair):
                     result.append(
                         SetColumnTag(
                             column_name=changed.column_name, name=pair.name, value=pair.value
@@ -429,21 +423,19 @@ def _diff_mapping(
     a Removed key is acted on (tags) or ignored (properties) is lowering
     policy, not a diffing concern.
     """
-    desired_by_name = {name: value for name, value in desired.items()}
-    observed_by_name = {name: value for name, value in observed.items()}
     result: list[Entry[KeyValue]] = []
-    for name, value in desired_by_name.items():
-        if name not in observed_by_name:
+    for name, value in desired.items():
+        if name not in observed:
             result.append(Added(KeyValue(name, value)))
-        elif observed_by_name[name] != value:
+        elif observed[name] != value:
             result.append(
                 Changed(
                     desired=KeyValue(name, value),
-                    observed=KeyValue(name, observed_by_name[name]),
+                    observed=KeyValue(name, observed[name]),
                 )
             )
-    for name, value in observed_by_name.items():
-        if name not in desired_by_name:
+    for name, value in observed.items():
+        if name not in desired:
             result.append(Removed(KeyValue(name, value)))
     return tuple(result)
 
