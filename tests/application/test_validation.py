@@ -42,13 +42,16 @@ def test_rejects_add_of_non_nullable_column():
         ColumnsDimension(entries=(Added(Column("order_id", Integer(), nullable=False)),)),
     )
 
+    # When
     failures = rule.evaluate(dimensions)
 
+    # Then
     assert len(failures) == 1
     assert failures[0].rule_name == "NonNullableColumnAdd"
 
 
 def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
+    # Given three NOT NULL column additions in a single dimensions tuple
     rule = NonNullableColumnAdd()
     dimensions = (
         ColumnsDimension(
@@ -60,8 +63,10 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
         ),
     )
 
+    # When
     failures = rule.evaluate(dimensions)
 
+    # Then
     assert len(failures) == 3
     assert {f.rule_name for f in failures} == {"NonNullableColumnAdd"}
     messages = [f.message for f in failures]
@@ -70,6 +75,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
 
 
 def test_allows_add_of_nullable_column():
+    # Given a columns dimension containing a nullable column addition
     rule = NonNullableColumnAdd()
     dimensions = (ColumnsDimension(entries=(Added(Column("age", Integer())),)),)
 
@@ -77,13 +83,16 @@ def test_allows_add_of_nullable_column():
 
 
 def test_non_nullable_column_add_ignores_creation():
+    # Given a TableMissing diff (table does not yet exist) with a NOT NULL column
     desired = DesiredTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer(), nullable=False),),
     )
 
+    # When
     result = validate_diff(TableMissing(desired=desired))
 
+    # Then
     assert result.failed is False
 
 
@@ -98,22 +107,28 @@ def test_non_nullable_column_add_passes_when_no_columns_dimension():
 
 
 def test_rejects_tightening_an_existing_column_to_not_null():
+    # Given a columns dimension with a nullability tightening on an existing column
     rule = NullabilityTighteningOnExistingColumn()
     dimensions = (ColumnsDimension(entries=(_tightening("order_id"),)),)
 
+    # When
     failures = rule.evaluate(dimensions)
 
+    # Then
     assert len(failures) == 1
     assert failures[0].rule_name == "NullabilityTighteningOnExistingColumn"
     assert "order_id" in failures[0].message
 
 
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
+    # Given two nullability tightenings in a single dimensions tuple
     rule = NullabilityTighteningOnExistingColumn()
     dimensions = (ColumnsDimension(entries=(_tightening("a"), _tightening("b"))),)
 
+    # When
     failures = rule.evaluate(dimensions)
 
+    # Then
     assert len(failures) == 2
     messages = [f.message for f in failures]
     for col in ("a", "b"):
@@ -121,6 +136,7 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
+    # Given a columns dimension with a nullability loosening (NOT NULL → nullable)
     rule = NullabilityTighteningOnExistingColumn()
     loosening = ColumnChanged(
         column_name="id", nullability=Changed(desired=True, observed=False)
@@ -139,20 +155,25 @@ def test_validate_diff_surfaces_type_drift_as_failure():
         dimensions=(ColumnsDimension(entries=(_type_drift("id"),)),)
     )
 
+    # When
     result = validate_diff(diff)
 
+    # Then
     assert result.failed is True
     assert len(result.failures) == 1
     assert "id" in result.failures[0].message
 
 
 def test_validate_diff_surfaces_partitioning_change_as_failure():
+    # Given a drift whose only dimension is a partitioning change
     diff = TableDrift(
         dimensions=(PartitioningDimension(change=Changed(desired=("ds",), observed=())),)
     )
 
+    # When
     result = validate_diff(diff)
 
+    # Then
     assert result.failed is True
     assert any("partitioning" in f.message.lower() for f in result.failures)
 
@@ -170,8 +191,10 @@ def test_validate_diff_collects_both_unhandled_and_rule_failures():
         )
     )
 
+    # When
     result = validate_diff(diff)
 
+    # Then
     assert result.failed is True
     assert len(result.failures) == 2
 
@@ -180,12 +203,15 @@ def test_validate_diff_collects_both_unhandled_and_rule_failures():
 
 
 def test_validation_passes_when_no_rule_is_broken():
+    # Given a drift containing only a nullable column addition (breaks no rules)
     diff = TableDrift(
         dimensions=(ColumnsDimension(entries=(Added(Column("age", Integer())),)),)
     )
 
+    # When
     result = validate_diff(diff)
 
+    # Then
     assert result.failed is False
     assert result.failures == ()
 
@@ -197,20 +223,26 @@ def test_empty_drift_produces_no_failures():
 
 
 def test_missing_table_passes_validation():
+    # Given a TableMissing diff (table does not yet exist)
     desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
 
+    # When
     result = validate_diff(TableMissing(desired=desired))
 
+    # Then
     assert result.failed is False
 
 
 def test_validation_uses_the_default_rules_when_none_are_supplied():
+    # Given a drift with a NOT NULL column addition and no explicit rules argument
     diff = TableDrift(
         dimensions=(ColumnsDimension(entries=(Added(Column("x", Integer(), nullable=False)),)),)
     )
 
+    # When
     result = validate_diff(diff)
 
+    # Then
     assert result.failed is True
 
 
@@ -221,20 +253,25 @@ def test_validation_passes_when_empty_rule_set_is_supplied():
         dimensions=(ColumnsDimension(entries=(Added(Column("x", Integer(), nullable=False)),)),)
     )
 
+    # When
     result = validate_diff(diff, rules=())
 
+    # Then
     assert result.failed is False
 
 
 def test_validation_result_failed_property():
+    # Given a result with one failure and a result with no failures
     failing = ValidationResult(failures=(ValidationFailure(rule_name="X", message="broken"),))
     passing = ValidationResult()
 
+    # Then
     assert failing.failed is True
     assert passing.failed is False
 
 
 def test_default_rules_cover_the_two_precondition_policies():
+    # Given the DEFAULT_RULES constant
     rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
 
     assert rule_names == {
