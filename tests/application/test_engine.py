@@ -773,6 +773,28 @@ def test_read_failure_is_reported_exactly_once():
     assert message.count("Read error: IOError - cannot read") == 1
 
 
+def test_read_failed_run_skips_diff_validation_and_planning():
+    # Given a reader that fails for the table
+    fqn = "cat.sch.orders"
+    read_failure = ReadFailed(
+        failure=ReadFailure(exception_type="Boom", message="connection lost")
+    )
+    engine = Engine(
+        reader=_FakeReader({fqn: read_failure}), executor=_FakeExecutor(results=())
+    )
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(_spec(fqn))
+
+    # Then the run carries only the read failure — no diff was computed, no
+    # validation ran, and the plan stayed empty
+    report = excinfo.value.report.table_reports[0]
+    assert report.status is TableRunStatus.READ_FAILED
+    assert len(report.plan) == 0
+    assert len(report.failures) == 1
+
+
 def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     # Given orders references customers, customers is in the sync but has NO PK
     engine = Engine(_FakeReader({}), _FakeExecutor((_ok_exec(),)))

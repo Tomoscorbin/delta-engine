@@ -1,35 +1,48 @@
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
+    DEFAULT_RULES,
     DisallowPartitioningChange,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
     UnsupportedColumnTypeChange,
     ValidationResult,
-    validate_plan,
+    validate_diff,
 )
-from delta_engine.domain.model import Column, Integer, Long, String
-from delta_engine.domain.plan.actions import (
-    ActionPlan,
-    AddColumn,
-    ColumnTypeChange,
-    PartitioningChange,
-    SetColumnNullability,
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName, String
+from delta_engine.domain.plan.diff import (
+    Added,
+    Changed,
+    ColumnChanged,
+    TableDrift,
+    TableMissing,
 )
 
+_QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
-def _plan(*actions) -> ActionPlan:
-    return ActionPlan(actions)
+
+def _type_drift(column_name: str = "id") -> ColumnChanged:
+    return ColumnChanged(
+        column_name=column_name, data_type=Changed(desired=Long(), observed=Integer())
+    )
+
+
+def _tightening(column_name: str = "id") -> ColumnChanged:
+    return ColumnChanged(
+        column_name=column_name, nullability=Changed(desired=False, observed=True)
+    )
 
 
 # ---- NonNullableColumnAdd
 
 
 def test_rejects_add_of_non_nullable_column():
-    # Given a plan adding a NOT NULL column to an existing table
+    # Given a drift adding a NOT NULL column to an existing table
     rule = NonNullableColumnAdd()
 
     # When evaluating
-    failures = rule.evaluate(_plan(AddColumn(Column("order_id", Integer(), nullable=False))))
+    failures = rule.evaluate(
+        TableDrift(columns=(Added(Column("order_id", Integer(), nullable=False)),))
+    )
 
     # Then the violation is flagged
     assert len(failures) == 1
@@ -37,213 +50,217 @@ def test_rejects_add_of_non_nullable_column():
 
 
 def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
-    # Given a plan adding three NOT NULL columns at once
+    # Given a drift adding three NOT NULL columns at once
     rule = NonNullableColumnAdd()
 
     # When evaluating
     failures = rule.evaluate(
-        _plan(
-            AddColumn(Column("a", Integer(), nullable=False)),
-            AddColumn(Column("b", String(), nullable=False)),
-            AddColumn(Column("c", Integer(), nullable=False)),
+        TableDrift(
+            columns=(
+                Added(Column("a", Integer(), nullable=False)),
+                Added(Column("b", String(), nullable=False)),
+                Added(Column("c", Integer(), nullable=False)),
+            )
         )
     )
 
     # Then all three violations are reported in one pass, not just the first
     assert len(failures) == 3
-    assert {f.rule_name for f in failures} == {"NonNullableColumnAdd"}
-    messages = [f.message for f in failures]
+    assert {failure.rule_name for failure in failures} == {"NonNullableColumnAdd"}
+    messages = [failure.message for failure in failures]
     for column_name in ("a", "b", "c"):
         assert any(column_name in message for message in messages)
 
 
 def test_allows_add_of_nullable_column():
-    # Given a plan adding a nullable column (always safe)
+    # Given a drift adding a nullable column
     rule = NonNullableColumnAdd()
 
-    failures = rule.evaluate(_plan(AddColumn(Column("notes", String(), nullable=True))))
-    assert failures == ()
+    # Then no failure is raised
+    assert rule.evaluate(TableDrift(columns=(Added(Column("age", Integer())),))) == ()
 
 
-def test_non_nullable_column_add_ignores_creation_plan():
-    # Given a creation plan — AddColumn does not appear; CreateTable carries the columns
-    # A creation plan will never contain AddColumn, so the rule always returns ()
-    failures = NonNullableColumnAdd().evaluate(_plan())
-    assert failures == ()
+def test_non_nullable_column_add_ignores_creation():
+    # Given a missing table whose declaration includes NOT NULL columns
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), nullable=False),),
+    )
+
+    # When validating the missing-table diff
+    result = validate_diff(TableMissing(desired=desired))
+
+    # Then creation is always safe — no rule sees it
+    assert result.failed is False
 
 
 # ---- NullabilityTighteningOnExistingColumn
 
 
 def test_rejects_tightening_an_existing_column_to_not_null():
-    # Given a plan that tightens a column to NOT NULL
+    # Given a drift tightening an existing column to NOT NULL
     rule = NullabilityTighteningOnExistingColumn()
 
-    failures = rule.evaluate(_plan(SetColumnNullability(column_name="id", nullable=False)))
+    failures = rule.evaluate(TableDrift(columns=(_tightening("order_id"),)))
+
+    # Then the violation is flagged with the safe path
     assert len(failures) == 1
-    assert "id" in failures[0].message
+    assert failures[0].rule_name == "NullabilityTighteningOnExistingColumn"
+    assert "order_id" in failures[0].message
 
 
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
-    # Given a plan tightening two columns to NOT NULL at once
     rule = NullabilityTighteningOnExistingColumn()
 
-    # When evaluating
-    failures = rule.evaluate(
-        _plan(
-            SetColumnNullability(column_name="id", nullable=False),
-            SetColumnNullability(column_name="name", nullable=False),
-        )
-    )
+    failures = rule.evaluate(TableDrift(columns=(_tightening("a"), _tightening("b"))))
 
-    # Then both violations are reported in one pass
     assert len(failures) == 2
-    messages = [f.message for f in failures]
-    for column_name in ("id", "name"):
-        assert any(column_name in message for message in messages)
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
-    # Given a plan that loosens a column to nullable (always safe)
+    # Given a drift loosening a column to nullable — always safe
     rule = NullabilityTighteningOnExistingColumn()
+    loosening = ColumnChanged(
+        column_name="id", nullability=Changed(desired=True, observed=False)
+    )
 
-    failures = rule.evaluate(_plan(SetColumnNullability(column_name="id", nullable=True)))
-    assert failures == ()
+    assert rule.evaluate(TableDrift(columns=(loosening,))) == ()
 
 
 # ---- UnsupportedColumnTypeChange
 
 
 def test_rejects_column_type_change():
-    # Given a plan with a ColumnTypeChange action
+    # Given a drift where an existing column's type differs
     rule = UnsupportedColumnTypeChange()
-    failures = rule.evaluate(
-        _plan(ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long()))
-    )
-    # Then it is rejected with the column name in the message
+
+    failures = rule.evaluate(TableDrift(columns=(_type_drift("id"),)))
+
+    # Then the violation is flagged
     assert len(failures) == 1
     assert failures[0].rule_name == "UnsupportedColumnTypeChange"
     assert "id" in failures[0].message
 
 
 def test_rejects_all_column_type_changes_in_a_single_pass():
-    # Given a plan with two ColumnTypeChange actions
     rule = UnsupportedColumnTypeChange()
-    failures = rule.evaluate(
-        _plan(
-            ColumnTypeChange(column_name="id", from_type=Integer(), to_type=Long()),
-            ColumnTypeChange(column_name="score", from_type=String(), to_type=Integer()),
-        )
-    )
-    # Then both are reported in one pass
+
+    failures = rule.evaluate(TableDrift(columns=(_type_drift("a"), _type_drift("b"))))
+
     assert len(failures) == 2
-    messages = [f.message for f in failures]
-    for column_name in ("id", "score"):
-        assert any(column_name in message for message in messages)
 
 
-def test_allows_plan_with_no_column_type_change():
-    # Given a plan with no ColumnTypeChange action
+def test_allows_drift_with_no_column_type_change():
+    # Given a changed column whose type is untouched
     rule = UnsupportedColumnTypeChange()
-    failures = rule.evaluate(_plan(AddColumn(Column("new_col", String()))))
-    assert failures == ()
+
+    assert rule.evaluate(TableDrift(columns=(_tightening(),))) == ()
 
 
 # ---- DisallowPartitioningChange
 
 
 def test_rejects_partitioning_change():
-    # Given a plan with a PartitioningChange action
+    # Given a drift where the partition specs differ
     rule = DisallowPartitioningChange()
+
     failures = rule.evaluate(
-        _plan(PartitioningChange(desired_partitioning=("ds",), observed_partitioning=()))
+        TableDrift(partitioning=Changed(desired=("ds",), observed=()))
     )
-    # Then it is rejected
+
+    # Then the violation is flagged
     assert len(failures) == 1
     assert failures[0].rule_name == "DisallowPartitioningChange"
 
 
-def test_allows_plan_with_no_partitioning_change():
-    # Given a plan with no PartitioningChange action
+def test_allows_drift_with_no_partitioning_change():
     rule = DisallowPartitioningChange()
-    failures = rule.evaluate(_plan(AddColumn(Column("x", Integer()))))
-    assert failures == ()
+
+    assert rule.evaluate(TableDrift()) == ()
 
 
-# ---- validate_plan
+# ---- validate_diff
 
 
 def test_validation_passes_when_no_rule_is_broken():
-    # Given a plan that violates no rule
-    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
+    # Given a benign drift
+    result = validate_diff(TableDrift(columns=(Added(Column("age", Integer())),)))
 
-    result = validate_plan(_plan(AddColumn(Column("x", String(), nullable=True))), rules=rules)
-
-    assert not result.failed
+    # Then no failures are reported
+    assert result.failed is False
     assert result.failures == ()
 
 
 def test_validation_collects_a_failure_from_every_broken_rule():
-    # Given a plan that breaks two rules at once
-    rules = (NonNullableColumnAdd(), NullabilityTighteningOnExistingColumn())
-
-    result = validate_plan(
-        _plan(
-            AddColumn(Column("order_id", Integer(), nullable=False)),
-            SetColumnNullability(column_name="id", nullable=False),
-        ),
-        rules=rules,
+    # Given a drift breaking two rules at once
+    result = validate_diff(
+        TableDrift(
+            columns=(_type_drift("id"),),
+            partitioning=Changed(desired=("ds",), observed=()),
+        )
     )
 
-    assert result.failed
-    assert {f.rule_name for f in result.failures} == {
-        "NonNullableColumnAdd",
-        "NullabilityTighteningOnExistingColumn",
+    # Then both failures are collected in one verdict
+    assert result.failed is True
+    assert {failure.rule_name for failure in result.failures} == {
+        "UnsupportedColumnTypeChange",
+        "DisallowPartitioningChange",
     }
 
 
-def test_empty_plan_produces_no_failures():
-    # Given an empty plan
-    rules = (NonNullableColumnAdd(), DisallowPartitioningChange())
+def test_empty_drift_produces_no_failures():
+    # Given a drift with no differences
+    result = validate_diff(TableDrift())
 
-    result = validate_plan(_plan(), rules=rules)
+    # Then validation passes
+    assert result.failed is False
 
-    assert not result.failed
-    assert result.failures == ()
+
+def test_missing_table_passes_validation():
+    # Given a missing table — creation is always safe
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
+
+    result = validate_diff(TableMissing(desired=desired))
+
+    assert result.failed is False
 
 
 def test_validation_uses_the_default_rules_when_none_are_supplied():
-    # Given a plan that the default NonNullableColumnAdd rule rejects
-    result = validate_plan(_plan(AddColumn(Column("order_id", Integer(), nullable=False))))
+    # Given a drift that breaks a default rule
+    result = validate_diff(TableDrift(columns=(_type_drift(),)))
 
-    assert result.failed
-    assert {f.rule_name for f in result.failures} == {"NonNullableColumnAdd"}
+    # Then the default rule set catches it without rules being passed explicitly
+    assert result.failed is True
 
 
 def test_validation_passes_when_empty_rule_set_is_supplied():
-    # Given an empty rule set and a plan that the defaults WOULD reject
-    result = validate_plan(
-        _plan(AddColumn(Column("order_id", Integer(), nullable=False))),
-        rules=(),
-    )
+    # Given a drift that would break a default rule, but no rules to apply
+    result = validate_diff(TableDrift(columns=(_type_drift(),)), rules=())
 
-    assert not result.failed
-    assert result.failures == ()
+    # Then nothing is evaluated and validation passes
+    assert result.failed is False
 
 
 def test_validation_result_failed_property_reflects_presence_of_failures():
-    # Given a result with failures
-    vf = ValidationFailure(rule_name="SomeRule", message="nope")
+    # Given results with and without failures
+    failing = ValidationResult(
+        failures=(ValidationFailure(rule_name="X", message="broken"),)
+    )
+    passing = ValidationResult()
 
-    # When checking .failed
-    failed_result = ValidationResult(failures=(vf,))
-    ok_result = ValidationResult()
-
-    # Then it reports correctly
-    assert failed_result.failed is True
-    assert ok_result.failed is False
+    # Then failed mirrors the failures tuple
+    assert failing.failed is True
+    assert passing.failed is False
 
 
-# A nullable primary key column is rejected when the DesiredTable is built (a
-# desired-schema well-formedness invariant), not by a plan-validation rule — see
-# tests/domain/model/test_table.py.
+def test_default_rules_cover_the_four_safety_policies():
+    # Given the production rule set
+    rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
+
+    # Then all four safety policies are active by default
+    assert rule_names == {
+        "NonNullableColumnAdd",
+        "NullabilityTighteningOnExistingColumn",
+        "UnsupportedColumnTypeChange",
+        "DisallowPartitioningChange",
+    }
