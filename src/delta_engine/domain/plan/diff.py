@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, assert_never
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
@@ -24,10 +24,18 @@ from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
     DropColumn,
+    DropForeignKey,
+    DropPrimaryKey,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
+    SetForeignKey,
+    SetPrimaryKey,
+    SetProperty,
+    SetTableComment,
+    SetTableTag,
     UnsetColumnTag,
+    UnsetTableTag,
 )
 
 
@@ -190,6 +198,144 @@ class ColumnsDimension:
                         UnsetColumnTag(column_name=changed.column_name, name=pair.name)
                     )
         return tuple(result)
+
+
+@dataclass(frozen=True, slots=True)
+class TableCommentDimension:
+    """Table comment drift."""
+
+    change: Changed[str]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return a SetTableComment action for the desired comment."""
+        return (SetTableComment(comment=self.change.desired),)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — comment changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class PropertiesDimension:
+    """Table property drift — declared-subset semantics: Removed entries are ignored."""
+
+    entries: tuple[Entry[KeyValue], ...]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return SetProperty for each Added or Changed entry; Removed entries produce no action."""
+        result: list[Action] = []
+        for entry in self.entries:
+            match entry:
+                case Added(item=pair) | Changed(desired=pair):
+                    result.append(SetProperty(name=pair.name, value=pair.value))
+                case Removed():
+                    pass
+        return tuple(result)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — property changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class TableTagsDimension:
+    """Table tag drift — full-state semantics: Removed entries are unset."""
+
+    entries: tuple[Entry[KeyValue], ...]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return SetTableTag for Added/Changed entries and UnsetTableTag for Removed entries."""
+        result: list[Action] = []
+        for entry in self.entries:
+            match entry:
+                case Added(item=pair) | Changed(desired=pair):
+                    result.append(SetTableTag(name=pair.name, value=pair.value))
+                case Removed(item=pair):
+                    result.append(UnsetTableTag(name=pair.name))
+        return tuple(result)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — tag changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class PartitioningDimension:
+    """Partitioning drift — no action is possible; always surfaces an unhandled fact."""
+
+    change: Changed[tuple[str, ...]]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return no actions — partitioning changes cannot be applied in place."""
+        return ()
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return one UnhandledFact describing the unsupported partitioning change."""
+        return (
+            UnhandledFact(
+                description=(
+                    f"partitioning changes are not supported."
+                    f" Current partition columns: {self.change.observed}"
+                    f" - Requested partition columns: {self.change.desired}."
+                    " Recreate the table with the desired partitioning."
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PrimaryKeyDimension:
+    """Primary key drift."""
+
+    entry: Entry[PrimaryKeyConstraint]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return SetPrimaryKey, DropPrimaryKey, or both depending on the entry type."""
+        match self.entry:
+            case Added(item=pk):
+                return (SetPrimaryKey(columns=pk.columns, constraint_name=pk.constraint_name),)
+            case Removed():
+                return (DropPrimaryKey(),)
+            case Changed(desired=pk):
+                return (
+                    DropPrimaryKey(),
+                    SetPrimaryKey(columns=pk.columns, constraint_name=pk.constraint_name),
+                )
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — primary key changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeysDimension:
+    """Foreign key drift."""
+
+    entries: tuple[ForeignKeyDrift, ...]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return SetForeignKey for Added entries and DropForeignKey for Removed entries."""
+        result: list[Action] = []
+        for entry in self.entries:
+            match entry:
+                case Added(item=fk):
+                    result.append(
+                        SetForeignKey(
+                            local_columns=fk.local_columns,
+                            referenced_table=fk.referenced_table,
+                            referenced_columns=fk.referenced_columns,
+                            constraint_name=fk.constraint_name,
+                        )
+                    )
+                case Removed(item=fk):
+                    result.append(DropForeignKey(constraint_name=fk.constraint_name))
+        return tuple(result)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — foreign key changes are always actionable."""
+        return ()
 
 
 @dataclass(frozen=True, slots=True)

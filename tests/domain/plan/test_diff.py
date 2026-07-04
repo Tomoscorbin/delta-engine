@@ -12,22 +12,37 @@ from delta_engine.domain.model import (
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
+    ActionPlan,
     AddColumn,
     DropColumn,
+    DropForeignKey,
+    DropPrimaryKey,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
+    SetForeignKey,
+    SetPrimaryKey,
+    SetProperty,
+    SetTableComment,
+    SetTableTag,
     UnsetColumnTag,
+    UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
     Added,
     Changed,
     ColumnChanged,
     ColumnsDimension,
+    ForeignKeysDimension,
     KeyValue,
+    PartitioningDimension,
+    PrimaryKeyDimension,
+    PropertiesDimension,
     Removed,
+    TableCommentDimension,
     TableDrift,
     TableMissing,
+    TableTagsDimension,
     UnhandledFact,
     diff_table,
 )
@@ -424,4 +439,133 @@ def test_columns_dimension_tag_changes_produce_set_and_unset_actions():
         SetColumnTag(column_name="id", name="pii", value="true"),
         UnsetColumnTag(column_name="id", name="old"),
     }
+    assert dim.unhandled() == ()
+
+
+def test_table_comment_dimension_produces_set_table_comment():
+    # Given a changed table comment
+    dim = TableCommentDimension(change=Changed(desired="new", observed="old"))
+
+    # Then a single SetTableComment action is produced and no unhandled facts
+    assert dim.actions() == (SetTableComment(comment="new"),)
+    assert dim.unhandled() == ()
+
+
+def test_properties_dimension_sets_added_and_changed_ignores_removed():
+    # Given properties drifting in all three ways
+    dim = PropertiesDimension(
+        entries=(
+            Added(KeyValue("a", "1")),
+            Changed(desired=KeyValue("b", "2"), observed=KeyValue("b", "9")),
+            Removed(KeyValue("c", "3")),
+        )
+    )
+
+    # When actions and unhandled facts are requested
+    # Then only Added and Changed entries produce SetProperty; Removed is silently ignored
+    assert set(dim.actions()) == {
+        SetProperty(name="a", value="1"),
+        SetProperty(name="b", value="2"),
+    }
+    assert dim.unhandled() == ()
+
+
+def test_table_tags_dimension_sets_and_unsets_with_full_state_semantics():
+    # Given tags drifting with one addition and one removal
+    dim = TableTagsDimension(
+        entries=(
+            Added(KeyValue("env", "prod")),
+            Removed(KeyValue("stale", "yes")),
+        )
+    )
+
+    # When actions are requested
+    # Then Added produces SetTableTag and Removed produces UnsetTableTag
+    assert set(dim.actions()) == {
+        SetTableTag(name="env", value="prod"),
+        UnsetTableTag(name="stale"),
+    }
+    assert dim.unhandled() == ()
+
+
+def test_partitioning_dimension_produces_no_actions_but_one_unhandled_fact():
+    # Given a partitioning change (unsupported in-place)
+    dim = PartitioningDimension(
+        change=Changed(desired=("ds",), observed=())
+    )
+
+    # Then no actions are produced and one unhandled fact describes the blockage
+    assert dim.actions() == ()
+    assert len(dim.unhandled()) == 1
+    assert "partitioning" in dim.unhandled()[0].description.lower()
+
+
+def test_primary_key_dimension_added_produces_set_primary_key():
+    # Given an added primary key
+    pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
+    dim = PrimaryKeyDimension(entry=Added(pk))
+
+    # Then SetPrimaryKey is produced
+    assert dim.actions() == (SetPrimaryKey(columns=("id",), constraint_name="test_pk"),)
+    assert dim.unhandled() == ()
+
+
+def test_primary_key_dimension_removed_produces_drop_primary_key():
+    # Given a removed primary key
+    pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+    dim = PrimaryKeyDimension(entry=Removed(pk))
+
+    # Then DropPrimaryKey is produced
+    assert dim.actions() == (DropPrimaryKey(),)
+    assert dim.unhandled() == ()
+
+
+def test_primary_key_dimension_changed_produces_drop_then_set():
+    # Given a changed primary key (column set differs)
+    desired_pk = PrimaryKeyConstraint(columns=("a",), constraint_name="test_pk")
+    observed_pk = PrimaryKeyConstraint(columns=("b",), constraint_name="test_pk")
+    dim = PrimaryKeyDimension(entry=Changed(desired=desired_pk, observed=observed_pk))
+
+    # When the actions are sorted by ActionPlan (drop runs before set)
+    plan = ActionPlan(dim.actions())
+
+    # Then the plan contains DropPrimaryKey followed by SetPrimaryKey
+    assert plan.actions == (
+        DropPrimaryKey(),
+        SetPrimaryKey(columns=("a",), constraint_name="test_pk"),
+    )
+    assert dim.unhandled() == ()
+
+
+def _fk(constraint_name: str = "test_fk") -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        local_columns=("id",),
+        referenced_table=QualifiedName("dev", "silver", "other"),
+        referenced_columns=("id",),
+        constraint_name=constraint_name,
+    )
+
+
+def test_foreign_keys_dimension_added_produces_set_foreign_key():
+    # Given an added foreign key
+    dim = ForeignKeysDimension(entries=(Added(_fk()),))
+
+    # Then SetForeignKey is produced with all FK fields
+    assert dim.actions() == (
+        SetForeignKey(
+            local_columns=("id",),
+            referenced_table=QualifiedName("dev", "silver", "other"),
+            referenced_columns=("id",),
+            constraint_name="test_fk",
+        ),
+    )
+    assert dim.unhandled() == ()
+
+
+def test_foreign_keys_dimension_removed_produces_drop_foreign_key():
+    # Given a removed foreign key
+    dim = ForeignKeysDimension(entries=(Removed(_fk("stale_fk")),))
+
+    # Then DropForeignKey is produced with the constraint name
+    assert dim.actions() == (DropForeignKey(constraint_name="stale_fk"),)
     assert dim.unhandled() == ()
