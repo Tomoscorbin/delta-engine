@@ -1,10 +1,8 @@
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
     DEFAULT_RULES,
-    ColumnDataTypeChangeNotSupported,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
-    PartitioningChangeNotSupported,
     ValidationResult,
     validate_diff,
 )
@@ -154,9 +152,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
 
 def test_validate_diff_surfaces_type_drift_as_failure():
     # Given a drift whose only dimension is a ColumnsDimension with a type change
-    diff = TableDrift(
-        dimensions=(ColumnsDimension(entries=(_type_drift("id"),)),)
-    )
+    diff = TableDrift(dimensions=(ColumnsDimension(entries=(_type_drift("id"),)),))
 
     # When
     result = validate_diff(diff)

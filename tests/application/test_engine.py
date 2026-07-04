@@ -776,12 +776,8 @@ def test_read_failure_is_reported_exactly_once():
 def test_read_failed_run_skips_diff_validation_and_planning():
     # Given a reader that fails for the table
     fqn = "cat.sch.orders"
-    read_failure = ReadFailed(
-        failure=ReadFailure(exception_type="Boom", message="connection lost")
-    )
-    engine = Engine(
-        reader=_FakeReader({fqn: read_failure}), executor=_FakeExecutor(results=())
-    )
+    read_failure = ReadFailed(failure=ReadFailure(exception_type="Boom", message="connection lost"))
+    engine = Engine(reader=_FakeReader({fqn: read_failure}), executor=_FakeExecutor(results=()))
 
     # When syncing
     with pytest.raises(SyncFailedError) as excinfo:
