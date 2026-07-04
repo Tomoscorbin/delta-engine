@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.plan.actions import Action
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +44,31 @@ class Changed[T]:
     desired: T
     observed: T
 
+    def __post_init__(self) -> None:
+        if self.desired == self.observed:
+            raise ValueError(f"Changed carries no difference: {self.desired!r}")
+
 
 type Entry[T] = Added[T] | Removed[T] | Changed[T]
+
+
+@dataclass(frozen=True, slots=True)
+class UnhandledFact:
+    """A diff fact the engine has no action for; surfaced to validation."""
+
+    description: str
+
+
+class Dimension(Protocol):
+    """A single aspect of table drift: produces actions and declares unhandled facts."""
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return the actions this dimension contributes to the plan."""
+        ...
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return facts this dimension has no action for, surfaced to validation."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

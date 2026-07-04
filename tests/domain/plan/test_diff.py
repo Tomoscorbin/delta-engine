@@ -19,6 +19,7 @@ from delta_engine.domain.plan.diff import (
     Removed,
     TableDrift,
     TableMissing,
+    UnhandledFact,
     diff_table,
 )
 
@@ -315,3 +316,25 @@ def test_existing_table_with_no_observed_foreign_keys_adds_every_desired_one():
 
     # Then the FK diff is pure addition — no removals arise from absence
     assert diff == TableDrift(foreign_keys=(Added(_foreign_key()),))
+
+
+def test_changed_rejects_equal_values():
+    # Given two equal values
+    # Then Changed construction raises
+    with pytest.raises(ValueError, match="no difference"):
+        Changed(desired=42, observed=42)
+
+
+def test_changed_accepts_unequal_values():
+    # Given two different values
+    result = Changed(desired=1, observed=2)
+
+    # Then it holds both
+    assert result.desired == 1
+    assert result.observed == 2
+
+
+def test_unhandled_fact_carries_description():
+    fact = UnhandledFact(description="partitioning change: () → ('ds',)")
+
+    assert fact.description == "partitioning change: () → ('ds',)"
