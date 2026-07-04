@@ -27,7 +27,7 @@ from delta_engine.application.report import (
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import CreateTable, SetColumnComment
+from delta_engine.domain.plan.actions import CreateTable, SetColumnComment, SetTableComment
 
 # --------- helpers/fakes
 
@@ -852,6 +852,7 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
     assert report.any_failures is False
     plan = report.table_reports[0].plan
     assert any(isinstance(a, SetColumnComment) for a in plan)
+    assert any(isinstance(a, SetTableComment) for a in plan)
 
 
 def test_metadata_only_sync_fails_when_unmanaged_column_has_drifted():

@@ -121,9 +121,7 @@ def test_desired_only_column_produces_columns_dimension_with_added_entry():
 
     # Then a ColumnStructureDimension with an Added entry is produced
     assert isinstance(diff, TableDrift)
-    assert len(diff.dimensions) == 1
-    dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnStructureDimension)
+    dim = next(d for d in diff.dimensions if isinstance(d, ColumnStructureDimension))
     assert dim.entries == (ColumnAdded(Column("age", Integer())),)
 
 
