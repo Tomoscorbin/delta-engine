@@ -291,3 +291,64 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
 
     bad_cols = {f.name for f in spark.table(fq_bad).schema.fields}
     assert "age" not in bad_cols
+
+
+def test_engine_metadata_only_applies_comments_when_schema_matches(
+    spark, monkeypatch, temp_schema
+):
+    # Given an existing table whose schema exactly matches the declaration
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"e2e_meta_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id INT) USING DELTA")
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When syncing a metadata-only definition
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Integer(), comment="surrogate key"),),
+            comment="metadata-only table",
+            metadata_only=True,
+        )
+    )
+
+    # Then the sync succeeds, comments are applied, and the schema is untouched
+    assert report.any_failures is False
+    fields = {f.name: f for f in spark.table(fq).schema.fields}
+    assert set(fields) == {"id"}
+    assert fields["id"].metadata.get("comment") == "surrogate key"
+    details = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert details["description"] == "metadata-only table"
+
+
+def test_engine_metadata_only_fails_when_column_type_has_drifted(
+    spark, monkeypatch, temp_schema
+):
+    # Given an existing table whose column type differs from the declaration
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"e2e_meta_drift_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id BIGINT) USING DELTA")  # BIGINT, declared as INT
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When syncing a metadata-only definition that declares id as Integer
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                table_name,
+                columns=(Column("id", Integer()),),
+                metadata_only=True,
+            )
+        )
+
+    # Then validation failed before execution and the table is unchanged
+    report = exc_info.value.report.table_reports[0]
+    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert {f.name for f in spark.table(fq).schema.fields} == {"id"}

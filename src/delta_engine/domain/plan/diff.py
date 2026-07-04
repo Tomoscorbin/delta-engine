@@ -1,35 +1,54 @@
 """
-Typed description of the difference between a desired and an observed table.
+Changes describing how an observed table differs from its desired declaration.
 
-`diff_table` is the single fact-producing entry point: given the desired
-definition and the observed one (or ``None`` when the table is missing), it
-returns a `TableDiff` — a closed sum of `TableMissing` and `TableDrift`. The
-diff states facts only; it carries no judgement about which differences are
-permitted (the validator's job) and no knowledge of how a difference is acted
-on (the dimension's job). Every variant carries the data its consumers need, so
-the diff is self-contained.
+``diff_table`` is the single entry point: given the desired definition and the
+observed one (or ``None`` when the table is missing), it returns a
+``TableDiff`` — a closed sum of ``TableMissing`` and ``TableDrift``.
+``TableDrift`` carries a flat tuple of changes plus the ``managed_aspects``
+of the declaration that produced it, so the diff is self-contained and
+``validate_diff`` needs no other input.
 
-Each dimension type owns two concerns: how to detect that it differs (via its
-``diff`` staticmethod) and what actions to produce. Adding a new dimension means
-adding one class here — ``diff_table`` requires no changes.
+Each change is a frozen dataclass recording one atomic difference. Every
+change carries two things:
 
-Column-level drift entries (`ColumnAdded`, `ColumnRemoved`, `ColumnDataTypeChanged`,
-etc.) satisfy the same `Dimension` protocol as table-level dimensions: each carries
-exactly the fact it describes with no optionals and produces its own actions.
-`ColumnsDimension` delegates to them directly. Whether a dimension's drift is
-permitted is policy — that belongs in validation, not here.
+- ``aspect`` — the :class:`TableAspect` the difference belongs to. Validation
+  uses this to gate drift in aspects the declaration does not manage.
+- ``actions()`` — the imperative actions that reconcile the difference.
+  Changes with no in-place remedy (a column type change, a partitioning
+  change) return no actions; validation blocks them instead.
+
+Naming conventions:
+
+- Changes are named for what is true relative to the declaration
+  (``ColumnAdded``, ``TableTagUnset``); actions in ``actions.py`` are
+  imperative commands (``AddColumn``, ``UnsetTableTag``). The two vocabularies
+  live in separate modules.
+- ``*Changed`` members carry both sides of the difference (``desired_*`` /
+  ``observed_*``) as one atomic pair: rules read the direction and report
+  from/to values without re-correlating separate changes, and a
+  ``__post_init__`` guard makes a no-difference change unrepresentable.
+
+Semantics that differ by aspect:
+
+- Properties are declared-projection: only declared keys are compared, so an
+  observed-only property (e.g. one written by a previous full sync or by the
+  platform) is not drift and produces no change.
+- Tags are full-state: an observed-only tag is drift and is unset.
+- Nullability drift is suppressed for a column whose type also drifted — the
+  column must be recreated first, so a nullability change would be noise.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, assert_never
+from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
@@ -50,57 +69,8 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 
-
-@dataclass(frozen=True, slots=True)
-class Added[T]:
-    """A desired-only item: present in the declaration, absent from the catalog."""
-
-    item: T
-
-
-@dataclass(frozen=True, slots=True)
-class Removed[T]:
-    """An observed-only item: present in the catalog, absent from the declaration."""
-
-    item: T
-
-
-@dataclass(frozen=True, slots=True)
-class Changed[T]:
-    """An item present on both sides with different content."""
-
-    desired: T
-    observed: T
-
-    def __post_init__(self) -> None:
-        if self.desired == self.observed:
-            raise ValueError(f"Changed carries no difference: {self.desired!r}")
-
-
-type Entry[T] = Added[T] | Removed[T] | Changed[T]
-
-
-class Dimension(Protocol):
-    """A single aspect of table drift: produces actions to reconcile the difference."""
-
-    def actions(self) -> tuple[Action, ...]:
-        """Return the actions this dimension contributes to the plan."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class KeyValue:
-    """A named string value — one property or one tag."""
-
-    name: str
-    value: str
-
-
 # ---------------------------------------------------------------------------
-# Column-level drift entries
-#
-# Each describes exactly one kind of column difference. All satisfy the
-# Dimension protocol so ColumnsDimension can delegate to them uniformly.
+# Changes
 # ---------------------------------------------------------------------------
 
 
@@ -110,14 +80,11 @@ class ColumnAdded:
 
     column: Column
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+
     def actions(self) -> tuple[Action, ...]:
-        """AddColumn followed by SetColumnTag for each tag on the new column."""
-        result: list[Action] = [AddColumn(column=self.column)]
-        result.extend(
-            SetColumnTag(column_name=self.column.name, name=name, value=value)
-            for name, value in self.column.tags.items()
-        )
-        return tuple(result)
+        """AddColumn for the new column; its tags arrive as ColumnTagSet changes."""
+        return (AddColumn(column=self.column),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +92,8 @@ class ColumnRemoved:
     """A column present in the catalog but absent from the declaration."""
 
     column: Column
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
     def actions(self) -> tuple[Action, ...]:
         """DropColumn for the removed column."""
@@ -136,7 +105,14 @@ class ColumnDataTypeChanged:
     """A column whose data type differs — no in-place action is possible."""
 
     column_name: str
-    change: Changed[DataType]
+    desired_type: DataType
+    observed_type: DataType
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+
+    def __post_init__(self) -> None:
+        if self.desired_type == self.observed_type:
+            raise ValueError(f"ColumnDataTypeChanged carries no difference: {self.desired_type!r}")
 
     def actions(self) -> tuple[Action, ...]:
         """No actions — type changes require recreation; see ColumnDataTypeChangeNotSupported."""
@@ -148,11 +124,20 @@ class ColumnNullabilityChanged:
     """A column whose nullability differs."""
 
     column_name: str
-    change: Changed[bool]
+    desired_nullable: bool
+    observed_nullable: bool
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+
+    def __post_init__(self) -> None:
+        if self.desired_nullable == self.observed_nullable:
+            raise ValueError(
+                f"ColumnNullabilityChanged carries no difference: {self.desired_nullable!r}"
+            )
 
     def actions(self) -> tuple[Action, ...]:
         """SetColumnNullability to the desired value."""
-        return (SetColumnNullability(column_name=self.column_name, nullable=self.change.desired),)
+        return (SetColumnNullability(column_name=self.column_name, nullable=self.desired_nullable),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,292 +145,259 @@ class ColumnCommentChanged:
     """A column whose comment differs."""
 
     column_name: str
-    change: Changed[str]
+    desired_comment: str
+    observed_comment: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_COMMENTS
+
+    def __post_init__(self) -> None:
+        if self.desired_comment == self.observed_comment:
+            raise ValueError(
+                f"ColumnCommentChanged carries no difference: {self.desired_comment!r}"
+            )
 
     def actions(self) -> tuple[Action, ...]:
         """SetColumnComment to the desired value."""
-        return (SetColumnComment(self.column_name, self.change.desired),)
+        return (SetColumnComment(self.column_name, self.desired_comment),)
 
 
 @dataclass(frozen=True, slots=True)
-class ColumnTagsChanged:
-    """A column whose tags differ."""
+class ColumnTagSet:
+    """A declared column tag absent from the catalog or carrying a different value."""
 
     column_name: str
-    entries: tuple[Entry[KeyValue], ...]
+    tag_name: str
+    tag_value: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
 
     def actions(self) -> tuple[Action, ...]:
-        """Return SetColumnTag for Added/Changed entries and UnsetColumnTag for Removed."""
-        result: list[Action] = []
-        for entry in self.entries:
-            match entry:
-                case Added(item=pair) | Changed(desired=pair):
-                    result.append(
-                        SetColumnTag(column_name=self.column_name, name=pair.name, value=pair.value)
-                    )
-                case Removed(item=pair):
-                    result.append(UnsetColumnTag(column_name=self.column_name, name=pair.name))
-        return tuple(result)
+        """SetColumnTag with the desired value."""
+        return (
+            SetColumnTag(column_name=self.column_name, name=self.tag_name, value=self.tag_value),
+        )
 
 
-type ColumnDrift = (
+@dataclass(frozen=True, slots=True)
+class ColumnTagUnset:
+    """A column tag present in the catalog but absent from the declaration (full-state)."""
+
+    column_name: str
+    tag_name: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
+
+    def actions(self) -> tuple[Action, ...]:
+        """UnsetColumnTag for the undeclared tag."""
+        return (UnsetColumnTag(column_name=self.column_name, name=self.tag_name),)
+
+
+@dataclass(frozen=True, slots=True)
+class TableCommentChanged:
+    """A table comment that differs from the declaration."""
+
+    desired_comment: str
+    observed_comment: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_COMMENT
+
+    def __post_init__(self) -> None:
+        if self.desired_comment == self.observed_comment:
+            raise ValueError(f"TableCommentChanged carries no difference: {self.desired_comment!r}")
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetTableComment to the desired value."""
+        return (SetTableComment(comment=self.desired_comment),)
+
+
+@dataclass(frozen=True, slots=True)
+class PropertySet:
+    """
+    A declared property absent from the catalog or carrying a different value.
+
+    Properties are declared-projection: only declared keys are compared, so
+    there is no PropertyUnset change — an observed-only property is not drift.
+    Like the tag set changes, this is an upsert: it carries only the desired
+    value, because the remedy is the same whether the key was absent or stale.
+    """
+
+    name: str
+    desired_value: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetProperty with the desired value."""
+        return (SetProperty(name=self.name, value=self.desired_value),)
+
+
+@dataclass(frozen=True, slots=True)
+class TableTagSet:
+    """A declared table tag absent from the catalog or carrying a different value."""
+
+    name: str
+    value: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetTableTag with the desired value."""
+        return (SetTableTag(name=self.name, value=self.value),)
+
+
+@dataclass(frozen=True, slots=True)
+class TableTagUnset:
+    """A table tag present in the catalog but absent from the declaration (full-state)."""
+
+    name: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
+
+    def actions(self) -> tuple[Action, ...]:
+        """UnsetTableTag for the undeclared tag."""
+        return (UnsetTableTag(name=self.name),)
+
+
+@dataclass(frozen=True, slots=True)
+class PartitioningChanged:
+    """Partitioning that differs from the declaration — no in-place action is possible."""
+
+    desired_partitioning: tuple[str, ...]
+    observed_partitioning: tuple[str, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.PARTITIONING
+
+    def __post_init__(self) -> None:
+        if self.desired_partitioning == self.observed_partitioning:
+            raise ValueError(
+                f"PartitioningChanged carries no difference: {self.desired_partitioning!r}"
+            )
+
+    def actions(self) -> tuple[Action, ...]:
+        """No actions — repartitioning requires recreation; see PartitioningChangeNotSupported."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class PrimaryKeyAdded:
+    """A declared primary key absent from the catalog."""
+
+    primary_key: PrimaryKeyConstraint
+
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetPrimaryKey for the declared key."""
+        return (
+            SetPrimaryKey(
+                columns=self.primary_key.columns,
+                constraint_name=self.primary_key.constraint_name,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PrimaryKeyRemoved:
+    """A primary key present in the catalog but absent from the declaration."""
+
+    observed_primary_key: PrimaryKeyConstraint
+
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
+
+    def actions(self) -> tuple[Action, ...]:
+        """DropPrimaryKey for the undeclared key."""
+        return (DropPrimaryKey(),)
+
+
+@dataclass(frozen=True, slots=True)
+class PrimaryKeyChanged:
+    """
+    A primary key whose column set differs from the declaration.
+
+    Both sides travel as one atomic pair so validation can report from/to and
+    ``actions()`` can emit Drop then Set. Splitting into separate
+    added/removed changes would make an orphaned half representable.
+    """
+
+    desired_primary_key: PrimaryKeyConstraint
+    observed_primary_key: PrimaryKeyConstraint
+
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
+
+    def __post_init__(self) -> None:
+        if set(self.desired_primary_key.columns) == set(self.observed_primary_key.columns):
+            raise ValueError(
+                f"PrimaryKeyChanged carries no difference: {self.desired_primary_key!r}"
+            )
+
+    def actions(self) -> tuple[Action, ...]:
+        """DropPrimaryKey then SetPrimaryKey (ActionPhase orders the pair)."""
+        return (
+            DropPrimaryKey(),
+            SetPrimaryKey(
+                columns=self.desired_primary_key.columns,
+                constraint_name=self.desired_primary_key.constraint_name,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyAdded:
+    """A declared foreign key absent from the catalog (by content signature)."""
+
+    constraint: ForeignKeyConstraint
+
+    aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetForeignKey for the declared constraint."""
+        return (
+            SetForeignKey(
+                local_columns=self.constraint.local_columns,
+                referenced_table=self.constraint.referenced_table,
+                referenced_columns=self.constraint.referenced_columns,
+                constraint_name=self.constraint.constraint_name,
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyRemoved:
+    """A foreign key present in the catalog but absent from the declaration."""
+
+    constraint: ForeignKeyConstraint
+
+    aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
+
+    def actions(self) -> tuple[Action, ...]:
+        """DropForeignKey using the catalog-stored constraint name."""
+        return (DropForeignKey(constraint_name=self.constraint.constraint_name),)
+
+
+type Change = (
     ColumnAdded
     | ColumnRemoved
     | ColumnDataTypeChanged
     | ColumnNullabilityChanged
     | ColumnCommentChanged
-    | ColumnTagsChanged
+    | ColumnTagSet
+    | ColumnTagUnset
+    | TableCommentChanged
+    | PropertySet
+    | TableTagSet
+    | TableTagUnset
+    | PartitioningChanged
+    | PrimaryKeyAdded
+    | PrimaryKeyRemoved
+    | PrimaryKeyChanged
+    | ForeignKeyAdded
+    | ForeignKeyRemoved
 )
-type ForeignKeyDrift = Added[ForeignKeyConstraint] | Removed[ForeignKeyConstraint]
 
 
-@dataclass(frozen=True, slots=True)
-class ColumnsDimension:
-    """Column drift: a flat sequence of per-column and per-attribute entries."""
-
-    entries: tuple[ColumnDrift, ...]
-
-    @staticmethod
-    def diff(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> ColumnsDimension | None:
-        """Return a ColumnsDimension for any column differences, or None when identical."""
-        desired_by_name = {col.name: col for col in desired}
-        observed_by_name = {col.name: col for col in observed}
-        result: list[ColumnDrift] = []
-        for name, col in desired_by_name.items():
-            if name not in observed_by_name:
-                result.append(ColumnAdded(column=col))
-        for name, col in observed_by_name.items():
-            if name not in desired_by_name:
-                result.append(ColumnRemoved(column=col))
-        for name, desired_col in desired_by_name.items():
-            if name in observed_by_name:
-                result.extend(ColumnsDimension._diff_pair(desired_col, observed_by_name[name]))
-        return ColumnsDimension(entries=tuple(result)) if result else None
-
-    @staticmethod
-    def _diff_pair(desired: Column, observed: Column) -> tuple[ColumnDrift, ...]:
-        """
-        Return per-attribute drift entries for a name-matched column pair.
-
-        When a data type change is present, only that entry is returned — other
-        attribute drift is suppressed because a type-changed column must be
-        recreated; showing nullability or comment entries would suggest
-        actionable work that is moot until the column is dropped and re-added.
-        """
-        if desired.data_type != observed.data_type:
-            return (
-                ColumnDataTypeChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.data_type, observed=observed.data_type),
-                ),
-            )
-        entries: list[ColumnDrift] = []
-        if desired.nullable != observed.nullable:
-            entries.append(
-                ColumnNullabilityChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.nullable, observed=observed.nullable),
-                )
-            )
-        if desired.comment != observed.comment:
-            entries.append(
-                ColumnCommentChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.comment, observed=observed.comment),
-                )
-            )
-        tag_entries = _diff_mapping(desired.tags, observed.tags)
-        if tag_entries:
-            entries.append(ColumnTagsChanged(column_name=desired.name, entries=tag_entries))
-        return tuple(entries)
-
-    def actions(self) -> tuple[Action, ...]:
-        """Collect actions from every column entry."""
-        return tuple(action for entry in self.entries for action in entry.actions())
-
-
-@dataclass(frozen=True, slots=True)
-class TableCommentDimension:
-    """Table comment drift."""
-
-    change: Changed[str]
-
-    @staticmethod
-    def diff(desired: str, observed: str) -> TableCommentDimension | None:
-        """Return a TableCommentDimension when the comment differs, or None when identical."""
-        change = _changed(desired, observed)
-        return TableCommentDimension(change=change) if change is not None else None
-
-    def actions(self) -> tuple[Action, ...]:
-        """SetTableComment to the desired value."""
-        return (SetTableComment(comment=self.change.desired),)
-
-
-@dataclass(frozen=True, slots=True)
-class PropertiesDimension:
-    """Table property drift — declared-subset semantics: Removed entries are ignored."""
-
-    entries: tuple[Entry[KeyValue], ...]
-
-    @staticmethod
-    def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> PropertiesDimension | None:
-        """Return a PropertiesDimension when any property differs, or None when identical."""
-        entries = _diff_mapping(desired, observed)
-        return PropertiesDimension(entries=entries) if entries else None
-
-    def actions(self) -> tuple[Action, ...]:
-        """SetProperty for Added/Changed entries; Removed is ignored (declared-subset semantics)."""
-        result: list[Action] = []
-        for entry in self.entries:
-            match entry:
-                case Added(item=pair) | Changed(desired=pair):
-                    result.append(SetProperty(name=pair.name, value=pair.value))
-                case _:
-                    pass
-        return tuple(result)
-
-
-@dataclass(frozen=True, slots=True)
-class TableTagsDimension:
-    """Table tag drift — full-state semantics: Removed entries are unset."""
-
-    entries: tuple[Entry[KeyValue], ...]
-
-    @staticmethod
-    def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> TableTagsDimension | None:
-        """Return a TableTagsDimension when any tag differs, or None when identical."""
-        entries = _diff_mapping(desired, observed)
-        return TableTagsDimension(entries=entries) if entries else None
-
-    def actions(self) -> tuple[Action, ...]:
-        """SetTableTag for Added/Changed entries; UnsetTableTag for Removed entries."""
-        result: list[Action] = []
-        for entry in self.entries:
-            match entry:
-                case Added(item=pair) | Changed(desired=pair):
-                    result.append(SetTableTag(name=pair.name, value=pair.value))
-                case Removed(item=pair):
-                    result.append(UnsetTableTag(name=pair.name))
-        return tuple(result)
-
-
-@dataclass(frozen=True, slots=True)
-class PartitioningDimension:
-    """
-    Partitioning drift — records the fact; policy on whether it is allowed lives in validation.
-
-    In-place repartitioning is not possible; see PartitioningChangeNotSupported.
-    """
-
-    change: Changed[tuple[str, ...]]
-
-    @staticmethod
-    def diff(desired: tuple[str, ...], observed: tuple[str, ...]) -> PartitioningDimension | None:
-        """Return a PartitioningDimension when partitioning differs, or None when identical."""
-        change = _changed(desired, observed)
-        return PartitioningDimension(change=change) if change is not None else None
-
-    def actions(self) -> tuple[Action, ...]:
-        """
-        No actions — in-place repartitioning is not supported.
-
-        See PartitioningChangeNotSupported.
-        """
-        return ()
-
-
-@dataclass(frozen=True, slots=True)
-class PrimaryKeyDimension:
-    """Primary key drift."""
-
-    entry: Entry[PrimaryKeyConstraint]
-
-    @staticmethod
-    def diff(
-        desired: PrimaryKeyConstraint | None,
-        observed: PrimaryKeyConstraint | None,
-    ) -> PrimaryKeyDimension | None:
-        """
-        Return a PrimaryKeyDimension when the primary key differs, or None when identical.
-
-        Identity is column-set equality: order and constraint name do not make
-        two keys different.
-        """
-        if desired is not None and observed is None:
-            return PrimaryKeyDimension(entry=Added(desired))
-        if desired is None and observed is not None:
-            return PrimaryKeyDimension(entry=Removed(observed))
-        if (
-            desired is not None
-            and observed is not None
-            and set(desired.columns) != set(observed.columns)
-        ):
-            return PrimaryKeyDimension(entry=Changed(desired=desired, observed=observed))
-        return None
-
-    def actions(self) -> tuple[Action, ...]:
-        """Return SetPrimaryKey, DropPrimaryKey, or both depending on the entry type."""
-        match self.entry:
-            case Added(item=pk):
-                return (SetPrimaryKey(columns=pk.columns, constraint_name=pk.constraint_name),)
-            case Removed():
-                return (DropPrimaryKey(),)
-            case Changed(desired=pk):
-                return (
-                    DropPrimaryKey(),
-                    SetPrimaryKey(columns=pk.columns, constraint_name=pk.constraint_name),
-                )
-            case _ as unreachable:
-                assert_never(unreachable)
-
-
-@dataclass(frozen=True, slots=True)
-class ForeignKeysDimension:
-    """Foreign key drift."""
-
-    entries: tuple[ForeignKeyDrift, ...]
-
-    @staticmethod
-    def diff(
-        desired: tuple[ForeignKeyConstraint, ...],
-        observed: tuple[ForeignKeyConstraint, ...],
-    ) -> ForeignKeysDimension | None:
-        """
-        Return a ForeignKeysDimension when any FK differs, or None when identical.
-
-        Identity is content signature (local columns, referenced table, referenced
-        columns): a matched pair is content-identical and records no fact. An FK
-        present on both sides under different constraint names produces nothing,
-        so a sync over an unchanged catalog stays idempotent.
-        """
-        desired_by_sig = {fk.signature: fk for fk in desired}
-        observed_by_sig = {fk.signature: fk for fk in observed}
-        added: tuple[ForeignKeyDrift, ...] = tuple(
-            Added(fk) for sig, fk in desired_by_sig.items() if sig not in observed_by_sig
-        )
-        removed: tuple[ForeignKeyDrift, ...] = tuple(
-            Removed(fk) for sig, fk in observed_by_sig.items() if sig not in desired_by_sig
-        )
-        entries = added + removed
-        return ForeignKeysDimension(entries=entries) if entries else None
-
-    def actions(self) -> tuple[Action, ...]:
-        """Return SetForeignKey for Added entries and DropForeignKey for Removed entries."""
-        result: list[Action] = []
-        for entry in self.entries:
-            match entry:
-                case Added(item=fk):
-                    result.append(
-                        SetForeignKey(
-                            local_columns=fk.local_columns,
-                            referenced_table=fk.referenced_table,
-                            referenced_columns=fk.referenced_columns,
-                            constraint_name=fk.constraint_name,
-                        )
-                    )
-                case Removed(item=fk):
-                    result.append(DropForeignKey(constraint_name=fk.constraint_name))
-        return tuple(result)
+# ---------------------------------------------------------------------------
+# Table-level diff sum
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,79 +433,238 @@ class TableMissing:
 @dataclass(frozen=True, slots=True)
 class TableDrift:
     """
-    Per-dimension differences between a desired and an observed table.
+    Flat sequence of changes separating an observed table from its declaration.
 
-    Each dimension records the facts for one aspect of the table and produces
-    actions to reconcile it. An empty tuple is the natural zero — a table with
-    no drift has no dimensions.
+    ``managed_aspects`` is copied from the declaration at diff time so the
+    diff is self-contained; there is deliberately no default — a drift always
+    belongs to a declaration with a known scope. The natural zero is an empty
+    changes tuple (no drift).
     """
 
-    dimensions: tuple[Dimension, ...] = ()
+    changes: tuple[Change, ...]
+    managed_aspects: frozenset[TableAspect]
 
     def plan(self) -> ActionPlan:
-        """Build the action plan by collecting actions from every dimension."""
-        return ActionPlan(tuple(action for d in self.dimensions for action in d.actions()))
+        """Build the action plan by collecting actions from every change."""
+        return ActionPlan(tuple(action for change in self.changes for action in change.actions()))
 
 
 type TableDiff = TableMissing | TableDrift
 
 
+# ---------------------------------------------------------------------------
+# diff_table — change production
+# ---------------------------------------------------------------------------
+
+
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
-    Compute the facts separating ``observed`` from ``desired``.
+    Compute the changes separating ``observed`` from ``desired``.
 
     Returns ``TableMissing`` when the table does not exist, else a
-    ``TableDrift`` whose dimensions each record the differences in one aspect.
-    Empty aspects produce no dimension — an equal pair yields an empty drift.
+    ``TableDrift`` whose changes each record one atomic difference. An equal
+    pair yields an empty drift. The diff is scope-blind: every aspect is
+    compared regardless of ``managed_aspects``; scope is judged in validation.
     """
     if observed is None:
         return TableMissing(desired=desired)
-    dimensions = [
-        d
-        for d in [
-            ColumnsDimension.diff(desired.columns, observed.columns),
-            TableCommentDimension.diff(desired.comment, observed.comment),
-            PropertiesDimension.diff(desired.properties, observed.properties),
-            TableTagsDimension.diff(desired.tags, observed.tags),
-            PartitioningDimension.diff(desired.partitioned_by, observed.partitioned_by),
-            PrimaryKeyDimension.diff(desired.primary_key, observed.primary_key),
-            ForeignKeysDimension.diff(desired.foreign_keys, observed.foreign_keys),
-        ]
-        if d is not None
-    ]
-    return TableDrift(dimensions=tuple(dimensions))
+
+    changes: tuple[Change, ...] = (
+        *_diff_column_structure(desired.columns, observed.columns),
+        *_diff_column_comments(desired.columns, observed.columns),
+        *_diff_column_tags(desired.columns, observed.columns),
+        *_diff_table_comment(desired.comment, observed.comment),
+        *_diff_properties(desired.properties, observed.properties),
+        *_diff_table_tags(desired.tags, observed.tags),
+        *_diff_partitioning(desired.partitioned_by, observed.partitioned_by),
+        *_diff_primary_key(desired.primary_key, observed.primary_key),
+        *_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
+    )
+    return TableDrift(changes=changes, managed_aspects=desired.managed_aspects)
 
 
-def _changed[T](desired: T, observed: T) -> Changed[T] | None:
-    """Return the Changed fact for a pair of values, or None when they are equal."""
-    if desired == observed:
-        return None
-    return Changed(desired=desired, observed=observed)
+def _diff_column_structure(
+    desired: tuple[Column, ...], observed: tuple[Column, ...]
+) -> list[Change]:
+    """Return changes for column additions, removals, type drift, and nullability drift."""
+    desired_by_name = {column.name: column for column in desired}
+    observed_by_name = {column.name: column for column in observed}
+    changes: list[Change] = []
 
+    for name, column in desired_by_name.items():
+        if name not in observed_by_name:
+            changes.append(ColumnAdded(column=column))
 
-def _diff_mapping(
-    desired: Mapping[str, str], observed: Mapping[str, str]
-) -> tuple[Entry[KeyValue], ...]:
-    """
-    Diff two string mappings into uniform entries.
+    for name, column in observed_by_name.items():
+        if name not in desired_by_name:
+            changes.append(ColumnRemoved(column=column))
 
-    Reports facts full-state: desired-only keys are Added, observed-only keys
-    are Removed, keys on both sides with different values are Changed. Whether
-    a Removed key is acted on (tags) or ignored (properties) is lowering
-    policy, not a diffing concern.
-    """
-    result: list[Entry[KeyValue]] = []
-    for name, value in desired.items():
-        if name not in observed:
-            result.append(Added(KeyValue(name, value)))
-        elif observed[name] != value:
-            result.append(
-                Changed(
-                    desired=KeyValue(name, value),
-                    observed=KeyValue(name, observed[name]),
+    for name, desired_column in desired_by_name.items():
+        if name not in observed_by_name:
+            continue
+        observed_column = observed_by_name[name]
+        if desired_column.data_type != observed_column.data_type:
+            changes.append(
+                ColumnDataTypeChanged(
+                    column_name=name,
+                    desired_type=desired_column.data_type,
+                    observed_type=observed_column.data_type,
                 )
             )
-    for name, value in observed.items():
+        elif desired_column.nullable != observed_column.nullable:
+            changes.append(
+                ColumnNullabilityChanged(
+                    column_name=name,
+                    desired_nullable=desired_column.nullable,
+                    observed_nullable=observed_column.nullable,
+                )
+            )
+    return changes
+
+
+def _diff_column_comments(
+    desired: tuple[Column, ...], observed: tuple[Column, ...]
+) -> list[Change]:
+    """Comment changes for name-matched column pairs."""
+    observed_by_name = {column.name: column for column in observed}
+    changes: list[Change] = []
+    for column in desired:
+        if column.name not in observed_by_name:
+            continue
+        observed_column = observed_by_name[column.name]
+        if column.comment != observed_column.comment:
+            changes.append(
+                ColumnCommentChanged(
+                    column_name=column.name,
+                    desired_comment=column.comment,
+                    observed_comment=observed_column.comment,
+                )
+            )
+    return changes
+
+
+def _diff_column_tags(
+    desired: tuple[Column, ...], observed: tuple[Column, ...]
+) -> list[Change]:
+    """
+    Tag changes for every desired column, matched or added (full-state).
+
+    A desired-only column's tags are included: the ADD_COLUMN phase precedes
+    SET_COLUMN_TAG, so the column exists by the time its tags are applied.
+    """
+    observed_by_name = {column.name: column for column in observed}
+    changes: list[Change] = []
+
+    for column in desired:
+        observed_tags: Mapping[str, str] = (
+            observed_by_name[column.name].tags if column.name in observed_by_name else {}
+        )
+
+        for tag_name, tag_value in column.tags.items():
+            if tag_name not in observed_tags or observed_tags[tag_name] != tag_value:
+                changes.append(
+                    ColumnTagSet(column_name=column.name, tag_name=tag_name, tag_value=tag_value)
+                )
+
+        for tag_name in observed_tags:
+            if tag_name not in column.tags:
+                changes.append(ColumnTagUnset(column_name=column.name, tag_name=tag_name))
+
+    return changes
+
+
+def _diff_table_comment(desired: str, observed: str) -> list[Change]:
+    """Return the table comment change, or nothing when the comments agree."""
+    if desired == observed:
+        return []
+    return [TableCommentChanged(desired_comment=desired, observed_comment=observed)]
+
+
+def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
+    """
+    Property changes under declared-projection semantics: only desired keys are compared.
+
+    An observed-only property is not drift — the declaration does not own it.
+    A metadata-only table declares no properties, so this loop body never
+    executes for it and catalog properties written by a previous full sync
+    (e.g. delta.columnMapping.mode) produce no changes.
+    """
+    return [
+        PropertySet(name=name, desired_value=value)
+        for name, value in desired.items()
+        if name not in observed or observed[name] != value
+    ]
+
+
+def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
+    """Tag changes under full-state semantics: observed-only tags are drift and are unset."""
+    changes: list[Change] = []
+
+    for name, value in desired.items():
+        if name not in observed or observed[name] != value:
+            changes.append(TableTagSet(name=name, value=value))
+
+    for name in observed:
         if name not in desired:
-            result.append(Removed(KeyValue(name, value)))
-    return tuple(result)
+            changes.append(TableTagUnset(name=name))
+
+    return changes
+
+
+def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> list[Change]:
+    """Return the partitioning change, or nothing when the specs agree."""
+    if desired == observed:
+        return []
+    return [PartitioningChanged(desired_partitioning=desired, observed_partitioning=observed)]
+
+
+def _diff_primary_key(
+    desired: PrimaryKeyConstraint | None,
+    observed: PrimaryKeyConstraint | None,
+) -> list[Change]:
+    """
+    Return the primary key change, or nothing when the keys agree.
+
+    Identity is column-set equality: order and constraint name do not make
+    two keys different.
+    """
+    if desired is not None and observed is None:
+        return [PrimaryKeyAdded(primary_key=desired)]
+
+    if desired is None and observed is not None:
+        return [PrimaryKeyRemoved(observed_primary_key=observed)]
+
+    if (
+        desired is not None
+        and observed is not None
+        and set(desired.columns) != set(observed.columns)
+    ):
+        return [PrimaryKeyChanged(desired_primary_key=desired, observed_primary_key=observed)]
+
+    return []
+
+
+def _diff_foreign_keys(
+    desired: tuple[ForeignKeyConstraint, ...],
+    observed: tuple[ForeignKeyConstraint, ...],
+) -> list[Change]:
+    """
+    Foreign key changes, matched by content signature.
+
+    Identity is content (local columns, referenced table, referenced columns):
+    an FK present on both sides under different constraint names produces
+    nothing, so a sync over an unchanged catalog stays idempotent.
+    """
+    desired_by_signature = {fk.signature: fk for fk in desired}
+    observed_by_signature = {fk.signature: fk for fk in observed}
+    changes: list[Change] = []
+
+    for signature, fk in desired_by_signature.items():
+        if signature not in observed_by_signature:
+            changes.append(ForeignKeyAdded(constraint=fk))
+
+    for signature, fk in observed_by_signature.items():
+        if signature not in desired_by_signature:
+            changes.append(ForeignKeyRemoved(constraint=fk))
+
+    return changes
