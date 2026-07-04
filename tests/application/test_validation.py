@@ -17,10 +17,10 @@ from delta_engine.domain.model import (
     TableAspect,
 )
 from delta_engine.domain.plan.diff import (
+    Change,
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
-    DriftFact,
     PartitioningChanged,
     TableCommentChanged,
     TableDrift,
@@ -39,9 +39,9 @@ def _desired_table(managed_aspects: frozenset[TableAspect] = ALL_ASPECTS) -> Des
 
 
 def _drift(
-    *facts: DriftFact, managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
+    *changes: Change, managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
 ) -> TableDrift:
-    return TableDrift(facts=tuple(facts), managed_aspects=managed_aspects)
+    return TableDrift(changes=tuple(changes), managed_aspects=managed_aspects)
 
 
 def _tightening(column_name: str = "id") -> ColumnNullabilityChanged:
@@ -60,12 +60,12 @@ def _type_drift(column_name: str = "id") -> ColumnDataTypeChanged:
 
 
 def test_rejects_add_of_non_nullable_column():
-    # Given a fact tuple containing a NOT NULL column addition
+    # Given a change tuple containing a NOT NULL column addition
     rule = NonNullableColumnAdd()
-    facts = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
+    changes = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
 
     # When
-    failures = rule.evaluate(facts)
+    failures = rule.evaluate(changes)
 
     # Then
     assert len(failures) == 1
@@ -73,16 +73,16 @@ def test_rejects_add_of_non_nullable_column():
 
 
 def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
-    # Given three NOT NULL column additions in a single fact tuple
+    # Given three NOT NULL column additions in a single change tuple
     rule = NonNullableColumnAdd()
-    facts = (
+    changes = (
         ColumnAdded(Column("a", Integer(), nullable=False)),
         ColumnAdded(Column("b", String(), nullable=False)),
         ColumnAdded(Column("c", Integer(), nullable=False)),
     )
 
     # When
-    failures = rule.evaluate(facts)
+    failures = rule.evaluate(changes)
 
     # Then
     assert len(failures) == 3
@@ -93,11 +93,11 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
 
 
 def test_allows_add_of_nullable_column():
-    # Given a fact tuple containing a nullable column addition
+    # Given a change tuple containing a nullable column addition
     rule = NonNullableColumnAdd()
-    facts = (ColumnAdded(Column("age", Integer())),)
+    changes = (ColumnAdded(Column("age", Integer())),)
 
-    assert rule.evaluate(facts) == ()
+    assert rule.evaluate(changes) == ()
 
 
 def test_non_nullable_column_add_ignores_creation():
@@ -114,8 +114,8 @@ def test_non_nullable_column_add_ignores_creation():
     assert result.failed is False
 
 
-def test_non_nullable_column_add_passes_when_no_facts():
-    # Given an empty fact tuple
+def test_non_nullable_column_add_passes_when_no_changes():
+    # Given an empty change tuple
     rule = NonNullableColumnAdd()
 
     assert rule.evaluate(()) == ()
@@ -125,12 +125,12 @@ def test_non_nullable_column_add_passes_when_no_facts():
 
 
 def test_rejects_tightening_an_existing_column_to_not_null():
-    # Given a nullability tightening fact on an existing column
+    # Given a nullability tightening change on an existing column
     rule = NullabilityTighteningOnExistingColumn()
-    facts = (_tightening("order_id"),)
+    changes = (_tightening("order_id"),)
 
     # When
-    failures = rule.evaluate(facts)
+    failures = rule.evaluate(changes)
 
     # Then
     assert len(failures) == 1
@@ -139,12 +139,12 @@ def test_rejects_tightening_an_existing_column_to_not_null():
 
 
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
-    # Given two nullability tightenings in a single fact tuple
+    # Given two nullability tightenings in a single change tuple
     rule = NullabilityTighteningOnExistingColumn()
-    facts = (_tightening("a"), _tightening("b"))
+    changes = (_tightening("a"), _tightening("b"))
 
     # When
-    failures = rule.evaluate(facts)
+    failures = rule.evaluate(changes)
 
     # Then
     assert len(failures) == 2
@@ -154,7 +154,7 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
-    # Given a nullability loosening fact (NOT NULL → nullable)
+    # Given a nullability loosening change (NOT NULL → nullable)
     rule = NullabilityTighteningOnExistingColumn()
     loosening = ColumnNullabilityChanged(
         column_name="id", desired_nullable=True, observed_nullable=False
@@ -167,7 +167,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
 
 
 def test_validate_diff_surfaces_type_drift_as_failure():
-    # Given a drift whose only fact is a column type change
+    # Given a drift whose only change is a column type change
     diff = _drift(_type_drift("id"))
 
     # When
@@ -180,7 +180,7 @@ def test_validate_diff_surfaces_type_drift_as_failure():
 
 
 def test_validate_diff_surfaces_partitioning_change_as_failure():
-    # Given a drift whose only fact is a partitioning change
+    # Given a drift whose only change is a partitioning change
     diff = _drift(PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=()))
 
     # When
@@ -301,7 +301,7 @@ def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
 
 
 def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
-    # Given two facts in one unmanaged aspect and one fact in another
+    # Given two changes in one unmanaged aspect and one change in another
     diff = _drift(
         ColumnAdded(Column("extra", Integer())),
         ColumnAdded(Column("more", Integer())),
@@ -311,7 +311,7 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
 
     result = validate_diff(diff)
 
-    # Then one failure per aspect, not per fact — in first-seen fact order
+    # Then one failure per aspect, not per change — in first-seen change order
     assert len(result.failures) == 2
     assert "column structure" in result.failures[0].message.lower()
     assert "table comment" in result.failures[1].message.lower()

@@ -53,14 +53,14 @@ class ActionPhase(IntEnum):
 
 ## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant drift fact's `actions()` method. For example, if `UpdateComment` is produced by `TableCommentChanged`:
+In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `TableCommentChanged`:
 
 ```python
 def actions(self) -> tuple[Action, ...]:
     return (UpdateComment(new_comment=self.desired_comment),)
 ```
 
-If the action belongs to a new kind of difference, add a new drift fact dataclass (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `DriftFact` union, and emit it from the relevant `_diff_*` helper in `diff_table`.
+If the action belongs to a new kind of difference, add a new change dataclass (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `Change` union, and emit it from the relevant `_diff_*` helper in `diff_table`.
 
 ## 4. Register a SQL compiler
 
@@ -80,28 +80,26 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 
 ## 5. Add a validation rule if needed
 
-If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the drift's flat fact tuple and its managed aspects, and match fact types directly:
+If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the drift's managed changes and match change types directly:
 
 ```python
 from typing import ClassVar
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.domain.model.table_aspect import TableAspect
-from delta_engine.domain.plan.diff import DriftFact, TableCommentChanged
+from delta_engine.domain.plan.diff import Change, TableCommentChanged
 
 
 class NoUnsafeCommentChange:
     name: ClassVar[str] = "NoUnsafeCommentChange"
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=f"Operation not allowed: ...",
             )
-            for fact in facts
-            if isinstance(fact, TableCommentChanged) and <condition>
+            for change in changes
+            if isinstance(change, TableCommentChanged) and <condition>
         )
 ```
 
@@ -110,7 +108,7 @@ Add it to `DEFAULT_RULES` in the same file.
 ## 6. Write tests
 
 Add tests in:
-- `tests/domain/plan/test_diff.py` — does the relevant drift fact's `actions()` produce `UpdateComment`?
+- `tests/domain/plan/test_diff.py` — does the relevant change's `actions()` produce `UpdateComment`?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?
 

@@ -19,6 +19,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
+    Change,
     ColumnAdded,
     ColumnCommentChanged,
     ColumnDataTypeChanged,
@@ -26,7 +27,6 @@ from delta_engine.domain.plan.diff import (
     ColumnRemoved,
     ColumnTagSet,
     ColumnTagUnset,
-    DriftFact,
     ForeignKeyAdded,
     ForeignKeyRemoved,
     PartitioningChanged,
@@ -48,6 +48,7 @@ __all__ = [
     "ActionPhase",
     "ActionPlan",
     "AddColumn",
+    "Change",
     "ColumnAdded",
     "ColumnCommentChanged",
     "ColumnDataTypeChanged",
@@ -56,7 +57,6 @@ __all__ = [
     "ColumnTagSet",
     "ColumnTagUnset",
     "CreateTable",
-    "DriftFact",
     "DropColumn",
     "DropForeignKey",
     "DropPrimaryKey",

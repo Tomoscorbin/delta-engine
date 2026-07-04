@@ -1,41 +1,41 @@
 """
-Facts describing how an observed table differs from its desired declaration.
+Changes describing how an observed table differs from its desired declaration.
 
 ``diff_table`` is the single entry point: given the desired definition and the
 observed one (or ``None`` when the table is missing), it returns a
 ``TableDiff`` — a closed sum of ``TableMissing`` and ``TableDrift``.
-``TableDrift`` carries a flat tuple of drift facts plus the ``managed_aspects``
+``TableDrift`` carries a flat tuple of changes plus the ``managed_aspects``
 of the declaration that produced it, so the diff is self-contained and
 ``validate_diff`` needs no other input.
 
-Each fact is a frozen dataclass recording one atomic difference. Every fact
-carries two things:
+Each change is a frozen dataclass recording one atomic difference. Every
+change carries two things:
 
 - ``aspect`` — the :class:`TableAspect` the difference belongs to. Validation
   uses this to gate drift in aspects the declaration does not manage.
-- ``actions()`` — the imperative actions that reconcile the difference. Facts
-  for differences with no in-place remedy (a column type change, a
-  partitioning change) return no actions; validation blocks them instead.
+- ``actions()`` — the imperative actions that reconcile the difference.
+  Changes with no in-place remedy (a column type change, a partitioning
+  change) return no actions; validation blocks them instead.
 
 Naming conventions:
 
-- Facts are named for what is true relative to the declaration
+- Changes are named for what is true relative to the declaration
   (``ColumnAdded``, ``TableTagUnset``); actions in ``actions.py`` are
   imperative commands (``AddColumn``, ``UnsetTableTag``). The two vocabularies
   live in separate modules.
-- ``*Changed`` facts carry both sides of the difference (``desired_*`` /
-  ``observed_*``) as one atomic pair: rules read the change direction and
-  report from/to values without re-correlating separate facts, and a
-  ``__post_init__`` guard makes a no-difference fact unrepresentable.
+- ``*Changed`` members carry both sides of the difference (``desired_*`` /
+  ``observed_*``) as one atomic pair: rules read the direction and report
+  from/to values without re-correlating separate changes, and a
+  ``__post_init__`` guard makes a no-difference change unrepresentable.
 
 Semantics that differ by aspect:
 
 - Properties are declared-projection: only declared keys are compared, so an
   observed-only property (e.g. one written by a previous full sync or by the
-  platform) is not drift and produces no fact.
+  platform) is not drift and produces no change.
 - Tags are full-state: an observed-only tag is drift and is unset.
 - Nullability drift is suppressed for a column whose type also drifted — the
-  column must be recreated first, so a nullability fact would be noise.
+  column must be recreated first, so a nullability change would be noise.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from delta_engine.domain.plan.actions import (
 )
 
 # ---------------------------------------------------------------------------
-# Drift facts
+# Changes
 # ---------------------------------------------------------------------------
 
 
@@ -83,7 +83,7 @@ class ColumnAdded:
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
     def actions(self) -> tuple[Action, ...]:
-        """AddColumn for the new column; its tags arrive as ColumnTagSet facts."""
+        """AddColumn for the new column; its tags arrive as ColumnTagSet changes."""
         return (AddColumn(column=self.column),)
 
 
@@ -216,8 +216,8 @@ class PropertySet:
     A declared property absent from the catalog or carrying a different value.
 
     Properties are declared-projection: only declared keys are compared, so
-    there is no PropertyUnset fact — an observed-only property is not drift.
-    Like the tag set facts, this is an upsert: it carries only the desired
+    there is no PropertyUnset change — an observed-only property is not drift.
+    Like the tag set changes, this is an upsert: it carries only the desired
     value, because the remedy is the same whether the key was absent or stale.
     """
 
@@ -316,7 +316,7 @@ class PrimaryKeyChanged:
 
     Both sides travel as one atomic pair so validation can report from/to and
     ``actions()`` can emit Drop then Set. Splitting into separate
-    added/removed facts would make an orphaned half representable.
+    added/removed changes would make an orphaned half representable.
     """
 
     desired_primary_key: PrimaryKeyConstraint
@@ -374,7 +374,7 @@ class ForeignKeyRemoved:
         return (DropForeignKey(constraint_name=self.constraint.constraint_name),)
 
 
-type DriftFact = (
+type Change = (
     ColumnAdded
     | ColumnRemoved
     | ColumnDataTypeChanged
@@ -433,42 +433,43 @@ class TableMissing:
 @dataclass(frozen=True, slots=True)
 class TableDrift:
     """
-    Flat sequence of drift facts separating an observed table from its declaration.
+    Flat sequence of changes separating an observed table from its declaration.
 
     ``managed_aspects`` is copied from the declaration at diff time so the
     diff is self-contained; there is deliberately no default — a drift always
     belongs to a declaration with a known scope. The natural zero is an empty
-    facts tuple (no drift).
+    changes tuple (no drift).
     """
 
-    facts: tuple[DriftFact, ...]
+    changes: tuple[Change, ...]
     managed_aspects: frozenset[TableAspect]
 
     def plan(self) -> ActionPlan:
-        """Build the action plan by collecting actions from every fact."""
-        return ActionPlan(tuple(action for fact in self.facts for action in fact.actions()))
+        """Build the action plan by collecting actions from every change."""
+        return ActionPlan(tuple(action for change in self.changes for action in change.actions()))
 
 
 type TableDiff = TableMissing | TableDrift
 
 
 # ---------------------------------------------------------------------------
-# diff_table — fact production
+# diff_table — change production
 # ---------------------------------------------------------------------------
 
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
-    Compute the facts separating ``observed`` from ``desired``.
+    Compute the changes separating ``observed`` from ``desired``.
 
     Returns ``TableMissing`` when the table does not exist, else a
-    ``TableDrift`` whose facts each record one atomic difference. An equal
+    ``TableDrift`` whose changes each record one atomic difference. An equal
     pair yields an empty drift. The diff is scope-blind: every aspect is
     compared regardless of ``managed_aspects``; scope is judged in validation.
     """
     if observed is None:
         return TableMissing(desired=desired)
-    facts: tuple[DriftFact, ...] = (
+
+    changes: tuple[Change, ...] = (
         *_diff_column_structure(desired.columns, observed.columns),
         *_diff_column_comments(desired.columns, observed.columns),
         *_diff_column_tags(desired.columns, observed.columns),
@@ -479,31 +480,31 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_primary_key(desired.primary_key, observed.primary_key),
         *_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
     )
-    return TableDrift(facts=facts, managed_aspects=desired.managed_aspects)
+    return TableDrift(changes=changes, managed_aspects=desired.managed_aspects)
 
 
 def _diff_column_structure(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[DriftFact]:
-    """Facts for column additions, removals, type changes, and nullability changes."""
+) -> list[Change]:
+    """Return changes for column additions, removals, type drift, and nullability drift."""
     desired_by_name = {column.name: column for column in desired}
     observed_by_name = {column.name: column for column in observed}
-    facts: list[DriftFact] = []
+    changes: list[Change] = []
 
     for name, column in desired_by_name.items():
         if name not in observed_by_name:
-            facts.append(ColumnAdded(column=column))
+            changes.append(ColumnAdded(column=column))
 
     for name, column in observed_by_name.items():
         if name not in desired_by_name:
-            facts.append(ColumnRemoved(column=column))
+            changes.append(ColumnRemoved(column=column))
 
     for name, desired_column in desired_by_name.items():
         if name not in observed_by_name:
             continue
         observed_column = observed_by_name[name]
         if desired_column.data_type != observed_column.data_type:
-            facts.append(
+            changes.append(
                 ColumnDataTypeChanged(
                     column_name=name,
                     desired_type=desired_column.data_type,
@@ -511,48 +512,48 @@ def _diff_column_structure(
                 )
             )
         elif desired_column.nullable != observed_column.nullable:
-            facts.append(
+            changes.append(
                 ColumnNullabilityChanged(
                     column_name=name,
                     desired_nullable=desired_column.nullable,
                     observed_nullable=observed_column.nullable,
                 )
             )
-    return facts
+    return changes
 
 
 def _diff_column_comments(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[DriftFact]:
-    """Comment facts for name-matched column pairs."""
+) -> list[Change]:
+    """Comment changes for name-matched column pairs."""
     observed_by_name = {column.name: column for column in observed}
-    facts: list[DriftFact] = []
+    changes: list[Change] = []
     for column in desired:
         if column.name not in observed_by_name:
             continue
         observed_column = observed_by_name[column.name]
         if column.comment != observed_column.comment:
-            facts.append(
+            changes.append(
                 ColumnCommentChanged(
                     column_name=column.name,
                     desired_comment=column.comment,
                     observed_comment=observed_column.comment,
                 )
             )
-    return facts
+    return changes
 
 
 def _diff_column_tags(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[DriftFact]:
+) -> list[Change]:
     """
-    Tag facts for every desired column, matched or added (full-state).
+    Tag changes for every desired column, matched or added (full-state).
 
     A desired-only column's tags are included: the ADD_COLUMN phase precedes
     SET_COLUMN_TAG, so the column exists by the time its tags are applied.
     """
     observed_by_name = {column.name: column for column in observed}
-    facts: list[DriftFact] = []
+    changes: list[Change] = []
 
     for column in desired:
         observed_tags: Mapping[str, str] = (
@@ -561,32 +562,32 @@ def _diff_column_tags(
 
         for tag_name, tag_value in column.tags.items():
             if tag_name not in observed_tags or observed_tags[tag_name] != tag_value:
-                facts.append(
+                changes.append(
                     ColumnTagSet(column_name=column.name, tag_name=tag_name, tag_value=tag_value)
                 )
 
         for tag_name in observed_tags:
             if tag_name not in column.tags:
-                facts.append(ColumnTagUnset(column_name=column.name, tag_name=tag_name))
+                changes.append(ColumnTagUnset(column_name=column.name, tag_name=tag_name))
 
-    return facts
+    return changes
 
 
-def _diff_table_comment(desired: str, observed: str) -> list[DriftFact]:
-    """Return the table comment fact, or nothing when the comments agree."""
+def _diff_table_comment(desired: str, observed: str) -> list[Change]:
+    """Return the table comment change, or nothing when the comments agree."""
     if desired == observed:
         return []
     return [TableCommentChanged(desired_comment=desired, observed_comment=observed)]
 
 
-def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[DriftFact]:
+def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
     """
-    Property facts under declared-projection semantics: only desired keys are compared.
+    Property changes under declared-projection semantics: only desired keys are compared.
 
     An observed-only property is not drift — the declaration does not own it.
     A metadata-only table declares no properties, so this loop body never
     executes for it and catalog properties written by a previous full sync
-    (e.g. delta.columnMapping.mode) produce no facts.
+    (e.g. delta.columnMapping.mode) produce no changes.
     """
     return [
         PropertySet(name=name, desired_value=value)
@@ -595,23 +596,23 @@ def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) ->
     ]
 
 
-def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[DriftFact]:
-    """Tag facts under full-state semantics: observed-only tags are drift and are unset."""
-    facts: list[DriftFact] = []
+def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
+    """Tag changes under full-state semantics: observed-only tags are drift and are unset."""
+    changes: list[Change] = []
 
     for name, value in desired.items():
         if name not in observed or observed[name] != value:
-            facts.append(TableTagSet(name=name, value=value))
+            changes.append(TableTagSet(name=name, value=value))
 
     for name in observed:
         if name not in desired:
-            facts.append(TableTagUnset(name=name))
+            changes.append(TableTagUnset(name=name))
 
-    return facts
+    return changes
 
 
-def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> list[DriftFact]:
-    """Return the partitioning fact, or nothing when the specs agree."""
+def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> list[Change]:
+    """Return the partitioning change, or nothing when the specs agree."""
     if desired == observed:
         return []
     return [PartitioningChanged(desired_partitioning=desired, observed_partitioning=observed)]
@@ -620,9 +621,9 @@ def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> l
 def _diff_primary_key(
     desired: PrimaryKeyConstraint | None,
     observed: PrimaryKeyConstraint | None,
-) -> list[DriftFact]:
+) -> list[Change]:
     """
-    Return the primary key fact, or nothing when the keys agree.
+    Return the primary key change, or nothing when the keys agree.
 
     Identity is column-set equality: order and constraint name do not make
     two keys different.
@@ -646,9 +647,9 @@ def _diff_primary_key(
 def _diff_foreign_keys(
     desired: tuple[ForeignKeyConstraint, ...],
     observed: tuple[ForeignKeyConstraint, ...],
-) -> list[DriftFact]:
+) -> list[Change]:
     """
-    Foreign key facts, matched by content signature.
+    Foreign key changes, matched by content signature.
 
     Identity is content (local columns, referenced table, referenced columns):
     an FK present on both sides under different constraint names produces
@@ -656,14 +657,14 @@ def _diff_foreign_keys(
     """
     desired_by_signature = {fk.signature: fk for fk in desired}
     observed_by_signature = {fk.signature: fk for fk in observed}
-    facts: list[DriftFact] = []
+    changes: list[Change] = []
 
     for signature, fk in desired_by_signature.items():
         if signature not in observed_by_signature:
-            facts.append(ForeignKeyAdded(constraint=fk))
+            changes.append(ForeignKeyAdded(constraint=fk))
 
     for signature, fk in observed_by_signature.items():
         if signature not in desired_by_signature:
-            facts.append(ForeignKeyRemoved(constraint=fk))
+            changes.append(ForeignKeyRemoved(constraint=fk))
 
-    return facts
+    return changes

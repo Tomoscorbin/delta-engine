@@ -93,7 +93,7 @@ sequenceDiagram
     Domain-->>Engine: TableDiff
     Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
-    Engine->>Domain: plan from diff.facts
+    Engine->>Domain: plan from diff.changes
     Domain-->>Engine: ActionPlan
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
@@ -109,7 +109,7 @@ The phases are:
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Diff**: compute the typed `TableDiff` with `diff_table`.
 4. **Validate**: judge the diff with `validate_diff`.
-5. **Plan**: construct an `ActionPlan` by iterating `diff.facts` after validation.
+5. **Plan**: construct an `ActionPlan` by iterating `diff.changes` after validation.
 6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
 7. **Execute**: execute non-empty plans for tables that have no failures.
@@ -123,15 +123,15 @@ The phases are:
 | `DeltaTable` | User code | Application preparation | Public declaration object |
 | `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
 | `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
-| `TableDiff` | `diff_table` | Validation, Engine (facts) | Typed facts separating observed from desired |
-| `ActionPlan` | Engine (from facts) | Executor, report | Ordered table-local changes |
+| `TableDiff` | `diff_table` | Validation, Engine (changes) | Typed changes separating observed from desired |
+| `ActionPlan` | Engine (from changes) | Executor, report | Ordered table-local changes |
 | `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
 | `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
 | `SyncReport` | Engine | User code | Immutable run result |
 
 ## Planning and determinism
 
-An `ActionPlan` is produced by iterating each drift fact's `.actions()`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
+An `ActionPlan` is produced by iterating each change's `.actions()`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
 The phase ordering encodes dependency constraints. Each ordering below exists because Databricks rejects the operation otherwise:
 
@@ -144,22 +144,22 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
 observed)` produces a `TableDiff` — `TableMissing` when the table does not
-exist, else a `TableDrift` holding a flat tuple of drift facts. Each fact is a
+exist, else a `TableDrift` holding a flat tuple of changes. Each change is a
 frozen dataclass recording one atomic difference (`ColumnAdded`,
 `TableTagUnset`, `ColumnDataTypeChanged`, …) and carries two things: an
 `aspect` naming the `TableAspect` it belongs to, and `.actions()` returning
-the DDL steps that reconcile it. Facts for differences with no in-place remedy
-(a column type change, a partitioning change) return no actions — validation
-blocks them instead. `*Changed` facts carry both sides of the difference as
-one atomic pair (`desired_*` / `observed_*`), so rules can read the change
-direction and report from/to values without correlating separate facts.
+the DDL steps that reconcile it. Changes with no in-place remedy (a column
+type change, a partitioning change) return no actions — validation blocks
+them instead. `*Changed` members carry both sides of the difference as one
+atomic pair (`desired_*` / `observed_*`), so rules can read the direction and
+report from/to values without correlating separate changes.
 
-Whether a fact's drift is permitted is policy — `validate_diff` evaluates
-precondition rules against the flat fact tuple, and rules match fact types
+Whether a change is permitted is policy — `validate_diff` evaluates
+precondition rules against the flat tuple, and rules match change types
 directly (e.g. `ColumnDataTypeChangeNotSupported` scans for
 `ColumnDataTypeChanged`; `PartitioningChangeNotSupported` scans for
 `PartitioningChanged`). The engine constructs the `ActionPlan` by iterating
-facts directly after validation — there is no separate `lower_diff` step and
+changes directly after validation — there is no separate `lower_diff` step and
 no hidden dependency between lowering and validation.
 
 Two aspects deliberately diff under different semantics: properties are
@@ -176,10 +176,10 @@ naming the aspects the engine reconciles for that table. The differ
 self-contained and `validate_diff` takes only the diff. Scope awareness lives
 in validation, as an unconditional invariant rather than an optional rule:
 `validate_diff` fails the sync once per unmanaged aspect that has drifted
-(`UnmanagedAspectDrift`), and only facts in managed aspects are passed to the
+(`UnmanagedAspectDrift`), and only changes in managed aspects are passed to the
 safety rules — so unmanaged drift produces exactly one scope failure rather
 than also tripping safety rules for changes the user never requested. If
-validation passes, every fact in the drift belongs to a managed aspect, so
+validation passes, every change in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.
 
@@ -229,9 +229,9 @@ radius in one run.
 
 ## Validation
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]) -> tuple[ValidationFailure, ...]` method. Rules scan the flat fact tuple directly — typically matching a specific fact type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]` method. Rules scan the flat change tuple directly — typically matching a specific change type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
 
-`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when column structure is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift's facts and managed aspects and aggregates their failures into a `ValidationResult`.
+`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when column structure is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift's managed changes and aggregates their failures into a `ValidationResult`.
 
 ## Lazy pyspark import
 
@@ -242,9 +242,9 @@ Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evalu
 | Change | Main location | Notes |
 |---|---|---|
 | Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new drift fact | `delta_engine.domain.plan.diff` | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `DriftFact` union and emit it from the relevant `_diff_*` helper. If the fact represents currently-unsupported drift, add a rule to `validation.py`. No other files change. |
-| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant drift fact's `actions()` method, then compile it in the backend adapter. |
-| Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` facts and return `ValidationFailure` values. |
+| Add a new change type | `delta_engine.domain.plan.diff` | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `Change` union and emit it from the relevant `_diff_*` helper. If the change is currently unsupported, add a rule to `validation.py`. No other files change. |
+| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter. |
+| Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` changes and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
 | Change public declarations | `delta_engine.api` | Lower public API choices into domain snapshots before the engine phases begin. |
 | Change report output | `delta_engine.application.report` / `rendering` | Keep display formatting out of domain objects. |

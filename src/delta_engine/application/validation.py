@@ -8,10 +8,10 @@ from typing import ClassVar, Protocol, assert_never
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.diff import (
+    Change,
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
-    DriftFact,
     PartitioningChanged,
     TableDiff,
     TableDrift,
@@ -36,11 +36,11 @@ class Rule(Protocol):
 
     name: ClassVar[str]
 
-    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         """
-        Evaluate the rule against a drift's managed facts.
+        Evaluate the rule against a drift's managed changes.
 
-        Receives only facts whose aspect the declaration manages — unmanaged
+        Receives only changes whose aspect the declaration manages — unmanaged
         drift is rejected by ``validate_diff`` itself before rules run, so a
         rule never judges a change the user did not ask for. Never called for
         a ``TableMissing`` diff.
@@ -53,17 +53,17 @@ class NonNullableColumnAdd:
 
     name: ClassVar[str] = "NonNullableColumnAdd"
 
-    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot add non-nullable column '{fact.column.name}'"
+                    f"Operation not allowed: cannot add non-nullable column '{change.column.name}'"
                 ),
             )
-            for fact in facts
-            if isinstance(fact, ColumnAdded) and not fact.column.nullable
+            for change in changes
+            if isinstance(change, ColumnAdded) and not change.column.nullable
         )
 
 
@@ -72,19 +72,19 @@ class NullabilityTighteningOnExistingColumn:
 
     name: ClassVar[str] = "NullabilityTighteningOnExistingColumn"
 
-    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every existing column tightened to NOT NULL."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: cannot tighten existing column"
-                    f" '{fact.column_name}' to NOT NULL. Keep it nullable,"
+                    f" '{change.column_name}' to NOT NULL. Keep it nullable,"
                     " backfill any NULLs in a separate step, then set NOT NULL."
                 ),
             )
-            for fact in facts
-            if isinstance(fact, ColumnNullabilityChanged) and not fact.desired_nullable
+            for change in changes
+            if isinstance(change, ColumnNullabilityChanged) and not change.desired_nullable
         )
 
 
@@ -93,21 +93,21 @@ class ColumnDataTypeChangeNotSupported:
 
     name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
 
-    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every in-place column type change."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     f"Operation not allowed: cannot change the type of existing column"
-                    f" '{fact.column_name}'"
-                    f" from {fact.observed_type} to {fact.desired_type}."
+                    f" '{change.column_name}'"
+                    f" from {change.observed_type} to {change.desired_type}."
                     " Type migrations are not supported;"
                     " recreate the table to change a column's type."
                 ),
             )
-            for fact in facts
-            if isinstance(fact, ColumnDataTypeChanged)
+            for change in changes
+            if isinstance(change, ColumnDataTypeChanged)
         )
 
 
@@ -116,20 +116,20 @@ class PartitioningChangeNotSupported:
 
     name: ClassVar[str] = "PartitioningChangeNotSupported"
 
-    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every in-place partitioning change."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: partitioning cannot be changed in place."
-                    f" Current: {fact.observed_partitioning}."
-                    f" Requested: {fact.desired_partitioning}."
+                    f" Current: {change.observed_partitioning}."
+                    f" Requested: {change.desired_partitioning}."
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for fact in facts
-            if isinstance(fact, PartitioningChanged)
+            for change in changes
+            if isinstance(change, PartitioningChanged)
         )
 
 
@@ -146,10 +146,10 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     One failure per unmanaged aspect that has drifted.
 
     dict.fromkeys deduplicates the aspects while preserving first-seen order,
-    so failure order follows fact order deterministically.
+    so failure order follows change order deterministically.
     """
     unmanaged_aspects = dict.fromkeys(
-        fact.aspect for fact in drift.facts if fact.aspect not in drift.managed_aspects
+        change.aspect for change in drift.changes if change.aspect not in drift.managed_aspects
     )
     return tuple(
         ValidationFailure(
@@ -177,7 +177,7 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
       per drifted aspect.
 
     Rules are safety policy over the drift the declaration *does* manage:
-    they receive only facts in managed aspects, so unmanaged drift produces
+    they receive only changes in managed aspects, so unmanaged drift produces
     exactly one scope failure rather than also tripping safety rules for
     changes the user never requested.
     """
@@ -199,8 +199,8 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
                 )
             return ValidationResult()
         case TableDrift() as drift:
-            managed_facts = tuple(
-                fact for fact in drift.facts if fact.aspect in drift.managed_aspects
+            managed_changes = tuple(
+                change for change in drift.changes if change.aspect in drift.managed_aspects
             )
             return ValidationResult(
                 failures=(
@@ -208,7 +208,7 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
                     *(
                         failure
                         for rule in rules
-                        for failure in rule.evaluate(managed_facts)
+                        for failure in rule.evaluate(managed_changes)
                     ),
                 )
             )
