@@ -239,8 +239,8 @@ Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evalu
 | Change | Main location | Notes |
 |---|---|---|
 | Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new dimension | `delta_engine.domain.plan.diff` | Add a dimension type with `.actions()`; `diff_table` constructs it. If the dimension represents currently-unsupported drift, add a rule to `validation.py`. No other files change. |
-| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant dimension type's `.actions()` method, then compile it in the backend adapter. |
+| Add a new drift fact | `delta_engine.domain.plan.diff` | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `DriftFact` union and emit it from the relevant `_diff_*` helper. If the fact represents currently-unsupported drift, add a rule to `validation.py`. No other files change. |
+| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant drift fact's `actions()` method, then compile it in the backend adapter. |
 | Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` facts and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
 | Change public declarations | `delta_engine.api` | Lower public API choices into domain snapshots before the engine phases begin. |

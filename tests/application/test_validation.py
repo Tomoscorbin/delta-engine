@@ -311,8 +311,10 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
 
     failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_TAGS}))
 
-    # Then one failure per aspect, not per fact
+    # Then one failure per aspect, not per fact — in first-seen fact order
     assert len(failures) == 2
+    assert "column structure" in failures[0].message.lower()
+    assert "table comment" in failures[1].message.lower()
 
 
 def test_unmanaged_aspect_drift_passes_when_no_unmanaged_aspect_has_drifted():

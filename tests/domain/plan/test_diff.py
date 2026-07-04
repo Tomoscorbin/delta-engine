@@ -43,7 +43,7 @@ from delta_engine.domain.plan.diff import (
     PrimaryKeyAdded,
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
-    PropertyChanged,
+    PropertySet,
     TableCommentChanged,
     TableDrift,
     TableMissing,
@@ -261,7 +261,7 @@ def test_table_comment_drift_produces_fact_with_both_sides():
 # ---------- property facts (declared-projection)
 
 
-def test_declared_property_drift_produces_property_changed_facts():
+def test_declared_property_drift_produces_property_set_facts():
     # Given one declared property missing from the catalog and one with a stale value
     diff = diff_table(
         _desired(properties={"a": "1", "b": "2"}),
@@ -271,9 +271,21 @@ def test_declared_property_drift_produces_property_changed_facts():
     # Then each declared difference is one fact
     assert isinstance(diff, TableDrift)
     assert set(diff.facts) == {
-        PropertyChanged(name="a", desired_value="1"),
-        PropertyChanged(name="b", desired_value="2"),
+        PropertySet(name="a", desired_value="1"),
+        PropertySet(name="b", desired_value="2"),
     }
+
+
+def test_declared_property_matching_catalog_produces_no_fact():
+    # Given a declared property whose catalog value already matches
+    diff = diff_table(
+        _desired(properties={"a": "1"}),
+        _observed(properties={"a": "1"}),
+    )
+
+    # Then no fact is produced — the property sync is idempotent
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == ()
 
 
 def test_observed_only_property_is_not_drift():
@@ -385,6 +397,11 @@ def test_column_nullability_changed_rejects_equal_flags():
         ColumnNullabilityChanged(column_name="id", desired_nullable=True, observed_nullable=True)
 
 
+def test_column_comment_changed_rejects_equal_comments():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnCommentChanged(column_name="id", desired_comment="same", observed_comment="same")
+
+
 def test_table_comment_changed_rejects_equal_comments():
     with pytest.raises(ValueError, match="no difference"):
         TableCommentChanged(desired_comment="same", observed_comment="same")
@@ -456,8 +473,8 @@ def test_table_comment_changed_produces_set_table_comment():
     assert fact.actions() == (SetTableComment(comment="new"),)
 
 
-def test_property_changed_produces_set_property():
-    fact = PropertyChanged(name="delta.appendOnly", desired_value="true")
+def test_property_set_produces_set_property():
+    fact = PropertySet(name="delta.appendOnly", desired_value="true")
 
     assert fact.actions() == (SetProperty(name="delta.appendOnly", value="true"),)
 

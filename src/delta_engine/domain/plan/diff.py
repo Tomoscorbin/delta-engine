@@ -211,12 +211,14 @@ class TableCommentChanged:
 
 
 @dataclass(frozen=True, slots=True)
-class PropertyChanged:
+class PropertySet:
     """
     A declared property absent from the catalog or carrying a different value.
 
     Properties are declared-projection: only declared keys are compared, so
     there is no PropertyUnset fact — an observed-only property is not drift.
+    Like the tag set facts, this is an upsert: it carries only the desired
+    value, because the remedy is the same whether the key was absent or stale.
     """
 
     name: str
@@ -381,7 +383,7 @@ type DriftFact = (
     | ColumnTagSet
     | ColumnTagUnset
     | TableCommentChanged
-    | PropertyChanged
+    | PropertySet
     | TableTagSet
     | TableTagUnset
     | PartitioningChanged
@@ -583,7 +585,7 @@ def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) ->
     (e.g. delta.columnMapping.mode) produce no facts.
     """
     return [
-        PropertyChanged(name=name, desired_value=value)
+        PropertySet(name=name, desired_value=value)
         for name, value in desired.items()
         if name not in observed or observed[name] != value
     ]
