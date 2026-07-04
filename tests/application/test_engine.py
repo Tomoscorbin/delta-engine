@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, String
+from delta_engine.api import Column, DeltaTable, ForeignKey, Long, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import (
@@ -842,7 +842,7 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
     # Given a live table whose schema exactly matches the declaration
     fqn = "cat.sch.orders"
     reader = _FakeReader({fqn: _existing_matching_table(fqn)})
-    executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))
+    executor = _FakeExecutor(results=(_ok_exec(0),))
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing a metadata-only definition
@@ -856,8 +856,6 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
 
 def test_metadata_only_sync_fails_when_unmanaged_column_has_drifted():
     # Given a live table with a different column type (unmanaged dimension drifted)
-    from delta_engine.api import Long
-
     fqn = "cat.sch.orders"
     reader = _FakeReader({
         fqn: TablePresent(
