@@ -141,7 +141,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
 )
 
 
-def _unmanaged_aspect_failures(drift: TableDrift) -> tuple[ValidationFailure, ...]:
+def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     """
     One failure per unmanaged aspect that has drifted.
 
@@ -204,7 +204,7 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
             )
             return ValidationResult(
                 failures=(
-                    *_unmanaged_aspect_failures(drift),
+                    *_validate_managed_scope(drift),
                     *(
                         failure
                         for rule in rules

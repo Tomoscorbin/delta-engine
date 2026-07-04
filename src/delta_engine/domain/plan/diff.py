@@ -468,28 +468,18 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     """
     if observed is None:
         return TableMissing(desired=desired)
-    facts: list[DriftFact] = []
-    facts.extend(_diff_column_structure(desired.columns, observed.columns))
-    facts.extend(_diff_column_comments(desired.columns, observed.columns))
-    facts.extend(_diff_column_tags(desired.columns, observed.columns))
-    if desired.comment != observed.comment:
-        facts.append(
-            TableCommentChanged(desired_comment=desired.comment, observed_comment=observed.comment)
-        )
-    facts.extend(_diff_properties(desired.properties, observed.properties))
-    facts.extend(_diff_table_tags(desired.tags, observed.tags))
-    if desired.partitioned_by != observed.partitioned_by:
-        facts.append(
-            PartitioningChanged(
-                desired_partitioning=desired.partitioned_by,
-                observed_partitioning=observed.partitioned_by,
-            )
-        )
-    primary_key_fact = _diff_primary_key(desired.primary_key, observed.primary_key)
-    if primary_key_fact is not None:
-        facts.append(primary_key_fact)
-    facts.extend(_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys))
-    return TableDrift(facts=tuple(facts), managed_aspects=desired.managed_aspects)
+    facts: tuple[DriftFact, ...] = (
+        *_diff_column_structure(desired.columns, observed.columns),
+        *_diff_column_comments(desired.columns, observed.columns),
+        *_diff_column_tags(desired.columns, observed.columns),
+        *_diff_table_comment(desired.comment, observed.comment),
+        *_diff_properties(desired.properties, observed.properties),
+        *_diff_table_tags(desired.tags, observed.tags),
+        *_diff_partitioning(desired.partitioned_by, observed.partitioned_by),
+        *_diff_primary_key(desired.primary_key, observed.primary_key),
+        *_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
+    )
+    return TableDrift(facts=facts, managed_aspects=desired.managed_aspects)
 
 
 def _diff_column_structure(
@@ -499,12 +489,15 @@ def _diff_column_structure(
     desired_by_name = {column.name: column for column in desired}
     observed_by_name = {column.name: column for column in observed}
     facts: list[DriftFact] = []
+
     for name, column in desired_by_name.items():
         if name not in observed_by_name:
             facts.append(ColumnAdded(column=column))
+
     for name, column in observed_by_name.items():
         if name not in desired_by_name:
             facts.append(ColumnRemoved(column=column))
+
     for name, desired_column in desired_by_name.items():
         if name not in observed_by_name:
             continue
@@ -560,19 +553,30 @@ def _diff_column_tags(
     """
     observed_by_name = {column.name: column for column in observed}
     facts: list[DriftFact] = []
+
     for column in desired:
         observed_tags: Mapping[str, str] = (
             observed_by_name[column.name].tags if column.name in observed_by_name else {}
         )
+
         for tag_name, tag_value in column.tags.items():
             if tag_name not in observed_tags or observed_tags[tag_name] != tag_value:
                 facts.append(
                     ColumnTagSet(column_name=column.name, tag_name=tag_name, tag_value=tag_value)
                 )
+
         for tag_name in observed_tags:
             if tag_name not in column.tags:
                 facts.append(ColumnTagUnset(column_name=column.name, tag_name=tag_name))
+
     return facts
+
+
+def _diff_table_comment(desired: str, observed: str) -> list[DriftFact]:
+    """Return the table comment fact, or nothing when the comments agree."""
+    if desired == observed:
+        return []
+    return [TableCommentChanged(desired_comment=desired, observed_comment=observed)]
 
 
 def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[DriftFact]:
@@ -594,36 +598,49 @@ def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) ->
 def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[DriftFact]:
     """Tag facts under full-state semantics: observed-only tags are drift and are unset."""
     facts: list[DriftFact] = []
+
     for name, value in desired.items():
         if name not in observed or observed[name] != value:
             facts.append(TableTagSet(name=name, value=value))
+
     for name in observed:
         if name not in desired:
             facts.append(TableTagUnset(name=name))
+
     return facts
+
+
+def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> list[DriftFact]:
+    """Return the partitioning fact, or nothing when the specs agree."""
+    if desired == observed:
+        return []
+    return [PartitioningChanged(desired_partitioning=desired, observed_partitioning=observed)]
 
 
 def _diff_primary_key(
     desired: PrimaryKeyConstraint | None,
     observed: PrimaryKeyConstraint | None,
-) -> DriftFact | None:
+) -> list[DriftFact]:
     """
-    Return the primary key fact, or None when the keys agree.
+    Return the primary key fact, or nothing when the keys agree.
 
     Identity is column-set equality: order and constraint name do not make
     two keys different.
     """
     if desired is not None and observed is None:
-        return PrimaryKeyAdded(primary_key=desired)
+        return [PrimaryKeyAdded(primary_key=desired)]
+
     if desired is None and observed is not None:
-        return PrimaryKeyRemoved(observed_primary_key=observed)
+        return [PrimaryKeyRemoved(observed_primary_key=observed)]
+
     if (
         desired is not None
         and observed is not None
         and set(desired.columns) != set(observed.columns)
     ):
-        return PrimaryKeyChanged(desired_primary_key=desired, observed_primary_key=observed)
-    return None
+        return [PrimaryKeyChanged(desired_primary_key=desired, observed_primary_key=observed)]
+
+    return []
 
 
 def _diff_foreign_keys(
@@ -640,10 +657,13 @@ def _diff_foreign_keys(
     desired_by_signature = {fk.signature: fk for fk in desired}
     observed_by_signature = {fk.signature: fk for fk in observed}
     facts: list[DriftFact] = []
+
     for signature, fk in desired_by_signature.items():
         if signature not in observed_by_signature:
             facts.append(ForeignKeyAdded(constraint=fk))
+
     for signature, fk in observed_by_signature.items():
         if signature not in desired_by_signature:
             facts.append(ForeignKeyRemoved(constraint=fk))
+
     return facts
