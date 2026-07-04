@@ -46,16 +46,21 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
-    COLUMN_TYPE_CHANGE = auto()
-    PARTITIONING_CHANGE = auto()
     # ADD_YOUR_NEW_PHASE = auto()
 ```
 
 `ActionPlan` sorts by phase then subject automatically — no changes needed there.
 
-## 3. Add a differ case
+## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/differ.py`, add the condition that produces your new action. `compute_plan(desired, observed)` is the entry point.
+In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant dimension type's `actions()` method. For example, if `UpdateComment` is produced by `TableCommentDimension`:
+
+```python
+def actions(self) -> tuple[Action, ...]:
+    return (UpdateComment(new_comment=self.change.desired),)
+```
+
+If the action belongs to a new dimension type, add the full dimension class (with a `diff()` staticmethod and an `actions()` method) and wire it into `diff_table`.
 
 ## 4. Register a SQL compiler
 
@@ -75,14 +80,26 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 
 ## 5. Add a validation rule if needed
 
-If the new action type can be unsafe, add a rule in `src/delta_engine/application/validation.py`:
+If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the full `dimensions` tuple and inspect dimension types directly:
 
 ```python
+from typing import ClassVar
+from delta_engine.application.failures import ValidationFailure
+from delta_engine.domain.plan.diff import Dimension, TableCommentDimension
+
+
 class NoUnsafeCommentChange:
     name: ClassVar[str] = "NoUnsafeCommentChange"
 
-    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
-        ...
+    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=f"Operation not allowed: ...",
+            )
+            for d in dimensions
+            if isinstance(d, TableCommentDimension) and <condition>
+        )
 ```
 
 Add it to `DEFAULT_RULES` in the same file.
@@ -90,7 +107,7 @@ Add it to `DEFAULT_RULES` in the same file.
 ## 6. Write tests
 
 Add tests in:
-- `tests/domain/plan/test_differ.py` — does `compute_plan` produce `UpdateComment` in the right cases?
+- `tests/domain/plan/test_diff.py` — does the relevant dimension's `actions()` produce `UpdateComment`?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?
 

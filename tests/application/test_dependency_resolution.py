@@ -310,7 +310,7 @@ def test_resolve_with_empty_tables_returns_empty_tuple():
 def test_resolve_blocks_table_passed_in_blocked_set():
     # Given one table with no FKs, named as already-blocked (e.g. failed validation upstream)
     table = _table("cat.sch.orders")
-    blocked = frozenset({QualifiedName("cat", "sch", "orders")})
+    blocked = {QualifiedName("cat", "sch", "orders")}
 
     # When resolving with that table blocked
     result = resolve((table,), blocked=blocked)
@@ -324,7 +324,7 @@ def test_resolve_blocks_fk_dependent_of_a_blocked_table():
     # Given orders (no FKs) is blocked, and shipments has a FK on orders
     orders = _table("cat.sch.orders")
     shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
-    blocked = frozenset({QualifiedName("cat", "sch", "orders")})
+    blocked = {QualifiedName("cat", "sch", "orders")}
 
     # When resolving
     result = resolve((orders, shipments), blocked=blocked)

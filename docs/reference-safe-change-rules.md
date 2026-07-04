@@ -5,7 +5,7 @@ tags:
 
 # Safe-change rules
 
-The engine validates a computed plan before executing any SQL. These four rules block changes that cannot be made safely in place. Each fires a `VALIDATION_FAILED` status with a message naming the rule and the affected column or table.
+The engine validates the computed diff before executing any SQL. These four rules block changes that cannot be made safely in place. Each fires a `VALIDATION_FAILED` status with a message naming the rule and the affected column or table.
 
 | Rule | What it blocks | How to resolve |
 |---|---|---|

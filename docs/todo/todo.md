@@ -38,3 +38,5 @@
 - [ ] improve Report display formatting
 - [ ] Put Propertiess into table.py alongside DeltaTable
 - [ ] Remove table.py from api/ and put it in src/delta_table??
+- [ ] Review if any classes/functions/methods/modules etc should be made private
+

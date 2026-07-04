@@ -6,13 +6,14 @@ runs — one `TableRunReport` is born per table in the read phase and accretes
 its plan, failures, and execution as the chain proceeds. On a real run, if any
 table fails, `SyncFailedError` is raised with a formatted summary.
 
-The five phases, each taking the runs and returning them:
+The six phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
-  2. Plan     — compute action plans from desired vs observed state
-  3. Validate — check every plan against rules; append per-table failures
-  4. Resolve  — order runs by FK dependency; append FK failures and
+  2. Diff     — compute the desired-observed diff; states the facts
+  3. Validate — check every diff against rules; append per-table failures
+  4. Plan     — lower every diff into its action plan
+  5. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  5. Execute  — run the plan of every run with no failures and a non-empty plan
+  6. Execute  — run the plan of every run with no failures and a non-empty plan
 
 Running `resolve()` after validation means a table that fails validation
 blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
@@ -46,11 +47,11 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.application.validation import validate_plan
+from delta_engine.application.validation import validate_diff
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
-from delta_engine.domain.plan.differ import compute_plan
+from delta_engine.domain.plan.diff import TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,10 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the read phase, it accretes its plan, failures, and execution as the
-    phase chain proceeds, then is frozen into a public :class:`TableRunReport`
-    once complete. Kept private to the engine so the published report stays
-    immutable while the phases mutate in place.
+    Born in the read phase, it accretes its diff, plan, failures, and execution
+    as the phase chain proceeds, then is frozen into a public
+    :class:`TableRunReport` once complete. Kept private to the engine so the
+    published report stays immutable while the phases mutate in place.
     """
 
     def __init__(
@@ -75,6 +76,7 @@ class _TableRun:
         self.desired = desired
         self.read = read
         self.plan = ActionPlan()
+        self.diff: TableDiff | None = None
         self.failures: list[Failure] = []
         self.execution: ExecutionSummary | None = None
 
@@ -95,9 +97,9 @@ class Engine:
     High-level orchestrator to plan, validate, and execute changes.
 
     The engine coordinates reading current state from a catalog, computing a
-    plan to reach desired state, validating that plan, resolving FK dependencies
-    with full failure context, and executing passing plans using the provided
-    adapter implementations.
+    diff of desired vs observed state, validating that diff, lowering it to an
+    action plan, resolving FK dependencies with full failure context, and
+    executing passing plans using the provided adapter implementations.
     """
 
     def __init__(
@@ -114,9 +116,9 @@ class Engine:
         Synchronize all registered tables to their desired state.
 
         Runs the phases as a chain, each transforming the per-table runs:
-        read → plan → validate → resolve → execute. Each ``TableRunReport``
-        is born in the read phase and accretes its plan, failures, and
-        execution as later phases run.
+        read → diff → validate → plan → resolve → execute. Each
+        ``TableRunReport`` is born in the read phase and accretes its diff,
+        plan, failures, and execution as later phases run.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -124,11 +126,12 @@ class Engine:
         Args:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``ValueError`` before any phase runs.
-            dry_run: When True, run read → plan → validate → resolve but skip
-                execution (zero catalog mutations). Every run's ``execution``
-                stays ``None`` while its ``plan`` still records the actions that
-                would be applied, and the report is returned instead of raising
-                ``SyncFailedError`` even when a table would fail.
+            dry_run: When True, run read → diff → validate → plan → resolve
+                but skip execution (zero catalog mutations). Every run's
+                ``execution`` stays ``None`` while its ``plan`` still records
+                the actions that would be applied, and the report is returned
+                instead of raising ``SyncFailedError`` even when a table would
+                fail.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -145,8 +148,9 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = self._read(desired)
-        runs = self._plan(runs)
+        runs = self._diff(runs)
         runs = self._validate(runs)
+        runs = self._plan(runs)
         runs = self._resolve(runs)
         runs = self._execute(runs, dry_run=dry_run)
 
@@ -193,20 +197,21 @@ class Engine:
             runs.append(run)
         return tuple(runs)
 
-    def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Compute an action plan for each run; read-failed runs keep their empty plan."""
+    def _diff(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
         for run in runs:
             if isinstance(run.read, ReadFailed):
                 continue
             observed = run.read.table if isinstance(run.read, TablePresent) else None
-            run.plan = compute_plan(desired=run.desired, observed=observed)
-            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+            run.diff = diff_table(desired=run.desired, observed=observed)
         return runs
 
     def _validate(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Validate every run's plan, appending any validation failures."""
+        """Validate every run's diff, appending any validation failures."""
         for run in runs:
-            result = validate_plan(run.plan)
+            if run.diff is None:
+                continue
+            result = validate_diff(run.diff)
             if result.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
@@ -218,6 +223,15 @@ class Engine:
             run.failures.extend(result.failures)
         return runs
 
+    def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """Build the action plan for each run by delegating to the diff."""
+        for run in runs:
+            if run.diff is None or run.failures:
+                continue
+            run.plan = run.diff.plan()
+            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+        return runs
+
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
         Order runs by FK dependency and fold in FK failures.
@@ -226,7 +240,7 @@ class Engine:
         blocked set, so their FK dependents are blocked with
         BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
         """
-        blocked = frozenset(run.qualified_name for run in runs if run.failures)
+        blocked = {run.qualified_name for run in runs if run.failures}
         result = resolve(tuple(run.desired for run in runs), blocked=blocked)
         by_name = {run.qualified_name: run for run in runs}
         for name, fk_failures in result.fk_failures.items():
