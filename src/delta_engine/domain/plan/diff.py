@@ -104,7 +104,7 @@ class KeyValue:
 # Column-level drift entries
 #
 # Each describes exactly one kind of column difference. All satisfy the
-# Dimension protocol so ColumnsDimension can delegate to them uniformly.
+# Dimension protocol so the column dimension types can delegate to them uniformly.
 # ---------------------------------------------------------------------------
 
 
