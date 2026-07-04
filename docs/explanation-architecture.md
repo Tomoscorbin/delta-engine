@@ -196,21 +196,9 @@ Most code lives in one of four packages:
 | `delta_engine.domain` | Backend-free snapshots, diffs, actions, and deterministic planning | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan` |
 | `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
 
-```mermaid
-flowchart TB
-    Public[delta_engine.__init__<br/>curated public exports]
-    API[api<br/>DeltaTable, ForeignKey, Property]
-    App[application<br/>Engine, ports, validation, reports]
-    Domain[domain<br/>snapshots, diffs, actions]
-    Adapters[adapters<br/>Databricks reader, executor, SQL compiler]
-
-    Public --> API
-    Public --> App
-    Public -. lazy .-> Adapters
-    API --> Domain
-    App --> Domain
-    Adapters --> App
-    Adapters --> Domain
+```{image} _generated/imports.svg
+:alt: pydeps import graph for delta_engine packages
+:width: 100%
 ```
 
 The arrows show source dependencies. The domain does not import Spark,
@@ -219,6 +207,12 @@ depends inward on the application ports and domain vocabulary. The top-level
 `delta_engine` package eagerly exposes the pure-Python API and application
 surface, and lazily exposes Databricks helpers so `import delta_engine` does not
 require PySpark.
+
+Regenerate this graph with:
+
+```bash
+uv run --group docs python docs/generate_architecture_diagrams.py
+```
 
 ## Diff-first planning
 
