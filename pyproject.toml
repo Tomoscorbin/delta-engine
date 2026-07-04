@@ -173,6 +173,8 @@ forbidden_modules = [
 
 [tool.mypy]
 python_version = "3.12"
+disallow_untyped_defs = true
+strict_equality = true
 # Example notebooks rely on Databricks-injected globals (spark, dbutils, display)
 # and are run on a cluster, not type-checked here. Excluding them keeps the
 # library's own type-checking strict without fighting the runtime environment.
