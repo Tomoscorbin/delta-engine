@@ -17,7 +17,7 @@ Most code lives in one of four packages:
 | Package | Responsibility | Examples |
 |---|---|---|
 | `delta_engine.api` | User-facing declarations and import surface | `DeltaTable`, `ForeignKey`, `Property` |
-| `delta_engine.application` | Use-case orchestration, ports, failures, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_plan`, `resolve` |
+| `delta_engine.application` | Use-case orchestration, ports, failures, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve` |
 | `delta_engine.domain` | Backend-free schema snapshots, action plans, and diffing | `DesiredTable`, `ObservedTable`, `ActionPlan`, `compute_plan` |
 | `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
 
@@ -91,10 +91,10 @@ sequenceDiagram
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
     Engine->>Domain: diff_table(desired, observed)
     Domain-->>Engine: TableDiff
-    Engine->>Domain: lower_diff(diff)
-    Domain-->>Engine: ActionPlan
     Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
+    Engine->>Domain: lower_diff(diff)
+    Domain-->>Engine: ActionPlan
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
     Engine->>Executor: execute(qualified_name, plan)
@@ -196,7 +196,9 @@ radius in one run.
 
 ## Validation
 
-Each rule implements a `Rule` protocol: a `name` class variable and an `evaluate(plan)` method returning zero or more `ValidationFailure` objects. `validate_plan` runs all rules in `DEFAULT_RULES` and aggregates failures. Rules receive the full plan, so they can reason across actions (e.g. "does this plan add a NOT NULL column to a table that already exists?").
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules judge the `TableDiff` facts — they receive the `TableDrift` so they can reason across dimensions (columns, partitioning, etc.) in a single call and return all violations at once, avoiding a fix-and-rerun cycle per failure.
+
+`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically — creating a table from its full declaration is always safe — so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` and aggregates their failures into a `ValidationResult`.
 
 ## Lazy pyspark import
 

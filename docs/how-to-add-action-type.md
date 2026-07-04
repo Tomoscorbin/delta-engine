@@ -76,10 +76,16 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 If the new action type can be unsafe, add a rule in `src/delta_engine/application/validation.py`:
 
 ```python
+from typing import ClassVar
+from delta_engine.application.failures import ValidationFailure
+from delta_engine.domain.plan.diff import TableDrift
+
+
 class NoUnsafeCommentChange:
     name: ClassVar[str] = "NoUnsafeCommentChange"
 
-    def evaluate(self, plan: ActionPlan) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        # inspect drift facts here — e.g. drift.columns, drift.comment, etc.
         ...
 ```
 
