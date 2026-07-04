@@ -20,6 +20,8 @@ from delta_engine.domain.plan.actions import (
     UnsetColumnTag,
     UnsetTableTag,
 )
+from delta_engine.domain.plan.diff import TableDiff, TableDrift, TableMissing, diff_table
+from delta_engine.domain.plan.lower import compute_plan, lower_diff
 
 __all__ = [
     "Action",
@@ -40,6 +42,12 @@ __all__ = [
     "SetProperty",
     "SetTableComment",
     "SetTableTag",
+    "TableDiff",
+    "TableDrift",
+    "TableMissing",
     "UnsetColumnTag",
     "UnsetTableTag",
+    "compute_plan",
+    "diff_table",
+    "lower_diff",
 ]

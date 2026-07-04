@@ -17,15 +17,14 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.plan import compute_plan
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
-    ColumnTypeChange,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    PartitioningChange,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -37,7 +36,6 @@ from delta_engine.domain.plan.actions import (
     UnsetColumnTag,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.differ import _diff_foreign_keys, compute_plan
 
 
 def _assert_set_fk_action_matches_constraint(
@@ -224,7 +222,7 @@ def test_no_actions_when_desired_equals_observed():
     assert plan.actions == ()
 
 
-def test_combines_column_property_comment_and_partition_diffs():
+def test_combines_column_property_and_comment_diffs():
     # Given: differences across all dimensions
     desired = _desired(
         columns=(
@@ -262,11 +260,6 @@ def test_combines_column_property_comment_and_partition_diffs():
     assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
-    # Partition change is surfaced as a PartitioningChange action
-    partitioning_changes = [a for a in plan.actions if isinstance(a, PartitioningChange)]
-    assert len(partitioning_changes) == 1
-    assert partitioning_changes[0].observed_partitioning == ("event_date",)
-    assert partitioning_changes[0].desired_partitioning == ("event_date", "country")
 
 
 # ---------- column diffs ----------
@@ -385,36 +378,28 @@ def test_adding_column_to_existing_table_emits_only_add_column():
     )
 
 
-def test_emits_column_type_change_action_when_type_differs():
-    # Given: same column name exists but data type differs
-    desired = _desired(columns=(Column("id", String()),))
-    observed = _observed(columns=(Column("id", Integer()),))
+def test_type_drift_lowers_to_no_actions_in_the_plan():
+    # Given a desired column whose type differs from observed
+    desired = _desired(columns=(Column("id", Integer()),))
+    observed = _observed(columns=(Column("id", Long()),))
 
     # When computing the plan
     plan = compute_plan(desired, observed)
 
-    # Then: the drift is surfaced as a ColumnTypeChange action
-    type_changes = [a for a in plan if isinstance(a, ColumnTypeChange)]
-    assert len(type_changes) == 1
-    assert type_changes[0].column_name == "id"
-    assert type_changes[0].from_type == Integer()
-    assert type_changes[0].to_type == String()
+    # Then the plan contains no action for it: the type difference is a fact
+    # for validation to judge, not an operation to execute
+    assert plan.actions == ()
 
 
-def test_emits_partitioning_change_action_when_partition_spec_differs():
-    # Given: desired and observed partition specs differ
-    columns = (Column("id", Integer()), Column("ds", String()))
-    desired = _desired(columns=columns, partitioned_by=("ds",))
-    observed = _observed(columns=columns, partitioned_by=())
+def test_partitioning_drift_lowers_to_no_actions_in_the_plan():
+    # Given desired partitioning that differs from observed
+    desired = _desired(partitioned_by=("id",))
+    observed = _observed()
 
-    # When computing the plan
     plan = compute_plan(desired, observed)
 
-    # Then: the conflict is surfaced as a PartitioningChange action
-    partitioning_changes = [a for a in plan if isinstance(a, PartitioningChange)]
-    assert len(partitioning_changes) == 1
-    assert partitioning_changes[0].observed_partitioning == ()
-    assert partitioning_changes[0].desired_partitioning == ("ds",)
+    # Then the plan contains no action for it — validation judges the drift
+    assert plan.actions == ()
 
 
 def test_no_partitioning_action_when_partition_spec_is_unchanged():
@@ -901,31 +886,6 @@ def test_sync_is_idempotent_when_fk_already_exists_in_catalog():
     # Then no FK actions are emitted — the FK is already in the right state
     fk_actions = [a for a in plan if isinstance(a, (DropForeignKey, SetForeignKey))]
     assert fk_actions == []
-
-
-def test_diff_foreign_keys_treats_missing_table_as_no_observed_fks():
-    # Given a desired table with a FK and no observed table (observed is None)
-    desired = _orders_with_fk(_FK)
-
-    # When diffing FKs against a missing table (empty observed FK tuple)
-    actions = _diff_foreign_keys(desired.foreign_keys, ())
-
-    # Then every desired FK is set and nothing is dropped — a missing table has
-    # no observed FKs to diff against, so there is no separate "create" path
-    set_actions = [a for a in actions if isinstance(a, SetForeignKey)]
-    drop_actions = [a for a in actions if isinstance(a, DropForeignKey)]
-    assert len(set_actions) == 1
-    _assert_set_fk_action_matches_constraint(set_actions[0], desired.foreign_keys[0])
-    assert drop_actions == []
-
-
-def test_diff_foreign_keys_missing_table_with_no_fks_produces_no_actions():
-    # Given a desired table with no FKs and no observed table
-    # When diffing FKs against a missing table
-    actions = _diff_foreign_keys((), ())
-
-    # Then there are no FK actions
-    assert actions == ()
 
 
 # ---------- table tag diffs (full-state) ----------

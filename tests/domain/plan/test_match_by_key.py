@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from delta_engine.domain.plan.differ import match_by_key
+from delta_engine.domain.plan.diff import match_by_key
 
 
 @dataclass(frozen=True)

@@ -304,3 +304,14 @@ def test_foreign_keys_match_by_signature_regardless_of_name():
 
     # Then the signature is the identity — no difference is recorded
     assert diff == TableDrift()
+
+
+def test_existing_table_with_no_observed_foreign_keys_adds_every_desired_one():
+    # Given an existing table observed with no FKs and a declaration with one
+    diff = diff_table(
+        _desired(foreign_keys=(_foreign_key(),)),
+        _observed(foreign_keys=()),
+    )
+
+    # Then the FK diff is pure addition — no removals arise from absence
+    assert diff == TableDrift(foreign_keys=(Added(_foreign_key()),))
