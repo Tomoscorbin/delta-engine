@@ -40,4 +40,5 @@
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
 - [ ] Should we remove the concept of default properties altogether?
+- [ ] restructure files so that important things come first
 
