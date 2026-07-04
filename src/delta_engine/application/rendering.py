@@ -141,6 +141,8 @@ def render_diff_block(report: TableRunReport) -> str:
     if isinstance(report.read, ReadFailed):
         return f"{header}\n  (could not read — no diff)"
     if not report.plan:
+        if report.has_failures:
+            return f"{header}\n  ({_NO_CHANGES} — see failures)"
         return f"{header}\n  ({_NO_CHANGES})"
     lines = [f"  {action_diff_line(action)}" for action in report.plan]
     return "\n".join([header, *lines])

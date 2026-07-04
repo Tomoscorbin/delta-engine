@@ -46,16 +46,14 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
-    COLUMN_TYPE_CHANGE = auto()
-    PARTITIONING_CHANGE = auto()
     # ADD_YOUR_NEW_PHASE = auto()
 ```
 
 `ActionPlan` sorts by phase then subject automatically — no changes needed there.
 
-## 3. Add a differ case
+## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/differ.py`, add the condition that produces your new action. `compute_plan(desired, observed)` is the entry point.
+In `src/delta_engine/domain/plan/lower.py`, add the match arm that translates the relevant `TableDiff` fact into your new action. `lower_diff` is the entry point; `compute_plan` is the `diff_table` → `lower_diff` composition used by the engine.
 
 ## 4. Register a SQL compiler
 
@@ -90,7 +88,7 @@ Add it to `DEFAULT_RULES` in the same file.
 ## 6. Write tests
 
 Add tests in:
-- `tests/domain/plan/test_differ.py` — does `compute_plan` produce `UpdateComment` in the right cases?
+- `tests/domain/plan/test_lower.py` — does `lower_diff` produce `UpdateComment` in the right cases?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?
 

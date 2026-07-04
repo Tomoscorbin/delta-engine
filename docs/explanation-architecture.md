@@ -89,9 +89,11 @@ sequenceDiagram
     API-->>Engine: DesiredTable
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
-    Engine->>Domain: compute_plan(desired, observed)
+    Engine->>Domain: diff_table(desired, observed)
+    Domain-->>Engine: TableDiff
+    Engine->>Domain: lower_diff(diff)
     Domain-->>Engine: ActionPlan
-    Engine->>Validator: validate_plan(plan)
+    Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
@@ -105,12 +107,13 @@ The phases are:
 1. **Prepare**: lower user-facing table declarations to `DesiredTable` values and
    reject duplicate qualified names.
 2. **Read**: ask the reader port for the current catalog state of each table.
-3. **Plan**: diff desired state against observed state with `compute_plan`.
-4. **Validate**: reject unsafe plans before SQL runs.
-5. **Resolve**: order tables by foreign-key dependency and block dependents of
+3. **Diff**: compute the typed `TableDiff` with `diff_table`.
+4. **Validate**: judge the diff with `validate_diff`.
+5. **Plan**: lower the diff into an `ActionPlan` with `lower_diff`.
+6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
-6. **Execute**: execute non-empty plans for tables that have no failures.
-7. **Report**: return `SyncReport`, or raise `SyncFailedError` with the report on
+7. **Execute**: execute non-empty plans for tables that have no failures.
+8. **Report**: return `SyncReport`, or raise `SyncFailedError` with the report on
    real runs that failed.
 
 ## Boundary data shapes
@@ -120,14 +123,15 @@ The phases are:
 | `DeltaTable` | User code | Application preparation | Public declaration object |
 | `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
 | `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
-| `ActionPlan` | `compute_plan` | Validation, executor, report | Ordered table-local changes |
+| `TableDiff` | `diff_table` | Validation, lowering | Typed facts separating observed from desired |
+| `ActionPlan` | `lower_diff` | Validation, executor, report | Ordered table-local changes |
 | `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
 | `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
 | `SyncReport` | Engine | User code | Immutable run result |
 
 ## Planning and determinism
 
-`compute_plan(desired, observed)` diffs the desired declaration against the observed catalog state and returns an `ActionPlan`. Actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
+`compute_plan(desired, observed)` — the `diff_table` → `lower_diff` composition — returns an `ActionPlan`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
 The phase ordering encodes dependency constraints. Each ordering below exists because Databricks rejects the operation otherwise:
 
@@ -136,9 +140,19 @@ The phase ordering encodes dependency constraints. Each ordering below exists be
 - **Primary key sets run after nullability changes**, so columns are guaranteed non-nullable before the constraint is applied.
 - **Foreign keys are set last** (after the primary key is set): a foreign key references a primary or unique key, so that key must exist before the foreign key can point at it.
 
-## Sentinel actions
+## Diff-first planning
 
-`ColumnTypeChange` and `PartitioningChange` are actions that are never executed. The differ emits them to describe drift it detected — a column whose type differs, or a changed partition spec — without judging whether that drift is allowed; deciding what is permitted is the validation layer's job (`UnsupportedColumnTypeChange` and `DisallowPartitioningChange` reject them with a clear message). The SQL compiler raises `AssertionError` if either reaches compilation — encoding the invariant that validation always runs first.
+Planning is two pure stages connected by a typed diff. `diff_table(desired,
+observed)` produces a `TableDiff` — `TableMissing` when the table does not
+exist, else a `TableDrift` recording per-dimension facts (`Added`, `Removed`,
+and `Changed` entries for columns, properties, tags, and keys; `Changed`
+values for the comment and partitioning). The diff states facts only.
+`validate_diff` judges those facts — all policy lives in the validation rules
+— and `lower_diff` translates them into the `ActionPlan`, one `match` per
+dimension. Facts the engine does not act on (a changed column type, a changed
+partition spec, an observed-only property) lower to nothing: validation has
+already rejected what is not allowed, so nothing unexecutable ever enters a
+plan. `compute_plan` is the `diff_table` → `lower_diff` composition.
 
 ## Constraint-name generation
 
@@ -193,8 +207,8 @@ Each rule implements a `Rule` protocol: a `name` class variable and an `evaluate
 | Change | Main location | Notes |
 |---|---|---|
 | Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in the domain, emit it from the differ, then compile it in the backend adapter. |
-| Add a safety rule | `delta_engine.application.validation` | Rules inspect `ActionPlan` and return `ValidationFailure` values. |
+| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in the domain, emit it from the lowering (`domain/plan/lower.py`), then compile it in the backend adapter. |
+| Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` facts and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
 | Change public declarations | `delta_engine.api` | Lower public API choices into domain snapshots before the engine phases begin. |
 | Change report output | `delta_engine.application.report` / `rendering` | Keep display formatting out of domain objects. |
