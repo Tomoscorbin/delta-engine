@@ -33,11 +33,13 @@ from delta_engine.domain.plan.diff import (
     Changed,
     ColumnAdded,
     ColumnCommentChanged,
+    ColumnCommentsDimension,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
-    ColumnsDimension,
+    ColumnStructureDimension,
     ColumnTagsChanged,
+    ColumnTagsDimension,
     ForeignKeysDimension,
     KeyValue,
     PartitioningDimension,
@@ -117,11 +119,11 @@ def test_desired_only_column_produces_columns_dimension_with_added_entry():
         _observed(),
     )
 
-    # Then a ColumnsDimension with an Added entry is produced
+    # Then a ColumnStructureDimension with an Added entry is produced
     assert isinstance(diff, TableDrift)
     assert len(diff.dimensions) == 1
     dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnsDimension)
+    assert isinstance(dim, ColumnStructureDimension)
     assert dim.entries == (ColumnAdded(Column("age", Integer())),)
 
 
@@ -133,7 +135,7 @@ def test_observed_only_column_produces_columns_dimension_with_removed_entry():
 
     assert isinstance(diff, TableDrift)
     dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnsDimension)
+    assert isinstance(dim, ColumnStructureDimension)
     assert dim.entries == (ColumnRemoved(Column("stale", String())),)
 
 
@@ -145,7 +147,7 @@ def test_type_drift_produces_columns_dimension_with_data_type_changed_entry():
 
     assert isinstance(diff, TableDrift)
     dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnsDimension)
+    assert isinstance(dim, ColumnStructureDimension)
     assert dim.entries == (
         ColumnDataTypeChanged(
             column_name="id",
@@ -261,58 +263,7 @@ def test_changed_accepts_unequal_values():
     assert result.observed == 2
 
 
-def test_columns_dimension_added_column_produces_add_column_action():
-    # Given a dimension carrying an added column with no tags
-    column = Column("age", Integer())
-    dim = ColumnsDimension(entries=(ColumnAdded(column=column),))
-
-    assert dim.actions() == (AddColumn(column=column),)
-
-
-def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
-    # Given an added column carrying one tag
-    column = Column("age", Integer(), tags={"pii": "false"})
-    dim = ColumnsDimension(entries=(ColumnAdded(column=column),))
-
-    # Then AddColumn is followed by SetColumnTag
-    assert len(dim.actions()) == 2
-    assert any(isinstance(a, AddColumn) for a in dim.actions())
-    assert any(isinstance(a, SetColumnTag) for a in dim.actions())
-
-
-def test_columns_dimension_removed_column_produces_drop_column():
-    column = Column("stale", Integer(), tags={"old": "y"})
-    dim = ColumnsDimension(entries=(ColumnRemoved(column=column),))
-
-    assert dim.actions() == (DropColumn("stale"),)
-
-
-def test_columns_dimension_nullability_entry_produces_action():
-    entry = ColumnNullabilityChanged(column_name="id", change=Changed(desired=True, observed=False))
-    dim = ColumnsDimension(entries=(entry,))
-
-    assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
-
-
-def test_columns_dimension_comment_entry_produces_action():
-    entry = ColumnCommentChanged(column_name="id", change=Changed(desired="pk", observed=""))
-    dim = ColumnsDimension(entries=(entry,))
-
-    assert dim.actions() == (SetColumnComment("id", "pk"),)
-
-
-def test_columns_dimension_data_type_entry_produces_no_action():
-    # Given a column whose type changed — no in-place action is possible
-    entry = ColumnDataTypeChanged(
-        column_name="id", change=Changed(desired=Integer(), observed=Long())
-    )
-    dim = ColumnsDimension(entries=(entry,))
-
-    # Then no action is produced; ColumnDataTypeChangeNotSupported raises the failure
-    assert dim.actions() == ()
-
-
-def test_type_drift_suppresses_nullability_and_comment_entries():
+def test_type_drift_produces_structure_dimension_with_type_entry_only():
     # Given a column where type, nullability, and comment all differ
     desired = _desired(columns=(Column("id", Integer(), nullable=False, comment="new"),))
     observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
@@ -320,15 +271,100 @@ def test_type_drift_suppresses_nullability_and_comment_entries():
     # When diffing
     diff = diff_table(desired, observed)
 
-    # Then the columns dimension contains only the type entry — nullability and comment
-    # are suppressed because those changes are moot until the column is recreated
+    # Then the structure dimension contains only the type entry (nullability is
+    # suppressed when type drifts — the column must be recreated first).
+    # Comment drift is a separate dimension and is not suppressed.
     assert isinstance(diff, TableDrift)
-    dim = next(d for d in diff.dimensions if isinstance(d, ColumnsDimension))
+    struct_dim = next(d for d in diff.dimensions if isinstance(d, ColumnStructureDimension))
+    assert len(struct_dim.entries) == 1
+    assert isinstance(struct_dim.entries[0], ColumnDataTypeChanged)
+    comment_dim = next((d for d in diff.dimensions if isinstance(d, ColumnCommentsDimension)), None)
+    assert comment_dim is not None
+
+
+# ---------- ColumnStructureDimension
+
+
+def test_column_structure_dimension_added_column_produces_add_column_only():
+    # Given an added column with tags — tags come from ColumnTagsDimension, not here
+    column = Column("age", Integer(), tags={"pii": "false"})
+    dim = ColumnStructureDimension(entries=(ColumnAdded(column=column),))
+
+    # Then only AddColumn is produced
+    assert dim.actions() == (AddColumn(column=column),)
+
+
+def test_column_structure_dimension_removed_column_produces_drop_column():
+    column = Column("stale", Integer())
+    dim = ColumnStructureDimension(entries=(ColumnRemoved(column=column),))
+
+    assert dim.actions() == (DropColumn("stale"),)
+
+
+def test_column_structure_dimension_nullability_produces_action():
+    entry = ColumnNullabilityChanged(
+        column_name="id", change=Changed(desired=True, observed=False)
+    )
+    dim = ColumnStructureDimension(entries=(entry,))
+
+    assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
+
+
+def test_column_structure_dimension_type_change_produces_no_action():
+    entry = ColumnDataTypeChanged(
+        column_name="id", change=Changed(desired=Integer(), observed=Long())
+    )
+    dim = ColumnStructureDimension(entries=(entry,))
+
+    assert dim.actions() == ()
+
+
+# ---------- ColumnCommentsDimension
+
+
+def test_column_comments_dimension_diff_produces_entries_for_matched_columns_only():
+    # Given a desired table with a matched column (comment differs) and a desired-only column
+    desired = (Column("id", Integer(), comment="pk"), Column("ghost", String(), comment="x"))
+    observed = (Column("id", Integer(), comment=""),)
+
+    dim = ColumnCommentsDimension.diff(desired, observed)
+
+    # Then only the matched column produces an entry; the ghost column is not diffed
+    assert dim is not None
     assert len(dim.entries) == 1
-    assert isinstance(dim.entries[0], ColumnDataTypeChanged)
+    assert dim.entries[0].column_name == "id"
 
 
-def test_columns_dimension_tag_entry_produces_set_and_unset_actions():
+def test_column_comments_dimension_produces_set_column_comment():
+    entry = ColumnCommentChanged(column_name="id", change=Changed(desired="pk", observed=""))
+    dim = ColumnCommentsDimension(entries=(entry,))
+
+    assert dim.actions() == (SetColumnComment("id", "pk"),)
+
+
+def test_column_comments_dimension_returns_none_when_no_comment_drift():
+    desired = (Column("id", Integer(), comment="same"),)
+    observed = (Column("id", Integer(), comment="same"),)
+
+    assert ColumnCommentsDimension.diff(desired, observed) is None
+
+
+# ---------- ColumnTagsDimension
+
+
+def test_column_tags_dimension_covers_added_columns():
+    # Given a desired-only column with tags (it will be created by ColumnStructureDimension)
+    desired = (Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))
+    observed = (Column("id", Integer()),)
+
+    dim = ColumnTagsDimension.diff(desired, observed)
+
+    # Then the added column's tags are included (ADD_COLUMN precedes SET_COLUMN_TAG)
+    assert dim is not None
+    assert any(e.column_name == "new" for e in dim.entries)
+
+
+def test_column_tags_dimension_tag_entry_produces_set_and_unset():
     entry = ColumnTagsChanged(
         column_name="id",
         entries=(
@@ -337,13 +373,20 @@ def test_columns_dimension_tag_entry_produces_set_and_unset_actions():
             Removed(KeyValue("old", "y")),
         ),
     )
-    dim = ColumnsDimension(entries=(entry,))
+    dim = ColumnTagsDimension(entries=(entry,))
 
     assert set(dim.actions()) == {
         SetColumnTag(column_name="id", name="new", value="x"),
         SetColumnTag(column_name="id", name="pii", value="true"),
         UnsetColumnTag(column_name="id", name="old"),
     }
+
+
+def test_column_tags_dimension_returns_none_when_no_tag_drift():
+    desired = (Column("id", Integer(), tags={"pii": "true"}),)
+    observed = (Column("id", Integer(), tags={"pii": "true"}),)
+
+    assert ColumnTagsDimension.diff(desired, observed) is None
 
 
 def test_table_comment_dimension_produces_set_table_comment():

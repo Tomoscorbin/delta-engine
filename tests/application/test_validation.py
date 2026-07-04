@@ -12,7 +12,7 @@ from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
-    ColumnsDimension,
+    ColumnStructureDimension,
     PartitioningDimension,
     TableDrift,
     TableMissing,
@@ -40,7 +40,7 @@ def test_rejects_add_of_non_nullable_column():
     # Given a dimensions tuple containing a columns dimension with a NOT NULL addition
     rule = NonNullableColumnAdd()
     dimensions = (
-        ColumnsDimension(entries=(ColumnAdded(Column("order_id", Integer(), nullable=False)),)),
+        ColumnStructureDimension(entries=(ColumnAdded(Column("order_id", Integer(), nullable=False)),)),
     )
 
     # When
@@ -55,7 +55,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
     # Given three NOT NULL column additions in a single dimensions tuple
     rule = NonNullableColumnAdd()
     dimensions = (
-        ColumnsDimension(
+        ColumnStructureDimension(
             entries=(
                 ColumnAdded(Column("a", Integer(), nullable=False)),
                 ColumnAdded(Column("b", String(), nullable=False)),
@@ -78,7 +78,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
 def test_allows_add_of_nullable_column():
     # Given a columns dimension containing a nullable column addition
     rule = NonNullableColumnAdd()
-    dimensions = (ColumnsDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
+    dimensions = (ColumnStructureDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
 
     assert rule.evaluate(dimensions) == ()
 
@@ -98,7 +98,7 @@ def test_non_nullable_column_add_ignores_creation():
 
 
 def test_non_nullable_column_add_passes_when_no_columns_dimension():
-    # Given a dimensions tuple with no ColumnsDimension at all
+    # Given a dimensions tuple with no ColumnStructureDimension at all
     rule = NonNullableColumnAdd()
 
     assert rule.evaluate(()) == ()
@@ -110,7 +110,7 @@ def test_non_nullable_column_add_passes_when_no_columns_dimension():
 def test_rejects_tightening_an_existing_column_to_not_null():
     # Given a columns dimension with a nullability tightening on an existing column
     rule = NullabilityTighteningOnExistingColumn()
-    dimensions = (ColumnsDimension(entries=(_tightening("order_id"),)),)
+    dimensions = (ColumnStructureDimension(entries=(_tightening("order_id"),)),)
 
     # When
     failures = rule.evaluate(dimensions)
@@ -124,7 +124,7 @@ def test_rejects_tightening_an_existing_column_to_not_null():
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
     # Given two nullability tightenings in a single dimensions tuple
     rule = NullabilityTighteningOnExistingColumn()
-    dimensions = (ColumnsDimension(entries=(_tightening("a"), _tightening("b"))),)
+    dimensions = (ColumnStructureDimension(entries=(_tightening("a"), _tightening("b"))),)
 
     # When
     failures = rule.evaluate(dimensions)
@@ -142,7 +142,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
     loosening = ColumnNullabilityChanged(
         column_name="id", change=Changed(desired=True, observed=False)
     )
-    dimensions = (ColumnsDimension(entries=(loosening,)),)
+    dimensions = (ColumnStructureDimension(entries=(loosening,)),)
 
     assert rule.evaluate(dimensions) == ()
 
@@ -151,8 +151,8 @@ def test_allows_loosening_an_existing_column_to_nullable():
 
 
 def test_validate_diff_surfaces_type_drift_as_failure():
-    # Given a drift whose only dimension is a ColumnsDimension with a type change
-    diff = TableDrift(dimensions=(ColumnsDimension(entries=(_type_drift("id"),)),))
+    # Given a drift whose only dimension is a ColumnStructureDimension with a type change
+    diff = TableDrift(dimensions=(ColumnStructureDimension(entries=(_type_drift("id"),)),))
 
     # When
     result = validate_diff(diff)
@@ -181,7 +181,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     # Given a drift with a type change (unsupported) AND a NOT NULL add (rule violation)
     diff = TableDrift(
         dimensions=(
-            ColumnsDimension(
+            ColumnStructureDimension(
                 entries=(
                     _type_drift("id"),
                     ColumnAdded(Column("new_col", Integer(), nullable=False)),
@@ -204,7 +204,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
 def test_validation_passes_when_no_rule_is_broken():
     # Given a drift containing only a nullable column addition (breaks no rules)
     diff = TableDrift(
-        dimensions=(ColumnsDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
+        dimensions=(ColumnStructureDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
     )
 
     # When
@@ -236,7 +236,7 @@ def test_validation_uses_the_default_rules_when_none_are_supplied():
     # Given a drift with a NOT NULL column addition and no explicit rules argument
     diff = TableDrift(
         dimensions=(
-            ColumnsDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
+            ColumnStructureDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
         )
     )
 
@@ -252,7 +252,7 @@ def test_validation_passes_when_empty_rule_set_is_supplied():
     # ColumnAdded breaks no rule when rules=() — ColumnDataTypeChangeNotSupported is suppressed too
     diff = TableDrift(
         dimensions=(
-            ColumnsDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
+            ColumnStructureDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),
         )
     )
 
