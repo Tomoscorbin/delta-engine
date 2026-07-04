@@ -19,6 +19,7 @@ dev = [
   "pyspark>=4.0.0",
   "delta-spark>=4.0.0",
   "hypothesis>=6.155.5",
+  "import-linter>=2.13",
 ]
 docs = [
   "sphinx>=8.0",
@@ -127,6 +128,39 @@ show_missing = true
 [tool.coverage.run]
 branch = true
 source = ["delta_engine"]
+
+
+# -------------------- Import Linter --------------------
+
+[tool.importlinter]
+root_package = "delta_engine"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+id = "hexagonal-layers"
+name = "Hexagonal package layers"
+type = "layers"
+containers = ["delta_engine"]
+layers = [
+  "adapters | api",
+  "application",
+  "domain",
+]
+exhaustive = true
+
+[[tool.importlinter.contracts]]
+id = "backend-imports-stay-in-adapters"
+name = "Backend imports stay in adapters"
+type = "forbidden"
+source_modules = [
+  "delta_engine.api",
+  "delta_engine.application",
+  "delta_engine.domain",
+]
+forbidden_modules = [
+  "delta",
+  "pyspark",
+]
 
 
 # -------------------- MyPy --------------------
