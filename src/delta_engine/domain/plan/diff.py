@@ -13,6 +13,11 @@ Each dimension type owns three concerns: how to detect that it differs (via its
 ``diff`` staticmethod), what actions to produce, and what facts it cannot handle.
 Adding a new dimension means adding one class here — ``diff_table`` requires no
 changes.
+
+Column-level drift entries (`ColumnAdded`, `ColumnRemoved`, `ColumnDataTypeChanged`,
+etc.) satisfy the same `Dimension` protocol as table-level dimensions: each carries
+exactly the fact it describes with no optionals, produces its own actions, and
+declares its own unhandled facts. `ColumnsDimension` delegates to them directly.
 """
 
 from __future__ import annotations
@@ -102,40 +107,145 @@ class KeyValue:
     value: str
 
 
-@dataclass(frozen=True, slots=True)
-class ColumnChanged:
-    """
-    A name-matched column whose attributes differ.
+# ---------------------------------------------------------------------------
+# Column-level drift entries
+#
+# Each describes exactly one kind of column difference. All satisfy the
+# Dimension protocol so ColumnsDimension can delegate to them uniformly.
+# ---------------------------------------------------------------------------
 
-    Carries one optional sub-fact per attribute so no consumer ever re-diffs a
-    column to discover *what* changed. At least one sub-fact must be present —
-    a vacuous entry is a malformed diff and is rejected at construction.
-    """
+
+@dataclass(frozen=True, slots=True)
+class ColumnAdded:
+    """A column present in the declaration but absent from the catalog."""
+
+    column: Column
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return AddColumn followed by SetColumnTag for each tag on the column."""
+        return (AddColumn(column=self.column), *[
+            SetColumnTag(column_name=self.column.name, name=name, value=value)
+            for name, value in self.column.tags.items()
+        ])
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — column additions are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnRemoved:
+    """A column present in the catalog but absent from the declaration."""
+
+    column: Column
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return a DropColumn action."""
+        return (DropColumn(self.column.name),)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — column removals are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnDataTypeChanged:
+    """A column whose data type differs — no in-place action is possible."""
 
     column_name: str
-    data_type: Changed[DataType] | None = None
-    nullability: Changed[bool] | None = None
-    comment: Changed[str] | None = None
-    tags: tuple[Entry[KeyValue], ...] = ()
+    change: Changed[DataType]
 
-    def __post_init__(self) -> None:
-        """Reject an entry that records no differences."""
-        if (
-            self.data_type is None
-            and self.nullability is None
-            and self.comment is None
-            and not self.tags
-        ):
-            raise ValueError(f"ColumnChanged for {self.column_name!r} carries no differences")
+    def actions(self) -> tuple[Action, ...]:
+        """Return no actions — data type changes cannot be applied in place."""
+        return ()
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return one UnhandledFact describing the unsupported type change."""
+        return (
+            UnhandledFact(
+                description=(
+                    f"cannot change the type of existing column '{self.column_name}'"
+                    f" from {self.change.observed} to {self.change.desired}."
+                    " Type migrations are not supported;"
+                    " recreate the table to change a column's type."
+                )
+            ),
+        )
 
 
-type ColumnDrift = Added[Column] | Removed[Column] | ColumnChanged
+@dataclass(frozen=True, slots=True)
+class ColumnNullabilityChanged:
+    """A column whose nullability differs."""
+
+    column_name: str
+    change: Changed[bool]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return a SetColumnNullability action."""
+        return (SetColumnNullability(column_name=self.column_name, nullable=self.change.desired),)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — nullability changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnCommentChanged:
+    """A column whose comment differs."""
+
+    column_name: str
+    change: Changed[str]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return a SetColumnComment action."""
+        return (SetColumnComment(self.column_name, self.change.desired),)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — comment changes are always actionable."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnTagsChanged:
+    """A column whose tags differ."""
+
+    column_name: str
+    entries: tuple[Entry[KeyValue], ...]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return SetColumnTag for Added/Changed entries and UnsetColumnTag for Removed."""
+        result: list[Action] = []
+        for entry in self.entries:
+            match entry:
+                case Added(item=pair) | Changed(desired=pair):
+                    result.append(
+                        SetColumnTag(
+                            column_name=self.column_name, name=pair.name, value=pair.value
+                        )
+                    )
+                case Removed(item=pair):
+                    result.append(UnsetColumnTag(column_name=self.column_name, name=pair.name))
+        return tuple(result)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return no unhandled facts — tag changes are always actionable."""
+        return ()
+
+
+type ColumnDrift = (
+    ColumnAdded
+    | ColumnRemoved
+    | ColumnDataTypeChanged
+    | ColumnNullabilityChanged
+    | ColumnCommentChanged
+    | ColumnTagsChanged
+)
 type ForeignKeyDrift = Added[ForeignKeyConstraint] | Removed[ForeignKeyConstraint]
 
 
 @dataclass(frozen=True, slots=True)
 class ColumnsDimension:
-    """Column drift: added, removed, and changed columns."""
+    """Column drift: a flat sequence of per-column and per-attribute entries."""
 
     entries: tuple[ColumnDrift, ...]
 
@@ -149,94 +259,58 @@ class ColumnsDimension:
         result: list[ColumnDrift] = []
         for name, col in desired_by_name.items():
             if name not in observed_by_name:
-                result.append(Added(col))
+                result.append(ColumnAdded(column=col))
         for name, col in observed_by_name.items():
             if name not in desired_by_name:
-                result.append(Removed(col))
+                result.append(ColumnRemoved(column=col))
         for name, desired_col in desired_by_name.items():
             if name in observed_by_name:
-                entry = ColumnsDimension._diff_pair(desired_col, observed_by_name[name])
-                if entry is not None:
-                    result.append(entry)
+                result.extend(ColumnsDimension._diff_pair(desired_col, observed_by_name[name]))
         return ColumnsDimension(entries=tuple(result)) if result else None
 
     @staticmethod
-    def _diff_pair(desired: Column, observed: Column) -> ColumnChanged | None:
-        """Return the ColumnChanged fact for a name-matched pair, or None when identical."""
-        data_type = _changed(desired.data_type, observed.data_type)
-        nullability = _changed(desired.nullable, observed.nullable)
-        comment = _changed(desired.comment, observed.comment)
-        tags = _diff_mapping(desired.tags, observed.tags)
-        if data_type is None and nullability is None and comment is None and not tags:
-            return None
-        return ColumnChanged(
-            column_name=desired.name,
-            data_type=data_type,
-            nullability=nullability,
-            comment=comment,
-            tags=tags,
-        )
+    def _diff_pair(desired: Column, observed: Column) -> tuple[ColumnDrift, ...]:
+        """
+        Return per-attribute drift entries for a name-matched column pair.
+
+        When a data type change is present, only that entry is returned — all
+        other attribute entries are suppressed so the dry-run report does not
+        show partial actions for a column the engine cannot reconcile.
+        """
+        if desired.data_type != observed.data_type:
+            return (
+                ColumnDataTypeChanged(
+                    column_name=desired.name,
+                    change=Changed(desired=desired.data_type, observed=observed.data_type),
+                ),
+            )
+        entries: list[ColumnDrift] = []
+        if desired.nullable != observed.nullable:
+            entries.append(
+                ColumnNullabilityChanged(
+                    column_name=desired.name,
+                    change=Changed(desired=desired.nullable, observed=observed.nullable),
+                )
+            )
+        if desired.comment != observed.comment:
+            entries.append(
+                ColumnCommentChanged(
+                    column_name=desired.name,
+                    change=Changed(desired=desired.comment, observed=observed.comment),
+                )
+            )
+        tag_entries = _diff_mapping(desired.tags, observed.tags)
+        if tag_entries:
+            entries.append(ColumnTagsChanged(column_name=desired.name, entries=tag_entries))
+        return tuple(entries)
 
     def actions(self) -> tuple[Action, ...]:
-        """Return one action per column drift entry, plus tag actions for added columns."""
-        result: list[Action] = []
-        for entry in self.entries:
-            match entry:
-                case Added(item=column):
-                    result.append(AddColumn(column=column))
-                    result.extend(
-                        SetColumnTag(column_name=column.name, name=name, value=value)
-                        for name, value in column.tags.items()
-                    )
-                case Removed(item=column):
-                    result.append(DropColumn(column.name))
-                case ColumnChanged() as changed:
-                    result.extend(ColumnsDimension._lower_column_changed(changed))
-        return tuple(result)
+        """Return all actions from every column entry."""
+        return tuple(action for entry in self.entries for action in entry.actions())
 
     def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return an UnhandledFact for each column whose data type changed."""
-        return tuple(
-            UnhandledFact(
-                description=(
-                    f"cannot change the type of existing column '{entry.column_name}'"
-                    f" from {entry.data_type.observed} to {entry.data_type.desired}."
-                    " Type migrations are not supported;"
-                    " recreate the table to change a column's type."
-                )
-            )
-            for entry in self.entries
-            if isinstance(entry, ColumnChanged) and entry.data_type is not None
-        )
-
-    @staticmethod
-    def _lower_column_changed(changed: ColumnChanged) -> tuple[Action, ...]:
-        if changed.data_type is not None:
-            # A data_type change is unhandled; suppress all other actions for
-            # this column so the dry-run report does not show partial actions
-            # that will never execute (the unhandled fact surfaces via
-            # .unhandled()).
-            return ()
-        result: list[Action] = []
-        if changed.nullability is not None:
-            result.append(
-                SetColumnNullability(
-                    column_name=changed.column_name, nullable=changed.nullability.desired
-                )
-            )
-        if changed.comment is not None:
-            result.append(SetColumnComment(changed.column_name, changed.comment.desired))
-        for tag_entry in changed.tags:
-            match tag_entry:
-                case Added(item=pair) | Changed(desired=pair):
-                    result.append(
-                        SetColumnTag(
-                            column_name=changed.column_name, name=pair.name, value=pair.value
-                        )
-                    )
-                case Removed(item=pair):
-                    result.append(UnsetColumnTag(column_name=changed.column_name, name=pair.name))
-        return tuple(result)
+        """Return all unhandled facts from every column entry."""
+        return tuple(fact for entry in self.entries for fact in entry.unhandled())
 
 
 @dataclass(frozen=True, slots=True)

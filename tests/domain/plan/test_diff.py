@@ -31,8 +31,13 @@ from delta_engine.domain.plan.actions import (
 from delta_engine.domain.plan.diff import (
     Added,
     Changed,
-    ColumnChanged,
+    ColumnAdded,
+    ColumnCommentChanged,
+    ColumnDataTypeChanged,
+    ColumnNullabilityChanged,
+    ColumnRemoved,
     ColumnsDimension,
+    ColumnTagsChanged,
     ForeignKeysDimension,
     KeyValue,
     PartitioningDimension,
@@ -50,33 +55,41 @@ from delta_engine.domain.plan.diff import (
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-def test_column_changed_requires_at_least_one_difference():
-    # Given a ColumnChanged carrying no sub-fact at all
-    # Then construction is rejected — a vacuous entry is a malformed diff
-    with pytest.raises(ValueError, match="no differences"):
-        ColumnChanged(column_name="id")
-
-
-def test_column_changed_accepts_a_single_difference():
-    # Given exactly one differing attribute
-    entry = ColumnChanged(column_name="id", comment=Changed(desired="pk", observed=""))
-
-    # Then the entry holds that fact and nothing else
-    assert entry.comment == Changed(desired="pk", observed="")
-    assert entry.data_type is None
-    assert entry.nullability is None
-    assert entry.tags == ()
-
-
-def test_column_changed_accepts_tags_only():
-    # Given only tag entries differ
-    entry = ColumnChanged(
-        column_name="id",
-        tags=(Changed(KeyValue("pii", "true"), KeyValue("pii", "false")),),
+def test_column_data_type_changed_carries_the_change():
+    entry = ColumnDataTypeChanged(
+        column_name="id", change=Changed(desired=Integer(), observed=Long())
     )
 
-    # Then the entry is valid
-    assert len(entry.tags) == 1
+    assert entry.column_name == "id"
+    assert entry.change == Changed(desired=Integer(), observed=Long())
+
+
+def test_column_nullability_changed_carries_the_change():
+    entry = ColumnNullabilityChanged(
+        column_name="id", change=Changed(desired=False, observed=True)
+    )
+
+    assert entry.column_name == "id"
+    assert entry.change.desired is False
+
+
+def test_column_comment_changed_carries_the_change():
+    entry = ColumnCommentChanged(
+        column_name="id", change=Changed(desired="new comment", observed="")
+    )
+
+    assert entry.column_name == "id"
+    assert entry.change.desired == "new comment"
+
+
+def test_column_tags_changed_carries_the_entries():
+    entry = ColumnTagsChanged(
+        column_name="id",
+        entries=(Changed(KeyValue("pii", "true"), KeyValue("pii", "false")),),
+    )
+
+    assert entry.column_name == "id"
+    assert len(entry.entries) == 1
 
 
 def test_table_drift_defaults_to_no_differences():
@@ -146,7 +159,7 @@ def test_desired_only_column_produces_columns_dimension_with_added_entry():
     assert len(diff.dimensions) == 1
     dim = diff.dimensions[0]
     assert isinstance(dim, ColumnsDimension)
-    assert dim.entries == (Added(Column("age", Integer())),)
+    assert dim.entries == (ColumnAdded(Column("age", Integer())),)
 
 
 def test_observed_only_column_produces_columns_dimension_with_removed_entry():
@@ -158,10 +171,10 @@ def test_observed_only_column_produces_columns_dimension_with_removed_entry():
     assert isinstance(diff, TableDrift)
     dim = diff.dimensions[0]
     assert isinstance(dim, ColumnsDimension)
-    assert dim.entries == (Removed(Column("stale", String())),)
+    assert dim.entries == (ColumnRemoved(Column("stale", String())),)
 
 
-def test_type_drift_produces_columns_dimension_with_column_changed():
+def test_type_drift_produces_columns_dimension_with_data_type_changed_entry():
     diff = diff_table(
         _desired(columns=(Column("id", Integer()),)),
         _observed(columns=(Column("id", Long()),)),
@@ -171,9 +184,9 @@ def test_type_drift_produces_columns_dimension_with_column_changed():
     dim = diff.dimensions[0]
     assert isinstance(dim, ColumnsDimension)
     assert dim.entries == (
-        ColumnChanged(
+        ColumnDataTypeChanged(
             column_name="id",
-            data_type=Changed(desired=Integer(), observed=Long()),
+            change=Changed(desired=Integer(), observed=Long()),
         ),
     )
 
@@ -294,7 +307,7 @@ def test_unhandled_fact_carries_description():
 def test_columns_dimension_added_column_produces_add_column_action():
     # Given a dimension carrying an added column with no tags
     column = Column("age", Integer())
-    dim = ColumnsDimension(entries=(Added(column),))
+    dim = ColumnsDimension(entries=(ColumnAdded(column=column),))
 
     # Then actions contains AddColumn, unhandled is empty
     assert dim.actions() == (AddColumn(column=column),)
@@ -304,7 +317,7 @@ def test_columns_dimension_added_column_produces_add_column_action():
 def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
     # Given an added column carrying one tag
     column = Column("age", Integer(), tags={"pii": "false"})
-    dim = ColumnsDimension(entries=(Added(column),))
+    dim = ColumnsDimension(entries=(ColumnAdded(column=column),))
 
     # Then AddColumn is followed by SetColumnTag
     assert len(dim.actions()) == 2
@@ -315,67 +328,60 @@ def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
 
 def test_columns_dimension_removed_column_produces_drop_column():
     column = Column("stale", Integer(), tags={"old": "y"})
-    dim = ColumnsDimension(entries=(Removed(column),))
+    dim = ColumnsDimension(entries=(ColumnRemoved(column=column),))
 
     assert dim.actions() == (DropColumn("stale"),)
     assert dim.unhandled() == ()
 
 
-def test_columns_dimension_changed_nullability_and_comment_produce_actions():
-    entry = ColumnChanged(
-        column_name="id",
-        nullability=Changed(desired=True, observed=False),
-        comment=Changed(desired="pk", observed=""),
+def test_columns_dimension_nullability_entry_produces_action():
+    entry = ColumnNullabilityChanged(
+        column_name="id", change=Changed(desired=True, observed=False)
     )
     dim = ColumnsDimension(entries=(entry,))
 
-    assert set(dim.actions()) == {
-        SetColumnNullability(column_name="id", nullable=True),
-        SetColumnComment("id", "pk"),
-    }
+    assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
     assert dim.unhandled() == ()
 
 
-def test_columns_dimension_type_drift_produces_unhandled_fact_no_action():
+def test_columns_dimension_comment_entry_produces_action():
+    entry = ColumnCommentChanged(column_name="id", change=Changed(desired="pk", observed=""))
+    dim = ColumnsDimension(entries=(entry,))
+
+    assert dim.actions() == (SetColumnComment("id", "pk"),)
+    assert dim.unhandled() == ()
+
+
+def test_columns_dimension_data_type_entry_produces_unhandled_fact_no_action():
     # Given a column whose type changed — unsupported operation
-    entry = ColumnChanged(
-        column_name="id",
-        data_type=Changed(desired=Integer(), observed=Long()),
+    entry = ColumnDataTypeChanged(
+        column_name="id", change=Changed(desired=Integer(), observed=Long())
     )
     dim = ColumnsDimension(entries=(entry,))
 
-    # Then no action is produced for the type change, but an unhandled fact is
+    # Then no action is produced, but an unhandled fact surfaces
     assert dim.actions() == ()
     assert len(dim.unhandled()) == 1
     assert "id" in dim.unhandled()[0].description
 
 
-def test_columns_dimension_type_drift_with_nullability_suppresses_all_actions():
-    # Given a column changed with both a data_type drift (unhandled) and a
-    # nullability drift (normally actionable)
-    entry = ColumnChanged(
+def test_columns_dimension_type_drift_suppresses_other_attribute_entries():
+    # Given a column pair where type differs: _diff_pair returns only the type entry
+    # so other attribute entries are never created (suppression happens at construction,
+    # not at lowering)
+    desired_col = Column("id", Integer(), nullable=False, comment="new")
+    observed_col = Column("id", Long(), nullable=True, comment="old")
+    entries = ColumnsDimension._diff_pair(desired_col, observed_col)
+
+    # Then only the data type entry is present — nullability and comment are suppressed
+    assert len(entries) == 1
+    assert isinstance(entries[0], ColumnDataTypeChanged)
+
+
+def test_columns_dimension_tag_entry_produces_set_and_unset_actions():
+    entry = ColumnTagsChanged(
         column_name="id",
-        data_type=Changed(desired=Integer(), observed=Long()),
-        nullability=Changed(desired=True, observed=False),
-    )
-    dim = ColumnsDimension(entries=(entry,))
-
-    # When actions and unhandled facts are requested
-    actions = dim.actions()
-    unhandled = dim.unhandled()
-
-    # Then no actions are produced — partial actions must not be shown for a
-    # column the engine cannot reconcile — but the unhandled fact is still
-    # surfaced so validation blocks the run
-    assert actions == ()
-    assert len(unhandled) == 1
-    assert "id" in unhandled[0].description
-
-
-def test_columns_dimension_tag_changes_produce_set_and_unset_actions():
-    entry = ColumnChanged(
-        column_name="id",
-        tags=(
+        entries=(
             Added(KeyValue("new", "x")),
             Changed(desired=KeyValue("pii", "true"), observed=KeyValue("pii", "false")),
             Removed(KeyValue("old", "y")),

@@ -7,8 +7,8 @@ from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.domain.plan.diff import (
-    Added,
-    ColumnChanged,
+    ColumnAdded,
+    ColumnNullabilityChanged,
     ColumnsDimension,
     Dimension,
     TableDiff,
@@ -59,11 +59,11 @@ class NonNullableColumnAdd:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot add non-nullable column '{entry.item.name}'"
+                    f"Operation not allowed: cannot add non-nullable column '{entry.column.name}'"
                 ),
             )
             for entry in cols_dim.entries
-            if isinstance(entry, Added) and not entry.item.nullable
+            if isinstance(entry, ColumnAdded) and not entry.column.nullable
         )
 
 
@@ -87,9 +87,7 @@ class NullabilityTighteningOnExistingColumn:
                 ),
             )
             for entry in cols_dim.entries
-            if isinstance(entry, ColumnChanged)
-            and entry.nullability is not None
-            and entry.nullability.desired is False
+            if isinstance(entry, ColumnNullabilityChanged) and entry.change.desired is False
         )
 
 
