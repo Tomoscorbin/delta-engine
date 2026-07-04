@@ -2,7 +2,8 @@ import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.properties import Property
-from delta_engine.domain.model import Column as DomainColumn, QualifiedName
+from delta_engine.api.table import METADATA_ASPECTS
+from delta_engine.domain.model import ALL_ASPECTS, Column as DomainColumn, QualifiedName, TableAspect
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
 
@@ -399,3 +400,70 @@ def test_delta_table_preserves_tag_key_case():
 
     # Then the key case is preserved
     assert "CostCentre" in dict(table.to_desired_table().tags)
+
+
+# ---- metadata_only flag
+
+
+def test_delta_table_manages_all_aspects_by_default():
+    # Given a table declared without metadata_only
+    table = DeltaTable(
+        catalog="dev", schema="silver", name="orders", columns=[Column("id", Integer())]
+    )
+
+    # Then the lowered desired table manages everything
+    assert table.to_desired_table().managed_aspects == ALL_ASPECTS
+
+
+def test_metadata_only_table_manages_metadata_aspects():
+    # Given a metadata-only declaration
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        metadata_only=True,
+    )
+
+    # Then the lowered scope is exactly the metadata aspects
+    assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
+
+
+def test_metadata_only_table_has_no_properties():
+    # Given a metadata-only declaration — properties control physical Delta behaviour,
+    # so they are deliberately excluded from metadata-only mode
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        metadata_only=True,
+    )
+
+    # Then no properties are injected (not even the column-mapping default)
+    assert table.to_desired_table().properties == {}
+
+
+def test_metadata_only_table_still_lowers_the_full_schema():
+    # Given a metadata-only declaration with full schema detail
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer(), nullable=False), Column("name", String())],
+        metadata_only=True,
+    )
+
+    # Then all columns are lowered — scope controls reconciliation, not lowering
+    desired = table.to_desired_table()
+    assert tuple(c.name for c in desired.columns) == ("id", "name")
+
+
+def test_metadata_aspects_excludes_structure_properties_and_partitioning():
+    # Given the metadata-only named mode
+    # Then physical-behaviour aspects are excluded by design
+    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset({
+        TableAspect.COLUMN_STRUCTURE,
+        TableAspect.PROPERTIES,
+        TableAspect.PARTITIONING,
+    })

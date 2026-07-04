@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import ClassVar, Final
 
 from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import ALL_ASPECTS, Column, DesiredTable, QualifiedName, TableAspect
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 
@@ -23,6 +23,15 @@ class _SelfReference:
 
 
 Self: Final = _SelfReference()
+
+METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset({
+    TableAspect.TABLE_COMMENT,
+    TableAspect.COLUMN_COMMENTS,
+    TableAspect.COLUMN_TAGS,
+    TableAspect.TABLE_TAGS,
+    TableAspect.PRIMARY_KEY,
+    TableAspect.FOREIGN_KEYS,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +122,7 @@ class DeltaTable:
         tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
+        metadata_only: bool = False,
     ) -> None:
         user_properties = dict(properties or {})
 
@@ -124,7 +134,7 @@ class DeltaTable:
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
-        effective_properties = {**self.default_properties, **user_properties}
+        effective_properties = {} if metadata_only else {**self.default_properties, **user_properties}
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
@@ -153,6 +163,7 @@ class DeltaTable:
             partitioned_by=tuple(partitioned_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
+            managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
         )
 
     @property
