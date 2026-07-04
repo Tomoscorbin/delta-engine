@@ -18,7 +18,7 @@ Most code lives in one of four packages:
 |---|---|---|
 | `delta_engine.api` | User-facing declarations and import surface | `DeltaTable`, `ForeignKey`, `Property` |
 | `delta_engine.application` | Use-case orchestration, ports, failures, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve` |
-| `delta_engine.domain` | Backend-free schema snapshots, action plans, and diffing | `DesiredTable`, `ObservedTable`, `ActionPlan`, `compute_plan` |
+| `delta_engine.domain` | Backend-free schema snapshots, action plans, and diffing | `DesiredTable`, `ObservedTable`, `ActionPlan` |
 | `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
 
 ```mermaid
@@ -123,7 +123,7 @@ The phases are:
 | `DeltaTable` | User code | Application preparation | Public declaration object |
 | `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
 | `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
-| `TableDiff` | `diff_table` | Validation, lowering | Typed facts separating observed from desired |
+| `TableDiff` | `diff_table` | Validation, Engine (dimensions) | Typed facts separating observed from desired |
 | `ActionPlan` | Engine (from dimensions) | Executor, report | Ordered table-local changes |
 | `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
 | `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
