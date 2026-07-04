@@ -35,43 +35,12 @@ from delta_engine.domain.plan.actions import (
     UnsetColumnTag,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.diff import TableDrift, TableMissing, diff_table
+from delta_engine.domain.plan.diff import diff_table
 
 
 def _compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
-    """Local test helper: diff then produce the action plan via dimension iteration."""
-    diff = diff_table(desired, observed)
-    match diff:
-        case TableMissing(desired=desired_table):
-            tag_actions = tuple(
-                SetTableTag(name=name, value=value) for name, value in desired_table.tags.items()
-            )
-            column_tag_actions = tuple(
-                SetColumnTag(column_name=column.name, name=name, value=value)
-                for column in desired_table.columns
-                for name, value in column.tags.items()
-            )
-            foreign_key_actions = tuple(
-                SetForeignKey(
-                    local_columns=foreign_key.local_columns,
-                    referenced_table=foreign_key.referenced_table,
-                    referenced_columns=foreign_key.referenced_columns,
-                    constraint_name=foreign_key.constraint_name,
-                )
-                for foreign_key in desired_table.foreign_keys
-            )
-            return ActionPlan(
-                (
-                    CreateTable(desired_table),
-                    *tag_actions,
-                    *column_tag_actions,
-                    *foreign_key_actions,
-                )
-            )
-        case TableDrift() as drift:
-            return ActionPlan(
-                tuple(action for dim in drift.dimensions for action in dim.actions())
-            )
+    """Local test helper: diff then produce the action plan."""
+    return diff_table(desired, observed).plan()
 
 
 def _assert_set_fk_action_matches_constraint(

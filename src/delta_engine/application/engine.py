@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
-from typing import assert_never
 
 from delta_engine.application.dependency_resolution import resolve
 from delta_engine.application.desired_tables import DesiredTableSource, prepare_desired_tables
@@ -51,15 +50,8 @@ from delta_engine.application.report import (
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import (
-    Action,
-    ActionPlan,
-    CreateTable,
-    SetColumnTag,
-    SetForeignKey,
-    SetTableTag,
-)
-from delta_engine.domain.plan.diff import TableDiff, TableDrift, TableMissing, diff_table
+from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan.diff import TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -232,45 +224,13 @@ class Engine:
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Build the action plan for each run by iterating its diff's dimensions."""
+        """Build the action plan for each run by delegating to the diff."""
         for run in runs:
             if run.diff is None:
                 continue
-            match run.diff:
-                case TableMissing(desired=desired):
-                    run.plan = self._plan_missing(desired)
-                case TableDrift() as drift:
-                    run.plan = ActionPlan(
-                        tuple(action for d in drift.dimensions for action in d.actions())
-                    )
-                case _ as unreachable:
-                    assert_never(unreachable)
+            run.plan = run.diff.plan()
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
-
-    @staticmethod
-    def _plan_missing(desired: DesiredTable) -> ActionPlan:
-        """Create the action plan for a missing table: CREATE TABLE plus tag and FK follow-ups."""
-        tag_actions: tuple[Action, ...] = tuple(
-            SetTableTag(name=name, value=value) for name, value in desired.tags.items()
-        )
-        column_tag_actions: tuple[Action, ...] = tuple(
-            SetColumnTag(column_name=column.name, name=name, value=value)
-            for column in desired.columns
-            for name, value in column.tags.items()
-        )
-        foreign_key_actions: tuple[Action, ...] = tuple(
-            SetForeignKey(
-                local_columns=foreign_key.local_columns,
-                referenced_table=foreign_key.referenced_table,
-                referenced_columns=foreign_key.referenced_columns,
-                constraint_name=foreign_key.constraint_name,
-            )
-            for foreign_key in desired.foreign_keys
-        )
-        return ActionPlan(
-            (CreateTable(desired), *tag_actions, *column_tag_actions, *foreign_key_actions)
-        )
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """

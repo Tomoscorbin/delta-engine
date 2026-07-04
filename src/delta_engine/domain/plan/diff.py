@@ -22,7 +22,9 @@ from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPlan,
     AddColumn,
+    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -274,7 +276,7 @@ class PartitioningDimension:
         return (
             UnhandledFact(
                 description=(
-                    f"partitioning changes are not supported."
+                    "partitioning changes are not supported."
                     f" Current partition columns: {self.change.observed}"
                     f" - Requested partition columns: {self.change.desired}."
                     " Recreate the table with the desired partitioning."
@@ -344,6 +346,29 @@ class TableMissing:
 
     desired: DesiredTable
 
+    def plan(self) -> ActionPlan:
+        """Build the creation plan: CREATE TABLE plus tag and FK follow-up actions."""
+        tag_actions = tuple(
+            SetTableTag(name=name, value=value) for name, value in self.desired.tags.items()
+        )
+        column_tag_actions = tuple(
+            SetColumnTag(column_name=column.name, name=name, value=value)
+            for column in self.desired.columns
+            for name, value in column.tags.items()
+        )
+        foreign_key_actions = tuple(
+            SetForeignKey(
+                local_columns=fk.local_columns,
+                referenced_table=fk.referenced_table,
+                referenced_columns=fk.referenced_columns,
+                constraint_name=fk.constraint_name,
+            )
+            for fk in self.desired.foreign_keys
+        )
+        return ActionPlan(
+            (CreateTable(self.desired), *tag_actions, *column_tag_actions, *foreign_key_actions)
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TableDrift:
@@ -356,6 +381,10 @@ class TableDrift:
     """
 
     dimensions: tuple[Dimension, ...] = ()
+
+    def plan(self) -> ActionPlan:
+        """Build the action plan by collecting actions from every dimension."""
+        return ActionPlan(tuple(action for d in self.dimensions for action in d.actions()))
 
 
 type TableDiff = TableMissing | TableDrift
