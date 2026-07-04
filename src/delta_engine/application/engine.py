@@ -226,7 +226,7 @@ class Engine:
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """Build the action plan for each run by delegating to the diff."""
         for run in runs:
-            if run.diff is None:
+            if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)

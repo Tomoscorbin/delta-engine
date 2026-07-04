@@ -149,7 +149,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
     assert rule.evaluate(dimensions) == ()
 
 
-# ---- unhandled facts → ValidationFailure
+# ---- unsupported drift → ValidationFailure
 
 
 def test_validate_diff_surfaces_type_drift_as_failure():
@@ -181,8 +181,8 @@ def test_validate_diff_surfaces_partitioning_change_as_failure():
     assert any("partitioning" in f.message.lower() for f in result.failures)
 
 
-def test_validate_diff_collects_both_unhandled_and_rule_failures():
-    # Given a drift with a type change (unhandled) AND a NOT NULL add (rule)
+def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
+    # Given a drift with a type change (unsupported) AND a NOT NULL add (rule violation)
     diff = TableDrift(
         dimensions=(
             ColumnsDimension(
@@ -253,7 +253,7 @@ def test_validation_uses_the_default_rules_when_none_are_supplied():
 
 def test_validation_passes_when_empty_rule_set_is_supplied():
     # Given a drift that would break a rule, but no rules are supplied
-    # The unhandled type-drift still surfaces because it comes from dimensions, not rules
+    # ColumnAdded breaks no rule when rules=() — ColumnDataTypeChangeNotSupported is suppressed too
     diff = TableDrift(
         dimensions=(
             ColumnsDimension(entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)),

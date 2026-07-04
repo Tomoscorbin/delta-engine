@@ -106,7 +106,8 @@ class ColumnDataTypeChangeNotSupported:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"cannot change the type of existing column '{entry.column_name}'"
+                    f"Operation not allowed: cannot change the type of existing column"
+                    f" '{entry.column_name}'"
                     f" from {entry.change.observed} to {entry.change.desired}."
                     " Type migrations are not supported;"
                     " recreate the table to change a column's type."
@@ -127,9 +128,9 @@ class PartitioningChangeNotSupported:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    "partitioning changes are not supported."
-                    f" Current partition columns: {d.change.observed}"
-                    f" - Requested partition columns: {d.change.desired}."
+                    "Operation not allowed: partitioning cannot be changed in place."
+                    f" Current: {d.change.observed}."
+                    f" Requested: {d.change.desired}."
                     " Recreate the table with the desired partitioning."
                 ),
             )

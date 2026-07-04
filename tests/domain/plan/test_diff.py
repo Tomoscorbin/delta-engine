@@ -385,7 +385,7 @@ def test_table_comment_dimension_produces_set_table_comment():
     # Given a changed table comment
     dim = TableCommentDimension(change=Changed(desired="new", observed="old"))
 
-    # Then a single SetTableComment action is produced and no unhandled facts
+    # Then a single SetTableComment action is produced
     assert dim.actions() == (SetTableComment(comment="new"),)
 
 
@@ -399,7 +399,6 @@ def test_properties_dimension_sets_added_and_changed_ignores_removed():
         )
     )
 
-    # When actions and unhandled facts are requested
     # Then only Added and Changed entries produce SetProperty; Removed is silently ignored
     assert set(dim.actions()) == {
         SetProperty(name="a", value="1"),

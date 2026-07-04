@@ -199,7 +199,7 @@ radius in one run.
 
 ## Validation
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules judge the `TableDiff` facts — they receive the `TableDrift` so they can reason across dimensions (columns, partitioning, etc.) in a single call and return all violations at once, avoiding a fix-and-rerun cycle per failure.
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]` method. Rules inspect the dimensions directly — typically by scanning for a specific dimension type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
 
 `validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically — creating a table from its full declaration is always safe — so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` and aggregates their failures into a `ValidationResult`.
 

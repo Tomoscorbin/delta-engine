@@ -53,7 +53,14 @@ class ActionPhase(IntEnum):
 
 ## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/lower.py`, add the match arm that translates the relevant `TableDiff` fact into your new action. `lower_diff` is the entry point; `compute_plan` is the `diff_table` → `lower_diff` composition used by the engine.
+In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant dimension type's `actions()` method. For example, if `UpdateComment` is produced by `TableCommentDimension`:
+
+```python
+def actions(self) -> tuple[Action, ...]:
+    return (UpdateComment(new_comment=self.change.desired),)
+```
+
+If the action belongs to a new dimension type, add the full dimension class (with a `diff()` staticmethod and an `actions()` method) and wire it into `diff_table`.
 
 ## 4. Register a SQL compiler
 
@@ -73,20 +80,26 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 
 ## 5. Add a validation rule if needed
 
-If the new action type can be unsafe, add a rule in `src/delta_engine/application/validation.py`:
+If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the full `dimensions` tuple and inspect dimension types directly:
 
 ```python
 from typing import ClassVar
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.domain.plan.diff import TableDrift
+from delta_engine.domain.plan.diff import Dimension, TableCommentDimension
 
 
 class NoUnsafeCommentChange:
     name: ClassVar[str] = "NoUnsafeCommentChange"
 
-    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        # inspect drift facts here — e.g. drift.columns, drift.comment, etc.
-        ...
+    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=f"Operation not allowed: ...",
+            )
+            for d in dimensions
+            if isinstance(d, TableCommentDimension) and <condition>
+        )
 ```
 
 Add it to `DEFAULT_RULES` in the same file.
@@ -94,7 +107,7 @@ Add it to `DEFAULT_RULES` in the same file.
 ## 6. Write tests
 
 Add tests in:
-- `tests/domain/plan/test_lower.py` — does `lower_diff` produce `UpdateComment` in the right cases?
+- `tests/domain/plan/test_diff.py` — does the relevant dimension's `actions()` produce `UpdateComment`?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?
 

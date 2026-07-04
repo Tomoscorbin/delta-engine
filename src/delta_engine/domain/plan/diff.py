@@ -111,10 +111,12 @@ class ColumnAdded:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
-        return (AddColumn(column=self.column), *[
+        result: list[Action] = [AddColumn(column=self.column)]
+        result.extend(
             SetColumnTag(column_name=self.column.name, name=name, value=value)
             for name, value in self.column.tags.items()
-        ])
+        )
+        return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)
