@@ -11,10 +11,19 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.plan.actions import (
+    AddColumn,
+    DropColumn,
+    SetColumnComment,
+    SetColumnNullability,
+    SetColumnTag,
+    UnsetColumnTag,
+)
 from delta_engine.domain.plan.diff import (
     Added,
     Changed,
     ColumnChanged,
+    ColumnsDimension,
     KeyValue,
     Removed,
     TableDrift,
@@ -338,3 +347,81 @@ def test_unhandled_fact_carries_description():
     fact = UnhandledFact(description="partitioning change: () → ('ds',)")
 
     assert fact.description == "partitioning change: () → ('ds',)"
+
+
+def test_columns_dimension_added_column_produces_add_column_action():
+    # Given a dimension carrying an added column with no tags
+    column = Column("age", Integer())
+    dim = ColumnsDimension(entries=(Added(column),))
+
+    # Then actions contains AddColumn, unhandled is empty
+    assert dim.actions() == (AddColumn(column=column),)
+    assert dim.unhandled() == ()
+
+
+def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
+    # Given an added column carrying one tag
+    column = Column("age", Integer(), tags={"pii": "false"})
+    dim = ColumnsDimension(entries=(Added(column),))
+
+    # Then AddColumn is followed by SetColumnTag
+    assert len(dim.actions()) == 2
+    assert any(isinstance(a, AddColumn) for a in dim.actions())
+    assert any(isinstance(a, SetColumnTag) for a in dim.actions())
+    assert dim.unhandled() == ()
+
+
+def test_columns_dimension_removed_column_produces_drop_column():
+    column = Column("stale", Integer(), tags={"old": "y"})
+    dim = ColumnsDimension(entries=(Removed(column),))
+
+    assert dim.actions() == (DropColumn("stale"),)
+    assert dim.unhandled() == ()
+
+
+def test_columns_dimension_changed_nullability_and_comment_produce_actions():
+    entry = ColumnChanged(
+        column_name="id",
+        nullability=Changed(desired=True, observed=False),
+        comment=Changed(desired="pk", observed=""),
+    )
+    dim = ColumnsDimension(entries=(entry,))
+
+    assert set(dim.actions()) == {
+        SetColumnNullability(column_name="id", nullable=True),
+        SetColumnComment("id", "pk"),
+    }
+    assert dim.unhandled() == ()
+
+
+def test_columns_dimension_type_drift_produces_unhandled_fact_no_action():
+    # Given a column whose type changed — unsupported operation
+    entry = ColumnChanged(
+        column_name="id",
+        data_type=Changed(desired=Integer(), observed=Long()),
+    )
+    dim = ColumnsDimension(entries=(entry,))
+
+    # Then no action is produced for the type change, but an unhandled fact is
+    assert dim.actions() == ()
+    assert len(dim.unhandled()) == 1
+    assert "id" in dim.unhandled()[0].description
+
+
+def test_columns_dimension_tag_changes_produce_set_and_unset_actions():
+    entry = ColumnChanged(
+        column_name="id",
+        tags=(
+            Added(KeyValue("new", "x")),
+            Changed(desired=KeyValue("pii", "true"), observed=KeyValue("pii", "false")),
+            Removed(KeyValue("old", "y")),
+        ),
+    )
+    dim = ColumnsDimension(entries=(entry,))
+
+    assert set(dim.actions()) == {
+        SetColumnTag(column_name="id", name="new", value="x"),
+        SetColumnTag(column_name="id", name="pii", value="true"),
+        UnsetColumnTag(column_name="id", name="old"),
+    }
+    assert dim.unhandled() == ()

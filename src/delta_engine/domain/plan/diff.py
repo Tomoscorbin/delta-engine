@@ -20,7 +20,15 @@ from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
-from delta_engine.domain.plan.actions import Action
+from delta_engine.domain.plan.actions import (
+    Action,
+    AddColumn,
+    DropColumn,
+    SetColumnComment,
+    SetColumnNullability,
+    SetColumnTag,
+    UnsetColumnTag,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +116,80 @@ class ColumnChanged:
 
 type ColumnDrift = Added[Column] | Removed[Column] | ColumnChanged
 type ForeignKeyDrift = Added[ForeignKeyConstraint] | Removed[ForeignKeyConstraint]
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnsDimension:
+    """Column drift: added, removed, and changed columns."""
+
+    entries: tuple[ColumnDrift, ...]
+
+    def actions(self) -> tuple[Action, ...]:
+        """Return one action per column drift entry, plus tag actions for added columns."""
+        result: list[Action] = []
+        for entry in self.entries:
+            match entry:
+                case Added(item=column):
+                    tag_actions = tuple(
+                        SetColumnTag(column_name=column.name, name=name, value=value)
+                        for name, value in column.tags.items()
+                    )
+                    result.append(AddColumn(column=column))
+                    result.extend(tag_actions)
+                case Removed(item=column):
+                    result.append(DropColumn(column.name))
+                case ColumnChanged() as changed:
+                    result.extend(self._lower_column_changed(changed))
+        return tuple(result)
+
+    def unhandled(self) -> tuple[UnhandledFact, ...]:
+        """Return an UnhandledFact for each column whose data type changed."""
+        facts: list[UnhandledFact] = []
+        for entry in self.entries:
+            if isinstance(entry, ColumnChanged) and entry.data_type is not None:
+                facts.append(
+                    UnhandledFact(
+                        description=(
+                            f"cannot change the type of existing column"
+                            f" '{entry.column_name}' from"
+                            f" {entry.data_type.observed} to {entry.data_type.desired}."
+                            " Type migrations are not supported;"
+                            " recreate the table to change a column's type."
+                        )
+                    )
+                )
+        return tuple(facts)
+
+    @staticmethod
+    def _lower_column_changed(changed: ColumnChanged) -> tuple[Action, ...]:
+        result: list[Action] = []
+        if changed.nullability is not None:
+            result.append(
+                SetColumnNullability(
+                    column_name=changed.column_name, nullable=changed.nullability.desired
+                )
+            )
+        if changed.comment is not None:
+            result.append(SetColumnComment(changed.column_name, changed.comment.desired))
+        for tag_entry in changed.tags:
+            match tag_entry:
+                case Added(item=pair):
+                    result.append(
+                        SetColumnTag(
+                            column_name=changed.column_name, name=pair.name, value=pair.value
+                        )
+                    )
+                case Changed(desired=pair):
+                    result.append(
+                        SetColumnTag(
+                            column_name=changed.column_name, name=pair.name, value=pair.value
+                        )
+                    )
+                case Removed(item=pair):
+                    result.append(
+                        UnsetColumnTag(column_name=changed.column_name, name=pair.name)
+                    )
+        return tuple(result)
 
 
 @dataclass(frozen=True, slots=True)
