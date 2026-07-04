@@ -19,5 +19,10 @@ class TableAspect(Enum):
     PRIMARY_KEY = auto()
     FOREIGN_KEYS = auto()
 
+    @property
+    def label(self) -> str:
+        """Human-readable label (e.g. COLUMN_STRUCTURE -> 'column structure')."""
+        return self.name.lower().replace("_", " ")
+
 
 ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)

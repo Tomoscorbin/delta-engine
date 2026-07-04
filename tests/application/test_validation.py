@@ -3,7 +3,6 @@ from delta_engine.application.validation import (
     DEFAULT_RULES,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
-    UnmanagedAspectDrift,
     ValidationResult,
     validate_diff,
 )
@@ -66,7 +65,7 @@ def test_rejects_add_of_non_nullable_column():
     facts = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
 
     # When
-    failures = rule.evaluate(facts, ALL_ASPECTS)
+    failures = rule.evaluate(facts)
 
     # Then
     assert len(failures) == 1
@@ -83,7 +82,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
     )
 
     # When
-    failures = rule.evaluate(facts, ALL_ASPECTS)
+    failures = rule.evaluate(facts)
 
     # Then
     assert len(failures) == 3
@@ -98,7 +97,7 @@ def test_allows_add_of_nullable_column():
     rule = NonNullableColumnAdd()
     facts = (ColumnAdded(Column("age", Integer())),)
 
-    assert rule.evaluate(facts, ALL_ASPECTS) == ()
+    assert rule.evaluate(facts) == ()
 
 
 def test_non_nullable_column_add_ignores_creation():
@@ -119,7 +118,7 @@ def test_non_nullable_column_add_passes_when_no_facts():
     # Given an empty fact tuple
     rule = NonNullableColumnAdd()
 
-    assert rule.evaluate((), ALL_ASPECTS) == ()
+    assert rule.evaluate(()) == ()
 
 
 # ---- NullabilityTighteningOnExistingColumn
@@ -131,7 +130,7 @@ def test_rejects_tightening_an_existing_column_to_not_null():
     facts = (_tightening("order_id"),)
 
     # When
-    failures = rule.evaluate(facts, ALL_ASPECTS)
+    failures = rule.evaluate(facts)
 
     # Then
     assert len(failures) == 1
@@ -145,7 +144,7 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
     facts = (_tightening("a"), _tightening("b"))
 
     # When
-    failures = rule.evaluate(facts, ALL_ASPECTS)
+    failures = rule.evaluate(facts)
 
     # Then
     assert len(failures) == 2
@@ -161,7 +160,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
         column_name="id", desired_nullable=True, observed_nullable=False
     )
 
-    assert rule.evaluate((loosening,), ALL_ASPECTS) == ()
+    assert rule.evaluate((loosening,)) == ()
 
 
 # ---- unsupported drift → ValidationFailure
@@ -271,8 +270,8 @@ def test_validation_result_failed_property():
     assert passing.failed is False
 
 
-def test_default_rules_cover_all_precondition_policies():
-    # Given the DEFAULT_RULES constant
+def test_default_rules_cover_all_safety_policies():
+    # Given the DEFAULT_RULES constant — scope invariants are not rules
     rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
 
     assert rule_names == {
@@ -280,60 +279,101 @@ def test_default_rules_cover_all_precondition_policies():
         "NullabilityTighteningOnExistingColumn",
         "ColumnDataTypeChangeNotSupported",
         "PartitioningChangeNotSupported",
-        "UnmanagedAspectDrift",
     }
 
 
-# ---- UnmanagedAspectDrift
+# ---- unmanaged aspect drift (scope invariant, not a rule)
 
 
 def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
     # Given a declaration that only manages table tags, but column structure has drifted
-    rule = UnmanagedAspectDrift()
-    facts = (ColumnAdded(Column("extra", Integer())),)
+    diff = _drift(
+        ColumnAdded(Column("extra", Integer())),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+    )
 
-    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_TAGS}))
+    result = validate_diff(diff)
 
     # Then one failure names the unmanaged aspect
-    assert len(failures) == 1
-    assert failures[0].rule_name == "UnmanagedAspectDrift"
-    assert "column structure" in failures[0].message.lower()
+    assert len(result.failures) == 1
+    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+    assert "column structure" in result.failures[0].message.lower()
 
 
 def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
     # Given two facts in one unmanaged aspect and one fact in another
-    rule = UnmanagedAspectDrift()
-    facts = (
+    diff = _drift(
         ColumnAdded(Column("extra", Integer())),
         ColumnAdded(Column("more", Integer())),
         TableCommentChanged(desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
-    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_TAGS}))
+    result = validate_diff(diff)
 
     # Then one failure per aspect, not per fact — in first-seen fact order
-    assert len(failures) == 2
-    assert "column structure" in failures[0].message.lower()
-    assert "table comment" in failures[1].message.lower()
+    assert len(result.failures) == 2
+    assert "column structure" in result.failures[0].message.lower()
+    assert "table comment" in result.failures[1].message.lower()
 
 
-def test_unmanaged_aspect_drift_passes_when_no_unmanaged_aspect_has_drifted():
-    # Given a metadata-only declaration where only a managed aspect (table comment) drifted
-    rule = UnmanagedAspectDrift()
-    facts = (TableCommentChanged(desired_comment="new", observed_comment="old"),)
+def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
+    # Given unmanaged drift and an empty rule set — the scope invariant still fires
+    diff = _drift(
+        ColumnAdded(Column("extra", Integer())),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+    )
 
-    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_COMMENT}))
+    result = validate_diff(diff, rules=())
 
-    assert failures == ()
+    assert result.failed is True
+    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
 
 
-def test_unmanaged_aspect_drift_passes_when_all_aspects_managed():
-    # Given a fully managed declaration with column structure drift
-    rule = UnmanagedAspectDrift()
-    facts = (ColumnAdded(Column("extra", Integer())),)
+def test_unmanaged_drift_does_not_also_trip_safety_rules():
+    # Given a metadata-only declaration whose live table has a type mismatch:
+    # the user asserted the structure matched — they never requested a type change
+    diff = _drift(
+        _type_drift("id"),
+        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+    )
 
-    # Then the rule passes — structure is managed
-    assert rule.evaluate(facts, ALL_ASPECTS) == ()
+    result = validate_diff(diff)
+
+    # Then the single failure is the scope violation, not
+    # ColumnDataTypeChangeNotSupported judging a change nobody asked for
+    assert len(result.failures) == 1
+    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+
+
+def test_managed_drift_still_trips_safety_rules():
+    # Given a fully managed drift with a type change
+    diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS)
+
+    result = validate_diff(diff)
+
+    # Then the safety rule fires — the change was requested, and it is unsafe
+    assert len(result.failures) == 1
+    assert result.failures[0].rule_name == "ColumnDataTypeChangeNotSupported"
+
+
+def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
+    # Given a metadata-only drift where only a managed aspect (table comment) drifted
+    diff = _drift(
+        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+    )
+
+    result = validate_diff(diff)
+
+    assert result.failed is False
+
+
+def test_drift_passes_when_all_aspects_managed():
+    # Given a fully managed drift with a nullable column addition
+    diff = _drift(ColumnAdded(Column("extra", Integer())), managed_aspects=ALL_ASPECTS)
+
+    assert validate_diff(diff).failed is False
 
 
 # ---- TableMissing with COLUMN_STRUCTURE unmanaged
@@ -358,28 +398,3 @@ def test_validate_diff_passes_table_missing_when_column_structure_managed():
     result = validate_diff(TableMissing(desired=desired))
 
     assert result.failed is False
-
-
-def test_metadata_only_drift_in_managed_aspects_passes():
-    # Given a metadata-only drift whose only fact is a managed table comment change
-    diff = _drift(
-        TableCommentChanged(desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
-    )
-
-    result = validate_diff(diff)
-
-    assert result.failed is False
-
-
-def test_metadata_only_drift_in_unmanaged_aspect_fails():
-    # Given a metadata-only drift carrying unmanaged column structure drift
-    diff = _drift(
-        ColumnAdded(Column("extra", Integer())),
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
-    )
-
-    result = validate_diff(diff)
-
-    assert result.failed is True
-    assert any("column structure" in f.message.lower() for f in result.failures)

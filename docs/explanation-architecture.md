@@ -174,8 +174,11 @@ naming the aspects the engine reconciles for that table. The differ
 (`diff_table`) is scope-blind and always compares all aspects; it copies
 `managed_aspects` onto the `TableDrift` it produces, so the diff is
 self-contained and `validate_diff` takes only the diff. Scope awareness lives
-in validation: the `UnmanagedAspectDrift` rule fails the sync once per
-unmanaged aspect that has drifted, keyed by each fact's `aspect`. If
+in validation, as an unconditional invariant rather than an optional rule:
+`validate_diff` fails the sync once per unmanaged aspect that has drifted
+(`UnmanagedAspectDrift`), and only facts in managed aspects are passed to the
+safety rules — so unmanaged drift produces exactly one scope failure rather
+than also tripping safety rules for changes the user never requested. If
 validation passes, every fact in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.

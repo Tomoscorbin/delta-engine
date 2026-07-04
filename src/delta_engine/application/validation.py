@@ -36,15 +36,14 @@ class Rule(Protocol):
 
     name: ClassVar[str]
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
         """
-        Evaluate the rule against a drift's facts.
+        Evaluate the rule against a drift's managed facts.
 
-        Receives the facts and managed aspects from a ``TableDrift``. Never
-        called for a ``TableMissing`` diff — that case is handled directly in
-        ``validate_diff``.
+        Receives only facts whose aspect the declaration manages — unmanaged
+        drift is rejected by ``validate_diff`` itself before rules run, so a
+        rule never judges a change the user did not ask for. Never called for
+        a ``TableMissing`` diff.
         """
         ...
 
@@ -54,9 +53,7 @@ class NonNullableColumnAdd:
 
     name: ClassVar[str] = "NonNullableColumnAdd"
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
         return tuple(
             ValidationFailure(
@@ -75,9 +72,7 @@ class NullabilityTighteningOnExistingColumn:
 
     name: ClassVar[str] = "NullabilityTighteningOnExistingColumn"
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every existing column tightened to NOT NULL."""
         return tuple(
             ValidationFailure(
@@ -98,9 +93,7 @@ class ColumnDataTypeChangeNotSupported:
 
     name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every in-place column type change."""
         return tuple(
             ValidationFailure(
@@ -123,9 +116,7 @@ class PartitioningChangeNotSupported:
 
     name: ClassVar[str] = "PartitioningChangeNotSupported"
 
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, facts: tuple[DriftFact, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every in-place partitioning change."""
         return tuple(
             ValidationFailure(
@@ -142,61 +133,53 @@ class PartitioningChangeNotSupported:
         )
 
 
-def _aspect_label(aspect: TableAspect) -> str:
-    """Human-readable label for a TableAspect (e.g. COLUMN_STRUCTURE -> 'column structure')."""
-    return aspect.name.lower().replace("_", " ")
-
-
-class UnmanagedAspectDrift:
-    """Disallow any drift in an aspect the desired table does not manage."""
-
-    name: ClassVar[str] = "UnmanagedAspectDrift"
-
-    def evaluate(
-        self, facts: tuple[DriftFact, ...], managed_aspects: frozenset[TableAspect]
-    ) -> tuple[ValidationFailure, ...]:
-        """
-        Fail once per unmanaged aspect that has drifted.
-
-        dict.fromkeys deduplicates the aspects while preserving first-seen
-        order, so failure order follows fact order deterministically.
-        """
-        unmanaged_aspects = dict.fromkeys(
-            fact.aspect for fact in facts if fact.aspect not in managed_aspects
-        )
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    f"Operation not allowed: {_aspect_label(aspect)} has drifted"
-                    " but is not managed by this definition. Sync the table fully"
-                    " or update the declaration to match the live schema."
-                ),
-            )
-            for aspect in unmanaged_aspects
-        )
-
-
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     ColumnDataTypeChangeNotSupported(),
     PartitioningChangeNotSupported(),
-    UnmanagedAspectDrift(),
 )
+
+
+def _unmanaged_aspect_failures(drift: TableDrift) -> tuple[ValidationFailure, ...]:
+    """
+    One failure per unmanaged aspect that has drifted.
+
+    dict.fromkeys deduplicates the aspects while preserving first-seen order,
+    so failure order follows fact order deterministically.
+    """
+    unmanaged_aspects = dict.fromkeys(
+        fact.aspect for fact in drift.facts if fact.aspect not in drift.managed_aspects
+    )
+    return tuple(
+        ValidationFailure(
+            rule_name="UnmanagedAspectDrift",
+            message=(
+                f"Operation not allowed: {aspect.label} has drifted"
+                " but is not managed by this definition. Sync the table fully"
+                " or update the declaration to match the live schema."
+            ),
+        )
+        for aspect in unmanaged_aspects
+    )
 
 
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
     """
-    Evaluate every rule against a table diff and return the verdict.
+    Evaluate a table diff and return the verdict.
 
-    The diff is self-contained: ``TableDrift`` carries its facts and managed
-    aspects, and ``TableMissing`` carries the desired table. A missing table
-    passes automatically when column structure is managed (creation is valid).
-    When structure is unmanaged, the table cannot be created and the diff
-    fails immediately — this check is unconditional and cannot be suppressed
-    via ``rules``, because bypassing it would silently permit metadata-only
-    creates.
+    Two scope invariants are checked unconditionally — they define what a
+    declaration is allowed to govern, and cannot be suppressed via ``rules``:
+
+    - A missing table fails with ``MissingTableUnmanaged`` when the
+      declaration does not manage column structure (it cannot be created).
+    - Drift in an unmanaged aspect fails with ``UnmanagedAspectDrift``, once
+      per drifted aspect.
+
+    Rules are safety policy over the drift the declaration *does* manage:
+    they receive only facts in managed aspects, so unmanaged drift produces
+    exactly one scope failure rather than also tripping safety rules for
+    changes the user never requested.
     """
     match diff:
         case TableMissing() as missing:
@@ -216,11 +199,17 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
                 )
             return ValidationResult()
         case TableDrift() as drift:
+            managed_facts = tuple(
+                fact for fact in drift.facts if fact.aspect in drift.managed_aspects
+            )
             return ValidationResult(
-                failures=tuple(
-                    failure
-                    for rule in rules
-                    for failure in rule.evaluate(drift.facts, drift.managed_aspects)
+                failures=(
+                    *_unmanaged_aspect_failures(drift),
+                    *(
+                        failure
+                        for rule in rules
+                        for failure in rule.evaluate(managed_facts)
+                    ),
                 )
             )
         case _ as unreachable:

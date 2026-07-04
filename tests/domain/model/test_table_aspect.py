@@ -7,6 +7,13 @@ def test_all_aspects_contains_every_aspect():
     assert ALL_ASPECTS == frozenset(TableAspect)
 
 
+def test_aspect_label_is_human_readable():
+    # Given an aspect with an underscored name
+    # Then the label reads as prose (used in validation messages)
+    assert TableAspect.COLUMN_STRUCTURE.label == "column structure"
+    assert TableAspect.PROPERTIES.label == "properties"
+
+
 def test_aspect_declaration_order_is_canonical():
     # Given the enum declaration order (used for deterministic rendering in messages)
     names = [a.name for a in TableAspect]
