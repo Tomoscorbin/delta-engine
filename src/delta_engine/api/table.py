@@ -124,6 +124,25 @@ class DeltaTable:
         foreign_keys: Iterable[ForeignKey] | None = None,
         metadata_only: bool = False,
     ) -> None:
+        """
+        Initialise a DeltaTable definition.
+
+        Args:
+            catalog: Unity Catalog catalog name.
+            schema: Schema (database) name within the catalog.
+            name: Table name.
+            columns: Ordered column declarations.
+            comment: Table-level comment.
+            properties: Delta/Spark table properties to manage.
+            tags: Key/value tags to apply to the table.
+            partitioned_by: Column names to partition by.
+            foreign_keys: Foreign key relationships declared on this table.
+            metadata_only: When ``True``, restricts the sync to catalog metadata:
+                comments, tags, and key constraints. Column structure, properties, and
+                partitioning are never changed. The live schema must match the declaration
+                exactly — any structural drift fails validation.
+
+        """
         user_properties = dict(properties or {})
 
         # Fast-fail on property keys this engine does not manage (e.g. typos)

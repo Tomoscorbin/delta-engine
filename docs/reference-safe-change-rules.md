@@ -11,8 +11,8 @@ The engine validates the computed diff before executing any SQL. These rules blo
 |---|---|---|
 | `NonNullableColumnAdd` | Adding a `NOT NULL` column to an existing table | Add the column as nullable, backfill, then tighten nullability |
 | `NullabilityTighteningOnExistingColumn` | Changing an existing nullable column to `NOT NULL` | Backfill existing NULLs first, then update the declaration |
-| `UnsupportedColumnTypeChange` | Changing a column's declared data type | Drop and recreate the table out of band, then re-sync |
-| `DisallowPartitioningChange` | Changing `partitioned_by` on an existing table | Drop and recreate the table out of band, then re-sync |
+| `ColumnDataTypeChangeNotSupported` | Changing a column's declared data type | Drop and recreate the table out of band, then re-sync |
+| `PartitioningChangeNotSupported` | Changing `partitioned_by` on an existing table | Drop and recreate the table out of band, then re-sync |
 | `UnmanagedDimensionDrift` | An unmanaged dimension (e.g. column structure) has drifted from the declaration in a metadata-only sync | Sync the table fully, or update the declaration to match the live schema |
 | `MissingTableUnmanaged` | The table does not exist but this definition does not manage column structure | Create the table out-of-band first, or manage it fully |
 
