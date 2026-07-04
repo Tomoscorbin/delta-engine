@@ -54,7 +54,6 @@ from delta_engine.domain.plan.diff import (
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-
 def test_table_drift_defaults_to_no_differences():
     # Given a drift built with no arguments
     drift = TableDrift()
@@ -65,9 +64,7 @@ def test_table_drift_defaults_to_no_differences():
 
 def test_table_missing_carries_the_desired_table():
     # Given a desired table for a table absent from the catalog
-    desired = DesiredTable(
-        qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),)
-    )
+    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
 
     # Then the missing-table variant is self-contained
     assert TableMissing(desired=desired).desired is desired
@@ -291,9 +288,7 @@ def test_columns_dimension_removed_column_produces_drop_column():
 
 
 def test_columns_dimension_nullability_entry_produces_action():
-    entry = ColumnNullabilityChanged(
-        column_name="id", change=Changed(desired=True, observed=False)
-    )
+    entry = ColumnNullabilityChanged(column_name="id", change=Changed(desired=True, observed=False))
     dim = ColumnsDimension(entries=(entry,))
 
     assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
@@ -313,7 +308,7 @@ def test_columns_dimension_data_type_entry_produces_no_action():
     )
     dim = ColumnsDimension(entries=(entry,))
 
-    # Then no action is produced; the validator raises the failure via ColumnDataTypeChangeNotSupported
+    # Then no action is produced; ColumnDataTypeChangeNotSupported raises the failure
     assert dim.actions() == ()
 
 
@@ -397,7 +392,7 @@ def test_partitioning_dimension_produces_no_actions():
     # Given a partitioning change — no in-place action is possible
     dim = PartitioningDimension(change=Changed(desired=("ds",), observed=()))
 
-    # Then no action is produced; the validator raises the failure via PartitioningChangeNotSupported
+    # Then no action is produced; PartitioningChangeNotSupported raises the failure
     assert dim.actions() == ()
 
 

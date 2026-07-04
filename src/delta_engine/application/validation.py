@@ -99,6 +99,7 @@ class ColumnDataTypeChangeNotSupported:
     name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
 
     def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        """Flag every in-place column type change."""
         cols_dim = next((d for d in dimensions if isinstance(d, ColumnsDimension)), None)
         if cols_dim is None:
             return ()
@@ -124,6 +125,7 @@ class PartitioningChangeNotSupported:
     name: ClassVar[str] = "PartitioningChangeNotSupported"
 
     def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        """Flag every in-place partitioning change."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
@@ -163,9 +165,7 @@ def validate_diff(
         case TableDrift() as drift:
             return ValidationResult(
                 failures=tuple(
-                    failure
-                    for rule in rules
-                    for failure in rule.evaluate(drift.dimensions)
+                    failure for rule in rules for failure in rule.evaluate(drift.dimensions)
                 )
             )
         case _:

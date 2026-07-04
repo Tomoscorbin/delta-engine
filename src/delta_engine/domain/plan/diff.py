@@ -111,6 +111,7 @@ class ColumnAdded:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
+        """AddColumn followed by SetColumnTag for each tag on the new column."""
         result: list[Action] = [AddColumn(column=self.column)]
         result.extend(
             SetColumnTag(column_name=self.column.name, name=name, value=value)
@@ -126,6 +127,7 @@ class ColumnRemoved:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
+        """DropColumn for the removed column."""
         return (DropColumn(self.column.name),)
 
 
@@ -137,6 +139,7 @@ class ColumnDataTypeChanged:
     change: Changed[DataType]
 
     def actions(self) -> tuple[Action, ...]:
+        """No actions — type changes require recreation; see ColumnDataTypeChangeNotSupported."""
         return ()
 
 
@@ -148,6 +151,7 @@ class ColumnNullabilityChanged:
     change: Changed[bool]
 
     def actions(self) -> tuple[Action, ...]:
+        """SetColumnNullability to the desired value."""
         return (SetColumnNullability(column_name=self.column_name, nullable=self.change.desired),)
 
 
@@ -159,6 +163,7 @@ class ColumnCommentChanged:
     change: Changed[str]
 
     def actions(self) -> tuple[Action, ...]:
+        """SetColumnComment to the desired value."""
         return (SetColumnComment(self.column_name, self.change.desired),)
 
 
@@ -176,9 +181,7 @@ class ColumnTagsChanged:
             match entry:
                 case Added(item=pair) | Changed(desired=pair):
                     result.append(
-                        SetColumnTag(
-                            column_name=self.column_name, name=pair.name, value=pair.value
-                        )
+                        SetColumnTag(column_name=self.column_name, name=pair.name, value=pair.value)
                     )
                 case Removed(item=pair):
                     result.append(UnsetColumnTag(column_name=self.column_name, name=pair.name))
@@ -203,9 +206,7 @@ class ColumnsDimension:
     entries: tuple[ColumnDrift, ...]
 
     @staticmethod
-    def diff(
-        desired: tuple[Column, ...], observed: tuple[Column, ...]
-    ) -> ColumnsDimension | None:
+    def diff(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> ColumnsDimension | None:
         """Return a ColumnsDimension for any column differences, or None when identical."""
         desired_by_name = {col.name: col for col in desired}
         observed_by_name = {col.name: col for col in observed}
@@ -259,6 +260,7 @@ class ColumnsDimension:
         return tuple(entries)
 
     def actions(self) -> tuple[Action, ...]:
+        """Collect actions from every column entry."""
         return tuple(action for entry in self.entries for action in entry.actions())
 
 
@@ -275,6 +277,7 @@ class TableCommentDimension:
         return TableCommentDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
+        """SetTableComment to the desired value."""
         return (SetTableComment(comment=self.change.desired),)
 
 
@@ -285,14 +288,13 @@ class PropertiesDimension:
     entries: tuple[Entry[KeyValue], ...]
 
     @staticmethod
-    def diff(
-        desired: Mapping[str, str], observed: Mapping[str, str]
-    ) -> PropertiesDimension | None:
+    def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> PropertiesDimension | None:
         """Return a PropertiesDimension when any property differs, or None when identical."""
         entries = _diff_mapping(desired, observed)
         return PropertiesDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
+        """SetProperty for Added/Changed entries; Removed is ignored (declared-subset semantics)."""
         result: list[Action] = []
         for entry in self.entries:
             match entry:
@@ -310,14 +312,13 @@ class TableTagsDimension:
     entries: tuple[Entry[KeyValue], ...]
 
     @staticmethod
-    def diff(
-        desired: Mapping[str, str], observed: Mapping[str, str]
-    ) -> TableTagsDimension | None:
+    def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> TableTagsDimension | None:
         """Return a TableTagsDimension when any tag differs, or None when identical."""
         entries = _diff_mapping(desired, observed)
         return TableTagsDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
+        """SetTableTag for Added/Changed entries; UnsetTableTag for Removed entries."""
         result: list[Action] = []
         for entry in self.entries:
             match entry:
@@ -330,19 +331,26 @@ class TableTagsDimension:
 
 @dataclass(frozen=True, slots=True)
 class PartitioningDimension:
-    """Partitioning drift — records the fact; policy on whether it is allowed lives in validation."""
+    """
+    Partitioning drift — records the fact; policy on whether it is allowed lives in validation.
+
+    In-place repartitioning is not possible; see PartitioningChangeNotSupported.
+    """
 
     change: Changed[tuple[str, ...]]
 
     @staticmethod
-    def diff(
-        desired: tuple[str, ...], observed: tuple[str, ...]
-    ) -> PartitioningDimension | None:
+    def diff(desired: tuple[str, ...], observed: tuple[str, ...]) -> PartitioningDimension | None:
         """Return a PartitioningDimension when partitioning differs, or None when identical."""
         change = _changed(desired, observed)
         return PartitioningDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
+        """
+        No actions — in-place repartitioning is not supported.
+
+        See PartitioningChangeNotSupported.
+        """
         return ()
 
 
