@@ -16,17 +16,19 @@ adding one class here — ``diff_table`` requires no changes.
 Column-level drift entries (`ColumnAdded`, `ColumnRemoved`, `ColumnDataTypeChanged`,
 etc.) satisfy the same `Dimension` protocol as table-level dimensions: each carries
 exactly the fact it describes with no optionals and produces its own actions.
-`ColumnsDimension` delegates to them directly. Whether a dimension's drift is
-permitted is policy — that belongs in validation, not here.
+`ColumnStructureDimension`, `ColumnCommentsDimension`, and `ColumnTagsDimension`
+delegate to them directly. Whether a dimension's drift is permitted is policy —
+that belongs in validation, not here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, assert_never
+from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -83,6 +85,8 @@ type Entry[T] = Added[T] | Removed[T] | Changed[T]
 class Dimension(Protocol):
     """A single aspect of table drift: produces actions to reconcile the difference."""
 
+    aspect: ClassVar[TableAspect]
+
     def actions(self) -> tuple[Action, ...]:
         """Return the actions this dimension contributes to the plan."""
         ...
@@ -111,13 +115,8 @@ class ColumnAdded:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
-        """AddColumn followed by SetColumnTag for each tag on the new column."""
-        result: list[Action] = [AddColumn(column=self.column)]
-        result.extend(
-            SetColumnTag(column_name=self.column.name, name=name, value=value)
-            for name, value in self.column.tags.items()
-        )
-        return tuple(result)
+        """AddColumn for the new column; tags are handled by ColumnTagsDimension."""
+        return (AddColumn(column=self.column),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,17 +199,21 @@ type ForeignKeyDrift = Added[ForeignKeyConstraint] | Removed[ForeignKeyConstrain
 
 
 @dataclass(frozen=True, slots=True)
-class ColumnsDimension:
-    """Column drift: a flat sequence of per-column and per-attribute entries."""
+class ColumnStructureDimension:
+    """Column structure drift: additions, removals, type changes, nullability changes."""
 
-    entries: tuple[ColumnDrift, ...]
+    entries: tuple[ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
     @staticmethod
-    def diff(desired: tuple[Column, ...], observed: tuple[Column, ...]) -> ColumnsDimension | None:
-        """Return a ColumnsDimension for any column differences, or None when identical."""
+    def diff(
+        desired: tuple[Column, ...], observed: tuple[Column, ...]
+    ) -> ColumnStructureDimension | None:
+        """Return a ColumnStructureDimension for any structural differences, or None."""
         desired_by_name = {col.name: col for col in desired}
         observed_by_name = {col.name: col for col in observed}
-        result: list[ColumnDrift] = []
+        result: list[ColumnAdded | ColumnRemoved | ColumnDataTypeChanged | ColumnNullabilityChanged] = []
         for name, col in desired_by_name.items():
             if name not in observed_by_name:
                 result.append(ColumnAdded(column=col))
@@ -218,49 +221,90 @@ class ColumnsDimension:
             if name not in desired_by_name:
                 result.append(ColumnRemoved(column=col))
         for name, desired_col in desired_by_name.items():
-            if name in observed_by_name:
-                result.extend(ColumnsDimension._diff_pair(desired_col, observed_by_name[name]))
-        return ColumnsDimension(entries=tuple(result)) if result else None
-
-    @staticmethod
-    def _diff_pair(desired: Column, observed: Column) -> tuple[ColumnDrift, ...]:
-        """
-        Return per-attribute drift entries for a name-matched column pair.
-
-        When a data type change is present, only that entry is returned — other
-        attribute drift is suppressed because a type-changed column must be
-        recreated; showing nullability or comment entries would suggest
-        actionable work that is moot until the column is dropped and re-added.
-        """
-        if desired.data_type != observed.data_type:
-            return (
-                ColumnDataTypeChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.data_type, observed=observed.data_type),
-                ),
-            )
-        entries: list[ColumnDrift] = []
-        if desired.nullable != observed.nullable:
-            entries.append(
-                ColumnNullabilityChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.nullable, observed=observed.nullable),
+            if name not in observed_by_name:
+                continue
+            observed_col = observed_by_name[name]
+            if desired_col.data_type != observed_col.data_type:
+                result.append(
+                    ColumnDataTypeChanged(
+                        column_name=name,
+                        change=Changed(desired=desired_col.data_type, observed=observed_col.data_type),
+                    )
                 )
-            )
-        if desired.comment != observed.comment:
-            entries.append(
-                ColumnCommentChanged(
-                    column_name=desired.name,
-                    change=Changed(desired=desired.comment, observed=observed.comment),
+            elif desired_col.nullable != observed_col.nullable:
+                result.append(
+                    ColumnNullabilityChanged(
+                        column_name=name,
+                        change=Changed(desired=desired_col.nullable, observed=observed_col.nullable),
+                    )
                 )
-            )
-        tag_entries = _diff_mapping(desired.tags, observed.tags)
-        if tag_entries:
-            entries.append(ColumnTagsChanged(column_name=desired.name, entries=tag_entries))
-        return tuple(entries)
+        return ColumnStructureDimension(entries=tuple(result)) if result else None
 
     def actions(self) -> tuple[Action, ...]:
-        """Collect actions from every column entry."""
+        """Collect actions from every structural entry."""
+        return tuple(action for entry in self.entries for action in entry.actions())
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnCommentsDimension:
+    """Column comment drift for name-matched column pairs."""
+
+    entries: tuple[ColumnCommentChanged, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_COMMENTS
+
+    @staticmethod
+    def diff(
+        desired: tuple[Column, ...], observed: tuple[Column, ...]
+    ) -> ColumnCommentsDimension | None:
+        """Return a ColumnCommentsDimension for any comment differences on matched columns."""
+        desired_by_name = {col.name: col for col in desired}
+        observed_by_name = {col.name: col for col in observed}
+        result: list[ColumnCommentChanged] = []
+        for name, desired_col in desired_by_name.items():
+            if name not in observed_by_name:
+                continue
+            observed_col = observed_by_name[name]
+            if desired_col.comment != observed_col.comment:
+                result.append(
+                    ColumnCommentChanged(
+                        column_name=name,
+                        change=Changed(desired=desired_col.comment, observed=observed_col.comment),
+                    )
+                )
+        return ColumnCommentsDimension(entries=tuple(result)) if result else None
+
+    def actions(self) -> tuple[Action, ...]:
+        """Collect SetColumnComment actions."""
+        return tuple(action for entry in self.entries for action in entry.actions())
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnTagsDimension:
+    """Column tag drift for all desired columns (matched and added)."""
+
+    entries: tuple[ColumnTagsChanged, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
+
+    @staticmethod
+    def diff(
+        desired: tuple[Column, ...], observed: tuple[Column, ...]
+    ) -> ColumnTagsDimension | None:
+        """Return a ColumnTagsDimension for any tag differences across all desired columns."""
+        observed_by_name = {col.name: col for col in observed}
+        result: list[ColumnTagsChanged] = []
+        for col in desired:
+            observed_tags: Mapping[str, str] = (
+                observed_by_name[col.name].tags if col.name in observed_by_name else {}
+            )
+            tag_entries = _diff_mapping(col.tags, observed_tags)
+            if tag_entries:
+                result.append(ColumnTagsChanged(column_name=col.name, entries=tag_entries))
+        return ColumnTagsDimension(entries=tuple(result)) if result else None
+
+    def actions(self) -> tuple[Action, ...]:
+        """Collect SetColumnTag / UnsetColumnTag actions."""
         return tuple(action for entry in self.entries for action in entry.actions())
 
 
@@ -269,6 +313,8 @@ class TableCommentDimension:
     """Table comment drift."""
 
     change: Changed[str]
+
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_COMMENT
 
     @staticmethod
     def diff(desired: str, observed: str) -> TableCommentDimension | None:
@@ -286,6 +332,8 @@ class PropertiesDimension:
     """Table property drift — declared-subset semantics: Removed entries are ignored."""
 
     entries: tuple[Entry[KeyValue], ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
 
     @staticmethod
     def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> PropertiesDimension | None:
@@ -310,6 +358,8 @@ class TableTagsDimension:
     """Table tag drift — full-state semantics: Removed entries are unset."""
 
     entries: tuple[Entry[KeyValue], ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
 
     @staticmethod
     def diff(desired: Mapping[str, str], observed: Mapping[str, str]) -> TableTagsDimension | None:
@@ -339,6 +389,8 @@ class PartitioningDimension:
 
     change: Changed[tuple[str, ...]]
 
+    aspect: ClassVar[TableAspect] = TableAspect.PARTITIONING
+
     @staticmethod
     def diff(desired: tuple[str, ...], observed: tuple[str, ...]) -> PartitioningDimension | None:
         """Return a PartitioningDimension when partitioning differs, or None when identical."""
@@ -359,6 +411,8 @@ class PrimaryKeyDimension:
     """Primary key drift."""
 
     entry: Entry[PrimaryKeyConstraint]
+
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
     @staticmethod
     def diff(
@@ -404,6 +458,8 @@ class ForeignKeysDimension:
     """Foreign key drift."""
 
     entries: tuple[ForeignKeyDrift, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
 
     @staticmethod
     def diff(
@@ -511,7 +567,9 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     dimensions = [
         d
         for d in [
-            ColumnsDimension.diff(desired.columns, observed.columns),
+            ColumnStructureDimension.diff(desired.columns, observed.columns),
+            ColumnCommentsDimension.diff(desired.columns, observed.columns),
+            ColumnTagsDimension.diff(desired.columns, observed.columns),
             TableCommentDimension.diff(desired.comment, observed.comment),
             PropertiesDimension.diff(desired.properties, observed.properties),
             TableTagsDimension.diff(desired.tags, observed.tags),

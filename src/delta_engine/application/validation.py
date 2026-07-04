@@ -10,7 +10,7 @@ from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
-    ColumnsDimension,
+    ColumnStructureDimension,
     Dimension,
     PartitioningDimension,
     TableDiff,
@@ -54,7 +54,7 @@ class NonNullableColumnAdd:
 
     def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
-        cols_dim = next((d for d in dimensions if isinstance(d, ColumnsDimension)), None)
+        cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
             return ()
         return tuple(
@@ -76,7 +76,7 @@ class NullabilityTighteningOnExistingColumn:
 
     def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every existing column tightened to NOT NULL."""
-        cols_dim = next((d for d in dimensions if isinstance(d, ColumnsDimension)), None)
+        cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
             return ()
         return tuple(
@@ -100,7 +100,7 @@ class ColumnDataTypeChangeNotSupported:
 
     def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
         """Flag every in-place column type change."""
-        cols_dim = next((d for d in dimensions if isinstance(d, ColumnsDimension)), None)
+        cols_dim = next((d for d in dimensions if isinstance(d, ColumnStructureDimension)), None)
         if cols_dim is None:
             return ()
         return tuple(
