@@ -12,7 +12,7 @@ the diff is self-contained.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol, assert_never
 
@@ -350,92 +350,59 @@ class TableDrift:
     """
     Per-dimension differences between a desired and an observed table.
 
-    Every field defaults to its empty value, so a drift with no differences is
-    the natural zero. There is deliberately no ``is_empty`` property: "no
-    drift" and "no actions" are different questions (a type-drift-only table
-    has drift but lowers to an empty plan), and every current consumer asks
-    the plan question.
+    Each dimension in the tuple owns its own facts, actions, and unhandled
+    facts. An empty tuple is the natural zero — a table with no drift has no
+    dimensions.
     """
 
-    columns: tuple[ColumnDrift, ...] = ()
-    table_comment: Changed[str] | None = None
-    properties: tuple[Entry[KeyValue], ...] = ()
-    table_tags: tuple[Entry[KeyValue], ...] = ()
-    partitioning: Changed[tuple[str, ...]] | None = None
-    primary_key: Entry[PrimaryKeyConstraint] | None = None
-    foreign_keys: tuple[ForeignKeyDrift, ...] = ()
+    dimensions: tuple[Dimension, ...] = ()
 
 
 type TableDiff = TableMissing | TableDrift
-
-
-@dataclass(frozen=True, slots=True)
-class Matched[T]:
-    """
-    The outcome of matching desired items against observed items by identity.
-
-    Partitions purely by key membership: ``added`` (desired-only), ``dropped``
-    (observed-only), and ``common`` (present on both sides, paired as
-    ``(desired, observed)``). It says nothing about whether a common pair is
-    equal — deciding what a match *means* is the caller's concern, not the
-    matcher's. ``added`` preserves desired declaration order; ``dropped``
-    preserves observed order.
-    """
-
-    added: tuple[T, ...]
-    dropped: tuple[T, ...]
-    common: tuple[tuple[T, T], ...]
-
-
-def match_by_key[T](
-    desired: Iterable[T],
-    observed: Iterable[T],
-    *,
-    key: Callable[[T], Hashable],
-) -> Matched[T]:
-    """Match ``desired`` against ``observed`` by ``key`` into added/dropped/common."""
-    desired_by_key = {key(item): item for item in desired}
-    observed_by_key = {key(item): item for item in observed}
-
-    added = tuple(
-        item for identity, item in desired_by_key.items() if identity not in observed_by_key
-    )
-    dropped = tuple(
-        item for identity, item in observed_by_key.items() if identity not in desired_by_key
-    )
-    common = tuple(
-        (desired_item, observed_by_key[identity])
-        for identity, desired_item in desired_by_key.items()
-        if identity in observed_by_key
-    )
-    return Matched(added=added, dropped=dropped, common=common)
 
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
     Compute the facts separating ``observed`` from ``desired``.
 
-    Args:
-        desired: Desired table definition.
-        observed: Current table definition, or ``None`` if the table is missing.
-
-    Returns:
-        ``TableMissing`` when the table does not exist, else a ``TableDrift``
-        whose every field records the differences in one dimension (empty
-        fields mean no difference).
-
+    Returns ``TableMissing`` when the table does not exist, else a
+    ``TableDrift`` whose dimensions each record the differences in one aspect.
+    Empty aspects produce no dimension — an equal pair yields an empty drift.
     """
     if observed is None:
         return TableMissing(desired=desired)
-    return TableDrift(
-        columns=_diff_columns(desired.columns, observed.columns),
-        table_comment=_changed(desired.comment, observed.comment),
-        properties=_diff_mapping(desired.properties, observed.properties),
-        table_tags=_diff_mapping(desired.tags, observed.tags),
-        partitioning=_changed(desired.partitioned_by, observed.partitioned_by),
-        primary_key=_diff_primary_key(desired.primary_key, observed.primary_key),
-        foreign_keys=_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
-    )
+
+    dimensions: list[Dimension] = []
+
+    column_entries = _diff_columns(desired.columns, observed.columns)
+    if column_entries:
+        dimensions.append(ColumnsDimension(entries=column_entries))
+
+    comment = _changed(desired.comment, observed.comment)
+    if comment is not None:
+        dimensions.append(TableCommentDimension(change=comment))
+
+    property_entries = _diff_mapping(desired.properties, observed.properties)
+    if property_entries:
+        dimensions.append(PropertiesDimension(entries=property_entries))
+
+    tag_entries = _diff_mapping(desired.tags, observed.tags)
+    if tag_entries:
+        dimensions.append(TableTagsDimension(entries=tag_entries))
+
+    partitioning = _changed(desired.partitioned_by, observed.partitioned_by)
+    if partitioning is not None:
+        dimensions.append(PartitioningDimension(change=partitioning))
+
+    pk_entry = _diff_primary_key(desired.primary_key, observed.primary_key)
+    if pk_entry is not None:
+        dimensions.append(PrimaryKeyDimension(entry=pk_entry))
+
+    fk_entries = _diff_foreign_keys(desired.foreign_keys, observed.foreign_keys)
+    if fk_entries:
+        dimensions.append(ForeignKeysDimension(entries=fk_entries))
+
+    return TableDrift(dimensions=tuple(dimensions))
 
 
 def _changed[T](desired: T, observed: T) -> Changed[T] | None:
@@ -456,34 +423,44 @@ def _diff_mapping(
     a Removed key is acted on (tags) or ignored (properties) is lowering
     policy, not a diffing concern.
     """
-    matched = match_by_key(
-        (KeyValue(name, value) for name, value in desired.items()),
-        (KeyValue(name, value) for name, value in observed.items()),
-        key=lambda pair: pair.name,
-    )
-    added: tuple[Entry[KeyValue], ...] = tuple(Added(item) for item in matched.added)
-    changed: tuple[Entry[KeyValue], ...] = tuple(
-        Changed(desired=desired_item, observed=observed_item)
-        for desired_item, observed_item in matched.common
-        if desired_item.value != observed_item.value
-    )
-    removed: tuple[Entry[KeyValue], ...] = tuple(Removed(item) for item in matched.dropped)
-    return added + changed + removed
+    desired_by_name = {name: value for name, value in desired.items()}
+    observed_by_name = {name: value for name, value in observed.items()}
+    result: list[Entry[KeyValue]] = []
+    for name, value in desired_by_name.items():
+        if name not in observed_by_name:
+            result.append(Added(KeyValue(name, value)))
+        elif observed_by_name[name] != value:
+            result.append(
+                Changed(
+                    desired=KeyValue(name, value),
+                    observed=KeyValue(name, observed_by_name[name]),
+                )
+            )
+    for name, value in observed_by_name.items():
+        if name not in desired_by_name:
+            result.append(Removed(KeyValue(name, value)))
+    return tuple(result)
 
 
 def _diff_columns(
     desired: tuple[Column, ...], observed: tuple[Column, ...]
 ) -> tuple[ColumnDrift, ...]:
     """Diff columns by name into Added/Removed entries and per-column ColumnChanged facts."""
-    matched = match_by_key(desired, observed, key=lambda column: column.name)
-    added: tuple[ColumnDrift, ...] = tuple(Added(column) for column in matched.added)
-    removed: tuple[ColumnDrift, ...] = tuple(Removed(column) for column in matched.dropped)
-    changed: tuple[ColumnDrift, ...] = tuple(
-        drift
-        for desired_column, observed_column in matched.common
-        if (drift := _diff_column_pair(desired_column, observed_column)) is not None
-    )
-    return added + removed + changed
+    desired_by_name = {col.name: col for col in desired}
+    observed_by_name = {col.name: col for col in observed}
+    result: list[ColumnDrift] = []
+    for name, col in desired_by_name.items():
+        if name not in observed_by_name:
+            result.append(Added(col))
+    for name, col in observed_by_name.items():
+        if name not in desired_by_name:
+            result.append(Removed(col))
+    for name, desired_col in desired_by_name.items():
+        if name in observed_by_name:
+            drift = _diff_column_pair(desired_col, observed_by_name[name])
+            if drift is not None:
+                result.append(drift)
+    return tuple(result)
 
 
 def _diff_column_pair(desired: Column, observed: Column) -> ColumnChanged | None:
@@ -541,7 +518,12 @@ def _diff_foreign_keys(
     sides under different constraint names produces nothing, so a sync over an
     unchanged catalog stays idempotent.
     """
-    matched = match_by_key(desired, observed, key=lambda foreign_key: foreign_key.signature)
-    added: tuple[ForeignKeyDrift, ...] = tuple(Added(item) for item in matched.added)
-    removed: tuple[ForeignKeyDrift, ...] = tuple(Removed(item) for item in matched.dropped)
+    desired_by_sig = {fk.signature: fk for fk in desired}
+    observed_by_sig = {fk.signature: fk for fk in observed}
+    added: tuple[ForeignKeyDrift, ...] = tuple(
+        Added(fk) for sig, fk in desired_by_sig.items() if sig not in observed_by_sig
+    )
+    removed: tuple[ForeignKeyDrift, ...] = tuple(
+        Removed(fk) for sig, fk in observed_by_sig.items() if sig not in desired_by_sig
+    )
     return added + removed
