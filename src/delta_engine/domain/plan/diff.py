@@ -170,6 +170,12 @@ class ColumnsDimension:
 
     @staticmethod
     def _lower_column_changed(changed: ColumnChanged) -> tuple[Action, ...]:
+        if changed.data_type is not None:
+            # A data_type change is unhandled; suppress all other actions for
+            # this column so the dry-run report does not show partial actions
+            # that will never execute (the unhandled fact surfaces via
+            # .unhandled()).
+            return ()
         result: list[Action] = []
         if changed.nullability is not None:
             result.append(

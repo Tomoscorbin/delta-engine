@@ -350,6 +350,28 @@ def test_columns_dimension_type_drift_produces_unhandled_fact_no_action():
     assert "id" in dim.unhandled()[0].description
 
 
+def test_columns_dimension_type_drift_with_nullability_suppresses_all_actions():
+    # Given a column changed with both a data_type drift (unhandled) and a
+    # nullability drift (normally actionable)
+    entry = ColumnChanged(
+        column_name="id",
+        data_type=Changed(desired=Integer(), observed=Long()),
+        nullability=Changed(desired=True, observed=False),
+    )
+    dim = ColumnsDimension(entries=(entry,))
+
+    # When actions and unhandled facts are requested
+    actions = dim.actions()
+    unhandled = dim.unhandled()
+
+    # Then no actions are produced — partial actions must not be shown for a
+    # column the engine cannot reconcile — but the unhandled fact is still
+    # surfaced so validation blocks the run
+    assert actions == ()
+    assert len(unhandled) == 1
+    assert "id" in unhandled[0].description
+
+
 def test_columns_dimension_tag_changes_produce_set_and_unset_actions():
     entry = ColumnChanged(
         column_name="id",
