@@ -321,6 +321,8 @@ def test_engine_metadata_only_applies_comments_when_schema_matches(
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert set(fields) == {"id"}
     assert fields["id"].metadata.get("comment") == "surrogate key"
+    details = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert details["description"] == "metadata-only table"
 
 
 def test_engine_metadata_only_fails_when_column_type_has_drifted(
