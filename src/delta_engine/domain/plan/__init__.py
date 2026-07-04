@@ -36,7 +36,6 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     TableMissing,
     TableTagsDimension,
-    UnhandledFact,
     diff_table,
 )
 
@@ -74,7 +73,6 @@ __all__ = [
     "TableDrift",
     "TableMissing",
     "TableTagsDimension",
-    "UnhandledFact",
     "UnsetColumnTag",
     "UnsetTableTag",
     "diff_table",

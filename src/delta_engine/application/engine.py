@@ -240,7 +240,7 @@ class Engine:
         blocked set, so their FK dependents are blocked with
         BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
         """
-        blocked = frozenset(run.qualified_name for run in runs if run.failures)
+        blocked = {run.qualified_name for run in runs if run.failures}
         result = resolve(tuple(run.desired for run in runs), blocked=blocked)
         by_name = {run.qualified_name: run for run in runs}
         for name, fk_failures in result.fk_failures.items():

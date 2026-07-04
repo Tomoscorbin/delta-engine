@@ -148,13 +148,14 @@ exist, else a `TableDrift` recording per-dimension facts (`Added`, `Removed`,
 and `Changed` entries for columns, properties, tags, and keys; `Changed`
 values for the comment and partitioning). The diff states facts only.
 Each dimension in the drift owns its own lowering: `.actions()` returns the DDL
-steps it can act on, and `.unhandled()` returns facts it has no action for (a
-changed column type, a changed partition spec). `validate_diff` collects
-unhandled facts from every dimension and maps them to failures, then evaluates
-precondition rules against the dimension tuple. The engine constructs the
-`ActionPlan` by iterating dimensions directly after validation — there is no
-separate `lower_diff` step and no hidden dependency between lowering and
-validation.
+steps to reconcile that aspect. Whether a dimension's drift is permitted is
+policy — `validate_diff` evaluates precondition rules against the dimension
+tuple, and rules inspect dimension types directly (e.g.
+`ColumnDataTypeChangeNotSupported` looks for `ColumnDataTypeChanged` entries;
+`PartitioningChangeNotSupported` looks for `PartitioningDimension`). The engine
+constructs the `ActionPlan` by iterating dimensions directly after validation —
+there is no separate `lower_diff` step and no hidden dependency between lowering
+and validation.
 
 ## Constraint-name generation
 
@@ -211,7 +212,7 @@ Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evalu
 | Change | Main location | Notes |
 |---|---|---|
 | Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new dimension | `delta_engine.domain.plan.diff` | Add a dimension type with `.actions()` and `.unhandled()`; `diff_table` constructs it. No other files change. |
+| Add a new dimension | `delta_engine.domain.plan.diff` | Add a dimension type with `.actions()`; `diff_table` constructs it. If the dimension represents currently-unsupported drift, add a rule to `validation.py`. No other files change. |
 | Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant dimension type's `.actions()` method, then compile it in the backend adapter. |
 | Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` facts and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |

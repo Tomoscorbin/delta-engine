@@ -48,7 +48,6 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     TableMissing,
     TableTagsDimension,
-    UnhandledFact,
     diff_table,
 )
 
@@ -298,20 +297,12 @@ def test_changed_accepts_unequal_values():
     assert result.observed == 2
 
 
-def test_unhandled_fact_carries_description():
-    fact = UnhandledFact(description="partitioning change: () → ('ds',)")
-
-    assert fact.description == "partitioning change: () → ('ds',)"
-
-
 def test_columns_dimension_added_column_produces_add_column_action():
     # Given a dimension carrying an added column with no tags
     column = Column("age", Integer())
     dim = ColumnsDimension(entries=(ColumnAdded(column=column),))
 
-    # Then actions contains AddColumn, unhandled is empty
     assert dim.actions() == (AddColumn(column=column),)
-    assert dim.unhandled() == ()
 
 
 def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
@@ -323,7 +314,6 @@ def test_columns_dimension_added_column_with_tags_produces_add_and_set_tag():
     assert len(dim.actions()) == 2
     assert any(isinstance(a, AddColumn) for a in dim.actions())
     assert any(isinstance(a, SetColumnTag) for a in dim.actions())
-    assert dim.unhandled() == ()
 
 
 def test_columns_dimension_removed_column_produces_drop_column():
@@ -331,7 +321,6 @@ def test_columns_dimension_removed_column_produces_drop_column():
     dim = ColumnsDimension(entries=(ColumnRemoved(column=column),))
 
     assert dim.actions() == (DropColumn("stale"),)
-    assert dim.unhandled() == ()
 
 
 def test_columns_dimension_nullability_entry_produces_action():
@@ -341,7 +330,6 @@ def test_columns_dimension_nullability_entry_produces_action():
     dim = ColumnsDimension(entries=(entry,))
 
     assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
-    assert dim.unhandled() == ()
 
 
 def test_columns_dimension_comment_entry_produces_action():
@@ -349,20 +337,17 @@ def test_columns_dimension_comment_entry_produces_action():
     dim = ColumnsDimension(entries=(entry,))
 
     assert dim.actions() == (SetColumnComment("id", "pk"),)
-    assert dim.unhandled() == ()
 
 
-def test_columns_dimension_data_type_entry_produces_unhandled_fact_no_action():
-    # Given a column whose type changed — unsupported operation
+def test_columns_dimension_data_type_entry_produces_no_action():
+    # Given a column whose type changed — no in-place action is possible
     entry = ColumnDataTypeChanged(
         column_name="id", change=Changed(desired=Integer(), observed=Long())
     )
     dim = ColumnsDimension(entries=(entry,))
 
-    # Then no action is produced, but an unhandled fact surfaces
+    # Then no action is produced; the validator raises the failure via ColumnDataTypeChangeNotSupported
     assert dim.actions() == ()
-    assert len(dim.unhandled()) == 1
-    assert "id" in dim.unhandled()[0].description
 
 
 def test_columns_dimension_type_drift_suppresses_other_attribute_entries():
@@ -394,7 +379,6 @@ def test_columns_dimension_tag_entry_produces_set_and_unset_actions():
         SetColumnTag(column_name="id", name="pii", value="true"),
         UnsetColumnTag(column_name="id", name="old"),
     }
-    assert dim.unhandled() == ()
 
 
 def test_table_comment_dimension_produces_set_table_comment():
@@ -403,7 +387,6 @@ def test_table_comment_dimension_produces_set_table_comment():
 
     # Then a single SetTableComment action is produced and no unhandled facts
     assert dim.actions() == (SetTableComment(comment="new"),)
-    assert dim.unhandled() == ()
 
 
 def test_properties_dimension_sets_added_and_changed_ignores_removed():
@@ -422,7 +405,6 @@ def test_properties_dimension_sets_added_and_changed_ignores_removed():
         SetProperty(name="a", value="1"),
         SetProperty(name="b", value="2"),
     }
-    assert dim.unhandled() == ()
 
 
 def test_table_tags_dimension_sets_and_unsets_with_full_state_semantics():
@@ -440,19 +422,14 @@ def test_table_tags_dimension_sets_and_unsets_with_full_state_semantics():
         SetTableTag(name="env", value="prod"),
         UnsetTableTag(name="stale"),
     }
-    assert dim.unhandled() == ()
 
 
-def test_partitioning_dimension_produces_no_actions_but_one_unhandled_fact():
-    # Given a partitioning change (unsupported in-place)
-    dim = PartitioningDimension(
-        change=Changed(desired=("ds",), observed=())
-    )
+def test_partitioning_dimension_produces_no_actions():
+    # Given a partitioning change — no in-place action is possible
+    dim = PartitioningDimension(change=Changed(desired=("ds",), observed=()))
 
-    # Then no actions are produced and one unhandled fact describes the blockage
+    # Then no action is produced; the validator raises the failure via PartitioningChangeNotSupported
     assert dim.actions() == ()
-    assert len(dim.unhandled()) == 1
-    assert "partitioning" in dim.unhandled()[0].description.lower()
 
 
 def test_primary_key_dimension_added_produces_set_primary_key():
@@ -462,7 +439,6 @@ def test_primary_key_dimension_added_produces_set_primary_key():
 
     # Then SetPrimaryKey is produced
     assert dim.actions() == (SetPrimaryKey(columns=("id",), constraint_name="test_pk"),)
-    assert dim.unhandled() == ()
 
 
 def test_primary_key_dimension_removed_produces_drop_primary_key():
@@ -472,7 +448,6 @@ def test_primary_key_dimension_removed_produces_drop_primary_key():
 
     # Then DropPrimaryKey is produced
     assert dim.actions() == (DropPrimaryKey(),)
-    assert dim.unhandled() == ()
 
 
 def test_primary_key_dimension_changed_produces_drop_then_set():
@@ -489,7 +464,6 @@ def test_primary_key_dimension_changed_produces_drop_then_set():
         DropPrimaryKey(),
         SetPrimaryKey(columns=("a",), constraint_name="test_pk"),
     )
-    assert dim.unhandled() == ()
 
 
 def _fk(constraint_name: str = "test_fk") -> ForeignKeyConstraint:
@@ -514,7 +488,6 @@ def test_foreign_keys_dimension_added_produces_set_foreign_key():
             constraint_name="test_fk",
         ),
     )
-    assert dim.unhandled() == ()
 
 
 def test_foreign_keys_dimension_removed_produces_drop_foreign_key():
@@ -523,4 +496,3 @@ def test_foreign_keys_dimension_removed_produces_drop_foreign_key():
 
     # Then DropForeignKey is produced with the constraint name
     assert dim.actions() == (DropForeignKey(constraint_name="stale_fk"),)
-    assert dim.unhandled() == ()

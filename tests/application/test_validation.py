@@ -1,8 +1,10 @@
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
     DEFAULT_RULES,
+    ColumnDataTypeChangeNotSupported,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
+    PartitioningChangeNotSupported,
     ValidationResult,
     validate_diff,
 )
@@ -275,11 +277,13 @@ def test_validation_result_failed_property():
     assert passing.failed is False
 
 
-def test_default_rules_cover_the_two_precondition_policies():
+def test_default_rules_cover_all_precondition_policies():
     # Given the DEFAULT_RULES constant
     rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
 
     assert rule_names == {
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
+        "ColumnDataTypeChangeNotSupported",
+        "PartitioningChangeNotSupported",
     }

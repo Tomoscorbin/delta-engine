@@ -8,9 +8,11 @@ from typing import ClassVar, Protocol, assert_never
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.domain.plan.diff import (
     ColumnAdded,
+    ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnsDimension,
     Dimension,
+    PartitioningDimension,
     TableDiff,
     TableDrift,
     TableMissing,
@@ -91,9 +93,56 @@ class NullabilityTighteningOnExistingColumn:
         )
 
 
+class ColumnDataTypeChangeNotSupported:
+    """Disallow in-place column type changes."""
+
+    name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
+
+    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        cols_dim = next((d for d in dimensions if isinstance(d, ColumnsDimension)), None)
+        if cols_dim is None:
+            return ()
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"cannot change the type of existing column '{entry.column_name}'"
+                    f" from {entry.change.observed} to {entry.change.desired}."
+                    " Type migrations are not supported;"
+                    " recreate the table to change a column's type."
+                ),
+            )
+            for entry in cols_dim.entries
+            if isinstance(entry, ColumnDataTypeChanged)
+        )
+
+
+class PartitioningChangeNotSupported:
+    """Disallow in-place partitioning changes."""
+
+    name: ClassVar[str] = "PartitioningChangeNotSupported"
+
+    def evaluate(self, dimensions: tuple[Dimension, ...]) -> tuple[ValidationFailure, ...]:
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "partitioning changes are not supported."
+                    f" Current partition columns: {d.change.observed}"
+                    f" - Requested partition columns: {d.change.desired}."
+                    " Recreate the table with the desired partitioning."
+                ),
+            )
+            for d in dimensions
+            if isinstance(d, PartitioningDimension)
+        )
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
+    ColumnDataTypeChangeNotSupported(),
+    PartitioningChangeNotSupported(),
 )
 
 
@@ -104,24 +153,19 @@ def validate_diff(
     """
     Evaluate every rule against a table diff and return the verdict.
 
-    A missing table passes automatically. For a drift, unhandled facts from
-    each dimension are surfaced as failures, then precondition rules are
-    evaluated against the dimensions.
+    A missing table passes automatically. For a drift, every rule is evaluated
+    against the dimensions and failures are collected.
     """
     match diff:
         case TableMissing():
             return ValidationResult()
         case TableDrift() as drift:
-            unhandled_failures = tuple(
-                ValidationFailure(rule_name="UnhandledDrift", message=fact.description)
-                for dimension in drift.dimensions
-                for fact in dimension.unhandled()
+            return ValidationResult(
+                failures=tuple(
+                    failure
+                    for rule in rules
+                    for failure in rule.evaluate(drift.dimensions)
+                )
             )
-            rule_failures = tuple(
-                failure
-                for rule in rules
-                for failure in rule.evaluate(drift.dimensions)
-            )
-            return ValidationResult(failures=unhandled_failures + rule_failures)
         case _:
             assert_never(diff)

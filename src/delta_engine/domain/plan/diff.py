@@ -9,15 +9,15 @@ permitted (the validator's job) and no knowledge of how a difference is acted
 on (the dimension's job). Every variant carries the data its consumers need, so
 the diff is self-contained.
 
-Each dimension type owns three concerns: how to detect that it differs (via its
-``diff`` staticmethod), what actions to produce, and what facts it cannot handle.
-Adding a new dimension means adding one class here — ``diff_table`` requires no
-changes.
+Each dimension type owns two concerns: how to detect that it differs (via its
+``diff`` staticmethod) and what actions to produce. Adding a new dimension means
+adding one class here — ``diff_table`` requires no changes.
 
 Column-level drift entries (`ColumnAdded`, `ColumnRemoved`, `ColumnDataTypeChanged`,
 etc.) satisfy the same `Dimension` protocol as table-level dimensions: each carries
-exactly the fact it describes with no optionals, produces its own actions, and
-declares its own unhandled facts. `ColumnsDimension` delegates to them directly.
+exactly the fact it describes with no optionals and produces its own actions.
+`ColumnsDimension` delegates to them directly. Whether a dimension's drift is
+permitted is policy — that belongs in validation, not here.
 """
 
 from __future__ import annotations
@@ -80,22 +80,11 @@ class Changed[T]:
 type Entry[T] = Added[T] | Removed[T] | Changed[T]
 
 
-@dataclass(frozen=True, slots=True)
-class UnhandledFact:
-    """A diff fact the engine has no action for; surfaced to validation."""
-
-    description: str
-
-
 class Dimension(Protocol):
-    """A single aspect of table drift: produces actions and declares unhandled facts."""
+    """A single aspect of table drift: produces actions to reconcile the difference."""
 
     def actions(self) -> tuple[Action, ...]:
         """Return the actions this dimension contributes to the plan."""
-        ...
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return facts this dimension has no action for, surfaced to validation."""
         ...
 
 
@@ -122,15 +111,10 @@ class ColumnAdded:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
-        """Return AddColumn followed by SetColumnTag for each tag on the column."""
         return (AddColumn(column=self.column), *[
             SetColumnTag(column_name=self.column.name, name=name, value=value)
             for name, value in self.column.tags.items()
         ])
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — column additions are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,12 +124,7 @@ class ColumnRemoved:
     column: Column
 
     def actions(self) -> tuple[Action, ...]:
-        """Return a DropColumn action."""
         return (DropColumn(self.column.name),)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — column removals are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,21 +135,7 @@ class ColumnDataTypeChanged:
     change: Changed[DataType]
 
     def actions(self) -> tuple[Action, ...]:
-        """Return no actions — data type changes cannot be applied in place."""
         return ()
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return one UnhandledFact describing the unsupported type change."""
-        return (
-            UnhandledFact(
-                description=(
-                    f"cannot change the type of existing column '{self.column_name}'"
-                    f" from {self.change.observed} to {self.change.desired}."
-                    " Type migrations are not supported;"
-                    " recreate the table to change a column's type."
-                )
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,12 +146,7 @@ class ColumnNullabilityChanged:
     change: Changed[bool]
 
     def actions(self) -> tuple[Action, ...]:
-        """Return a SetColumnNullability action."""
         return (SetColumnNullability(column_name=self.column_name, nullable=self.change.desired),)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — nullability changes are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,12 +157,7 @@ class ColumnCommentChanged:
     change: Changed[str]
 
     def actions(self) -> tuple[Action, ...]:
-        """Return a SetColumnComment action."""
         return (SetColumnComment(self.column_name, self.change.desired),)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — comment changes are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,10 +181,6 @@ class ColumnTagsChanged:
                 case Removed(item=pair):
                     result.append(UnsetColumnTag(column_name=self.column_name, name=pair.name))
         return tuple(result)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — tag changes are always actionable."""
-        return ()
 
 
 type ColumnDrift = (
@@ -273,9 +224,10 @@ class ColumnsDimension:
         """
         Return per-attribute drift entries for a name-matched column pair.
 
-        When a data type change is present, only that entry is returned — all
-        other attribute entries are suppressed so the dry-run report does not
-        show partial actions for a column the engine cannot reconcile.
+        When a data type change is present, only that entry is returned — other
+        attribute drift is suppressed because a type-changed column must be
+        recreated; showing nullability or comment entries would suggest
+        actionable work that is moot until the column is dropped and re-added.
         """
         if desired.data_type != observed.data_type:
             return (
@@ -305,12 +257,7 @@ class ColumnsDimension:
         return tuple(entries)
 
     def actions(self) -> tuple[Action, ...]:
-        """Return all actions from every column entry."""
         return tuple(action for entry in self.entries for action in entry.actions())
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return all unhandled facts from every column entry."""
-        return tuple(fact for entry in self.entries for fact in entry.unhandled())
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,12 +273,7 @@ class TableCommentDimension:
         return TableCommentDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
-        """Return a SetTableComment action for the desired comment."""
         return (SetTableComment(comment=self.change.desired),)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — comment changes are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,19 +291,14 @@ class PropertiesDimension:
         return PropertiesDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
-        """Return SetProperty for each Added or Changed entry; Removed entries produce no action."""
         result: list[Action] = []
         for entry in self.entries:
             match entry:
                 case Added(item=pair) | Changed(desired=pair):
                     result.append(SetProperty(name=pair.name, value=pair.value))
-                case Removed():
+                case _:
                     pass
         return tuple(result)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — property changes are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,7 +316,6 @@ class TableTagsDimension:
         return TableTagsDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
-        """Return SetTableTag for Added/Changed entries and UnsetTableTag for Removed entries."""
         result: list[Action] = []
         for entry in self.entries:
             match entry:
@@ -389,14 +325,10 @@ class TableTagsDimension:
                     result.append(UnsetTableTag(name=pair.name))
         return tuple(result)
 
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — tag changes are always actionable."""
-        return ()
-
 
 @dataclass(frozen=True, slots=True)
 class PartitioningDimension:
-    """Partitioning drift — no action is possible; always surfaces an unhandled fact."""
+    """Partitioning drift — records the fact; policy on whether it is allowed lives in validation."""
 
     change: Changed[tuple[str, ...]]
 
@@ -409,21 +341,7 @@ class PartitioningDimension:
         return PartitioningDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
-        """Return no actions — partitioning changes cannot be applied in place."""
         return ()
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return one UnhandledFact describing the unsupported partitioning change."""
-        return (
-            UnhandledFact(
-                description=(
-                    "partitioning changes are not supported."
-                    f" Current partition columns: {self.change.observed}"
-                    f" - Requested partition columns: {self.change.desired}."
-                    " Recreate the table with the desired partitioning."
-                )
-            ),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -469,10 +387,6 @@ class PrimaryKeyDimension:
                 )
             case _ as unreachable:
                 assert_never(unreachable)
-
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — primary key changes are always actionable."""
-        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,10 +437,6 @@ class ForeignKeysDimension:
                     result.append(DropForeignKey(constraint_name=fk.constraint_name))
         return tuple(result)
 
-    def unhandled(self) -> tuple[UnhandledFact, ...]:
-        """Return no unhandled facts — foreign key changes are always actionable."""
-        return ()
-
 
 @dataclass(frozen=True, slots=True)
 class TableMissing:
@@ -563,9 +473,9 @@ class TableDrift:
     """
     Per-dimension differences between a desired and an observed table.
 
-    Each dimension in the tuple owns its own facts, actions, and unhandled
-    facts. An empty tuple is the natural zero — a table with no drift has no
-    dimensions.
+    Each dimension records the facts for one aspect of the table and produces
+    actions to reconcile it. An empty tuple is the natural zero — a table with
+    no drift has no dimensions.
     """
 
     dimensions: tuple[Dimension, ...] = ()
