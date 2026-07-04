@@ -36,7 +36,7 @@
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] improve Report display formatting
-- [ ] Put Propertiess into table.py alongside DeltaTable
+- [ ] Put Propertiess into table.py alongside DeltaTable. rename table.py to delta_table.py
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
 - [ ] Should we remove the concept of default properties altogether?
