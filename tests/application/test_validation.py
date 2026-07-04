@@ -115,6 +115,9 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
     failures = rule.evaluate(TableDrift(columns=(_tightening("a"), _tightening("b"))))
 
     assert len(failures) == 2
+    messages = [failure.message for failure in failures]
+    for column_name in ("a", "b"):
+        assert any(column_name in message for message in messages)
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
@@ -148,6 +151,9 @@ def test_rejects_all_column_type_changes_in_a_single_pass():
     failures = rule.evaluate(TableDrift(columns=(_type_drift("a"), _type_drift("b"))))
 
     assert len(failures) == 2
+    messages = [failure.message for failure in failures]
+    for column_name in ("a", "b"):
+        assert any(column_name in message for message in messages)
 
 
 def test_allows_drift_with_no_column_type_change():
