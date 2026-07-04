@@ -27,7 +27,7 @@ from delta_engine.application.report import (
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import CreateTable
+from delta_engine.domain.plan.actions import CreateTable, SetColumnComment
 
 # --------- helpers/fakes
 
@@ -809,3 +809,90 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     assert orders.execution is None
     # customers is a clean create with no FK — it is not itself foreign-key-failed
     assert reports["cat.sch.customers"].status is TableRunStatus.SUCCESS
+
+
+# ---- metadata-only engine tests
+
+
+def _metadata_only_spec(fqn: str) -> DeltaTable:
+    """A metadata-only spec with a comment on its only column."""
+    catalog, schema, name = fqn.split(".")
+    return DeltaTable(
+        catalog,
+        schema,
+        name,
+        columns=(Column("id", String(), comment="surrogate key"),),
+        comment="orders table",
+        metadata_only=True,
+    )
+
+
+def _existing_matching_table(fqn: str) -> TablePresent:
+    """An observed table whose schema exactly matches _metadata_only_spec."""
+    catalog, schema, name = fqn.split(".")
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, name),
+            columns=(Column("id", String()),),
+        )
+    )
+
+
+def test_metadata_only_sync_applies_metadata_when_schema_matches():
+    # Given a live table whose schema exactly matches the declaration
+    fqn = "cat.sch.orders"
+    reader = _FakeReader({fqn: _existing_matching_table(fqn)})
+    executor = _FakeExecutor(results=(_ok_exec(0), _ok_exec(1)))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing a metadata-only definition
+    report = engine.sync(_metadata_only_spec(fqn))
+
+    # Then the sync succeeds and metadata actions were planned
+    assert report.any_failures is False
+    plan = report.table_reports[0].plan
+    assert any(isinstance(a, SetColumnComment) for a in plan)
+
+
+def test_metadata_only_sync_fails_when_unmanaged_column_has_drifted():
+    # Given a live table with a different column type (unmanaged dimension drifted)
+    from delta_engine.api import Long
+
+    fqn = "cat.sch.orders"
+    reader = _FakeReader({
+        fqn: TablePresent(
+            table=ObservedTable(
+                qualified_name=QualifiedName("cat", "sch", "orders"),
+                columns=(Column("id", Long()),),  # type differs from String in spec
+            )
+        )
+    })
+    executor = _FakeExecutor(results=())
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(_metadata_only_spec(fqn))
+
+    # Then validation failed and nothing executed
+    table_report = exc_info.value.report.table_reports[0]
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.execution is None
+    assert any("column structure" in f.message.lower() for f in table_report.failures)
+
+
+def test_metadata_only_sync_fails_when_table_is_missing():
+    # Given a missing table (TableAbsent) for a metadata-only definition
+    fqn = "cat.sch.orders"
+    reader = _FakeReader({fqn: TableAbsent()})
+    executor = _FakeExecutor(results=())
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(_metadata_only_spec(fqn))
+
+    # Then validation failed
+    table_report = exc_info.value.report.table_reports[0]
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert any("does not exist" in f.message for f in table_report.failures)
