@@ -18,6 +18,7 @@ Declarative schema management for Delta Lake tables on Databricks.
    how-to-declare-foreign-keys
    how-to-configure-properties
    how-to-configure-tags
+   how-to-deploy-metadata-only
 
 .. toctree::
    :hidden:
