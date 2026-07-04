@@ -93,7 +93,7 @@ sequenceDiagram
     Domain-->>Engine: TableDiff
     Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
-    Engine->>Domain: lower_diff(diff)
+    Engine->>Domain: plan from diff.dimensions
     Domain-->>Engine: ActionPlan
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
@@ -109,7 +109,7 @@ The phases are:
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Diff**: compute the typed `TableDiff` with `diff_table`.
 4. **Validate**: judge the diff with `validate_diff`.
-5. **Plan**: lower the diff into an `ActionPlan` with `lower_diff`.
+5. **Plan**: construct an `ActionPlan` by iterating `diff.dimensions` after validation.
 6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
 7. **Execute**: execute non-empty plans for tables that have no failures.
@@ -124,14 +124,14 @@ The phases are:
 | `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
 | `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
 | `TableDiff` | `diff_table` | Validation, lowering | Typed facts separating observed from desired |
-| `ActionPlan` | `lower_diff` | Validation, executor, report | Ordered table-local changes |
+| `ActionPlan` | Engine (from dimensions) | Executor, report | Ordered table-local changes |
 | `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
 | `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
 | `SyncReport` | Engine | User code | Immutable run result |
 
 ## Planning and determinism
 
-`compute_plan(desired, observed)` — the `diff_table` → `lower_diff` composition — returns an `ActionPlan`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
+`compute_plan(desired, observed)` returns an `ActionPlan`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
 The phase ordering encodes dependency constraints. Each ordering below exists because Databricks rejects the operation otherwise:
 
@@ -147,12 +147,14 @@ observed)` produces a `TableDiff` — `TableMissing` when the table does not
 exist, else a `TableDrift` recording per-dimension facts (`Added`, `Removed`,
 and `Changed` entries for columns, properties, tags, and keys; `Changed`
 values for the comment and partitioning). The diff states facts only.
-`validate_diff` judges those facts — all policy lives in the validation rules
-— and `lower_diff` translates them into the `ActionPlan`, one `match` per
-dimension. Facts the engine does not act on (a changed column type, a changed
-partition spec, an observed-only property) lower to nothing: validation has
-already rejected what is not allowed, so nothing unexecutable ever enters a
-plan. `compute_plan` is the `diff_table` → `lower_diff` composition.
+Each dimension in the drift owns its own lowering: `.actions()` returns the DDL
+steps it can act on, and `.unhandled()` returns facts it has no action for (a
+changed column type, a changed partition spec). `validate_diff` collects
+unhandled facts from every dimension and maps them to failures, then evaluates
+precondition rules against the dimension tuple. The engine constructs the
+`ActionPlan` by iterating dimensions directly after validation — there is no
+separate `lower_diff` step and no hidden dependency between lowering and
+validation.
 
 ## Constraint-name generation
 
@@ -209,7 +211,8 @@ Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evalu
 | Change | Main location | Notes |
 |---|---|---|
 | Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in the domain, emit it from the lowering (`domain/plan/lower.py`), then compile it in the backend adapter. |
+| Add a new dimension | `delta_engine.domain.plan.diff` | Add a dimension type with `.actions()` and `.unhandled()`; `diff_table` constructs it. No other files change. |
+| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant dimension type's `.actions()` method, then compile it in the backend adapter. |
 | Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` facts and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
 | Change public declarations | `delta_engine.api` | Lower public API choices into domain snapshots before the engine phases begin. |
