@@ -54,42 +54,6 @@ from delta_engine.domain.plan.diff import (
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
-def test_column_data_type_changed_carries_the_change():
-    entry = ColumnDataTypeChanged(
-        column_name="id", change=Changed(desired=Integer(), observed=Long())
-    )
-
-    assert entry.column_name == "id"
-    assert entry.change == Changed(desired=Integer(), observed=Long())
-
-
-def test_column_nullability_changed_carries_the_change():
-    entry = ColumnNullabilityChanged(
-        column_name="id", change=Changed(desired=False, observed=True)
-    )
-
-    assert entry.column_name == "id"
-    assert entry.change.desired is False
-
-
-def test_column_comment_changed_carries_the_change():
-    entry = ColumnCommentChanged(
-        column_name="id", change=Changed(desired="new comment", observed="")
-    )
-
-    assert entry.column_name == "id"
-    assert entry.change.desired == "new comment"
-
-
-def test_column_tags_changed_carries_the_entries():
-    entry = ColumnTagsChanged(
-        column_name="id",
-        entries=(Changed(KeyValue("pii", "true"), KeyValue("pii", "false")),),
-    )
-
-    assert entry.column_name == "id"
-    assert len(entry.entries) == 1
-
 
 def test_table_drift_defaults_to_no_differences():
     # Given a drift built with no arguments
@@ -149,11 +113,14 @@ def test_equal_tables_diff_to_empty_drift():
 
 
 def test_desired_only_column_produces_columns_dimension_with_added_entry():
+    # Given a desired table with an extra column not in the observed table
+    # When diffing
     diff = diff_table(
         _desired(columns=(Column("id", Integer()), Column("age", Integer()))),
         _observed(),
     )
 
+    # Then a ColumnsDimension with an Added entry is produced
     assert isinstance(diff, TableDrift)
     assert len(diff.dimensions) == 1
     dim = diff.dimensions[0]
@@ -350,17 +317,20 @@ def test_columns_dimension_data_type_entry_produces_no_action():
     assert dim.actions() == ()
 
 
-def test_columns_dimension_type_drift_suppresses_other_attribute_entries():
-    # Given a column pair where type differs: _diff_pair returns only the type entry
-    # so other attribute entries are never created (suppression happens at construction,
-    # not at lowering)
-    desired_col = Column("id", Integer(), nullable=False, comment="new")
-    observed_col = Column("id", Long(), nullable=True, comment="old")
-    entries = ColumnsDimension._diff_pair(desired_col, observed_col)
+def test_type_drift_suppresses_nullability_and_comment_entries():
+    # Given a column where type, nullability, and comment all differ
+    desired = _desired(columns=(Column("id", Integer(), nullable=False, comment="new"),))
+    observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
 
-    # Then only the data type entry is present — nullability and comment are suppressed
-    assert len(entries) == 1
-    assert isinstance(entries[0], ColumnDataTypeChanged)
+    # When diffing
+    diff = diff_table(desired, observed)
+
+    # Then the columns dimension contains only the type entry — nullability and comment
+    # are suppressed because those changes are moot until the column is recreated
+    assert isinstance(diff, TableDrift)
+    dim = next(d for d in diff.dimensions if isinstance(d, ColumnsDimension))
+    assert len(dim.entries) == 1
+    assert isinstance(dim.entries[0], ColumnDataTypeChanged)
 
 
 def test_columns_dimension_tag_entry_produces_set_and_unset_actions():
