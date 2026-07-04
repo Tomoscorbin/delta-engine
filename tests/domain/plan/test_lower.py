@@ -86,6 +86,7 @@ def test_added_column_lowers_to_add_column_plus_its_tags():
 
     # Note: Column.tags is a dict so AddColumn(column=...) is unhashable; use
     # isinstance check for AddColumn and set() for the tag-only actions.
+    assert len(plan.actions) == 2
     assert any(isinstance(a, AddColumn) and a.column == column for a in plan.actions)
     tag_actions = [a for a in plan.actions if isinstance(a, SetColumnTag)]
     assert tag_actions == [SetColumnTag(column_name="age", name="pii", value="false")]
