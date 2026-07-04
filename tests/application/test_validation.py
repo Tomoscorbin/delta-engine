@@ -3,7 +3,7 @@ from delta_engine.application.validation import (
     DEFAULT_RULES,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
-    UnmanagedDimensionDrift,
+    UnmanagedAspectDrift,
     ValidationResult,
     validate_diff,
 )
@@ -18,13 +18,12 @@ from delta_engine.domain.model import (
     TableAspect,
 )
 from delta_engine.domain.plan.diff import (
-    Changed,
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
-    ColumnStructureDimension,
-    PartitioningDimension,
-    TableCommentDimension,
+    DriftFact,
+    PartitioningChanged,
+    TableCommentChanged,
     TableDrift,
     TableMissing,
 )
@@ -40,15 +39,21 @@ def _desired_table(managed_aspects: frozenset[TableAspect] = ALL_ASPECTS) -> Des
     )
 
 
+def _drift(
+    *facts: DriftFact, managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
+) -> TableDrift:
+    return TableDrift(facts=tuple(facts), managed_aspects=managed_aspects)
+
+
 def _tightening(column_name: str = "id") -> ColumnNullabilityChanged:
     return ColumnNullabilityChanged(
-        column_name=column_name, change=Changed(desired=False, observed=True)
+        column_name=column_name, desired_nullable=False, observed_nullable=True
     )
 
 
 def _type_drift(column_name: str = "id") -> ColumnDataTypeChanged:
     return ColumnDataTypeChanged(
-        column_name=column_name, change=Changed(desired=Long(), observed=Integer())
+        column_name=column_name, desired_type=Long(), observed_type=Integer()
     )
 
 
@@ -56,16 +61,12 @@ def _type_drift(column_name: str = "id") -> ColumnDataTypeChanged:
 
 
 def test_rejects_add_of_non_nullable_column():
-    # Given a dimensions tuple containing a columns dimension with a NOT NULL addition
+    # Given a fact tuple containing a NOT NULL column addition
     rule = NonNullableColumnAdd()
-    dimensions = (
-        ColumnStructureDimension(
-            entries=(ColumnAdded(Column("order_id", Integer(), nullable=False)),)
-        ),
-    )
+    facts = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
 
     # When
-    failures = rule.evaluate(dimensions, _desired_table())
+    failures = rule.evaluate(facts, ALL_ASPECTS)
 
     # Then
     assert len(failures) == 1
@@ -73,20 +74,16 @@ def test_rejects_add_of_non_nullable_column():
 
 
 def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
-    # Given three NOT NULL column additions in a single dimensions tuple
+    # Given three NOT NULL column additions in a single fact tuple
     rule = NonNullableColumnAdd()
-    dimensions = (
-        ColumnStructureDimension(
-            entries=(
-                ColumnAdded(Column("a", Integer(), nullable=False)),
-                ColumnAdded(Column("b", String(), nullable=False)),
-                ColumnAdded(Column("c", Integer(), nullable=False)),
-            )
-        ),
+    facts = (
+        ColumnAdded(Column("a", Integer(), nullable=False)),
+        ColumnAdded(Column("b", String(), nullable=False)),
+        ColumnAdded(Column("c", Integer(), nullable=False)),
     )
 
     # When
-    failures = rule.evaluate(dimensions, _desired_table())
+    failures = rule.evaluate(facts, ALL_ASPECTS)
 
     # Then
     assert len(failures) == 3
@@ -97,11 +94,11 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
 
 
 def test_allows_add_of_nullable_column():
-    # Given a columns dimension containing a nullable column addition
+    # Given a fact tuple containing a nullable column addition
     rule = NonNullableColumnAdd()
-    dimensions = (ColumnStructureDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
+    facts = (ColumnAdded(Column("age", Integer())),)
 
-    assert rule.evaluate(dimensions, _desired_table()) == ()
+    assert rule.evaluate(facts, ALL_ASPECTS) == ()
 
 
 def test_non_nullable_column_add_ignores_creation():
@@ -112,29 +109,29 @@ def test_non_nullable_column_add_ignores_creation():
     )
 
     # When
-    result = validate_diff(TableMissing(desired=desired), desired)
+    result = validate_diff(TableMissing(desired=desired))
 
     # Then
     assert result.failed is False
 
 
-def test_non_nullable_column_add_passes_when_no_columns_dimension():
-    # Given a dimensions tuple with no ColumnStructureDimension at all
+def test_non_nullable_column_add_passes_when_no_facts():
+    # Given an empty fact tuple
     rule = NonNullableColumnAdd()
 
-    assert rule.evaluate((), _desired_table()) == ()
+    assert rule.evaluate((), ALL_ASPECTS) == ()
 
 
 # ---- NullabilityTighteningOnExistingColumn
 
 
 def test_rejects_tightening_an_existing_column_to_not_null():
-    # Given a columns dimension with a nullability tightening on an existing column
+    # Given a nullability tightening fact on an existing column
     rule = NullabilityTighteningOnExistingColumn()
-    dimensions = (ColumnStructureDimension(entries=(_tightening("order_id"),)),)
+    facts = (_tightening("order_id"),)
 
     # When
-    failures = rule.evaluate(dimensions, _desired_table())
+    failures = rule.evaluate(facts, ALL_ASPECTS)
 
     # Then
     assert len(failures) == 1
@@ -143,12 +140,12 @@ def test_rejects_tightening_an_existing_column_to_not_null():
 
 
 def test_rejects_all_nullability_tightenings_in_a_single_pass():
-    # Given two nullability tightenings in a single dimensions tuple
+    # Given two nullability tightenings in a single fact tuple
     rule = NullabilityTighteningOnExistingColumn()
-    dimensions = (ColumnStructureDimension(entries=(_tightening("a"), _tightening("b"))),)
+    facts = (_tightening("a"), _tightening("b"))
 
     # When
-    failures = rule.evaluate(dimensions, _desired_table())
+    failures = rule.evaluate(facts, ALL_ASPECTS)
 
     # Then
     assert len(failures) == 2
@@ -158,25 +155,24 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
 
 
 def test_allows_loosening_an_existing_column_to_nullable():
-    # Given a columns dimension with a nullability loosening (NOT NULL → nullable)
+    # Given a nullability loosening fact (NOT NULL → nullable)
     rule = NullabilityTighteningOnExistingColumn()
     loosening = ColumnNullabilityChanged(
-        column_name="id", change=Changed(desired=True, observed=False)
+        column_name="id", desired_nullable=True, observed_nullable=False
     )
-    dimensions = (ColumnStructureDimension(entries=(loosening,)),)
 
-    assert rule.evaluate(dimensions, _desired_table()) == ()
+    assert rule.evaluate((loosening,), ALL_ASPECTS) == ()
 
 
 # ---- unsupported drift → ValidationFailure
 
 
 def test_validate_diff_surfaces_type_drift_as_failure():
-    # Given a drift whose only dimension is a ColumnStructureDimension with a type change
-    diff = TableDrift(dimensions=(ColumnStructureDimension(entries=(_type_drift("id"),)),))
+    # Given a drift whose only fact is a column type change
+    diff = _drift(_type_drift("id"))
 
     # When
-    result = validate_diff(diff, _desired_table())
+    result = validate_diff(diff)
 
     # Then
     assert result.failed is True
@@ -185,13 +181,11 @@ def test_validate_diff_surfaces_type_drift_as_failure():
 
 
 def test_validate_diff_surfaces_partitioning_change_as_failure():
-    # Given a drift whose only dimension is a partitioning change
-    diff = TableDrift(
-        dimensions=(PartitioningDimension(change=Changed(desired=("ds",), observed=())),)
-    )
+    # Given a drift whose only fact is a partitioning change
+    diff = _drift(PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=()))
 
     # When
-    result = validate_diff(diff, _desired_table())
+    result = validate_diff(diff)
 
     # Then
     assert result.failed is True
@@ -200,19 +194,13 @@ def test_validate_diff_surfaces_partitioning_change_as_failure():
 
 def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     # Given a drift with a type change (unsupported) AND a NOT NULL add (rule violation)
-    diff = TableDrift(
-        dimensions=(
-            ColumnStructureDimension(
-                entries=(
-                    _type_drift("id"),
-                    ColumnAdded(Column("new_col", Integer(), nullable=False)),
-                )
-            ),
-        )
+    diff = _drift(
+        _type_drift("id"),
+        ColumnAdded(Column("new_col", Integer(), nullable=False)),
     )
 
     # When
-    result = validate_diff(diff, _desired_table())
+    result = validate_diff(diff)
 
     # Then
     assert result.failed is True
@@ -224,12 +212,10 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
 
 def test_validation_passes_when_no_rule_is_broken():
     # Given a drift containing only a nullable column addition (breaks no rules)
-    diff = TableDrift(
-        dimensions=(ColumnStructureDimension(entries=(ColumnAdded(Column("age", Integer())),)),)
-    )
+    diff = _drift(ColumnAdded(Column("age", Integer())))
 
     # When
-    result = validate_diff(diff, _desired_table())
+    result = validate_diff(diff)
 
     # Then
     assert result.failed is False
@@ -237,17 +223,17 @@ def test_validation_passes_when_no_rule_is_broken():
 
 
 def test_empty_drift_produces_no_failures():
-    result = validate_diff(TableDrift(), _desired_table())
+    result = validate_diff(_drift())
 
     assert result.failed is False
 
 
 def test_missing_table_passes_validation():
     # Given a TableMissing diff (table does not yet exist)
-    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
+    desired = _desired_table()
 
     # When
-    result = validate_diff(TableMissing(desired=desired), desired)
+    result = validate_diff(TableMissing(desired=desired))
 
     # Then
     assert result.failed is False
@@ -255,16 +241,10 @@ def test_missing_table_passes_validation():
 
 def test_validation_uses_the_default_rules_when_none_are_supplied():
     # Given a drift with a NOT NULL column addition and no explicit rules argument
-    diff = TableDrift(
-        dimensions=(
-            ColumnStructureDimension(
-                entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)
-            ),
-        )
-    )
+    diff = _drift(ColumnAdded(Column("x", Integer(), nullable=False)))
 
     # When
-    result = validate_diff(diff, _desired_table())
+    result = validate_diff(diff)
 
     # Then
     assert result.failed is True
@@ -272,17 +252,10 @@ def test_validation_uses_the_default_rules_when_none_are_supplied():
 
 def test_validation_passes_when_empty_rule_set_is_supplied():
     # Given a drift that would break a rule, but no rules are supplied
-    # ColumnAdded breaks no rule when rules=() — ColumnDataTypeChangeNotSupported is suppressed too
-    diff = TableDrift(
-        dimensions=(
-            ColumnStructureDimension(
-                entries=(ColumnAdded(Column("x", Integer(), nullable=False)),)
-            ),
-        )
-    )
+    diff = _drift(ColumnAdded(Column("x", Integer(), nullable=False)))
 
     # When
-    result = validate_diff(diff, _desired_table(), rules=())
+    result = validate_diff(diff, rules=())
 
     # Then
     assert result.failed is False
@@ -307,72 +280,58 @@ def test_default_rules_cover_all_precondition_policies():
         "NullabilityTighteningOnExistingColumn",
         "ColumnDataTypeChangeNotSupported",
         "PartitioningChangeNotSupported",
-        "UnmanagedDimensionDrift",
+        "UnmanagedAspectDrift",
     }
 
 
-# ---- UnmanagedDimensionDrift
+# ---- UnmanagedAspectDrift
 
 
-def test_unmanaged_dimension_drift_fails_when_unmanaged_dimension_has_drifted():
-    # Given a table that only manages table tags, but column structure has drifted
-    desired = _desired_table(
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS})
-    )
-    rule = UnmanagedDimensionDrift()
-    dimensions = (
-        ColumnStructureDimension(entries=(ColumnAdded(Column("extra", Integer())),)),
-    )
+def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
+    # Given a declaration that only manages table tags, but column structure has drifted
+    rule = UnmanagedAspectDrift()
+    facts = (ColumnAdded(Column("extra", Integer())),)
 
-    failures = rule.evaluate(dimensions, desired)
+    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_TAGS}))
 
     # Then one failure names the unmanaged aspect
     assert len(failures) == 1
-    assert failures[0].rule_name == "UnmanagedDimensionDrift"
+    assert failures[0].rule_name == "UnmanagedAspectDrift"
     assert "column structure" in failures[0].message.lower()
 
 
-def test_unmanaged_dimension_drift_produces_one_failure_per_drifted_unmanaged_dimension():
-    # Given two unmanaged dimensions that have drifted
-    desired = _desired_table(
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS})
-    )
-    rule = UnmanagedDimensionDrift()
-    dimensions = (
-        ColumnStructureDimension(entries=(ColumnAdded(Column("extra", Integer())),)),
-        TableCommentDimension(change=Changed(desired="new", observed="old")),
+def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
+    # Given two facts in one unmanaged aspect and one fact in another
+    rule = UnmanagedAspectDrift()
+    facts = (
+        ColumnAdded(Column("extra", Integer())),
+        ColumnAdded(Column("more", Integer())),
+        TableCommentChanged(desired_comment="new", observed_comment="old"),
     )
 
-    failures = rule.evaluate(dimensions, desired)
+    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_TAGS}))
 
+    # Then one failure per aspect, not per fact
     assert len(failures) == 2
 
 
-def test_unmanaged_dimension_drift_passes_when_no_unmanaged_dimension_has_drifted():
-    # Given a metadata-only table where only a managed dimension (table comment) has drifted
-    desired = _desired_table(
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT})
-    )
-    rule = UnmanagedDimensionDrift()
-    dimensions = (
-        TableCommentDimension(change=Changed(desired="new", observed="old")),
-    )
+def test_unmanaged_aspect_drift_passes_when_no_unmanaged_aspect_has_drifted():
+    # Given a metadata-only declaration where only a managed aspect (table comment) drifted
+    rule = UnmanagedAspectDrift()
+    facts = (TableCommentChanged(desired_comment="new", observed_comment="old"),)
 
-    failures = rule.evaluate(dimensions, desired)
+    failures = rule.evaluate(facts, frozenset({TableAspect.TABLE_COMMENT}))
 
     assert failures == ()
 
 
-def test_unmanaged_dimension_drift_passes_when_all_aspects_managed():
-    # Given a fully managed table with column structure drift
-    desired = _desired_table(managed_aspects=ALL_ASPECTS)
-    rule = UnmanagedDimensionDrift()
-    dimensions = (
-        ColumnStructureDimension(entries=(ColumnAdded(Column("extra", Integer())),)),
-    )
+def test_unmanaged_aspect_drift_passes_when_all_aspects_managed():
+    # Given a fully managed declaration with column structure drift
+    rule = UnmanagedAspectDrift()
+    facts = (ColumnAdded(Column("extra", Integer())),)
 
     # Then the rule passes — structure is managed
-    assert rule.evaluate(dimensions, desired) == ()
+    assert rule.evaluate(facts, ALL_ASPECTS) == ()
 
 
 # ---- TableMissing with COLUMN_STRUCTURE unmanaged
@@ -384,7 +343,7 @@ def test_validate_diff_fails_table_missing_when_column_structure_unmanaged():
         managed_aspects=frozenset({TableAspect.TABLE_COMMENT, TableAspect.TABLE_TAGS})
     )
 
-    result = validate_diff(TableMissing(desired=desired), desired)
+    result = validate_diff(TableMissing(desired=desired))
 
     assert result.failed is True
     assert any("does not exist" in f.message for f in result.failures)
@@ -394,15 +353,31 @@ def test_validate_diff_passes_table_missing_when_column_structure_managed():
     # Given a fully managed definition for a missing table
     desired = _desired_table(managed_aspects=ALL_ASPECTS)
 
-    result = validate_diff(TableMissing(desired=desired), desired)
+    result = validate_diff(TableMissing(desired=desired))
 
     assert result.failed is False
 
 
-# ---- DEFAULT_RULES coverage
+def test_metadata_only_drift_in_managed_aspects_passes():
+    # Given a metadata-only drift whose only fact is a managed table comment change
+    diff = _drift(
+        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+    )
+
+    result = validate_diff(diff)
+
+    assert result.failed is False
 
 
-def test_default_rules_include_unmanaged_dimension_drift():
-    rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
+def test_metadata_only_drift_in_unmanaged_aspect_fails():
+    # Given a metadata-only drift carrying unmanaged column structure drift
+    diff = _drift(
+        ColumnAdded(Column("extra", Integer())),
+        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+    )
 
-    assert "UnmanagedDimensionDrift" in rule_names
+    result = validate_diff(diff)
+
+    assert result.failed is True
+    assert any("column structure" in f.message.lower() for f in result.failures)

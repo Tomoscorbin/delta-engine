@@ -1,6 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import (
+    ALL_ASPECTS,
     Column,
     DesiredTable,
     Integer,
@@ -29,47 +30,29 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
-    Added,
-    Changed,
     ColumnAdded,
     ColumnCommentChanged,
-    ColumnCommentsDimension,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
-    ColumnStructureDimension,
-    ColumnTagsChanged,
-    ColumnTagsDimension,
-    ForeignKeysDimension,
-    KeyValue,
-    PartitioningDimension,
-    PrimaryKeyDimension,
-    PropertiesDimension,
-    Removed,
-    TableCommentDimension,
+    ColumnTagSet,
+    ColumnTagUnset,
+    ForeignKeyAdded,
+    ForeignKeyRemoved,
+    PartitioningChanged,
+    PrimaryKeyAdded,
+    PrimaryKeyChanged,
+    PrimaryKeyRemoved,
+    PropertyChanged,
+    TableCommentChanged,
     TableDrift,
     TableMissing,
-    TableTagsDimension,
+    TableTagSet,
+    TableTagUnset,
     diff_table,
 )
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
-
-
-def test_table_drift_defaults_to_no_differences():
-    # Given a drift built with no arguments
-    drift = TableDrift()
-
-    # Then there are no dimensions
-    assert drift.dimensions == ()
-
-
-def test_table_missing_carries_the_desired_table():
-    # Given a desired table for a table absent from the catalog
-    desired = DesiredTable(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
-
-    # Then the missing-table variant is self-contained
-    assert TableMissing(desired=desired).desired is desired
 
 
 def _desired(**overrides) -> DesiredTable:
@@ -91,6 +74,17 @@ def _foreign_key(constraint_name: str = "test_id_fk") -> ForeignKeyConstraint:
     )
 
 
+# ---------- top-level diff sum
+
+
+def test_table_missing_carries_the_desired_table():
+    # Given a desired table for a table absent from the catalog
+    desired = _desired()
+
+    # Then the missing-table variant is self-contained
+    assert TableMissing(desired=desired).desired is desired
+
+
 def test_missing_table_diffs_to_table_missing_carrying_desired():
     # Given no observed table
     desired = _desired()
@@ -106,108 +100,229 @@ def test_equal_tables_diff_to_empty_drift():
     # Given identical desired and observed definitions
     diff = diff_table(_desired(), _observed())
 
-    # Then no dimensions are produced
+    # Then no facts are produced — the natural zero
     assert isinstance(diff, TableDrift)
-    assert diff.dimensions == ()
+    assert diff.facts == ()
 
 
-def test_desired_only_column_produces_columns_dimension_with_added_entry():
+def test_drift_carries_the_declarations_managed_aspects():
+    # Given a desired table (fully managed by default)
+    diff = diff_table(_desired(), _observed())
+
+    # Then the drift is self-contained: it knows its declaration's scope
+    assert isinstance(diff, TableDrift)
+    assert diff.managed_aspects == ALL_ASPECTS
+
+
+# ---------- column structure facts
+
+
+def test_desired_only_column_produces_column_added_fact():
     # Given a desired table with an extra column not in the observed table
-    # When diffing
     diff = diff_table(
         _desired(columns=(Column("id", Integer()), Column("age", Integer()))),
         _observed(),
     )
 
-    # Then a ColumnStructureDimension with an Added entry is produced
+    # Then a ColumnAdded fact is produced
     assert isinstance(diff, TableDrift)
-    dim = next(d for d in diff.dimensions if isinstance(d, ColumnStructureDimension))
-    assert dim.entries == (ColumnAdded(Column("age", Integer())),)
+    assert ColumnAdded(Column("age", Integer())) in diff.facts
 
 
-def test_observed_only_column_produces_columns_dimension_with_removed_entry():
+def test_observed_only_column_produces_column_removed_fact():
     # Given an observed table with an extra column not in the desired table
     diff = diff_table(
         _desired(),
         _observed(columns=(Column("id", Integer()), Column("stale", String()))),
     )
 
-    # Then a ColumnStructureDimension with a Removed entry is produced
+    # Then a ColumnRemoved fact is produced
     assert isinstance(diff, TableDrift)
-    dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnStructureDimension)
-    assert dim.entries == (ColumnRemoved(Column("stale", String())),)
+    assert diff.facts == (ColumnRemoved(Column("stale", String())),)
 
 
-def test_type_drift_produces_columns_dimension_with_data_type_changed_entry():
+def test_type_drift_produces_column_data_type_changed_fact():
     # Given a column whose data type differs between desired and observed
     diff = diff_table(
         _desired(columns=(Column("id", Integer()),)),
         _observed(columns=(Column("id", Long()),)),
     )
 
-    # Then a ColumnStructureDimension with a DataTypeChanged entry is produced
+    # Then a ColumnDataTypeChanged fact carries both sides
     assert isinstance(diff, TableDrift)
-    dim = diff.dimensions[0]
-    assert isinstance(dim, ColumnStructureDimension)
-    assert dim.entries == (
-        ColumnDataTypeChanged(
-            column_name="id",
-            change=Changed(desired=Integer(), observed=Long()),
+    assert diff.facts == (
+        ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Long()),
+    )
+
+
+def test_type_drift_suppresses_nullability_fact_but_not_comment_fact():
+    # Given a column where type, nullability, and comment all differ
+    desired = _desired(columns=(Column("id", Integer(), nullable=False, comment="new"),))
+    observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
+
+    # When diffing
+    diff = diff_table(desired, observed)
+
+    # Then the type fact is present and nullability is suppressed (the column
+    # must be recreated first); comment drift is independent and not suppressed
+    assert isinstance(diff, TableDrift)
+    assert any(isinstance(fact, ColumnDataTypeChanged) for fact in diff.facts)
+    assert not any(isinstance(fact, ColumnNullabilityChanged) for fact in diff.facts)
+    assert any(isinstance(fact, ColumnCommentChanged) for fact in diff.facts)
+
+
+def test_nullability_drift_produces_column_nullability_changed_fact():
+    # Given a column whose nullability differs
+    diff = diff_table(
+        _desired(columns=(Column("id", Integer(), nullable=False),)),
+        _observed(columns=(Column("id", Integer(), nullable=True),)),
+    )
+
+    # Then a ColumnNullabilityChanged fact carries the change direction
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == (
+        ColumnNullabilityChanged(column_name="id", desired_nullable=False, observed_nullable=True),
+    )
+
+
+# ---------- column comment facts
+
+
+def test_comment_drift_on_matched_column_produces_fact():
+    # Given a matched column with differing comments and a desired-only column
+    diff = diff_table(
+        _desired(
+            columns=(Column("id", Integer(), comment="pk"), Column("ghost", String(), comment="x"))
         ),
+        _observed(columns=(Column("id", Integer(), comment=""),)),
     )
 
-
-def test_table_comment_drift_produces_table_comment_dimension():
-    diff = diff_table(_desired(comment="new"), _observed(comment="old"))
-
+    # Then only the matched column produces a comment fact; the ghost column's
+    # comment travels inside its ColumnAdded fact
     assert isinstance(diff, TableDrift)
-    assert any(
-        isinstance(d, TableCommentDimension) and d.change == Changed(desired="new", observed="old")
-        for d in diff.dimensions
-    )
+    comment_facts = [fact for fact in diff.facts if isinstance(fact, ColumnCommentChanged)]
+    assert comment_facts == [
+        ColumnCommentChanged(column_name="id", desired_comment="pk", observed_comment="")
+    ]
 
 
-def test_partitioning_drift_produces_partitioning_dimension():
+# ---------- column tag facts
+
+
+def test_column_tag_drift_produces_set_and_unset_facts():
+    # Given a column with one tag to set, one to update, and one to remove
     diff = diff_table(
-        _desired(partitioned_by=("id",)),
-        _observed(),
+        _desired(columns=(Column("id", Integer(), tags={"new": "x", "pii": "true"}),)),
+        _observed(columns=(Column("id", Integer(), tags={"pii": "false", "old": "y"}),)),
     )
 
+    # Then set facts cover added and changed tags; an unset fact covers the removed tag
     assert isinstance(diff, TableDrift)
-    assert any(isinstance(d, PartitioningDimension) for d in diff.dimensions)
-
-
-def test_property_drift_produces_properties_dimension():
-    diff = diff_table(
-        _desired(properties={"a": "1", "b": "2"}),
-        _observed(properties={"b": "9", "c": "3"}),
-    )
-
-    assert isinstance(diff, TableDrift)
-    dim = next(d for d in diff.dimensions if isinstance(d, PropertiesDimension))
-    assert set(dim.entries) == {
-        Added(KeyValue("a", "1")),
-        Changed(desired=KeyValue("b", "2"), observed=KeyValue("b", "9")),
-        Removed(KeyValue("c", "3")),
+    tag_facts = {fact for fact in diff.facts if isinstance(fact, (ColumnTagSet, ColumnTagUnset))}
+    assert tag_facts == {
+        ColumnTagSet(column_name="id", tag_name="new", tag_value="x"),
+        ColumnTagSet(column_name="id", tag_name="pii", tag_value="true"),
+        ColumnTagUnset(column_name="id", tag_name="old"),
     }
 
 
-def test_tag_drift_produces_table_tags_dimension():
+def test_added_columns_tags_produce_set_facts():
+    # Given a desired-only column with tags (created by its ColumnAdded fact)
+    diff = diff_table(
+        _desired(columns=(Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))),
+        _observed(),
+    )
+
+    # Then the added column's tags are facts too — ADD_COLUMN precedes SET_COLUMN_TAG
+    assert isinstance(diff, TableDrift)
+    assert ColumnTagSet(column_name="new", tag_name="pii", tag_value="true") in diff.facts
+
+
+def test_identical_column_tags_produce_no_facts():
+    # Given matched columns with identical tags
+    columns = (Column("id", Integer(), tags={"pii": "true"}),)
+    diff = diff_table(_desired(columns=columns), _observed(columns=columns))
+
+    # Then no tag facts are produced
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == ()
+
+
+# ---------- table comment fact
+
+
+def test_table_comment_drift_produces_fact_with_both_sides():
+    diff = diff_table(_desired(comment="new"), _observed(comment="old"))
+
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == (TableCommentChanged(desired_comment="new", observed_comment="old"),)
+
+
+# ---------- property facts (declared-projection)
+
+
+def test_declared_property_drift_produces_property_changed_facts():
+    # Given one declared property missing from the catalog and one with a stale value
+    diff = diff_table(
+        _desired(properties={"a": "1", "b": "2"}),
+        _observed(properties={"b": "9"}),
+    )
+
+    # Then each declared difference is one fact
+    assert isinstance(diff, TableDrift)
+    assert set(diff.facts) == {
+        PropertyChanged(name="a", desired_value="1"),
+        PropertyChanged(name="b", desired_value="2"),
+    }
+
+
+def test_observed_only_property_is_not_drift():
+    # Given a catalog property the declaration does not own
+    # (e.g. delta.columnMapping.mode written by a previous full sync)
+    diff = diff_table(
+        _desired(properties={}),
+        _observed(properties={"delta.columnMapping.mode": "name"}),
+    )
+
+    # Then no fact is produced — declared-projection semantics
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == ()
+
+
+# ---------- table tag facts (full-state)
+
+
+def test_table_tag_drift_produces_set_and_unset_facts():
+    # Given one declared tag missing from the catalog and one observed-only tag
     diff = diff_table(
         _desired(tags={"env": "prod"}),
         _observed(tags={"stale": "yes"}),
     )
 
+    # Then the declared tag is set and the undeclared tag is unset — full-state
     assert isinstance(diff, TableDrift)
-    dim = next(d for d in diff.dimensions if isinstance(d, TableTagsDimension))
-    assert set(dim.entries) == {
-        Added(KeyValue("env", "prod")),
-        Removed(KeyValue("stale", "yes")),
+    assert set(diff.facts) == {
+        TableTagSet(name="env", value="prod"),
+        TableTagUnset(name="stale"),
     }
 
 
-def test_primary_key_drift_produces_primary_key_dimension():
+# ---------- partitioning fact
+
+
+def test_partitioning_drift_produces_fact_with_both_sides():
+    diff = diff_table(_desired(partitioned_by=("id",)), _observed())
+
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == (
+        PartitioningChanged(desired_partitioning=("id",), observed_partitioning=()),
+    )
+
+
+# ---------- primary key facts
+
+
+def test_desired_only_primary_key_produces_added_fact():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     diff = diff_table(
         _desired(columns=(Column("id", Integer(), nullable=False),), primary_key=pk),
@@ -215,18 +330,11 @@ def test_primary_key_drift_produces_primary_key_dimension():
     )
 
     assert isinstance(diff, TableDrift)
-    assert any(isinstance(d, PrimaryKeyDimension) for d in diff.dimensions)
+    assert diff.facts == (PrimaryKeyAdded(primary_key=pk),)
 
 
-def test_foreign_key_drift_produces_foreign_keys_dimension():
-    fk = _foreign_key()
-    diff = diff_table(_desired(foreign_keys=(fk,)), _observed())
-
-    assert isinstance(diff, TableDrift)
-    assert any(isinstance(d, ForeignKeysDimension) for d in diff.dimensions)
-
-
-def test_equal_primary_keys_by_column_set_produce_no_dimension():
+def test_equal_primary_keys_by_column_set_produce_no_fact():
+    # Given the same PK column set under different orders and names
     desired_pk = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="test_pk")
     observed_pk = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="other_name")
     columns = (Column("a", Integer(), nullable=False), Column("b", Integer(), nullable=False))
@@ -236,251 +344,163 @@ def test_equal_primary_keys_by_column_set_produce_no_dimension():
         _observed(columns=columns, primary_key=observed_pk),
     )
 
-    # Equal column sets → no PK dimension
-    assert not any(isinstance(d, PrimaryKeyDimension) for d in diff.dimensions)
+    # Then identity is column-set equality — no fact
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == ()
 
 
-def test_equal_foreign_keys_by_signature_produce_no_dimension():
+# ---------- foreign key facts
+
+
+def test_desired_only_foreign_key_produces_added_fact():
+    fk = _foreign_key()
+    diff = diff_table(_desired(foreign_keys=(fk,)), _observed())
+
+    assert isinstance(diff, TableDrift)
+    assert diff.facts == (ForeignKeyAdded(constraint=fk),)
+
+
+def test_equal_foreign_keys_by_signature_produce_no_fact():
+    # Given the same FK relationship under different constraint names
     diff = diff_table(
         _desired(foreign_keys=(_foreign_key("engine_name"),)),
         _observed(foreign_keys=(_foreign_key("external_name"),)),
     )
 
-    assert not any(isinstance(d, ForeignKeysDimension) for d in diff.dimensions)
-
-
-def test_changed_rejects_equal_values():
-    # Given two equal values
-    # Then Changed construction raises
-    with pytest.raises(ValueError, match="no difference"):
-        Changed(desired=42, observed=42)
-
-
-def test_changed_accepts_unequal_values():
-    # Given two different values
-    result = Changed(desired=1, observed=2)
-
-    # Then it holds both
-    assert result.desired == 1
-    assert result.observed == 2
-
-
-def test_type_drift_produces_structure_dimension_with_type_entry_only():
-    # Given a column where type, nullability, and comment all differ
-    desired = _desired(columns=(Column("id", Integer(), nullable=False, comment="new"),))
-    observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
-
-    # When diffing
-    diff = diff_table(desired, observed)
-
-    # Then the structure dimension contains only the type entry (nullability is
-    # suppressed when type drifts — the column must be recreated first).
-    # Comment drift is a separate dimension and is not suppressed.
+    # Then identity is the content signature — no fact, sync stays idempotent
     assert isinstance(diff, TableDrift)
-    struct_dim = next(d for d in diff.dimensions if isinstance(d, ColumnStructureDimension))
-    assert len(struct_dim.entries) == 1
-    assert isinstance(struct_dim.entries[0], ColumnDataTypeChanged)
-    comment_dim = next((d for d in diff.dimensions if isinstance(d, ColumnCommentsDimension)), None)
-    assert comment_dim is not None
+    assert diff.facts == ()
 
 
-# ---------- ColumnStructureDimension
+# ---------- no-difference facts are unrepresentable
 
 
-def test_column_structure_dimension_added_column_produces_add_column_only():
-    # Given an added column with tags — tags come from ColumnTagsDimension, not here
+def test_column_data_type_changed_rejects_equal_types():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Integer())
+
+
+def test_column_nullability_changed_rejects_equal_flags():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnNullabilityChanged(column_name="id", desired_nullable=True, observed_nullable=True)
+
+
+def test_table_comment_changed_rejects_equal_comments():
+    with pytest.raises(ValueError, match="no difference"):
+        TableCommentChanged(desired_comment="same", observed_comment="same")
+
+
+def test_partitioning_changed_rejects_equal_specs():
+    with pytest.raises(ValueError, match="no difference"):
+        PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
+
+
+def test_primary_key_changed_rejects_equal_column_sets():
+    pk_a = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="x")
+    pk_b = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="y")
+
+    with pytest.raises(ValueError, match="no difference"):
+        PrimaryKeyChanged(desired_primary_key=pk_a, observed_primary_key=pk_b)
+
+
+# ---------- fact lowering: actions()
+
+
+def test_column_added_produces_add_column_only():
+    # Given an added column with tags — its tags arrive as separate ColumnTagSet facts
     column = Column("age", Integer(), tags={"pii": "false"})
-    dim = ColumnStructureDimension(entries=(ColumnAdded(column=column),))
 
-    # Then only AddColumn is produced
-    assert dim.actions() == (AddColumn(column=column),)
+    assert ColumnAdded(column=column).actions() == (AddColumn(column=column),)
 
 
-def test_column_structure_dimension_removed_column_produces_drop_column():
-    # Given a ColumnStructureDimension with a single removed column entry
-    column = Column("stale", Integer())
-    dim = ColumnStructureDimension(entries=(ColumnRemoved(column=column),))
-
-    # Then a DropColumn action is produced
-    assert dim.actions() == (DropColumn("stale"),)
+def test_column_removed_produces_drop_column():
+    assert ColumnRemoved(column=Column("stale", Integer())).actions() == (DropColumn("stale"),)
 
 
-def test_column_structure_dimension_nullability_produces_action():
-    # Given a ColumnStructureDimension with a nullability change entry
-    entry = ColumnNullabilityChanged(
-        column_name="id", change=Changed(desired=True, observed=False)
-    )
-    dim = ColumnStructureDimension(entries=(entry,))
+def test_column_data_type_changed_produces_no_actions():
+    # Given a type change — no in-place remedy exists; validation blocks it
+    fact = ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Long())
 
-    # Then a SetColumnNullability action is produced
-    assert dim.actions() == (SetColumnNullability(column_name="id", nullable=True),)
+    assert fact.actions() == ()
 
 
-def test_column_structure_dimension_type_change_produces_no_action():
-    # Given a ColumnStructureDimension with only a data type change entry
-    entry = ColumnDataTypeChanged(
-        column_name="id", change=Changed(desired=Integer(), observed=Long())
-    )
-    dim = ColumnStructureDimension(entries=(entry,))
-
-    # Then no actions are produced (type changes require column recreation, not in-place action)
-    assert dim.actions() == ()
-
-
-# ---------- ColumnCommentsDimension
-
-
-def test_column_comments_dimension_diff_produces_entries_for_matched_columns_only():
-    # Given a desired table with a matched column (comment differs) and a desired-only column
-    desired = (Column("id", Integer(), comment="pk"), Column("ghost", String(), comment="x"))
-    observed = (Column("id", Integer(), comment=""),)
-
-    dim = ColumnCommentsDimension.diff(desired, observed)
-
-    # Then only the matched column produces an entry; the ghost column is not diffed
-    assert dim is not None
-    assert len(dim.entries) == 1
-    assert dim.entries[0].column_name == "id"
-
-
-def test_column_comments_dimension_produces_set_column_comment():
-    # Given a ColumnCommentsDimension with a single comment change entry
-    entry = ColumnCommentChanged(column_name="id", change=Changed(desired="pk", observed=""))
-    dim = ColumnCommentsDimension(entries=(entry,))
-
-    # Then a SetColumnComment action is produced with the desired comment
-    assert dim.actions() == (SetColumnComment("id", "pk"),)
-
-
-def test_column_comments_dimension_returns_none_when_no_comment_drift():
-    # Given matched columns with identical comments
-    desired = (Column("id", Integer(), comment="same"),)
-    observed = (Column("id", Integer(), comment="same"),)
-
-    # Then no dimension is produced
-    assert ColumnCommentsDimension.diff(desired, observed) is None
-
-
-# ---------- ColumnTagsDimension
-
-
-def test_column_tags_dimension_covers_added_columns():
-    # Given a desired-only column with tags (it will be created by ColumnStructureDimension)
-    desired = (Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))
-    observed = (Column("id", Integer()),)
-
-    dim = ColumnTagsDimension.diff(desired, observed)
-
-    # Then the added column's tags are included (ADD_COLUMN precedes SET_COLUMN_TAG)
-    assert dim is not None
-    assert any(e.column_name == "new" for e in dim.entries)
-
-
-def test_column_tags_dimension_tag_entry_produces_set_and_unset():
-    # Given a ColumnTagsDimension with added, changed, and removed tag entries for a column
-    entry = ColumnTagsChanged(
-        column_name="id",
-        entries=(
-            Added(KeyValue("new", "x")),
-            Changed(desired=KeyValue("pii", "true"), observed=KeyValue("pii", "false")),
-            Removed(KeyValue("old", "y")),
-        ),
-    )
-    dim = ColumnTagsDimension(entries=(entry,))
-
-    # Then Added and Changed produce SetColumnTag; Removed produces UnsetColumnTag
-    assert set(dim.actions()) == {
-        SetColumnTag(column_name="id", name="new", value="x"),
-        SetColumnTag(column_name="id", name="pii", value="true"),
-        UnsetColumnTag(column_name="id", name="old"),
-    }
-
-
-def test_column_tags_dimension_returns_none_when_no_tag_drift():
-    # Given matched columns with identical tags
-    desired = (Column("id", Integer(), tags={"pii": "true"}),)
-    observed = (Column("id", Integer(), tags={"pii": "true"}),)
-
-    # Then no dimension is produced
-    assert ColumnTagsDimension.diff(desired, observed) is None
-
-
-def test_table_comment_dimension_produces_set_table_comment():
-    # Given a changed table comment
-    dim = TableCommentDimension(change=Changed(desired="new", observed="old"))
-
-    # Then a single SetTableComment action is produced
-    assert dim.actions() == (SetTableComment(comment="new"),)
-
-
-def test_properties_dimension_sets_added_and_changed_ignores_removed():
-    # Given properties drifting in all three ways
-    dim = PropertiesDimension(
-        entries=(
-            Added(KeyValue("a", "1")),
-            Changed(desired=KeyValue("b", "2"), observed=KeyValue("b", "9")),
-            Removed(KeyValue("c", "3")),
-        )
+def test_column_nullability_changed_produces_set_column_nullability():
+    fact = ColumnNullabilityChanged(
+        column_name="id", desired_nullable=True, observed_nullable=False
     )
 
-    # Then only Added and Changed entries produce SetProperty; Removed is silently ignored
-    assert set(dim.actions()) == {
-        SetProperty(name="a", value="1"),
-        SetProperty(name="b", value="2"),
-    }
+    assert fact.actions() == (SetColumnNullability(column_name="id", nullable=True),)
 
 
-def test_table_tags_dimension_sets_and_unsets_with_full_state_semantics():
-    # Given tags drifting with one addition and one removal
-    dim = TableTagsDimension(
-        entries=(
-            Added(KeyValue("env", "prod")),
-            Removed(KeyValue("stale", "yes")),
-        )
-    )
+def test_column_comment_changed_produces_set_column_comment():
+    fact = ColumnCommentChanged(column_name="id", desired_comment="pk", observed_comment="")
 
-    # When actions are requested
-    # Then Added produces SetTableTag and Removed produces UnsetTableTag
-    assert set(dim.actions()) == {
+    assert fact.actions() == (SetColumnComment("id", "pk"),)
+
+
+def test_column_tag_set_produces_set_column_tag():
+    fact = ColumnTagSet(column_name="id", tag_name="pii", tag_value="true")
+
+    assert fact.actions() == (SetColumnTag(column_name="id", name="pii", value="true"),)
+
+
+def test_column_tag_unset_produces_unset_column_tag():
+    fact = ColumnTagUnset(column_name="id", tag_name="old")
+
+    assert fact.actions() == (UnsetColumnTag(column_name="id", name="old"),)
+
+
+def test_table_comment_changed_produces_set_table_comment():
+    fact = TableCommentChanged(desired_comment="new", observed_comment="old")
+
+    assert fact.actions() == (SetTableComment(comment="new"),)
+
+
+def test_property_changed_produces_set_property():
+    fact = PropertyChanged(name="delta.appendOnly", desired_value="true")
+
+    assert fact.actions() == (SetProperty(name="delta.appendOnly", value="true"),)
+
+
+def test_table_tag_set_produces_set_table_tag():
+    assert TableTagSet(name="env", value="prod").actions() == (
         SetTableTag(name="env", value="prod"),
-        UnsetTableTag(name="stale"),
-    }
+    )
 
 
-def test_partitioning_dimension_produces_no_actions():
-    # Given a partitioning change — no in-place action is possible
-    dim = PartitioningDimension(change=Changed(desired=("ds",), observed=()))
-
-    # Then no action is produced; PartitioningChangeNotSupported raises the failure
-    assert dim.actions() == ()
+def test_table_tag_unset_produces_unset_table_tag():
+    assert TableTagUnset(name="stale").actions() == (UnsetTableTag(name="stale"),)
 
 
-def test_primary_key_dimension_added_produces_set_primary_key():
-    # Given an added primary key
+def test_partitioning_changed_produces_no_actions():
+    # Given a partitioning change — no in-place remedy exists; validation blocks it
+    fact = PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=())
+
+    assert fact.actions() == ()
+
+
+def test_primary_key_added_produces_set_primary_key():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
-    dim = PrimaryKeyDimension(entry=Added(pk))
 
-    # Then SetPrimaryKey is produced
-    assert dim.actions() == (SetPrimaryKey(columns=("id",), constraint_name="test_pk"),)
+    assert PrimaryKeyAdded(primary_key=pk).actions() == (
+        SetPrimaryKey(columns=("id",), constraint_name="test_pk"),
+    )
 
 
-def test_primary_key_dimension_removed_produces_drop_primary_key():
-    # Given a removed primary key
+def test_primary_key_removed_produces_drop_primary_key():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
-    dim = PrimaryKeyDimension(entry=Removed(pk))
 
-    # Then DropPrimaryKey is produced
-    assert dim.actions() == (DropPrimaryKey(),)
+    assert PrimaryKeyRemoved(observed_primary_key=pk).actions() == (DropPrimaryKey(),)
 
 
-def test_primary_key_dimension_changed_produces_drop_then_set():
+def test_primary_key_changed_produces_drop_then_set():
     # Given a changed primary key (column set differs)
     desired_pk = PrimaryKeyConstraint(columns=("a",), constraint_name="test_pk")
     observed_pk = PrimaryKeyConstraint(columns=("b",), constraint_name="test_pk")
-    dim = PrimaryKeyDimension(entry=Changed(desired=desired_pk, observed=observed_pk))
+    fact = PrimaryKeyChanged(desired_primary_key=desired_pk, observed_primary_key=observed_pk)
 
     # When the actions are sorted by ActionPlan (drop runs before set)
-    plan = ActionPlan(dim.actions())
+    plan = ActionPlan(fact.actions())
 
     # Then the plan contains DropPrimaryKey followed by SetPrimaryKey
     assert plan.actions == (
@@ -489,33 +509,22 @@ def test_primary_key_dimension_changed_produces_drop_then_set():
     )
 
 
-def _fk(constraint_name: str = "test_fk") -> ForeignKeyConstraint:
-    return ForeignKeyConstraint(
-        local_columns=("id",),
-        referenced_table=QualifiedName("dev", "silver", "other"),
-        referenced_columns=("id",),
-        constraint_name=constraint_name,
-    )
+def test_foreign_key_added_produces_set_foreign_key():
+    fk = _foreign_key()
 
-
-def test_foreign_keys_dimension_added_produces_set_foreign_key():
-    # Given an added foreign key
-    dim = ForeignKeysDimension(entries=(Added(_fk()),))
-
-    # Then SetForeignKey is produced with all FK fields
-    assert dim.actions() == (
+    assert ForeignKeyAdded(constraint=fk).actions() == (
         SetForeignKey(
             local_columns=("id",),
             referenced_table=QualifiedName("dev", "silver", "other"),
             referenced_columns=("id",),
-            constraint_name="test_fk",
+            constraint_name="test_id_fk",
         ),
     )
 
 
-def test_foreign_keys_dimension_removed_produces_drop_foreign_key():
-    # Given a removed foreign key
-    dim = ForeignKeysDimension(entries=(Removed(_fk("stale_fk")),))
+def test_foreign_key_removed_produces_drop_foreign_key():
+    fk = _foreign_key("stale_fk")
 
-    # Then DropForeignKey is produced with the constraint name
-    assert dim.actions() == (DropForeignKey(constraint_name="stale_fk"),)
+    assert ForeignKeyRemoved(constraint=fk).actions() == (
+        DropForeignKey(constraint_name="stale_fk"),
+    )

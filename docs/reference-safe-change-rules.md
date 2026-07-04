@@ -13,7 +13,7 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `NullabilityTighteningOnExistingColumn` | Changing an existing nullable column to `NOT NULL` | Backfill existing NULLs first, then update the declaration |
 | `ColumnDataTypeChangeNotSupported` | Changing a column's declared data type | Drop and recreate the table out of band, then re-sync |
 | `PartitioningChangeNotSupported` | Changing `partitioned_by` on an existing table | Drop and recreate the table out of band, then re-sync |
-| `UnmanagedDimensionDrift` | An unmanaged dimension (e.g. column structure) has drifted from the declaration in a metadata-only sync | Sync the table fully, or update the declaration to match the live schema |
+| `UnmanagedAspectDrift` | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a metadata-only sync | Sync the table fully, or update the declaration to match the live schema |
 | `MissingTableUnmanaged` | The table does not exist but this definition does not manage column structure | Create the table out-of-band first, or manage it fully |
 
 A nullable primary key column is rejected earlier still — when the `DeltaTable` is constructed (`ValueError` at definition time), not as a plan-validation rule — because a nullable primary key is not a well-formed table definition. See [how-to-declare-primary-keys.md](how-to-declare-primary-keys.md).

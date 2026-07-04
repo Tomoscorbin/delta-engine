@@ -211,7 +211,7 @@ class Engine:
         for run in runs:
             if run.diff is None:
                 continue
-            result = validate_diff(run.diff, run.desired)
+            result = validate_diff(run.diff)
             if result.failed:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",

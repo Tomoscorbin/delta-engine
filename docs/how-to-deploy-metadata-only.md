@@ -43,8 +43,11 @@ metadata is applied.
 - **Reconciles** table comment, column comments, table tags, column tags, and
   PK/FK constraints, exactly as a fully managed sync would.
 - **Requires** the live schema to match the declaration exactly. Any unmanaged
-  dimension (column structure, properties, partitioning) that has drifted
-  causes the sync to fail at validation before any SQL executes.
+  aspect (column structure or partitioning) that has drifted causes the sync
+  to fail at validation before any SQL executes. Catalog properties are never
+  compared for a metadata-only table — it declares none, and undeclared
+  properties (for example those written by a previous fully managed sync) are
+  not drift.
 - **Cannot create** a missing table. If the table does not exist, the sync
   fails at validation.
 

@@ -1,5 +1,6 @@
 # Open questions and decisions
 
+- [x] Work through the diff-module design review (see [diff-module-design-review.md](diff-module-design-review.md)) — resolved: flat-facts model implemented on PR #127, properties bug fixed
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering

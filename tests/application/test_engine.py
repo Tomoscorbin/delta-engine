@@ -855,8 +855,32 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
     assert any(isinstance(a, SetTableComment) for a in plan)
 
 
+def test_metadata_only_sync_succeeds_when_catalog_has_engine_written_properties():
+    # Given a live table carrying a property a previous fully managed sync wrote;
+    # a metadata-only declaration owns no properties, so this is not drift
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _FakeReader({
+        fqn: TablePresent(
+            table=ObservedTable(
+                qualified_name=QualifiedName(catalog, schema, name),
+                columns=(Column("id", String()),),
+                properties={"delta.columnMapping.mode": "name"},
+            )
+        )
+    })
+    executor = _FakeExecutor(results=(_ok_exec(0),))
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing a metadata-only definition
+    report = engine.sync(_metadata_only_spec(fqn))
+
+    # Then the sync succeeds — the undeclared property is not treated as drift
+    assert report.any_failures is False
+
+
 def test_metadata_only_sync_fails_when_unmanaged_column_has_drifted():
-    # Given a live table with a different column type (unmanaged dimension drifted)
+    # Given a live table with a different column type (unmanaged aspect drifted)
     fqn = "cat.sch.orders"
     reader = _FakeReader({
         fqn: TablePresent(
