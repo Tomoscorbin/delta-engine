@@ -6,8 +6,13 @@ definition and the observed one (or ``None`` when the table is missing), it
 returns a `TableDiff` — a closed sum of `TableMissing` and `TableDrift`. The
 diff states facts only; it carries no judgement about which differences are
 permitted (the validator's job) and no knowledge of how a difference is acted
-on (the lowerer's job). Every variant carries the data its consumers need, so
+on (the dimension's job). Every variant carries the data its consumers need, so
 the diff is self-contained.
+
+Each dimension type owns three concerns: how to detect that it differs (via its
+``diff`` staticmethod), what actions to produce, and what facts it cannot handle.
+Adding a new dimension means adding one class here — ``diff_table`` requires no
+changes.
 """
 
 from __future__ import annotations
@@ -134,41 +139,75 @@ class ColumnsDimension:
 
     entries: tuple[ColumnDrift, ...]
 
+    @staticmethod
+    def diff(
+        desired: tuple[Column, ...], observed: tuple[Column, ...]
+    ) -> ColumnsDimension | None:
+        """Return a ColumnsDimension for any column differences, or None when identical."""
+        desired_by_name = {col.name: col for col in desired}
+        observed_by_name = {col.name: col for col in observed}
+        result: list[ColumnDrift] = []
+        for name, col in desired_by_name.items():
+            if name not in observed_by_name:
+                result.append(Added(col))
+        for name, col in observed_by_name.items():
+            if name not in desired_by_name:
+                result.append(Removed(col))
+        for name, desired_col in desired_by_name.items():
+            if name in observed_by_name:
+                entry = ColumnsDimension._diff_pair(desired_col, observed_by_name[name])
+                if entry is not None:
+                    result.append(entry)
+        return ColumnsDimension(entries=tuple(result)) if result else None
+
+    @staticmethod
+    def _diff_pair(desired: Column, observed: Column) -> ColumnChanged | None:
+        """Return the ColumnChanged fact for a name-matched pair, or None when identical."""
+        data_type = _changed(desired.data_type, observed.data_type)
+        nullability = _changed(desired.nullable, observed.nullable)
+        comment = _changed(desired.comment, observed.comment)
+        tags = _diff_mapping(desired.tags, observed.tags)
+        if data_type is None and nullability is None and comment is None and not tags:
+            return None
+        return ColumnChanged(
+            column_name=desired.name,
+            data_type=data_type,
+            nullability=nullability,
+            comment=comment,
+            tags=tags,
+        )
+
     def actions(self) -> tuple[Action, ...]:
         """Return one action per column drift entry, plus tag actions for added columns."""
         result: list[Action] = []
         for entry in self.entries:
             match entry:
                 case Added(item=column):
-                    tag_actions = tuple(
+                    result.append(AddColumn(column=column))
+                    result.extend(
                         SetColumnTag(column_name=column.name, name=name, value=value)
                         for name, value in column.tags.items()
                     )
-                    result.append(AddColumn(column=column))
-                    result.extend(tag_actions)
                 case Removed(item=column):
                     result.append(DropColumn(column.name))
                 case ColumnChanged() as changed:
-                    result.extend(self._lower_column_changed(changed))
+                    result.extend(ColumnsDimension._lower_column_changed(changed))
         return tuple(result)
 
     def unhandled(self) -> tuple[UnhandledFact, ...]:
         """Return an UnhandledFact for each column whose data type changed."""
-        facts: list[UnhandledFact] = []
-        for entry in self.entries:
-            if isinstance(entry, ColumnChanged) and entry.data_type is not None:
-                facts.append(
-                    UnhandledFact(
-                        description=(
-                            f"cannot change the type of existing column"
-                            f" '{entry.column_name}' from"
-                            f" {entry.data_type.observed} to {entry.data_type.desired}."
-                            " Type migrations are not supported;"
-                            " recreate the table to change a column's type."
-                        )
-                    )
+        return tuple(
+            UnhandledFact(
+                description=(
+                    f"cannot change the type of existing column '{entry.column_name}'"
+                    f" from {entry.data_type.observed} to {entry.data_type.desired}."
+                    " Type migrations are not supported;"
+                    " recreate the table to change a column's type."
                 )
-        return tuple(facts)
+            )
+            for entry in self.entries
+            if isinstance(entry, ColumnChanged) and entry.data_type is not None
+        )
 
     @staticmethod
     def _lower_column_changed(changed: ColumnChanged) -> tuple[Action, ...]:
@@ -196,9 +235,7 @@ class ColumnsDimension:
                         )
                     )
                 case Removed(item=pair):
-                    result.append(
-                        UnsetColumnTag(column_name=changed.column_name, name=pair.name)
-                    )
+                    result.append(UnsetColumnTag(column_name=changed.column_name, name=pair.name))
         return tuple(result)
 
 
@@ -207,6 +244,12 @@ class TableCommentDimension:
     """Table comment drift."""
 
     change: Changed[str]
+
+    @staticmethod
+    def diff(desired: str, observed: str) -> TableCommentDimension | None:
+        """Return a TableCommentDimension when the comment differs, or None when identical."""
+        change = _changed(desired, observed)
+        return TableCommentDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
         """Return a SetTableComment action for the desired comment."""
@@ -222,6 +265,14 @@ class PropertiesDimension:
     """Table property drift — declared-subset semantics: Removed entries are ignored."""
 
     entries: tuple[Entry[KeyValue], ...]
+
+    @staticmethod
+    def diff(
+        desired: Mapping[str, str], observed: Mapping[str, str]
+    ) -> PropertiesDimension | None:
+        """Return a PropertiesDimension when any property differs, or None when identical."""
+        entries = _diff_mapping(desired, observed)
+        return PropertiesDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
         """Return SetProperty for each Added or Changed entry; Removed entries produce no action."""
@@ -245,6 +296,14 @@ class TableTagsDimension:
 
     entries: tuple[Entry[KeyValue], ...]
 
+    @staticmethod
+    def diff(
+        desired: Mapping[str, str], observed: Mapping[str, str]
+    ) -> TableTagsDimension | None:
+        """Return a TableTagsDimension when any tag differs, or None when identical."""
+        entries = _diff_mapping(desired, observed)
+        return TableTagsDimension(entries=entries) if entries else None
+
     def actions(self) -> tuple[Action, ...]:
         """Return SetTableTag for Added/Changed entries and UnsetTableTag for Removed entries."""
         result: list[Action] = []
@@ -266,6 +325,14 @@ class PartitioningDimension:
     """Partitioning drift — no action is possible; always surfaces an unhandled fact."""
 
     change: Changed[tuple[str, ...]]
+
+    @staticmethod
+    def diff(
+        desired: tuple[str, ...], observed: tuple[str, ...]
+    ) -> PartitioningDimension | None:
+        """Return a PartitioningDimension when partitioning differs, or None when identical."""
+        change = _changed(desired, observed)
+        return PartitioningDimension(change=change) if change is not None else None
 
     def actions(self) -> tuple[Action, ...]:
         """Return no actions — partitioning changes cannot be applied in place."""
@@ -290,6 +357,29 @@ class PrimaryKeyDimension:
     """Primary key drift."""
 
     entry: Entry[PrimaryKeyConstraint]
+
+    @staticmethod
+    def diff(
+        desired: PrimaryKeyConstraint | None,
+        observed: PrimaryKeyConstraint | None,
+    ) -> PrimaryKeyDimension | None:
+        """
+        Return a PrimaryKeyDimension when the primary key differs, or None when identical.
+
+        Identity is column-set equality: order and constraint name do not make
+        two keys different.
+        """
+        if desired is not None and observed is None:
+            return PrimaryKeyDimension(entry=Added(desired))
+        if desired is None and observed is not None:
+            return PrimaryKeyDimension(entry=Removed(observed))
+        if (
+            desired is not None
+            and observed is not None
+            and set(desired.columns) != set(observed.columns)
+        ):
+            return PrimaryKeyDimension(entry=Changed(desired=desired, observed=observed))
+        return None
 
     def actions(self) -> tuple[Action, ...]:
         """Return SetPrimaryKey, DropPrimaryKey, or both depending on the entry type."""
@@ -316,6 +406,30 @@ class ForeignKeysDimension:
     """Foreign key drift."""
 
     entries: tuple[ForeignKeyDrift, ...]
+
+    @staticmethod
+    def diff(
+        desired: tuple[ForeignKeyConstraint, ...],
+        observed: tuple[ForeignKeyConstraint, ...],
+    ) -> ForeignKeysDimension | None:
+        """
+        Return a ForeignKeysDimension when any FK differs, or None when identical.
+
+        Identity is content signature (local columns, referenced table, referenced
+        columns): a matched pair is content-identical and records no fact. An FK
+        present on both sides under different constraint names produces nothing,
+        so a sync over an unchanged catalog stays idempotent.
+        """
+        desired_by_sig = {fk.signature: fk for fk in desired}
+        observed_by_sig = {fk.signature: fk for fk in observed}
+        added: tuple[ForeignKeyDrift, ...] = tuple(
+            Added(fk) for sig, fk in desired_by_sig.items() if sig not in observed_by_sig
+        )
+        removed: tuple[ForeignKeyDrift, ...] = tuple(
+            Removed(fk) for sig, fk in observed_by_sig.items() if sig not in desired_by_sig
+        )
+        entries = added + removed
+        return ForeignKeysDimension(entries=entries) if entries else None
 
     def actions(self) -> tuple[Action, ...]:
         """Return SetForeignKey for Added entries and DropForeignKey for Removed entries."""
@@ -400,37 +514,19 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     """
     if observed is None:
         return TableMissing(desired=desired)
-
-    dimensions: list[Dimension] = []
-
-    column_entries = _diff_columns(desired.columns, observed.columns)
-    if column_entries:
-        dimensions.append(ColumnsDimension(entries=column_entries))
-
-    comment = _changed(desired.comment, observed.comment)
-    if comment is not None:
-        dimensions.append(TableCommentDimension(change=comment))
-
-    property_entries = _diff_mapping(desired.properties, observed.properties)
-    if property_entries:
-        dimensions.append(PropertiesDimension(entries=property_entries))
-
-    tag_entries = _diff_mapping(desired.tags, observed.tags)
-    if tag_entries:
-        dimensions.append(TableTagsDimension(entries=tag_entries))
-
-    partitioning = _changed(desired.partitioned_by, observed.partitioned_by)
-    if partitioning is not None:
-        dimensions.append(PartitioningDimension(change=partitioning))
-
-    pk_entry = _diff_primary_key(desired.primary_key, observed.primary_key)
-    if pk_entry is not None:
-        dimensions.append(PrimaryKeyDimension(entry=pk_entry))
-
-    fk_entries = _diff_foreign_keys(desired.foreign_keys, observed.foreign_keys)
-    if fk_entries:
-        dimensions.append(ForeignKeysDimension(entries=fk_entries))
-
+    dimensions = [
+        d
+        for d in [
+            ColumnsDimension.diff(desired.columns, observed.columns),
+            TableCommentDimension.diff(desired.comment, observed.comment),
+            PropertiesDimension.diff(desired.properties, observed.properties),
+            TableTagsDimension.diff(desired.tags, observed.tags),
+            PartitioningDimension.diff(desired.partitioned_by, observed.partitioned_by),
+            PrimaryKeyDimension.diff(desired.primary_key, observed.primary_key),
+            ForeignKeysDimension.diff(desired.foreign_keys, observed.foreign_keys),
+        ]
+        if d is not None
+    ]
     return TableDrift(dimensions=tuple(dimensions))
 
 
@@ -467,90 +563,3 @@ def _diff_mapping(
         if name not in desired:
             result.append(Removed(KeyValue(name, value)))
     return tuple(result)
-
-
-def _diff_columns(
-    desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> tuple[ColumnDrift, ...]:
-    """Diff columns by name into Added/Removed entries and per-column ColumnChanged facts."""
-    desired_by_name = {col.name: col for col in desired}
-    observed_by_name = {col.name: col for col in observed}
-    result: list[ColumnDrift] = []
-    for name, col in desired_by_name.items():
-        if name not in observed_by_name:
-            result.append(Added(col))
-    for name, col in observed_by_name.items():
-        if name not in desired_by_name:
-            result.append(Removed(col))
-    for name, desired_col in desired_by_name.items():
-        if name in observed_by_name:
-            drift = _diff_column_pair(desired_col, observed_by_name[name])
-            if drift is not None:
-                result.append(drift)
-    return tuple(result)
-
-
-def _diff_column_pair(desired: Column, observed: Column) -> ColumnChanged | None:
-    """Return the ColumnChanged fact for a name-matched pair, or None when identical."""
-    data_type = _changed(desired.data_type, observed.data_type)
-    nullability = _changed(desired.nullable, observed.nullable)
-    comment = _changed(desired.comment, observed.comment)
-    tags = _diff_mapping(desired.tags, observed.tags)
-    if data_type is None and nullability is None and comment is None and not tags:
-        return None
-    return ColumnChanged(
-        column_name=desired.name,
-        data_type=data_type,
-        nullability=nullability,
-        comment=comment,
-        tags=tags,
-    )
-
-
-def _diff_primary_key(
-    desired: PrimaryKeyConstraint | None,
-    observed: PrimaryKeyConstraint | None,
-) -> Entry[PrimaryKeyConstraint] | None:
-    """
-    Diff primary keys by column-set identity.
-
-    The key columns compared as a set are the constraint's identity: order and
-    constraint name do not make two keys different (matching today's
-    behaviour, where equal sets produce no action).
-    """
-    if desired is not None and observed is None:
-        return Added(desired)
-    if desired is None and observed is not None:
-        return Removed(observed)
-    if (
-        desired is not None
-        and observed is not None
-        and set(desired.columns) != set(observed.columns)
-    ):
-        return Changed(desired=desired, observed=observed)
-    return None
-
-
-def _diff_foreign_keys(
-    desired: tuple[ForeignKeyConstraint, ...],
-    observed: tuple[ForeignKeyConstraint, ...],
-) -> tuple[ForeignKeyDrift, ...]:
-    """
-    Diff foreign keys by content signature.
-
-    The signature (local columns, referenced table, referenced columns) *is*
-    the FK's identity, so a matched pair is content-identical and records no
-    fact — an FK has no changed state, only added or removed, which is why
-    ``ForeignKeyDrift`` admits no ``Changed`` variant. An FK present on both
-    sides under different constraint names produces nothing, so a sync over an
-    unchanged catalog stays idempotent.
-    """
-    desired_by_sig = {fk.signature: fk for fk in desired}
-    observed_by_sig = {fk.signature: fk for fk in observed}
-    added: tuple[ForeignKeyDrift, ...] = tuple(
-        Added(fk) for sig, fk in desired_by_sig.items() if sig not in observed_by_sig
-    )
-    removed: tuple[ForeignKeyDrift, ...] = tuple(
-        Removed(fk) for sig, fk in observed_by_sig.items() if sig not in desired_by_sig
-    )
-    return added + removed
