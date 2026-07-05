@@ -131,7 +131,6 @@ def test_to_desired_table_preserves_columns_and_metadata():
     assert desired.partitioned_by == ("ds",)
 
 
-
 def test_to_desired_table_defaults_partitioning_to_empty_tuple():
     # Given a table with no partition specs
     table = DeltaTable(

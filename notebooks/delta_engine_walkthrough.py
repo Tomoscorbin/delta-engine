@@ -265,7 +265,9 @@ customers = DeltaTable(
     columns=[
         Column("id", Long(), nullable=False, primary_key=True),
         Column("name", String(), comment="Full legal name"),  # <-- added column comment
-        Column("email", String(), tags={"pii": "true"}),  # <-- added with column tag (legacy_code dropped by omission)
+        Column(
+            "email", String(), tags={"pii": "true"}
+        ),  # <-- added with column tag (legacy_code dropped by omission)
         Column("status", String()),  # <-- loosened from NOT NULL to nullable
     ],
     comment="Customer master table (with contact details)",  # <-- added table comment

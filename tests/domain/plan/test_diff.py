@@ -282,9 +282,7 @@ def test_declared_property_absent_from_catalog_produces_first_write_set():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PropertySet(
-            name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
-        ),
+        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value=None),
     )
 
 
@@ -382,9 +380,7 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
 
 def test_property_set_rejects_equal_values():
     with pytest.raises(ValueError, match="no difference"):
-        PropertySet(
-            name="delta.enableChangeDataFeed", desired_value="true", observed_value="true"
-        )
+        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
 
 
 def test_property_set_first_write_is_always_representable():

@@ -669,9 +669,7 @@ def _diff_properties(desired: DesiredTable, observed: ObservedTable) -> list[Cha
                 changes.append(PropertyUnset(name=name, observed_value=observed_value))
         elif observed_value != declared_value:
             changes.append(
-                PropertySet(
-                    name=name, desired_value=declared_value, observed_value=observed_value
-                )
+                PropertySet(name=name, desired_value=declared_value, observed_value=observed_value)
             )
 
     for name, observed_value in observed.properties.items():

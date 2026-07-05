@@ -514,9 +514,7 @@ def test_blocks_none_declaration_on_removal_forbidden_key():
 def test_allows_none_declaration_on_unrestricted_key():
     # Given an absence assertion on a key whose registry entry restricts nothing
     rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
-    changes = (
-        PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
-    )
+    changes = (PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),)
 
     assert rule.evaluate(_drift(*changes)) == ()
 
@@ -531,8 +529,7 @@ def test_drop_without_column_mapping_fails_before_execution():
     failures = validate_diff(diff).failures
 
     assert any(
-        f.rule_name == "ColumnMappingRequiredForDrop"
-        and "delta.columnMapping.mode" in f.message
+        f.rule_name == "ColumnMappingRequiredForDrop" and "delta.columnMapping.mode" in f.message
         for f in failures
     )
 
