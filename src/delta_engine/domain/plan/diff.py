@@ -580,7 +580,9 @@ def _diff_table_comment(desired: str, observed: str) -> list[Change]:
     return [TableCommentChanged(desired_comment=desired, observed_comment=observed)]
 
 
-def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
+def _diff_properties(
+    desired: Mapping[str, str | None], observed: Mapping[str, str]
+) -> list[Change]:
     """
     Property changes under declared-projection semantics: only desired keys are compared.
 
@@ -592,7 +594,7 @@ def _diff_properties(desired: Mapping[str, str], observed: Mapping[str, str]) ->
     return [
         PropertySet(name=name, desired_value=value)
         for name, value in desired.items()
-        if name not in observed or observed[name] != value
+        if value is not None and (name not in observed or observed[name] != value)
     ]
 
 

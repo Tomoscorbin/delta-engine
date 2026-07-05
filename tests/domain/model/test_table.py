@@ -429,3 +429,27 @@ def test_desired_table_rejects_empty_aspect_set():
             columns=(_COL,),
             managed_aspects=frozenset(),
         )
+
+
+def test_desired_table_accepts_none_property_assertions():
+    # Given a declaration asserting one value and one absence
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(_COL,),
+        properties={"delta.enableChangeDataFeed": "true", "delta.logRetentionDuration": None},
+    )
+
+    # Then both entries are carried verbatim
+    assert desired.properties["delta.enableChangeDataFeed"] == "true"
+    assert desired.properties["delta.logRetentionDuration"] is None
+
+
+def test_observed_table_properties_carry_values_only():
+    # Given an observed table — the catalog has values, never assertions
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(_COL,),
+        properties={"delta.enableChangeDataFeed": "true"},
+    )
+
+    assert observed.properties == {"delta.enableChangeDataFeed": "true"}

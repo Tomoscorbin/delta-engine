@@ -188,7 +188,7 @@ class DeltaTable:
         )
 
     @property
-    def effective_properties(self) -> Mapping[str, str]:
+    def effective_properties(self) -> Mapping[str, str | None]:
         """Defaults overlaid by user properties (user wins)."""
         return self._desired_table.properties
 

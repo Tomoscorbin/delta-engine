@@ -227,10 +227,15 @@ def _set_table_comment(comment: str) -> str:
     return f"COMMENT {quote_literal(comment)}"
 
 
-def _set_properties(props: Mapping[str, str]) -> str:
-    if not props:
+def _set_properties(props: Mapping[str, str | None]) -> str:
+    # None values are absence assertions: a new table simply omits the key.
+    pairs = ", ".join(
+        f"{quote_literal(name)}={quote_literal(value)}"
+        for name, value in sorted(props.items())
+        if value is not None
+    )
+    if not pairs:
         return ""
-    pairs = ", ".join(f"{quote_literal(k)}={quote_literal(v)}" for k, v in sorted(props.items()))
     return f"TBLPROPERTIES ({pairs})"
 
 
