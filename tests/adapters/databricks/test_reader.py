@@ -310,8 +310,9 @@ def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
     assert result.failure.exception_type == "RuntimeError"
 
 
-def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
-    # Given a present table whose DESCRIBE DETAIL returns properties the engine does not manage
+def test_observed_properties_are_filtered_to_managed_keys(qn):
+    # Given a present table whose DESCRIBE DETAIL returns a mix of managed
+    # keys and platform-written keys the engine does not manage
     catalog = FakeCatalog(
         columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): ""},
@@ -321,7 +322,7 @@ def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
             "properties": {
                 "delta.columnMapping.mode": "name",
                 "delta.minReaderVersion": "2",
-                "custom.unlisted": "kept",
+                "custom.unlisted": "dropped",
             }
         }
     ]
@@ -330,14 +331,11 @@ def test_observed_properties_pass_through_catalog_map_unfiltered(qn):
     # When we fetch state
     result = reader.fetch_state(qn)
 
-    # Then the full catalog map passes through unfiltered, as a read-only mapping
+    # Then only managed keys reach the domain — platform-written keys can
+    # never trip validation or churn plans — and the mapping is read-only
     assert isinstance(result, TablePresent)
     properties = result.table.properties
-    assert dict(properties) == {
-        "delta.columnMapping.mode": "name",
-        "delta.minReaderVersion": "2",
-        "custom.unlisted": "kept",
-    }
+    assert dict(properties) == {"delta.columnMapping.mode": "name"}
     with pytest.raises(TypeError):
         properties["x"] = "y"  # type: ignore[index]
 
