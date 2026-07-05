@@ -286,30 +286,47 @@ DEFAULT_RULES: tuple[Rule, ...] = (
 )
 
 
-def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
+class UnmanagedAspectDrift:
     """
-    One failure per unmanaged aspect that has drifted.
+    Fail once per unmanaged aspect that has drifted.
 
-    A scope invariant, not a rule: it defines what a declaration is allowed
-    to govern and runs unconditionally, so ``rules=()`` cannot let unmanaged
-    drift through. dict.fromkeys deduplicates the aspects while preserving
-    first-seen order, so failure order follows change order deterministically.
+    A scope invariant with the ``Rule`` interface, but not a member of
+    ``DEFAULT_RULES``: it defines what a declaration is allowed to govern
+    and runs unconditionally in ``validate_diff``. It must not be
+    suppressible — ``TableDrift.plan()`` iterates *all* changes, and the
+    guarantee that a passing validation implies only managed actions holds
+    only because this check always runs; ``rules=()`` letting unmanaged
+    drift through would make ``plan()`` emit changes the declaration never
+    asked for.
+
+    Unlike the safety rules it reads ``drift.changes`` (unfiltered): its
+    subject is exactly the changes ``managed_changes`` excludes.
+    dict.fromkeys deduplicates the aspects while preserving first-seen
+    order, so failure order follows change order deterministically.
     """
-    managed_aspects = drift.desired.managed_aspects
-    unmanaged_aspects = dict.fromkeys(
-        change.aspect for change in drift.changes if change.aspect not in managed_aspects
-    )
-    return tuple(
-        ValidationFailure(
-            rule_name="UnmanagedAspectDrift",
-            message=(
-                f"Operation not allowed: {aspect.label} has drifted"
-                " but is not managed by this definition. Sync the table fully"
-                " or update the declaration to match the live schema."
-            ),
+
+    name: ClassVar[str] = "UnmanagedAspectDrift"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every drifted aspect the declaration does not manage."""
+        managed_aspects = drift.desired.managed_aspects
+        unmanaged_aspects = dict.fromkeys(
+            change.aspect for change in drift.changes if change.aspect not in managed_aspects
         )
-        for aspect in unmanaged_aspects
-    )
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: {aspect.label} has drifted"
+                    " but is not managed by this definition. Sync the table fully"
+                    " or update the declaration to match the live schema."
+                ),
+            )
+            for aspect in unmanaged_aspects
+        )
+
+
+_SCOPE_INVARIANTS: tuple[Rule, ...] = (UnmanagedAspectDrift(),)
 
 
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
@@ -322,7 +339,8 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
     - A missing table fails with ``MissingTableUnmanaged`` when the
       declaration does not manage column structure (it cannot be created).
     - Drift in an unmanaged aspect fails with ``UnmanagedAspectDrift``, once
-      per drifted aspect.
+      per drifted aspect. It shares the ``Rule`` interface but runs from its
+      own always-on tier, prepended to whatever ``rules`` are supplied.
 
     Rules are safety policy over the drift the declaration *does* manage:
     each reads ``drift.managed_changes``, so unmanaged drift produces exactly
@@ -348,9 +366,10 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
             return ValidationResult()
         case TableDrift() as drift:
             return ValidationResult(
-                failures=(
-                    *_validate_managed_scope(drift),
-                    *(failure for rule in rules for failure in rule.evaluate(drift)),
+                failures=tuple(
+                    failure
+                    for rule in (*_SCOPE_INVARIANTS, *rules)
+                    for failure in rule.evaluate(drift)
                 )
             )
         case _ as unreachable:
