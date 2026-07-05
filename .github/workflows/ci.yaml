@@ -9,6 +9,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  runtime-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install runtime package only
+        run: uv sync --locked --no-dev
+
+      - name: Import public package without dev dependencies
+        run: |
+          uv run --no-dev python - <<'PY'
+          from delta_engine import Column, DeltaTable, Engine, Integer, String
+
+          table = DeltaTable(
+              catalog="dev",
+              schema="silver",
+              name="customers",
+              columns=[
+                  Column("id", Integer(), nullable=False, primary_key=True),
+                  Column("name", String(), nullable=True),
+              ],
+          )
+
+          desired = table.to_desired_table()
+
+          assert desired.qualified_name.catalog == "dev"
+          assert desired.qualified_name.schema == "silver"
+          assert desired.qualified_name.name == "customers"
+          assert table.primary_key == ("id",)
+          assert Engine is not None
+          PY
+
   typecheck:
     runs-on: ubuntu-latest
     steps:
