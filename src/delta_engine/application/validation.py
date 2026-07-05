@@ -326,7 +326,39 @@ class UnmanagedAspectDrift:
         )
 
 
+class MissingTableUnmanaged:
+    """
+    Fail creation of a table whose declaration does not manage column structure.
+
+    The scope invariant for the ``TableMissing`` arm, peer to
+    ``UnmanagedAspectDrift`` on the drift arm. It shares the naming shape of
+    a rule (its ``name`` supplies the failure's ``rule_name``) but not the
+    ``Rule`` protocol — its subject is a missing table, which has no changes
+    to evaluate. Like the drift-arm invariant it runs unconditionally:
+    ``rules=()`` must not enable metadata-only creates.
+    """
+
+    name: ClassVar[str] = "MissingTableUnmanaged"
+
+    def evaluate(self, missing: TableMissing) -> tuple[ValidationFailure, ...]:
+        """Flag a missing table that this declaration cannot create."""
+        if TableAspect.COLUMN_STRUCTURE in missing.desired.managed_aspects:
+            return ()
+        return (
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: the table does not exist and this"
+                    " definition does not manage column structure, so it cannot"
+                    " be created. Manage the table fully or create it out-of-band"
+                    " first."
+                ),
+            ),
+        )
+
+
 _SCOPE_INVARIANTS: tuple[Rule, ...] = (UnmanagedAspectDrift(),)
+_MISSING_TABLE_UNMANAGED = MissingTableUnmanaged()
 
 
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
@@ -336,11 +368,13 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
     Two scope invariants are checked unconditionally — they define what a
     declaration is allowed to govern, and cannot be suppressed via ``rules``:
 
-    - A missing table fails with ``MissingTableUnmanaged`` when the
-      declaration does not manage column structure (it cannot be created).
-    - Drift in an unmanaged aspect fails with ``UnmanagedAspectDrift``, once
-      per drifted aspect. It shares the ``Rule`` interface but runs from its
-      own always-on tier, prepended to whatever ``rules`` are supplied.
+    - ``MissingTableUnmanaged`` judges the missing arm: a table that does
+      not exist cannot be created by a declaration that does not manage
+      column structure.
+    - ``UnmanagedAspectDrift`` judges the drift arm: one failure per
+      drifted unmanaged aspect. It shares the ``Rule`` interface but runs
+      from its own always-on tier, prepended to whatever ``rules`` are
+      supplied.
 
     Rules are safety policy over the drift the declaration *does* manage:
     each reads ``drift.managed_changes``, so unmanaged drift produces exactly
@@ -349,21 +383,7 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
     """
     match diff:
         case TableMissing() as missing:
-            if TableAspect.COLUMN_STRUCTURE not in missing.desired.managed_aspects:
-                return ValidationResult(
-                    failures=(
-                        ValidationFailure(
-                            rule_name="MissingTableUnmanaged",
-                            message=(
-                                "Operation not allowed: the table does not exist and this"
-                                " definition does not manage column structure, so it cannot"
-                                " be created. Manage the table fully or create it out-of-band"
-                                " first."
-                            ),
-                        ),
-                    )
-                )
-            return ValidationResult()
+            return ValidationResult(failures=_MISSING_TABLE_UNMANAGED.evaluate(missing))
         case TableDrift() as drift:
             return ValidationResult(
                 failures=tuple(
