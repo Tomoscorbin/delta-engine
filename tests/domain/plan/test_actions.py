@@ -4,7 +4,6 @@ import pytest
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
-    ActionPhase,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -122,23 +121,35 @@ def test_plan_ordering_ignores_non_subject_fields():
 @pytest.mark.parametrize(
     "action, expected_subject",
     [
-        (AddColumn(column=_column("xcol")), "xcol"),
-        (DropColumn(column_name="ycol"), "ycol"),
-        (SetProperty(name="propA", value="v"), "propA"),
-        (SetColumnComment(column_name="zcol", comment="c"), "zcol"),
-        (SetColumnNullability(column_name="ncol", nullable=False), "ncol"),
-        (SetTableComment(comment="table comment"), ""),  # whole-table action: no subject
+        (_create_table_action(), ""),
+        (AddColumn(column=_column("x")), "x"),
+        (DropColumn(column_name="x"), "x"),
+        (SetProperty(name="prop", value="1"), "prop"),
+        (UnsetProperty(name="prop"), "prop"),
+        (SetTableTag(name="env", value="prod"), "env"),
+        (UnsetTableTag(name="env"), "env"),
+        (SetColumnTag(column_name="email", name="pii", value="true"), "email.pii"),
+        (UnsetColumnTag(column_name="email", name="pii"), "email.pii"),
+        (SetColumnComment(column_name="email", comment="customer email"), "email"),
+        (SetTableComment(comment="table comment"), ""),
+        (SetColumnNullability(column_name="email", nullable=False), "email"),
+        (DropPrimaryKey(), ""),
+        (SetPrimaryKey(columns=("id",), constraint_name="table_pk"), ""),
+        (DropForeignKey(constraint_name="orders_customer_id_fk"), "orders_customer_id_fk"),
+        (
+            SetForeignKey(
+                local_columns=("customer_id",),
+                referenced_table=QualifiedName("cat", "sch", "customers"),
+                referenced_columns=("id",),
+                constraint_name="orders_customer_id_fk",
+            ),
+            "customer_id",
+        ),
     ],
 )
-def test_subject_identifies_within_phase_target(action, expected_subject):
-    # Then a column/property action's subject is its name; a whole-table action's is empty
+def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
+    # Then each action exposes the target used for deterministic ordering within its phase
     assert action.subject == expected_subject
-
-
-def test_create_table_action_has_no_subject():
-    # Given a CreateTable action (targets the table as a whole)
-    # Then it has no within-phase subject
-    assert _create_table_action().subject == ""
 
 
 # ----- ActionPlan: permutation invariance
@@ -171,22 +182,6 @@ def test_actionplan_order_is_independent_of_input_permutation(
 
 
 # ----- DropPrimaryKey / SetPrimaryKey
-
-
-def test_drop_primary_key_has_no_subject():
-    # Given a DropPrimaryKey action (whole-table operation)
-    action = DropPrimaryKey()
-
-    # Then it has no within-phase subject
-    assert action.subject == ""
-
-
-def test_set_primary_key_has_no_subject():
-    # Given a SetPrimaryKey action
-    action = SetPrimaryKey(columns=("id",), constraint_name="tbl_pk")
-
-    # Then it has no within-phase subject
-    assert action.subject == ""
 
 
 def test_plan_orders_drop_primary_key_before_add_column():
@@ -293,44 +288,7 @@ def test_plan_orders_drop_foreign_key_before_drop_primary_key():
     assert [type(a) for a in plan] == [DropForeignKey, DropPrimaryKey]
 
 
-def test_drop_foreign_key_subject_is_constraint_name():
-    # Given a DropForeignKey action with a constraint name
-    action = DropForeignKey(constraint_name="orders_customer_id_fk")
-
-    # Then subject is the constraint name (for deterministic ordering within the phase)
-    assert action.subject == "orders_customer_id_fk"
-
-
-def test_set_foreign_key_subject_is_local_columns_joined():
-    # Given a SetForeignKey action with one local column
-    action = SetForeignKey(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-        constraint_name="tbl_customer_id_fk",
-    )
-
-    # Then subject is the local columns joined (used for deterministic ordering within the phase)
-    assert action.subject == "customer_id"
-
-
 # ----- SetTableTag / UnsetTableTag
-
-
-def test_set_table_tag_subject_is_tag_name():
-    # Given a SetTableTag action
-    action = SetTableTag(name="env", value="prod")
-
-    # Then its within-phase subject is the tag name (for deterministic ordering)
-    assert action.subject == "env"
-
-
-def test_unset_table_tag_subject_is_tag_name():
-    # Given an UnsetTableTag action
-    action = UnsetTableTag(name="env")
-
-    # Then its within-phase subject is the tag name
-    assert action.subject == "env"
 
 
 def test_plan_orders_set_table_tag_after_set_property_and_before_drop_foreign_key():
@@ -356,22 +314,6 @@ def test_plan_orders_set_table_tag_before_unset_table_tag():
 
 
 # ----- SetColumnTag / UnsetColumnTag
-
-
-def test_set_column_tag_subject_is_column_and_tag_name():
-    # Given a SetColumnTag action
-    action = SetColumnTag(column_name="email", name="pii", value="true")
-
-    # Then its within-phase subject is "{column}.{tag}" (for deterministic ordering)
-    assert action.subject == "email.pii"
-
-
-def test_unset_column_tag_subject_is_column_and_tag_name():
-    # Given an UnsetColumnTag action
-    action = UnsetColumnTag(column_name="email", name="pii")
-
-    # Then its within-phase subject is "{column}.{tag}"
-    assert action.subject == "email.pii"
 
 
 def test_plan_orders_set_column_tag_after_add_column():
@@ -400,10 +342,17 @@ def test_plan_orders_set_column_tag_before_unset_column_tag():
     assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]
 
 
-def test_unset_property_phases_immediately_after_set_property():
-    # Given the two property phases
-    # Then unset sorts directly after set so mixed plans stay deterministic
-    assert ActionPhase.UNSET_PROPERTY == ActionPhase.SET_PROPERTY + 1
+def test_plan_orders_set_property_before_unset_property():
+    # Given property set and unset actions supplied out of execution order
+    plan = ActionPlan(
+        (
+            UnsetProperty(name="old_property"),
+            SetProperty(name="new_property", value="true"),
+        )
+    )
+
+    # Then the plan orders property sets before property unsets
+    assert [type(action) for action in plan] == [SetProperty, UnsetProperty]
 
 
 def test_set_property_observed_value_defaults_to_none():

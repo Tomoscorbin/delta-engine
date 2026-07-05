@@ -16,6 +16,7 @@ from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
+    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -282,9 +283,7 @@ def test_declared_property_absent_from_catalog_produces_first_write_set():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PropertySet(
-            name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
-        ),
+        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value=None),
     )
 
 
@@ -382,9 +381,7 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
 
 def test_property_set_rejects_equal_values():
     with pytest.raises(ValueError, match="no difference"):
-        PropertySet(
-            name="delta.enableChangeDataFeed", desired_value="true", observed_value="true"
-        )
+        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
 
 
 def test_property_set_first_write_is_always_representable():
@@ -661,3 +658,164 @@ def test_foreign_key_removed_produces_drop_foreign_key():
     assert ForeignKeyRemoved(constraint=fk).actions() == (
         DropForeignKey(constraint_name="stale_fk"),
     )
+
+
+def test_missing_table_plan_creates_table_then_follow_up_metadata_actions():
+    # Given a desired table that does not exist yet, with metadata that must be
+    # applied after CREATE TABLE
+    foreign_key = _foreign_key("test_id_fk")
+    desired = _desired(
+        columns=(Column("id", Integer(), tags={"pii": "false"}),),
+        tags={"env": "dev"},
+        foreign_keys=(foreign_key,),
+    )
+
+    # When planning the missing table
+    plan = TableMissing(desired=desired).plan()
+
+    # Then the table is created first, followed by metadata and foreign-key actions
+    assert plan.actions == (
+        CreateTable(desired),
+        SetTableTag(name="env", value="dev"),
+        SetColumnTag(column_name="id", name="pii", value="false"),
+        SetForeignKey(
+            local_columns=("id",),
+            referenced_table=QualifiedName("dev", "silver", "other"),
+            referenced_columns=("id",),
+            constraint_name="test_id_fk",
+        ),
+    )
+
+
+def test_drift_plan_collects_actions_from_detected_differences():
+    # Given an existing table with an added column and changed table comment
+    diff = diff_table(
+        _desired(
+            columns=(Column("id", Integer()), Column("age", Integer())),
+            comment="new table comment",
+        ),
+        _observed(
+            columns=(Column("id", Integer()),),
+            comment="old table comment",
+        ),
+    )
+
+    # When planning the drift
+    assert isinstance(diff, TableDrift)
+    plan = diff.plan()
+
+    # Then the plan contains the actions needed to reconcile the drift
+    assert plan.actions == (
+        AddColumn(Column("age", Integer())),
+        SetTableComment(comment="new table comment"),
+    )
+
+
+def test_managed_changes_filters_out_unmanaged_aspects():
+    # Given a drift containing one managed change and one unmanaged change
+    desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
+    table_comment_change = TableCommentChanged(desired_comment="new", observed_comment="old")
+    column_change = ColumnAdded(Column("new_col", Integer()))
+
+    drift = TableDrift(
+        desired=desired,
+        changes=(column_change, table_comment_change),
+    )
+
+    # Then only the managed change is exposed to validation rules
+    assert drift.managed_changes == (table_comment_change,)
+
+
+def test_observed_only_primary_key_produces_removed_change():
+    # Given a catalog primary key that is absent from the declaration
+    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
+
+    # When diffing
+    diff = diff_table(
+        _desired(),
+        _observed(primary_key=primary_key),
+    )
+
+    # Then the primary key is marked for removal
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (PrimaryKeyRemoved(observed_primary_key=primary_key),)
+
+
+def test_changed_primary_key_produces_changed_change():
+    # Given desired and observed primary keys over different column sets
+    desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
+    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
+    columns = (
+        Column("id", Integer(), nullable=False),
+        Column("other_id", Integer(), nullable=False),
+    )
+
+    # When diffing
+    diff = diff_table(
+        _desired(columns=columns, primary_key=desired_primary_key),
+        _observed(columns=columns, primary_key=observed_primary_key),
+    )
+
+    # Then the key change is represented as one atomic changed fact
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (
+        PrimaryKeyChanged(
+            desired_primary_key=desired_primary_key,
+            observed_primary_key=observed_primary_key,
+        ),
+    )
+
+
+def test_observed_only_foreign_key_produces_removed_change():
+    # Given a catalog foreign key that is absent from the declaration
+    foreign_key = _foreign_key("legacy_fk")
+
+    # When diffing
+    diff = diff_table(
+        _desired(),
+        _observed(foreign_keys=(foreign_key,)),
+    )
+
+    # Then the foreign key is marked for removal
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (ForeignKeyRemoved(constraint=foreign_key),)
+
+
+def test_changed_foreign_key_signature_produces_remove_and_add_changes():
+    # Given a declared FK and an observed FK with different relationship signatures
+    desired_foreign_key = _foreign_key("desired_fk")
+    observed_foreign_key = ForeignKeyConstraint(
+        local_columns=("id",),
+        referenced_table=QualifiedName("dev", "silver", "different_parent"),
+        referenced_columns=("id",),
+        constraint_name="legacy_fk",
+    )
+
+    # When diffing
+    diff = diff_table(
+        _desired(foreign_keys=(desired_foreign_key,)),
+        _observed(foreign_keys=(observed_foreign_key,)),
+    )
+
+    # Then the observed relationship is removed and the desired relationship is added
+    assert isinstance(diff, TableDrift)
+    assert set(diff.changes) == {
+        ForeignKeyAdded(constraint=desired_foreign_key),
+        ForeignKeyRemoved(constraint=observed_foreign_key),
+    }
+
+
+def test_observed_only_column_tags_are_ignored_because_column_is_removed():
+    # Given an observed-only column that also has catalog tags
+    observed_only_column = Column("stale", Integer(), tags={"old": "true"})
+
+    # When diffing
+    diff = diff_table(
+        _desired(columns=(Column("id", Integer()),)),
+        _observed(columns=(Column("id", Integer()), observed_only_column)),
+    )
+
+    # Then the column removal is enough; no tag-unset noise is produced for a
+    # column that will be dropped
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (ColumnRemoved(observed_only_column),)
