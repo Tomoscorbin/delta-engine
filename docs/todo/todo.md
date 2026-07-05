@@ -21,7 +21,7 @@
 - [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row
 - [ ] utilise __init__ __all__ so that we can reduce the number of import line
 - [ ] Add build docs to pre-commit?
-- [ ] Remove default properties from `DeltaTable` (no implicit `delta.columnMapping.mode=name`), add a `ColumnMappingRequiredForDrop` precondition check, and fast-fail `metadata_only=True` declarations that pass `properties`. The precondition check needs desired+observed property *state*, not drift — a property already correct in the catalog produces no fact — so it cannot live in unary `validate_diff`. Preferred shape: a separate `validate_execution_preconditions(desired, observed, facts)` composed by the engine's validate phase. Alternatives considered and parked: a bool field on `TableDrift` (leaks a Delta property key into the domain); full desired/observed snapshots on `TableDrift` (heavy test fixtures).
+- [x] Remove default properties from `DeltaTable`, `ColumnMappingRequiredForDrop` precondition, metadata-only property fast-fail — shipped in the property-ownership feature (exact declaration)
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] should DesiredTableSource live in ports.py?
 - [ ] Decide whether to emit `RELY` on FK/PK constraints. Without `RELY`, Databricks treats informational constraints as documentation only and the optimizer cannot use them for join elimination / query rewrite. If the point of declaring keys is optimization, they are currently inert. Weigh against the risk of `RELY` on unverified data (the optimizer trusts it). Would add a `rely: bool` to `ForeignKeyConstraint`/`PrimaryKeyConstraint` and a ` NOT ENFORCED RELY` / ` NOT ENFORCED` suffix in the compiler.
@@ -40,7 +40,7 @@
 - [ ] Put Propertiess into table.py alongside DeltaTable. rename table.py to delta_table.py
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
-- [ ] Should we remove the concept of default properties altogether?
+- [x] Should we remove the concept of default properties altogether? — yes; shipped in the property-ownership feature
 - [ ] restructure files so that important things come first
 - [ ] is it possible to remove Changed[T] so that everything is either Added or Removed?
-
+- [ ] `ignored_properties` escape hatch for coexistence with other tooling writing managed keys (deferred from the property-ownership design; see spec Known Limitations)

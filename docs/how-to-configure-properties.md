@@ -5,70 +5,118 @@ tags:
 
 # How to configure table properties
 
-`DeltaTable` accepts a `properties` dict that maps `Property` enum members to string values. The engine reconciles only the keys you declare; properties set out-of-band are left untouched.
+The engine manages properties by **exact declaration**: your declaration is
+the complete list of the properties you manage on that table.
 
-## Default properties
+- A key declared **with a value** is reconciled — set when absent, corrected
+  when the catalog value differs.
+- A key declared **as `None`** is asserted absent — removed from the table
+  if present.
+- A **managed key present on the table but missing from your declaration**
+  fails the sync with a message naming the key and its current value:
+  declare it to manage it, or declare it `None` to remove it.
+- **Any other key is ignored.** Databricks writes many properties
+  autonomously (`delta.enableRowTracking`, compression codecs, internal
+  counters); the engine never compares or touches keys it does not manage,
+  so platform behaviour and runtime upgrades cannot fail your syncs.
 
-Every `DeltaTable` applies one default unless you override it:
+## The managed keys
 
-| Property | Default value |
-|---|---|
-| `Property.COLUMN_MAPPING_MODE` | `"name"` |
+| `Property` member | Delta table property key | Restrictions |
+|---|---|---|
+| `CHANGE_DATA_FEED` | `delta.enableChangeDataFeed` | none |
+| `DELETED_FILE_RETENTION_DURATION` | `delta.deletedFileRetentionDuration` | none |
+| `LOG_RETENTION_DURATION` | `delta.logRetentionDuration` | none |
+| `DATA_SKIPPING_NUM_INDEXED_COLS` | `delta.dataSkippingNumIndexedCols` | none |
+| `COLUMN_MAPPING_MODE` | `delta.columnMapping.mode` | only `none → name`; cannot be removed |
 
-`COLUMN_MAPPING_MODE=name` is required for column drops to work. Override it to `none` only if you never drop columns.
+Passing a key outside this set raises `ValueError` at `DeltaTable`
+construction (for `None` assertions too). This prevents typos from silently
+doing nothing.
 
-Deletion vectors are intentionally **not** defaulted here — current Databricks runtimes enable them automatically. The engine reconciles only the properties you declare, so leaving `ENABLE_DELETION_VECTORS` undeclared lets the runtime own it. Declare it explicitly if you need to pin a specific value.
+Deletion vectors (`delta.enableDeletionVectors`) are deliberately **not**
+managed: Databricks enables them automatically on new tables, so the engine
+leaves that key entirely to the platform.
 
-## Override a default
+## Declaring and removing properties
 
 ```python
-from delta_engine import Column, DeltaTable, Property, String
+from delta_engine import Column, DeltaTable, Integer, Property
 
-table = DeltaTable(
-    catalog="dev",
-    schema="silver",
-    name="events",
-    columns=[Column("id", String())],
+orders = DeltaTable(
+    catalog="prod",
+    schema="sales",
+    name="orders",
+    columns=[Column("id", Integer(), nullable=False, primary_key=True)],
     properties={
-        Property.COLUMN_MAPPING_MODE: "none",
+        Property.CHANGE_DATA_FEED: "true",          # ensure it is set
+        Property.LOG_RETENTION_DURATION: None,       # ensure it is absent
     },
 )
 ```
 
-## Set additional properties
+Removing a line from `properties` does **not** remove the property from the
+table — it stops managing it, and the next sync fails loud asking you to
+decide (declare a value, or declare `None`). Nothing is ever removed
+implicitly.
 
-```python
-from delta_engine import Column, DeltaTable, Property, String
-
-table = DeltaTable(
-    catalog="dev",
-    schema="silver",
-    name="events",
-    columns=[Column("id", String())],
-    properties={
-        Property.CHANGE_DATA_FEED: "true",
-        Property.DELETED_FILE_RETENTION_DURATION: "interval 30 days",
-        Property.LOG_RETENTION_DURATION: "interval 30 days",
-    },
-)
-```
-
-The engine emits the requested table-property DDL but does not verify whether
-your Databricks Runtime or Delta table protocol supports each feature. For
-example, if you enable change data feed on a table or runtime that cannot support
-it, Databricks rejects the statement and `sync` reports an `EXECUTION_FAILED`
-table with the original error. See
+The engine emits the requested table-property DDL but does not verify
+whether your Databricks Runtime or Delta table protocol supports each
+feature. If you enable change data feed on a runtime that cannot support
+it, Databricks rejects the statement and `sync` reports an
+`EXECUTION_FAILED` table with the original error. See
 {ref}`runtime-and-delta-feature-compatibility`.
 
-## Available properties
+## Column mapping and dropping columns
 
-| `Property` member | Delta table property key |
-|---|---|
-| `ENABLE_DELETION_VECTORS` | `delta.enableDeletionVectors` |
-| `COLUMN_MAPPING_MODE` | `delta.columnMapping.mode` |
-| `CHANGE_DATA_FEED` | `delta.enableChangeDataFeed` |
-| `DELETED_FILE_RETENTION_DURATION` | `delta.deletedFileRetentionDuration` |
-| `LOG_RETENTION_DURATION` | `delta.logRetentionDuration` |
-| `DATA_SKIPPING_NUM_INDEXED_COLS` | `delta.dataSkippingNumIndexedCols` |
+Delta only permits `ALTER TABLE ... DROP COLUMN` when
+`delta.columnMapping.mode` is `name`. Declare it on any table whose columns
+may be dropped:
 
-Passing a key not in this enum raises `ValueError` at `DeltaTable` construction. This prevents typos from silently doing nothing.
+```python
+properties={Property.COLUMN_MAPPING_MODE: "name"}
+```
+
+A sync that drops a column without this declaration fails at validation
+(`ColumnMappingRequiredForDrop`) naming the property. Declaring it in the
+same sync as the drop is safe — properties are set before columns are
+dropped.
+
+Two operations on this key are blocked at validation because the table
+protocol upgrade is permanent: changing `name` back to `none`
+(`PropertyTransitionNotSupported`) and declaring it `None`
+(`PropertyUnsetNotSupported`). Once a table has column mapping, its
+declaration must carry `Property.COLUMN_MAPPING_MODE: "name"`.
+
+## Migrating from older engine versions
+
+Engine versions before this one injected `delta.columnMapping.mode='name'`
+into every fully-managed table. Those tables carry the key in the catalog,
+so their first sync after upgrading fails with `PropertyMustBeDeclared`.
+The fix is one line per declaration:
+
+```python
+properties={Property.COLUMN_MAPPING_MODE: "name"}
+```
+
+Tables synced only with `metadata_only=True` are unaffected (their
+properties are never compared). Old deletion-vectors residue from the
+pre-2026-07 default is also unaffected — that key is no longer managed.
+
+## When something else writes a managed key
+
+Two platform mechanisms can write managed keys without your action:
+Databricks' Automatic Upgrades service (writes properties onto enrolled
+Unity Catalog managed tables) and admin session defaults
+(`spark.databricks.delta.properties.defaults.*`, stamped onto new tables at
+creation). If either writes a managed key onto your table, the next sync
+fails loud with `PropertyMustBeDeclared` naming the key — add the line and
+carry on. The engine never reacts silently to keys it did not set.
+
+## Adding keys to the managed set
+
+Growing the managed set is a breaking change: tables carrying the new key
+undeclared start failing loud on upgrade. Before a key is added, a fresh
+table is created on a current Databricks Runtime and its `DESCRIBE DETAIL`
+properties inspected — platform-auto-written keys are not added. Additions
+are called out in release notes.

@@ -248,10 +248,15 @@ directly (e.g. `ColumnDataTypeChangeNotSupported` scans for
 changes directly after validation — there is no separate `lower_diff` step and
 no hidden dependency between lowering and validation.
 
-Two aspects deliberately diff under different semantics: properties are
-declared-projection (only declared keys are compared, so an observed-only
-property — for example one written by the platform — is not drift), while
-tags are full-state (an observed-only tag is drift and is unset).
+Two aspects deliberately diff under different semantics. Properties are
+exact-declaration: the declaration is the complete list of managed keys — a
+declared value is reconciled, a declared ``None`` asserts absence (unset
+when present), a managed key observed without a declaration is a blocking
+change, and unmanaged keys (platform-written) are invisible in both
+directions. The properties diff runs only when the declaration manages
+``PROPERTIES`` and receives the manageable-key registry from the
+application layer. Tags are full-state (an observed-only tag is drift and
+is unset).
 
 ## Managed aspects
 
