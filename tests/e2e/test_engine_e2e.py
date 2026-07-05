@@ -5,11 +5,11 @@ import pytest
 
 from delta_engine.adapters.databricks.executor import DatabricksExecutor
 from delta_engine.adapters.databricks.reader import DatabricksReader
-from delta_engine.api import Column, Date, DeltaTable, Integer, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.report import TableRunStatus
+from delta_engine.schema import Column, Date, DeltaTable, Integer, String
 from tests.config import TEST_CATALOG
 
 
@@ -298,9 +298,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
     assert "age" not in bad_cols
 
 
-def test_engine_metadata_only_applies_comments_when_schema_matches(
-    spark, monkeypatch, temp_schema
-):
+def test_engine_metadata_only_applies_comments_when_schema_matches(spark, monkeypatch, temp_schema):
     # Given an existing table whose schema exactly matches the declaration
     _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_meta_{uuid4().hex[:8]}"
@@ -330,9 +328,7 @@ def test_engine_metadata_only_applies_comments_when_schema_matches(
     assert details["description"] == "metadata-only table"
 
 
-def test_engine_metadata_only_fails_when_column_type_has_drifted(
-    spark, monkeypatch, temp_schema
-):
+def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, monkeypatch, temp_schema):
     # Given an existing table whose column type differs from the declaration
     _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_meta_drift_{uuid4().hex[:8]}"

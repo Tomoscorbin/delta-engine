@@ -1,6 +1,5 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, Long, String
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import (
@@ -28,6 +27,7 @@ from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable, SetColumnComment, SetTableComment
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
 
 # --------- helpers/fakes
 
@@ -855,15 +855,17 @@ def test_metadata_only_sync_succeeds_when_catalog_has_engine_written_properties(
     # a metadata-only declaration owns no properties, so this is not drift
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")
-    reader = _FakeReader({
-        fqn: TablePresent(
-            table=ObservedTable(
-                qualified_name=QualifiedName(catalog, schema, name),
-                columns=(Column("id", String()),),
-                properties={"delta.columnMapping.mode": "name"},
+    reader = _FakeReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()),),
+                    properties={"delta.columnMapping.mode": "name"},
+                )
             )
-        )
-    })
+        }
+    )
     executor = _FakeExecutor(results=(_ok_exec(0),))
     engine = Engine(reader=reader, executor=executor)
 
@@ -877,14 +879,16 @@ def test_metadata_only_sync_succeeds_when_catalog_has_engine_written_properties(
 def test_metadata_only_sync_fails_when_unmanaged_column_has_drifted():
     # Given a live table with a different column type (unmanaged aspect drifted)
     fqn = "cat.sch.orders"
-    reader = _FakeReader({
-        fqn: TablePresent(
-            table=ObservedTable(
-                qualified_name=QualifiedName("cat", "sch", "orders"),
-                columns=(Column("id", Long()),),  # type differs from String in spec
+    reader = _FakeReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName("cat", "sch", "orders"),
+                    columns=(Column("id", Long()),),  # type differs from String in spec
+                )
             )
-        )
-    })
+        }
+    )
     executor = _FakeExecutor(results=())
     engine = Engine(reader=reader, executor=executor)
 

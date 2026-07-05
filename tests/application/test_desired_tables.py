@@ -1,9 +1,9 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.api import DeltaTable, String
 from delta_engine.application.desired_tables import prepare_desired_tables
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
+from delta_engine.schema import DeltaTable, String
 
 
 @st.composite

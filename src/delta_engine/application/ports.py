@@ -10,7 +10,7 @@ the whole contract.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.domain.model import ObservedTable, QualifiedName
@@ -43,7 +43,6 @@ class ReadFailed:
 CatalogState = TablePresent | TableAbsent | ReadFailed
 
 
-@runtime_checkable
 class CatalogStateReader(Protocol):
     """
     Reads the current catalog state for a single table.
@@ -127,7 +126,6 @@ class ExecutionSummary:
         return len(self.failures)
 
 
-@runtime_checkable
 class PlanExecutor(Protocol):
     """
     Executes an action plan against a backing engine.

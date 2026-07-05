@@ -7,13 +7,13 @@ self-reference handling, and the per-table fail-closed verdict
 transitive propagation to dependents.
 """
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, Self, String
 from delta_engine.application.dependency_resolution import ResolveResult, resolve
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
 
 
 def _table(fqn: str) -> DesiredTable:
