@@ -9,7 +9,7 @@ delta-engine ships with a Databricks adapter. To target a different backend, imp
 
 ## The two protocols
 
-Both live in `delta_engine.application.ports`. Both are `runtime_checkable` Protocols — you do not inherit from them; you implement the required methods and the engine accepts your class.
+Both live in `delta_engine.application.ports`. You do not inherit from them; you implement the required methods and the engine accepts your class.
 
 ### CatalogStateReader
 
