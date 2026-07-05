@@ -43,6 +43,7 @@ from delta_engine.application.ports import (
     ReadFailed,
     TablePresent,
 )
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
@@ -203,7 +204,11 @@ class Engine:
             if isinstance(run.read, ReadFailed):
                 continue
             observed = run.read.table if isinstance(run.read, TablePresent) else None
-            run.diff = diff_table(desired=run.desired, observed=observed)
+            run.diff = diff_table(
+                desired=run.desired,
+                observed=observed,
+                property_registry=DELTA_PROPERTY_REGISTRY,
+            )
         return runs
 
     def _validate(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:

@@ -7,8 +7,11 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     ObservedTable,
+    PropertyDefinition,
+    PropertyRegistry,
     QualifiedName,
     String,
+    TableAspect,
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -27,6 +30,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
@@ -44,15 +48,27 @@ from delta_engine.domain.plan.diff import (
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
     PropertySet,
+    PropertyUnset,
     TableCommentChanged,
     TableDrift,
     TableMissing,
     TableTagSet,
     TableTagUnset,
+    UndeclaredProperty,
     diff_table,
 )
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
+
+_REGISTRY: PropertyRegistry = {
+    "delta.enableChangeDataFeed": PropertyDefinition(key="delta.enableChangeDataFeed"),
+    "delta.logRetentionDuration": PropertyDefinition(key="delta.logRetentionDuration"),
+    "delta.columnMapping.mode": PropertyDefinition(
+        key="delta.columnMapping.mode",
+        permitted_transitions=frozenset({("none", "name")}),
+        unset_permitted=False,
+    ),
+}
 
 
 def _desired(**overrides) -> DesiredTable:
@@ -90,7 +106,7 @@ def test_missing_table_diffs_to_table_missing_carrying_desired():
     desired = _desired()
 
     # When diffing against None
-    diff = diff_table(desired, observed=None)
+    diff = diff_table(desired, observed=None, property_registry=_REGISTRY)
 
     # Then the diff is the self-contained missing-table variant
     assert diff == TableMissing(desired=desired)
@@ -98,7 +114,7 @@ def test_missing_table_diffs_to_table_missing_carrying_desired():
 
 def test_equal_tables_diff_to_empty_drift():
     # Given identical desired and observed definitions
-    diff = diff_table(_desired(), _observed())
+    diff = diff_table(_desired(), _observed(), property_registry=_REGISTRY)
 
     # Then no changes are produced — the natural zero
     assert isinstance(diff, TableDrift)
@@ -107,7 +123,7 @@ def test_equal_tables_diff_to_empty_drift():
 
 def test_drift_carries_the_declarations_managed_aspects():
     # Given a desired table (fully managed by default)
-    diff = diff_table(_desired(), _observed())
+    diff = diff_table(_desired(), _observed(), property_registry=_REGISTRY)
 
     # Then the drift is self-contained: it knows its declaration's scope
     assert isinstance(diff, TableDrift)
@@ -122,6 +138,7 @@ def test_desired_only_column_produces_column_added_change():
     diff = diff_table(
         _desired(columns=(Column("id", Integer()), Column("age", Integer()))),
         _observed(),
+        property_registry=_REGISTRY,
     )
 
     # Then a ColumnAdded change is produced
@@ -134,6 +151,7 @@ def test_observed_only_column_produces_column_removed_change():
     diff = diff_table(
         _desired(),
         _observed(columns=(Column("id", Integer()), Column("stale", String()))),
+        property_registry=_REGISTRY,
     )
 
     # Then a ColumnRemoved change is produced
@@ -146,6 +164,7 @@ def test_type_drift_produces_column_data_type_changed():
     diff = diff_table(
         _desired(columns=(Column("id", Integer()),)),
         _observed(columns=(Column("id", Long()),)),
+        property_registry=_REGISTRY,
     )
 
     # Then a ColumnDataTypeChanged change carries both sides
@@ -161,7 +180,7 @@ def test_type_drift_suppresses_nullability_change_but_not_comment_change():
     observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
 
     # When diffing
-    diff = diff_table(desired, observed)
+    diff = diff_table(desired, observed, property_registry=_REGISTRY)
 
     # Then the type change is present and nullability is suppressed (the column
     # must be recreated first); comment drift is independent and not suppressed
@@ -176,6 +195,7 @@ def test_nullability_drift_produces_column_nullability_changed():
     diff = diff_table(
         _desired(columns=(Column("id", Integer(), nullable=False),)),
         _observed(columns=(Column("id", Integer(), nullable=True),)),
+        property_registry=_REGISTRY,
     )
 
     # Then a ColumnNullabilityChanged change carries the direction
@@ -195,6 +215,7 @@ def test_comment_drift_on_matched_column_produces_change():
             columns=(Column("id", Integer(), comment="pk"), Column("ghost", String(), comment="x"))
         ),
         _observed(columns=(Column("id", Integer(), comment=""),)),
+        property_registry=_REGISTRY,
     )
 
     # Then only the matched column produces a comment change; the ghost column's
@@ -216,6 +237,7 @@ def test_column_tag_drift_produces_set_and_unset_changes():
     diff = diff_table(
         _desired(columns=(Column("id", Integer(), tags={"new": "x", "pii": "true"}),)),
         _observed(columns=(Column("id", Integer(), tags={"pii": "false", "old": "y"}),)),
+        property_registry=_REGISTRY,
     )
 
     # Then set changes cover added and updated tags; an unset change covers the removed tag
@@ -235,6 +257,7 @@ def test_added_columns_tags_produce_set_facts():
     diff = diff_table(
         _desired(columns=(Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))),
         _observed(),
+        property_registry=_REGISTRY,
     )
 
     # Then the added column's tags are changes too — ADD_COLUMN precedes SET_COLUMN_TAG
@@ -245,7 +268,9 @@ def test_added_columns_tags_produce_set_facts():
 def test_identical_column_tags_produce_no_changes():
     # Given matched columns with identical tags
     columns = (Column("id", Integer(), tags={"pii": "true"}),)
-    diff = diff_table(_desired(columns=columns), _observed(columns=columns))
+    diff = diff_table(
+        _desired(columns=columns), _observed(columns=columns), property_registry=_REGISTRY
+    )
 
     # Then no tag changes are produced
     assert isinstance(diff, TableDrift)
@@ -256,35 +281,53 @@ def test_identical_column_tags_produce_no_changes():
 
 
 def test_table_comment_drift_produces_change_with_both_sides():
-    diff = diff_table(_desired(comment="new"), _observed(comment="old"))
+    diff = diff_table(
+        _desired(comment="new"), _observed(comment="old"), property_registry=_REGISTRY
+    )
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (TableCommentChanged(desired_comment="new", observed_comment="old"),)
 
 
-# ---------- property changes (declared-projection)
+# ---------- property changes (exact declaration)
 
 
-def test_declared_property_drift_produces_property_set_changes():
-    # Given one declared property missing from the catalog and one with a stale value
+def test_declared_property_absent_from_catalog_produces_first_write_set():
+    # Given a declared key the catalog lacks
     diff = diff_table(
-        _desired(properties={"a": "1", "b": "2"}),
-        _observed(properties={"b": "9"}),
+        _desired(properties={"delta.enableChangeDataFeed": "true"}),
+        _observed(properties={}),
+        property_registry=_REGISTRY,
     )
 
-    # Then each declared difference is one change
     assert isinstance(diff, TableDrift)
-    assert set(diff.changes) == {
-        PropertySet(name="a", desired_value="1"),
-        PropertySet(name="b", desired_value="2"),
-    }
+    assert diff.changes == (
+        PropertySet(
+            name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
+        ),
+    )
+
+
+def test_declared_property_with_stale_value_produces_set_carrying_both_sides():
+    diff = diff_table(
+        _desired(properties={"delta.enableChangeDataFeed": "true"}),
+        _observed(properties={"delta.enableChangeDataFeed": "false"}),
+        property_registry=_REGISTRY,
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (
+        PropertySet(
+            name="delta.enableChangeDataFeed", desired_value="true", observed_value="false"
+        ),
+    )
 
 
 def test_declared_property_matching_catalog_produces_no_change():
-    # Given a declared property whose catalog value already matches
     diff = diff_table(
-        _desired(properties={"a": "1"}),
-        _observed(properties={"a": "1"}),
+        _desired(properties={"delta.enableChangeDataFeed": "true"}),
+        _observed(properties={"delta.enableChangeDataFeed": "true"}),
+        property_registry=_REGISTRY,
     )
 
     # Then no change is produced — the property sync is idempotent
@@ -292,17 +335,96 @@ def test_declared_property_matching_catalog_produces_no_change():
     assert diff.changes == ()
 
 
-def test_observed_only_property_is_not_drift():
-    # Given a catalog property the declaration does not own
-    # (e.g. delta.columnMapping.mode written by a previous full sync)
+def test_none_declaration_on_present_key_produces_unset():
+    # Given a declaration asserting the key must be absent, and a catalog that has it
+    diff = diff_table(
+        _desired(properties={"delta.logRetentionDuration": None}),
+        _observed(properties={"delta.logRetentionDuration": "interval 30 days"}),
+        property_registry=_REGISTRY,
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (
+        PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
+    )
+
+
+def test_none_declaration_on_absent_key_produces_no_change():
+    # Given an absence assertion that already holds
+    diff = diff_table(
+        _desired(properties={"delta.logRetentionDuration": None}),
+        _observed(properties={}),
+        property_registry=_REGISTRY,
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == ()
+
+
+def test_undeclared_registered_key_produces_blocking_change():
+    # Given a registered key on the table that the declaration omits
     diff = diff_table(
         _desired(properties={}),
         _observed(properties={"delta.columnMapping.mode": "name"}),
+        property_registry=_REGISTRY,
     )
 
-    # Then no change is produced — declared-projection semantics
+    # Then the change records the fact for validation to fail; it plans nothing
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (
+        UndeclaredProperty(name="delta.columnMapping.mode", observed_value="name"),
+    )
+    assert diff.changes[0].actions() == ()
+
+
+def test_unregistered_platform_key_is_invisible():
+    # Given platform keys the registry does not know (deletion vectors is
+    # deliberately unregistered — Databricks manages it)
+    diff = diff_table(
+        _desired(properties={}),
+        _observed(
+            properties={
+                "delta.enableDeletionVectors": "true",
+                "delta.enableRowTracking": "true",
+                "delta.columnMapping.maxColumnId": "4",
+            }
+        ),
+        property_registry=_REGISTRY,
+    )
+
     assert isinstance(diff, TableDrift)
     assert diff.changes == ()
+
+
+def test_properties_diff_is_skipped_when_properties_unmanaged():
+    # Given a declaration that does not manage properties (metadata-only style)
+    # over a catalog carrying an undeclared registered key
+    managed = ALL_ASPECTS - frozenset({TableAspect.PROPERTIES})
+    diff = diff_table(
+        _desired(properties={}, managed_aspects=managed),
+        _observed(properties={"delta.columnMapping.mode": "name"}),
+        property_registry=_REGISTRY,
+    )
+
+    # Then no property change of any kind — no assertion was made
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == ()
+
+
+def test_property_set_rejects_equal_values():
+    with pytest.raises(ValueError, match="no difference"):
+        PropertySet(
+            name="delta.enableChangeDataFeed", desired_value="true", observed_value="true"
+        )
+
+
+def test_property_set_first_write_is_always_representable():
+    # Given observed_value=None — the guard is bypassed by type
+    change = PropertySet(
+        name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
+    )
+
+    assert change.observed_value is None
 
 
 # ---------- table tag changes (full-state)
@@ -313,6 +435,7 @@ def test_table_tag_drift_produces_set_and_unset_changes():
     diff = diff_table(
         _desired(tags={"env": "prod"}),
         _observed(tags={"stale": "yes"}),
+        property_registry=_REGISTRY,
     )
 
     # Then the declared tag is set and the undeclared tag is unset — full-state
@@ -327,7 +450,7 @@ def test_table_tag_drift_produces_set_and_unset_changes():
 
 
 def test_partitioning_drift_produces_change_with_both_sides():
-    diff = diff_table(_desired(partitioned_by=("id",)), _observed())
+    diff = diff_table(_desired(partitioned_by=("id",)), _observed(), property_registry=_REGISTRY)
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
@@ -343,6 +466,7 @@ def test_desired_only_primary_key_produces_added_change():
     diff = diff_table(
         _desired(columns=(Column("id", Integer(), nullable=False),), primary_key=pk),
         _observed(columns=(Column("id", Integer(), nullable=False),)),
+        property_registry=_REGISTRY,
     )
 
     assert isinstance(diff, TableDrift)
@@ -358,6 +482,7 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     diff = diff_table(
         _desired(columns=columns, primary_key=desired_pk),
         _observed(columns=columns, primary_key=observed_pk),
+        property_registry=_REGISTRY,
     )
 
     # Then identity is column-set equality — no change
@@ -370,7 +495,7 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
 
 def test_desired_only_foreign_key_produces_added_change():
     fk = _foreign_key()
-    diff = diff_table(_desired(foreign_keys=(fk,)), _observed())
+    diff = diff_table(_desired(foreign_keys=(fk,)), _observed(), property_registry=_REGISTRY)
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (ForeignKeyAdded(constraint=fk),)
@@ -381,6 +506,7 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
     diff = diff_table(
         _desired(foreign_keys=(_foreign_key("engine_name"),)),
         _observed(foreign_keys=(_foreign_key("external_name"),)),
+        property_registry=_REGISTRY,
     )
 
     # Then identity is the content signature — no change, sync stays idempotent
@@ -477,10 +603,20 @@ def test_table_comment_changed_produces_set_table_comment():
     assert change.actions() == (SetTableComment(comment="new"),)
 
 
-def test_property_set_produces_set_property():
-    change = PropertySet(name="delta.appendOnly", desired_value="true")
+def test_property_set_produces_set_property_carrying_observed_value():
+    change = PropertySet(
+        name="delta.enableChangeDataFeed", desired_value="true", observed_value="false"
+    )
 
-    assert change.actions() == (SetProperty(name="delta.appendOnly", value="true"),)
+    assert change.actions() == (
+        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false"),
+    )
+
+
+def test_property_unset_produces_unset_property():
+    change = PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days")
+
+    assert change.actions() == (UnsetProperty(name="delta.logRetentionDuration"),)
 
 
 def test_table_tag_set_produces_set_table_tag():

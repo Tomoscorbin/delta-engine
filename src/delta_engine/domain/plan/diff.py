@@ -30,9 +30,11 @@ Naming conventions:
 
 Semantics that differ by aspect:
 
-- Properties are declared-projection: only declared keys are compared, so an
-  observed-only property (e.g. one written by a previous full sync or by the
-  platform) is not drift and produces no change.
+- Properties are exact-declaration: a declared value is reconciled, a
+  declared ``None`` asserts absence, and a registered key observed without a
+  declaration is a blocking change. Unregistered keys (platform-written,
+  e.g. ``delta.enableRowTracking``) are invisible in both directions. The
+  properties diff runs only when the declaration manages ``PROPERTIES``.
 - Tags are full-state: an observed-only tag is drift and is unset.
 - Nullability drift is suppressed for a column whose type also drifted — the
   column must be recreated first, so a nullability change would be noise.
@@ -48,6 +50,7 @@ from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.property import PropertyRegistry
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
@@ -66,6 +69,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -215,20 +219,62 @@ class PropertySet:
     """
     A declared property absent from the catalog or carrying a different value.
 
-    Properties are declared-projection: only declared keys are compared, so
-    there is no PropertyUnset change — an observed-only property is not drift.
-    Like the tag set changes, this is an upsert: it carries only the desired
-    value, because the remedy is the same whether the key was absent or stale.
+    ``observed_value`` is None when the key is absent (first write) and the
+    stale catalog value otherwise. An upsert either way — the remedy is the
+    same — but both sides travel so validation can judge the transition and
+    reports can show was/now.
     """
 
     name: str
     desired_value: str
+    observed_value: str | None
+
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
+
+    def __post_init__(self) -> None:
+        if self.desired_value == self.observed_value:
+            raise ValueError(f"PropertySet carries no difference: {self.desired_value!r}")
+
+    def actions(self) -> tuple[Action, ...]:
+        """SetProperty with the desired value; observed rides along for rendering."""
+        return (
+            SetProperty(
+                name=self.name, value=self.desired_value, observed_value=self.observed_value
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PropertyUnset:
+    """A property the declaration asserts absent (declared None) but the catalog has."""
+
+    name: str
+    observed_value: str
 
     aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
 
     def actions(self) -> tuple[Action, ...]:
-        """SetProperty with the desired value."""
-        return (SetProperty(name=self.name, value=self.desired_value),)
+        """UnsetProperty for the asserted-absent key."""
+        return (UnsetProperty(name=self.name),)
+
+
+@dataclass(frozen=True, slots=True)
+class UndeclaredProperty:
+    """
+    A registered key present in the catalog but missing from the declaration.
+
+    The engine must not guess: it neither reconciles nor removes the key.
+    actions() returns nothing; see PropertyMustBeDeclared.
+    """
+
+    name: str
+    observed_value: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
+
+    def actions(self) -> tuple[Action, ...]:
+        """No actions — validation fails the sync instead."""
+        return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,6 +430,8 @@ type Change = (
     | ColumnTagUnset
     | TableCommentChanged
     | PropertySet
+    | PropertyUnset
+    | UndeclaredProperty
     | TableTagSet
     | TableTagUnset
     | PartitioningChanged
@@ -457,14 +505,27 @@ type TableDiff = TableMissing | TableDrift
 # ---------------------------------------------------------------------------
 
 
-def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
+def diff_table(
+    desired: DesiredTable,
+    observed: ObservedTable | None,
+    property_registry: PropertyRegistry,
+) -> TableDiff:
     """
     Compute the changes separating ``observed`` from ``desired``.
 
     Returns ``TableMissing`` when the table does not exist, else a
     ``TableDrift`` whose changes each record one atomic difference. An equal
-    pair yields an empty drift. The diff is scope-blind: every aspect is
-    compared regardless of ``managed_aspects``; scope is judged in validation.
+    pair yields an empty drift.
+
+    The diff is scope-blind — every aspect is compared regardless of
+    ``managed_aspects``, with scope judged in validation — except for
+    properties, which are compared only when the declaration manages
+    ``PROPERTIES``: under exact declaration an empty property mapping is an
+    assertion (any undeclared registered key is a blocking change), so an
+    unmanaged table must make no assertion at all.
+
+    ``property_registry`` names the manageable keys; it deliberately has no
+    default — an empty default would silently make every key invisible.
     """
     if observed is None:
         return TableMissing(desired=desired)
@@ -474,7 +535,11 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_column_comments(desired.columns, observed.columns),
         *_diff_column_tags(desired.columns, observed.columns),
         *_diff_table_comment(desired.comment, observed.comment),
-        *_diff_properties(desired.properties, observed.properties),
+        *(
+            _diff_properties(desired.properties, observed.properties, property_registry)
+            if TableAspect.PROPERTIES in desired.managed_aspects
+            else ()
+        ),
         *_diff_table_tags(desired.tags, observed.tags),
         *_diff_partitioning(desired.partitioned_by, observed.partitioned_by),
         *_diff_primary_key(desired.primary_key, observed.primary_key),
@@ -581,21 +646,41 @@ def _diff_table_comment(desired: str, observed: str) -> list[Change]:
 
 
 def _diff_properties(
-    desired: Mapping[str, str | None], observed: Mapping[str, str]
+    desired: Mapping[str, str | None],
+    observed: Mapping[str, str],
+    property_registry: PropertyRegistry,
 ) -> list[Change]:
     """
-    Property changes under declared-projection semantics: only desired keys are compared.
+    Property changes under exact-declaration semantics.
 
-    An observed-only property is not drift — the declaration does not own it.
-    A metadata-only table declares no properties, so this loop body never
-    executes for it and catalog properties written by a previous full sync
-    (e.g. delta.columnMapping.mode) produce no changes.
+    The declaration is the complete list of managed keys: a declared value
+    is reconciled, a declared None asserts absence (unset when present),
+    and a registered key observed without a declaration is a blocking
+    change — the engine must not guess. Unregistered keys are invisible in
+    both directions.
     """
-    return [
-        PropertySet(name=name, desired_value=value)
-        for name, value in desired.items()
-        if value is not None and (name not in observed or observed[name] != value)
-    ]
+    changes: list[Change] = []
+
+    for name, declared_value in desired.items():
+        observed_value = observed.get(name)
+        if declared_value is None:
+            if observed_value is not None:
+                changes.append(PropertyUnset(name=name, observed_value=observed_value))
+        elif observed_value != declared_value:
+            changes.append(
+                PropertySet(
+                    name=name, desired_value=declared_value, observed_value=observed_value
+                )
+            )
+
+    for name, observed_value in observed.items():
+        if name in desired:
+            continue
+        if name not in property_registry:
+            continue
+        changes.append(UndeclaredProperty(name=name, observed_value=observed_value))
+
+    return changes
 
 
 def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:

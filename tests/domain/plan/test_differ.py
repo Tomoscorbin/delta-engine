@@ -11,6 +11,8 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     ObservedTable,
+    PropertyDefinition,
+    PropertyRegistry,
     QualifiedName,
     String,
     Timestamp,
@@ -37,10 +39,15 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.diff import diff_table
 
+_REGISTRY: PropertyRegistry = {
+    "delta.enableChangeDataFeed": PropertyDefinition(key="delta.enableChangeDataFeed"),
+    "delta.logRetentionDuration": PropertyDefinition(key="delta.logRetentionDuration"),
+}
+
 
 def _compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """Local test helper: diff then produce the action plan."""
-    return diff_table(desired, observed).plan()
+    return diff_table(desired, observed, property_registry=_REGISTRY).plan()
 
 
 def _assert_set_fk_action_matches_constraint(
@@ -190,7 +197,7 @@ def test_creates_table_when_observed_is_missing():
     desired = _desired(
         columns=(Column("id", Integer()),),
         comment="core table",
-        properties={"owner": "cdm"},
+        properties={"delta.enableChangeDataFeed": "true"},
     )
 
     # When: diffing desired vs None
@@ -210,13 +217,13 @@ def test_no_actions_when_desired_equals_observed():
     desired = _desired(
         columns=columns,
         comment="core table",
-        properties={"owner": "cdm"},
+        properties={"delta.enableChangeDataFeed": "true"},
         partitioned_by=("event_date",),
     )
     observed = _observed(
         columns=columns,
         comment="core table",
-        properties={"owner": "cdm"},
+        properties={"delta.enableChangeDataFeed": "true"},
         partitioned_by=("event_date",),
     )
 
@@ -238,7 +245,7 @@ def test_combines_column_property_and_comment_diffs():
             Column("age", Integer()),  # new column to add
         ),
         comment="core table",  # updated comment
-        properties={"owner": "cdm", "delta.appendOnly": "false"},  # set/update
+        properties={"delta.enableChangeDataFeed": "false"},  # set/update
         partitioned_by=("event_date", "country"),  # partition spec differs
     )
     observed = _observed(
@@ -249,7 +256,7 @@ def test_combines_column_property_and_comment_diffs():
             Column("country", String()),
         ),
         comment="",  # will be set
-        properties={"owner": "cdm", "obsolete": "1"},  # extra prop (unset checked elsewhere)
+        properties={"obsolete": "1"},  # unregistered extra prop (invisible)
         partitioned_by=("event_date",),  # different partition spec
     )
 
@@ -261,8 +268,8 @@ def test_combines_column_property_and_comment_diffs():
 
     # Column add
     assert AddColumn(column=Column("age", Integer())) in plan.actions
-    # Property set/update
-    assert SetProperty(name="delta.appendOnly", value="false") in plan.actions
+    # Property set/update (first write: the observed catalog lacks the key)
+    assert SetProperty(name="delta.enableChangeDataFeed", value="false") in plan.actions
     # Comment update
     assert SetTableComment(comment="core table") in plan.actions
 
@@ -424,7 +431,7 @@ def test_no_partitioning_action_when_partition_spec_is_unchanged():
 
 def test_no_property_actions_when_mappings_are_identical():
     # Given: desired and observed have identical properties
-    props = {"delta.appendOnly": "true", "owner": "cdm"}
+    props = {"delta.enableChangeDataFeed": "true", "delta.logRetentionDuration": "interval 30 days"}
 
     # When computing the plan
     plan = _compute_plan(_desired(properties=props), _observed(properties=props))
@@ -435,33 +442,37 @@ def test_no_property_actions_when_mappings_are_identical():
 
 def test_sets_property_when_missing_in_observed():
     # Given: desired has a property missing from observed
-    desired = _desired(properties={"delta.appendOnly": "true"})
+    desired = _desired(properties={"delta.enableChangeDataFeed": "true"})
     observed = _observed(properties={})
 
     # When computing the plan
     plan = _compute_plan(desired, observed)
 
     # Then: a SetProperty is emitted with the desired value
-    assert plan.actions == (SetProperty(name="delta.appendOnly", value="true"),)
+    assert plan.actions == (SetProperty(name="delta.enableChangeDataFeed", value="true"),)
 
 
 def test_updates_property_when_value_differs():
     # Given: key matches but value differs
-    desired = _desired(properties={"delta.appendOnly": "false"})
-    observed = _observed(properties={"delta.appendOnly": "true"})
+    desired = _desired(properties={"delta.enableChangeDataFeed": "false"})
+    observed = _observed(properties={"delta.enableChangeDataFeed": "true"})
 
     # When computing the plan
     plan = _compute_plan(desired, observed)
 
     # Then: a single SetProperty updates the value
-    assert plan.actions == (SetProperty(name="delta.appendOnly", value="false"),)
+    assert plan.actions == (
+        SetProperty(name="delta.enableChangeDataFeed", value="false", observed_value="true"),
+    )
 
 
-def test_ignores_observed_only_properties():
-    # Given: observed contains a property the user never declared
-    #        (e.g. one Databricks set autonomously)
-    desired = _desired(properties={"owner": "cdm"})
-    observed = _observed(properties={"owner": "cdm", "delta.minReaderVersion": "2"})
+def test_ignores_observed_only_unregistered_properties():
+    # Given: observed contains a property the user never declared and the
+    #        registry does not know (e.g. one Databricks set autonomously)
+    desired = _desired(properties={"delta.enableChangeDataFeed": "true"})
+    observed = _observed(
+        properties={"delta.enableChangeDataFeed": "true", "delta.minReaderVersion": "2"}
+    )
 
     # When computing the plan
     plan = _compute_plan(desired, observed)
