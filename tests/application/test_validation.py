@@ -7,7 +7,6 @@ from delta_engine.application.validation import (
     PropertyMustBeDeclared,
     PropertyTransitionNotSupported,
     ValidationResult,
-    validate_column_drop_preconditions,
     validate_diff,
 )
 from delta_engine.domain.model import (
@@ -47,9 +46,13 @@ def _desired_table(managed_aspects: frozenset[TableAspect] = ALL_ASPECTS) -> Des
 
 
 def _drift(
-    *changes: Change, managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
+    *changes: Change,
+    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    desired: DesiredTable | None = None,
 ) -> TableDrift:
-    return TableDrift(changes=tuple(changes), managed_aspects=managed_aspects)
+    if desired is None:
+        desired = _desired_table(managed_aspects)
+    return TableDrift(desired=desired, changes=tuple(changes))
 
 
 def _tightening(column_name: str = "id") -> ColumnNullabilityChanged:
@@ -517,18 +520,20 @@ def test_allows_none_declaration_on_unrestricted_key():
     assert rule.evaluate(changes) == ()
 
 
-# ---- validate_column_drop_preconditions
+# ---- column-drop precondition (through validate_diff)
 
 
 def test_drop_without_column_mapping_fails_before_execution():
     # Given a plan that drops a column but the declaration lacks column mapping
-    desired = _desired_table()
-    changes = (ColumnRemoved(Column("stale", Integer())),)
+    diff = _drift(ColumnRemoved(Column("stale", Integer())))
 
-    failures = validate_column_drop_preconditions(desired, changes)
+    failures = validate_diff(diff).failures
 
-    assert len(failures) == 1
-    assert "delta.columnMapping.mode" in failures[0].message
+    assert any(
+        f.rule_name == "ColumnMappingRequiredForDrop"
+        and "delta.columnMapping.mode" in f.message
+        for f in failures
+    )
 
 
 def test_drop_with_declared_column_mapping_passes():
@@ -538,10 +543,10 @@ def test_drop_with_declared_column_mapping_passes():
         columns=(Column("id", Integer()),),
         properties={"delta.columnMapping.mode": "name"},
     )
-    changes = (ColumnRemoved(Column("stale", Integer())),)
+    diff = _drift(ColumnRemoved(Column("stale", Integer())), desired=desired)
 
-    assert validate_column_drop_preconditions(desired, changes) == ()
+    assert validate_diff(diff).failed is False
 
 
 def test_no_drop_means_no_precondition_failure():
-    assert validate_column_drop_preconditions(_desired_table(), ()) == ()
+    assert validate_diff(_drift()).failed is False

@@ -254,8 +254,9 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     dict.fromkeys deduplicates the aspects while preserving first-seen order,
     so failure order follows change order deterministically.
     """
+    managed_aspects = drift.desired.managed_aspects
     unmanaged_aspects = dict.fromkeys(
-        change.aspect for change in drift.changes if change.aspect not in drift.managed_aspects
+        change.aspect for change in drift.changes if change.aspect not in managed_aspects
     )
     return tuple(
         ValidationFailure(
@@ -270,8 +271,8 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     )
 
 
-def validate_column_drop_preconditions(
-    desired: DesiredTable, changes: tuple[Change, ...]
+def _validate_column_drop_preconditions(
+    desired: DesiredTable, managed_changes: tuple[Change, ...]
 ) -> tuple[ValidationFailure, ...]:
     """
     Fail a plan that drops a column without column mapping declared.
@@ -284,8 +285,12 @@ def validate_column_drop_preconditions(
     catalog has it, so checking the declaration alone is sufficient.
     Declaring the mode in the same sync as the drop is safe: SET_PROPERTY
     phases before DROP_COLUMN.
+
+    Scans managed changes only: an unmanaged ColumnRemoved (metadata-only
+    table with structural drift) is a scope violation, not a requested
+    drop — UnmanagedAspectDrift reports it and this check stays silent.
     """
-    drops_a_column = any(isinstance(change, ColumnRemoved) for change in changes)
+    drops_a_column = any(isinstance(change, ColumnRemoved) for change in managed_changes)
     if not drops_a_column:
         return ()
     if desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
@@ -337,17 +342,15 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
                 )
             return ValidationResult()
         case TableDrift() as drift:
+            managed_aspects = drift.desired.managed_aspects
             managed_changes = tuple(
-                change for change in drift.changes if change.aspect in drift.managed_aspects
+                change for change in drift.changes if change.aspect in managed_aspects
             )
             return ValidationResult(
                 failures=(
                     *_validate_managed_scope(drift),
-                    *(
-                        failure
-                        for rule in rules
-                        for failure in rule.evaluate(managed_changes)
-                    ),
+                    *(failure for rule in rules for failure in rule.evaluate(managed_changes)),
+                    *_validate_column_drop_preconditions(drift.desired, managed_changes),
                 )
             )
         case _ as unreachable:

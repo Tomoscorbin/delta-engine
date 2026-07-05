@@ -4,9 +4,9 @@ Changes describing how an observed table differs from its desired declaration.
 ``diff_table`` is the single entry point: given the desired definition and the
 observed one (or ``None`` when the table is missing), it returns a
 ``TableDiff`` — a closed sum of ``TableMissing`` and ``TableDrift``.
-``TableDrift`` carries a flat tuple of changes plus the ``managed_aspects``
-of the declaration that produced it, so the diff is self-contained and
-``validate_diff`` needs no other input.
+``TableDrift`` carries a flat tuple of changes plus the desired table that
+produced it — symmetric with ``TableMissing`` — so the diff is
+self-contained and ``validate_diff`` needs no other input.
 
 Each change is a frozen dataclass recording one atomic difference. Every
 change carries two things:
@@ -483,14 +483,14 @@ class TableDrift:
     """
     Flat sequence of changes separating an observed table from its declaration.
 
-    ``managed_aspects`` is copied from the declaration at diff time so the
-    diff is self-contained; there is deliberately no default — a drift always
-    belongs to a declaration with a known scope. The natural zero is an empty
-    changes tuple (no drift).
+    Carries the desired table itself — symmetric with ``TableMissing`` — so
+    the diff is self-contained: validation reads the declaration's scope and
+    properties from the drift with no second argument. The natural zero is
+    an empty changes tuple (no drift).
     """
 
+    desired: DesiredTable
     changes: tuple[Change, ...]
-    managed_aspects: frozenset[TableAspect]
 
     def plan(self) -> ActionPlan:
         """Build the action plan by collecting actions from every change."""
@@ -515,10 +515,8 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
 
     The diff is scope-blind — every aspect is compared regardless of
     ``managed_aspects``, with scope judged in validation — except for
-    properties, which are compared only when the declaration manages
-    ``PROPERTIES``: under exact declaration an empty property mapping is an
-    assertion (any undeclared key is a blocking change), so an unmanaged
-    table must make no assertion at all.
+    properties, whose helper gates itself on the declaration's scope (see
+    ``_diff_properties`` for why that aspect alone is assertion-like).
     """
     if observed is None:
         return TableMissing(desired=desired)
@@ -528,17 +526,13 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_column_comments(desired.columns, observed.columns),
         *_diff_column_tags(desired.columns, observed.columns),
         *_diff_table_comment(desired.comment, observed.comment),
-        *(
-            _diff_properties(desired.properties, observed.properties)
-            if TableAspect.PROPERTIES in desired.managed_aspects
-            else ()
-        ),
+        *_diff_properties(desired.properties, observed.properties, desired.managed_aspects),
         *_diff_table_tags(desired.tags, observed.tags),
         *_diff_partitioning(desired.partitioned_by, observed.partitioned_by),
         *_diff_primary_key(desired.primary_key, observed.primary_key),
         *_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
     )
-    return TableDrift(changes=changes, managed_aspects=desired.managed_aspects)
+    return TableDrift(desired=desired, changes=changes)
 
 
 def _diff_column_structure(
@@ -639,7 +633,9 @@ def _diff_table_comment(desired: str, observed: str) -> list[Change]:
 
 
 def _diff_properties(
-    desired: Mapping[str, str | None], observed: Mapping[str, str]
+    desired: Mapping[str, str | None],
+    observed: Mapping[str, str],
+    managed_aspects: frozenset[TableAspect],
 ) -> list[Change]:
     """
     Property changes under exact-declaration semantics.
@@ -650,7 +646,16 @@ def _diff_properties(
     engine must not guess. The observed mapping contains managed keys only:
     the reader adapter filters platform-written keys out of the catalog
     state before the domain sees them.
+
+    Unlike every other aspect, this helper gates itself on scope: an empty
+    property mapping is an assertion (every observed key becomes a blocking
+    change), not a neutral absence of facts — so a declaration that does
+    not manage ``PROPERTIES`` must make no assertion at all, and the diff
+    returns nothing rather than facts for validation to judge.
     """
+    if TableAspect.PROPERTIES not in managed_aspects:
+        return []
+
     changes: list[Change] = []
 
     for name, declared_value in desired.items():

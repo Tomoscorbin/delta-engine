@@ -109,13 +109,17 @@ def test_equal_tables_diff_to_empty_drift():
     assert diff.changes == ()
 
 
-def test_drift_carries_the_declarations_managed_aspects():
-    # Given a desired table (fully managed by default)
-    diff = diff_table(_desired(), _observed())
+def test_drift_carries_the_desired_table():
+    # Given a desired table
+    desired = _desired()
 
-    # Then the drift is self-contained: it knows its declaration's scope
+    # When diffing
+    diff = diff_table(desired, _observed())
+
+    # Then the drift is self-contained: it carries the declaration, so
+    # validation reads scope and properties from it with no second argument
     assert isinstance(diff, TableDrift)
-    assert diff.managed_aspects == ALL_ASPECTS
+    assert diff.desired is desired
 
 
 # ---------- column structure changes
