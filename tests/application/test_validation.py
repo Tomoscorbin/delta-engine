@@ -76,7 +76,7 @@ def test_rejects_add_of_non_nullable_column():
     changes = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 1
@@ -93,7 +93,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
     )
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 3
@@ -108,7 +108,7 @@ def test_allows_add_of_nullable_column():
     rule = NonNullableColumnAdd()
     changes = (ColumnAdded(Column("age", Integer())),)
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 def test_non_nullable_column_add_ignores_creation():
@@ -129,7 +129,7 @@ def test_non_nullable_column_add_passes_when_no_changes():
     # Given an empty change tuple
     rule = NonNullableColumnAdd()
 
-    assert rule.evaluate(()) == ()
+    assert rule.evaluate(_drift()) == ()
 
 
 # ---- NullabilityTighteningOnExistingColumn
@@ -141,7 +141,7 @@ def test_rejects_tightening_an_existing_column_to_not_null():
     changes = (_tightening("order_id"),)
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 1
@@ -155,7 +155,7 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
     changes = (_tightening("a"), _tightening("b"))
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 2
@@ -171,7 +171,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
         column_name="id", desired_nullable=True, observed_nullable=False
     )
 
-    assert rule.evaluate((loosening,)) == ()
+    assert rule.evaluate(_drift(loosening)) == ()
 
 
 # ---- unsupported drift → ValidationFailure
@@ -292,6 +292,7 @@ def test_default_rules_cover_all_safety_policies():
         "PartitioningChangeNotSupported",
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
+        "ColumnMappingRequiredForDrop",
     }
 
 
@@ -423,7 +424,7 @@ def test_blocks_column_mapping_downgrade():
         PropertySet(name="delta.columnMapping.mode", desired_value="none", observed_value="name"),
     )
 
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     assert len(failures) == 1
     assert failures[0].rule_name == "PropertyTransitionNotSupported"
@@ -437,7 +438,7 @@ def test_allows_column_mapping_upgrade():
         PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value="none"),
     )
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 def test_allows_first_write_of_restricted_key():
@@ -447,7 +448,7 @@ def test_allows_first_write_of_restricted_key():
         PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value=None),
     )
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 def test_ignores_value_changes_on_unrestricted_keys():
@@ -459,7 +460,7 @@ def test_ignores_value_changes_on_unrestricted_keys():
         ),
     )
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 # ---- PropertyMustBeDeclared
@@ -470,7 +471,7 @@ def test_fails_undeclared_registered_key_offering_none():
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
     changes = (UndeclaredProperty(name="delta.enableChangeDataFeed", observed_value="true"),)
 
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     assert len(failures) == 1
     assert failures[0].rule_name == "PropertyMustBeDeclared"
@@ -483,7 +484,7 @@ def test_fails_undeclared_unset_forbidden_key_without_offering_none():
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
     changes = (UndeclaredProperty(name="delta.columnMapping.mode", observed_value="name"),)
 
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     assert len(failures) == 1
     assert "cannot be unset" in failures[0].message
@@ -494,7 +495,7 @@ def test_passes_when_no_undeclared_key():
     # Given no changes at all
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
 
-    assert rule.evaluate(()) == ()
+    assert rule.evaluate(_drift()) == ()
 
 
 def test_blocks_none_declaration_on_removal_forbidden_key():
@@ -503,7 +504,7 @@ def test_blocks_none_declaration_on_removal_forbidden_key():
     rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
     changes = (PropertyUnset(name="delta.columnMapping.mode", observed_value="name"),)
 
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     assert len(failures) == 1
     assert failures[0].rule_name == "PropertyTransitionNotSupported"
@@ -517,7 +518,7 @@ def test_allows_none_declaration_on_unrestricted_key():
         PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
     )
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 # ---- column-drop precondition (through validate_diff)

@@ -11,10 +11,8 @@ from delta_engine.application.properties import (
     DELTA_PROPERTY_REGISTRY,
     PropertyRegistry,
 )
-from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.diff import (
-    Change,
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
@@ -42,19 +40,22 @@ class ValidationResult:
 
 
 class Rule(Protocol):
-    """Interface for drift validation rules."""
+    """
+    Interface for drift validation rules.
+
+    A rule judges whether a managed change is safe, given the declaration it
+    belongs to. It receives the whole ``TableDrift`` — the self-contained
+    diff — and reads what it needs: ``drift.managed_changes`` for the changes
+    to judge (unmanaged drift is a scope violation the validator reports
+    separately, never rule input), and ``drift.desired`` for declaration
+    context such as declared properties. Never called for a ``TableMissing``
+    diff.
+    """
 
     name: ClassVar[str]
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
-        """
-        Evaluate the rule against a drift's managed changes.
-
-        Receives only changes whose aspect the declaration manages — unmanaged
-        drift is rejected by ``validate_diff`` itself before rules run, so a
-        rule never judges a change the user did not ask for. Never called for
-        a ``TableMissing`` diff.
-        """
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Return one failure per unsafe managed change, or an empty tuple."""
         ...
 
 
@@ -63,7 +64,7 @@ class NonNullableColumnAdd:
 
     name: ClassVar[str] = "NonNullableColumnAdd"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every NOT NULL column addition to an existing table."""
         return tuple(
             ValidationFailure(
@@ -72,7 +73,7 @@ class NonNullableColumnAdd:
                     f"Operation not allowed: cannot add non-nullable column '{change.column.name}'"
                 ),
             )
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, ColumnAdded) and not change.column.nullable
         )
 
@@ -82,7 +83,7 @@ class NullabilityTighteningOnExistingColumn:
 
     name: ClassVar[str] = "NullabilityTighteningOnExistingColumn"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every existing column tightened to NOT NULL."""
         return tuple(
             ValidationFailure(
@@ -93,7 +94,7 @@ class NullabilityTighteningOnExistingColumn:
                     " backfill any NULLs in a separate step, then set NOT NULL."
                 ),
             )
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, ColumnNullabilityChanged) and not change.desired_nullable
         )
 
@@ -103,7 +104,7 @@ class ColumnDataTypeChangeNotSupported:
 
     name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every in-place column type change."""
         return tuple(
             ValidationFailure(
@@ -116,7 +117,7 @@ class ColumnDataTypeChangeNotSupported:
                     " recreate the table to change a column's type."
                 ),
             )
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, ColumnDataTypeChanged)
         )
 
@@ -126,7 +127,7 @@ class PartitioningChangeNotSupported:
 
     name: ClassVar[str] = "PartitioningChangeNotSupported"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every in-place partitioning change."""
         return tuple(
             ValidationFailure(
@@ -138,7 +139,7 @@ class PartitioningChangeNotSupported:
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, PartitioningChanged)
         )
 
@@ -158,10 +159,10 @@ class PropertyTransitionNotSupported:
 
     name: ClassVar[str] = "PropertyTransitionNotSupported"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every restricted-key transition that is not permitted."""
         failures: list[ValidationFailure] = []
-        for change in changes:
+        for change in drift.managed_changes:
             match change:
                 case PropertySet(
                     name=name, desired_value=desired_value, observed_value=str() as observed_value
@@ -208,11 +209,11 @@ class PropertyMustBeDeclared:
 
     name: ClassVar[str] = "PropertyMustBeDeclared"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every registered key set on the table but absent from the declaration."""
         return tuple(
             ValidationFailure(rule_name=self.name, message=self._message(change))
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, UndeclaredProperty)
         )
 
@@ -237,6 +238,43 @@ class PropertyMustBeDeclared:
         return (observed_value, None) in definition.permitted_transitions
 
 
+class ColumnMappingRequiredForDrop:
+    """
+    Disallow dropping a column without column mapping declared.
+
+    Delta only permits DROP COLUMN when ``delta.columnMapping.mode`` is
+    ``name``. This judges a managed change (a ``ColumnRemoved``) against the
+    declaration — the safe case is when declaration and catalog already agree
+    on the mode, in which case no property change exists to inspect, so the
+    rule reads the declaration directly. Exact declaration guarantees a
+    validated declaration states the mode whenever the catalog has it, so the
+    declaration alone is sufficient; declaring the mode in the same sync as
+    the drop is safe (SET_PROPERTY phases before DROP_COLUMN).
+    """
+
+    name: ClassVar[str] = "ColumnMappingRequiredForDrop"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag a column drop when the declaration lacks column mapping."""
+        drops_a_column = any(
+            isinstance(change, ColumnRemoved) for change in drift.managed_changes
+        )
+        if not drops_a_column:
+            return ()
+        if drift.desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
+            return ()
+        return (
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: dropping a column requires"
+                    f" {COLUMN_MAPPING_MODE_KEY}='name'. Declare"
+                    f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}} on this table."
+                ),
+            ),
+        )
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
@@ -244,6 +282,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PartitioningChangeNotSupported(),
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
+    ColumnMappingRequiredForDrop(),
 )
 
 
@@ -251,8 +290,10 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     """
     One failure per unmanaged aspect that has drifted.
 
-    dict.fromkeys deduplicates the aspects while preserving first-seen order,
-    so failure order follows change order deterministically.
+    A scope invariant, not a rule: it defines what a declaration is allowed
+    to govern and runs unconditionally, so ``rules=()`` cannot let unmanaged
+    drift through. dict.fromkeys deduplicates the aspects while preserving
+    first-seen order, so failure order follows change order deterministically.
     """
     managed_aspects = drift.desired.managed_aspects
     unmanaged_aspects = dict.fromkeys(
@@ -271,42 +312,6 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     )
 
 
-def _validate_column_drop_preconditions(
-    desired: DesiredTable, managed_changes: tuple[Change, ...]
-) -> tuple[ValidationFailure, ...]:
-    """
-    Fail a plan that drops a column without column mapping declared.
-
-    Delta only permits DROP COLUMN when ``delta.columnMapping.mode`` is
-    ``name``. This is a precondition on state, not drift policy: when the
-    declaration and catalog already agree on the mode, no property change
-    exists in the diff, so no rule could judge it. Exact declaration
-    guarantees that a validated declaration states the mode whenever the
-    catalog has it, so checking the declaration alone is sufficient.
-    Declaring the mode in the same sync as the drop is safe: SET_PROPERTY
-    phases before DROP_COLUMN.
-
-    Scans managed changes only: an unmanaged ColumnRemoved (metadata-only
-    table with structural drift) is a scope violation, not a requested
-    drop — UnmanagedAspectDrift reports it and this check stays silent.
-    """
-    drops_a_column = any(isinstance(change, ColumnRemoved) for change in managed_changes)
-    if not drops_a_column:
-        return ()
-    if desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
-        return ()
-    return (
-        ValidationFailure(
-            rule_name="ColumnMappingRequiredForDrop",
-            message=(
-                "Operation not allowed: dropping a column requires"
-                f" {COLUMN_MAPPING_MODE_KEY}='name'. Declare"
-                f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}} on this table."
-            ),
-        ),
-    )
-
-
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
     """
     Evaluate a table diff and return the verdict.
@@ -320,9 +325,9 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
       per drifted aspect.
 
     Rules are safety policy over the drift the declaration *does* manage:
-    they receive only changes in managed aspects, so unmanaged drift produces
-    exactly one scope failure rather than also tripping safety rules for
-    changes the user never requested.
+    each reads ``drift.managed_changes``, so unmanaged drift produces exactly
+    one scope failure rather than also tripping safety rules for changes the
+    user never requested.
     """
     match diff:
         case TableMissing() as missing:
@@ -342,15 +347,10 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
                 )
             return ValidationResult()
         case TableDrift() as drift:
-            managed_aspects = drift.desired.managed_aspects
-            managed_changes = tuple(
-                change for change in drift.changes if change.aspect in managed_aspects
-            )
             return ValidationResult(
                 failures=(
                     *_validate_managed_scope(drift),
-                    *(failure for rule in rules for failure in rule.evaluate(managed_changes)),
-                    *_validate_column_drop_preconditions(drift.desired, managed_changes),
+                    *(failure for rule in rules for failure in rule.evaluate(drift)),
                 )
             )
         case _ as unreachable:

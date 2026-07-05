@@ -492,6 +492,19 @@ class TableDrift:
     desired: DesiredTable
     changes: tuple[Change, ...]
 
+    @property
+    def managed_changes(self) -> tuple[Change, ...]:
+        """
+        Changes whose aspect the declaration manages.
+
+        Safety rules judge these — a change in an unmanaged aspect is a scope
+        violation reported once (see the validator's scope check), not input
+        for the rules, so filtering here keeps unmanaged drift from also
+        tripping a safety rule.
+        """
+        managed = self.desired.managed_aspects
+        return tuple(change for change in self.changes if change.aspect in managed)
+
     def plan(self) -> ActionPlan:
         """Build the action plan by collecting actions from every change."""
         return ActionPlan(tuple(action for change in self.changes for action in change.actions()))

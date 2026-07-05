@@ -252,11 +252,11 @@ Two aspects deliberately diff under different semantics. Properties are
 exact-declaration: the declaration is the complete list of managed keys — a
 declared value is reconciled, a declared ``None`` asserts absence (unset
 when present), a managed key observed without a declaration is a blocking
-change, and unmanaged keys (platform-written) are invisible in both
-directions. The properties diff runs only when the declaration manages
-``PROPERTIES`` and receives the manageable-key registry from the
-application layer. Tags are full-state (an observed-only tag is drift and
-is unset).
+change, and unmanaged keys (platform-written) are invisible. The reader
+adapter filters unmanaged keys out of the observed state before the domain
+sees them, and the properties diff runs only when the declaration manages
+``PROPERTIES``. Tags are full-state (an observed-only tag is drift and is
+unset).
 
 ## Managed aspects
 
@@ -264,15 +264,15 @@ Every `DesiredTable` carries a `managed_aspects` field: a `frozenset[TableAspect
 naming the aspects the engine reconciles for that table. The differ
 (`diff_table`) is scope-blind for every aspect except properties — the
 properties diff runs only when the declaration manages `PROPERTIES` (see
-Diff-first planning) — and copies
-`managed_aspects` onto the `TableDrift` it produces, so the diff is
-self-contained and `validate_diff` takes only the diff. Scope awareness lives
-in validation, as an unconditional invariant rather than an optional rule:
+Diff-first planning). The `TableDrift` it produces carries the `desired`
+table itself (symmetric with `TableMissing`), so the diff is self-contained
+and `validate_diff` takes only the diff. Scope awareness lives in
+validation, as an unconditional invariant rather than an optional rule:
 `validate_diff` fails the sync once per unmanaged aspect that has drifted
-(`UnmanagedAspectDrift`), and only changes in managed aspects are passed to the
-safety rules — so unmanaged drift produces exactly one scope failure rather
-than also tripping safety rules for changes the user never requested. If
-validation passes, every change in the drift belongs to a managed aspect, so
+(`UnmanagedAspectDrift`), and rules read `drift.managed_changes` — so
+unmanaged drift produces exactly one scope failure rather than also tripping
+safety rules for changes the user never requested. If validation passes,
+every change in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.
 

@@ -1,12 +1,18 @@
 """
 The Delta table properties this engine manages, and their restrictions.
 
+Reference: https://docs.delta.io/latest/table-properties.html
+
 Properties share their namespace with the platform: Databricks writes keys
 like ``delta.minReaderVersion`` and ``delta.enableRowTracking`` into table
 metadata autonomously. The engine manages properties by exact declaration
 over the registered keys below; everything else is invisible — the reader
 adapter filters unregistered keys out of the observed state before the
 domain ever sees them.
+
+``Property`` is the single source of the managed key names: the catalogue
+below references its members, and ``api.properties`` re-exports it as the
+user-facing declaration vocabulary. There is no second list to keep in sync.
 
 Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
 (workspaces auto-enable it on new tables), so the engine leaves the key
@@ -23,8 +29,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
+
+
+class Property(StrEnum):
+    """The Delta table properties a user may declare on a table."""
+
+    COLUMN_MAPPING_MODE = "delta.columnMapping.mode"
+    CHANGE_DATA_FEED = "delta.enableChangeDataFeed"
+    DELETED_FILE_RETENTION_DURATION = "delta.deletedFileRetentionDuration"
+    LOG_RETENTION_DURATION = "delta.logRetentionDuration"
+    DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
+
+
+COLUMN_MAPPING_MODE_KEY: Final[str] = Property.COLUMN_MAPPING_MODE.value
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,15 +65,13 @@ class PropertyDefinition:
 
 type PropertyRegistry = Mapping[str, PropertyDefinition]
 
-COLUMN_MAPPING_MODE_KEY: Final[str] = "delta.columnMapping.mode"
-
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
-    PropertyDefinition(key="delta.enableChangeDataFeed"),
-    PropertyDefinition(key="delta.deletedFileRetentionDuration"),
-    PropertyDefinition(key="delta.logRetentionDuration"),
-    PropertyDefinition(key="delta.dataSkippingNumIndexedCols"),
+    PropertyDefinition(key=Property.CHANGE_DATA_FEED),
+    PropertyDefinition(key=Property.DELETED_FILE_RETENTION_DURATION),
+    PropertyDefinition(key=Property.LOG_RETENTION_DURATION),
+    PropertyDefinition(key=Property.DATA_SKIPPING_NUM_INDEXED_COLS),
     PropertyDefinition(
-        key=COLUMN_MAPPING_MODE_KEY,
+        key=Property.COLUMN_MAPPING_MODE,
         # The protocol upgrade (minReader 2 / minWriter 5, physical column
         # names) is permanent: only none -> name is a legal change. The
         # absence of any (value, None) pair blocks removal by the same
