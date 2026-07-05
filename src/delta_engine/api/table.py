@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
-from typing import ClassVar, Final
+from typing import Final
 
-from delta_engine.api.properties import MANAGED_PROPERTY_KEYS, Property
+from delta_engine.api.properties import MANAGED_PROPERTY_KEYS
 from delta_engine.domain.model import ALL_ASPECTS, Column, DesiredTable, QualifiedName, TableAspect
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -99,17 +98,10 @@ class DeltaTable:
     Defines a Delta table schema.
 
     Note on dropping columns: Delta only permits ``ALTER TABLE ... DROP COLUMN``
-    when ``delta.columnMapping.mode`` is ``name``, which is the default applied
-    here. If you override that property to ``none``, a sync that removes a column
-    will fail at execution time. Keep column mapping enabled on tables whose
-    columns may be dropped.
+    when ``delta.columnMapping.mode`` is ``name``. Declare it in ``properties``
+    on any table whose columns may be dropped; a sync that drops a column
+    without it fails at validation with a message naming the property.
     """
-
-    default_properties: ClassVar[Mapping[str, str]] = MappingProxyType(
-        {
-            Property.COLUMN_MAPPING_MODE.value: "name",
-        }
-    )
 
     def __init__(
         self,
@@ -118,7 +110,7 @@ class DeltaTable:
         name: str,
         columns: Iterable[Column],
         comment: str = "",
-        properties: dict[str, str] | None = None,
+        properties: Mapping[str, str | None] | None = None,
         tags: dict[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
@@ -145,17 +137,21 @@ class DeltaTable:
         """
         user_properties = dict(properties or {})
 
-        # Fast-fail on property keys this engine does not manage (e.g. typos)
+        if metadata_only and user_properties:
+            raise ValueError(
+                "metadata-only tables do not manage properties;"
+                " remove the properties argument or set metadata_only=False"
+            )
+
+        # Fast-fail on property keys this engine does not manage (e.g. typos).
+        # None-valued assertions are validated too: asserting absence of an
+        # unmanaged key is as meaningless as declaring it.
         if user_properties:
             unmanaged = [k for k in user_properties if k not in MANAGED_PROPERTY_KEYS]
             if unmanaged:
                 raise ValueError(
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
-
-        effective_properties = (
-            {} if metadata_only else {**self.default_properties, **user_properties}
-        )
 
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
@@ -179,18 +175,13 @@ class DeltaTable:
             qualified_name=qualified_name,
             columns=columns,
             comment=comment,
-            properties=effective_properties,
+            properties=user_properties,
             tags=dict(tags or {}),
             partitioned_by=tuple(partitioned_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
             managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
         )
-
-    @property
-    def effective_properties(self) -> Mapping[str, str | None]:
-        """Defaults overlaid by user properties (user wins)."""
-        return self._desired_table.properties
 
     @property
     def primary_key(self) -> tuple[str, ...]:

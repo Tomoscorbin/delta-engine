@@ -53,5 +53,10 @@ def test_property_enum_lists_the_keys_deltatable_accepts():
 
     assert {member.value for member in api.Property} == set(MANAGED_PROPERTY_KEYS)
 
+    # And the allowlist is sourced from the application property catalogue
+    from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+
+    assert MANAGED_PROPERTY_KEYS == frozenset(DELTA_PROPERTY_REGISTRY)
+
     # And Property is a str enum, so its members can be used directly as dict keys
     assert api.Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"

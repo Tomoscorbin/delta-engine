@@ -75,11 +75,11 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     """
     Build the present-state read of a table that is already fully in sync with _spec.
 
-    Includes the default Delta property that _spec produces (column mapping) so
-    that diffing against _spec yields an empty plan. Also carries an
-    observed-only ``delta.enableDeletionVectors`` (as the Databricks runtime
-    enables autonomously) to confirm the engine leaves undeclared properties
-    untouched rather than emitting a spurious action.
+    _spec declares no properties, so an in-sync table carries none of the
+    engine's registered keys. It does carry an observed-only unregistered
+    ``delta.enableDeletionVectors`` (as the Databricks runtime enables
+    autonomously) to confirm the engine ignores unregistered platform keys
+    rather than emitting a spurious action or failing loud.
     """
     catalog, schema, name = fqn.split(".")
     return TablePresent(
@@ -89,10 +89,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String(), nullable=False),),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{name}_pk"),
-            properties={
-                "delta.columnMapping.mode": "name",
-                "delta.enableDeletionVectors": "true",
-            },
+            properties={"delta.enableDeletionVectors": "true"},
         )
     )
 
@@ -919,3 +916,51 @@ def test_metadata_only_sync_fails_when_table_is_missing():
     table_report = exc_info.value.report.table_reports[0]
     assert table_report.status is TableRunStatus.VALIDATION_FAILED
     assert any("does not exist" in f.message for f in table_report.failures)
+
+
+def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
+    # Given a live table with an extra column, and a declaration without columnMapping
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _FakeReader({
+        fqn: TablePresent(
+            table=ObservedTable(
+                qualified_name=QualifiedName(catalog, schema, name),
+                columns=(Column("id", String()), Column("stale", String())),
+            )
+        )
+    })
+    engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
+    spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
+
+    # When syncing (the plan would drop `stale`)
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(spec)
+
+    # Then it fails at validation, naming the property to declare
+    table_report = excinfo.value.report.table_reports[0]
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
+
+
+def test_sync_fails_loud_on_undeclared_registered_property():
+    # Given a live table carrying columnMapping.mode that the spec omits
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _FakeReader({
+        fqn: TablePresent(
+            table=ObservedTable(
+                qualified_name=QualifiedName(catalog, schema, name),
+                columns=(Column("id", String()),),
+                properties={"delta.columnMapping.mode": "name"},
+            )
+        )
+    })
+    engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
+    spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
+
+    # When / Then the sync stops at validation naming the key
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(spec)
+    table_report = excinfo.value.report.table_reports[0]
+    assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
