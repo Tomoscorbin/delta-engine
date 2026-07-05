@@ -29,7 +29,8 @@ jobs:
       - name: Import public package without dev dependencies
         run: |
           uv run --no-dev python - <<'PY'
-          from delta_engine import Column, DeltaTable, Engine, Integer, String
+          from delta_engine import Engine
+          from delta_engine.schema import Column, DeltaTable, Integer, String
 
           table = DeltaTable(
               catalog="dev",
