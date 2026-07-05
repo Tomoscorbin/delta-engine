@@ -163,6 +163,12 @@ class DatabricksReader:
         return ``ReadFailed`` — the honest outcome for "could not determine
         state" — rather than a ``TablePresent`` with no properties, which would
         make the differ re-apply every managed property on every sync.
+
+        DESCRIBE DETAIL is load-bearing here: its ``properties`` column is
+        ``Metadata.configuration`` verbatim — Delta strips protocol keys
+        (``delta.minReaderVersion``, ``delta.feature.*``) from it before
+        every commit. Never switch to ``SHOW TBLPROPERTIES``, which
+        synthesizes those protocol rows into its output at read time.
         """
         # The name is interpolated into SQL text here, so it must be backtick-quoted
         # to stay an identifier (and escape any embedded backtick). This differs

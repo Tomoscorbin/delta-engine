@@ -90,6 +90,7 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypat
                 Column("age", Integer(), nullable=True),  # new column, nullable (valid)
             ),
             comment="unchanged",
+            properties={"delta.columnMapping.mode": "name"},
         )
     )
 
@@ -144,6 +145,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
                     Column("name", String()),
                     Column("age", Integer(), nullable=False),  # non-nullable add -> invalid
                 ),
+                properties={"delta.columnMapping.mode": "name"},
                 comment="unchanged",
             )
         )
@@ -206,6 +208,7 @@ def test_engine_loosen_nullability_sets_column_nullable(
             fq.split(".")[-1],
             columns=(Column("id", Integer(), nullable=True), Column("name", String())),
             comment="unchanged",
+            properties={"delta.columnMapping.mode": "name"},
         )
     )
 
@@ -272,6 +275,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
                     Column("name", String()),
                     Column("age", Integer(), nullable=True),
                 ),
+                properties={"delta.columnMapping.mode": "name"},
             ),
             DeltaTable(
                 TEST_CATALOG,
@@ -282,6 +286,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
                     Column("name", String()),
                     Column("age", Integer(), nullable=False),
                 ),
+                properties={"delta.columnMapping.mode": "name"},
             ),  # invalid add
         )
     assert bad in str(excinfo.value)
@@ -352,3 +357,135 @@ def test_engine_metadata_only_fails_when_column_type_has_drifted(
     report = exc_info.value.report.table_reports[0]
     assert report.status is TableRunStatus.VALIDATION_FAILED
     assert {f.name for f in spark.table(fq).schema.fields} == {"id"}
+
+
+def test_engine_sets_declared_property_on_existing_table(spark, monkeypatch, temp_schema):
+    # Given an existing table without change data feed
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"prop_set_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id INT NOT NULL) USING DELTA")
+
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    # When syncing a declaration that states the property
+    engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Integer(), nullable=False),),
+            properties={"delta.enableChangeDataFeed": "true"},
+        )
+    )
+
+    # Then the property is set in the catalog
+    detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert detail["properties"].get("delta.enableChangeDataFeed") == "true"
+
+
+def test_engine_unsets_property_declared_absent(spark, monkeypatch, temp_schema):
+    # Given a table carrying a property the declaration asserts absent
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"prop_unset_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(
+        f"CREATE TABLE {fq} (id INT NOT NULL) USING DELTA"
+        " TBLPROPERTIES ('delta.enableChangeDataFeed'='true')"
+    )
+
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    # When syncing a declaration stating the key must be absent
+    engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Integer(), nullable=False),),
+            properties={"delta.enableChangeDataFeed": None},
+        )
+    )
+
+    # Then the key is removed from the catalog
+    detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert "delta.enableChangeDataFeed" not in detail["properties"]
+
+
+def test_engine_fails_loud_on_undeclared_column_mapping(spark, monkeypatch, temp_schema):
+    # Given a table with column mapping enabled but a declaration that omits it
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"prop_loud_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(
+        f"CREATE TABLE {fq} (id INT NOT NULL) USING DELTA"
+        " TBLPROPERTIES ('delta.columnMapping.mode'='name')"
+    )
+
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    # When / Then the sync fails at validation, naming the property
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(
+            DeltaTable(
+                TEST_CATALOG,
+                temp_schema,
+                table_name,
+                columns=(Column("id", Integer(), nullable=False),),
+            )
+        )
+    table_report = excinfo.value.report.table_reports[0]
+    assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
+
+
+def test_engine_ignores_platform_written_properties(spark, monkeypatch, temp_schema):
+    # Given a table carrying unregistered platform-style keys
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"prop_invis_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(
+        f"CREATE TABLE {fq} (id INT NOT NULL) USING DELTA"
+        " TBLPROPERTIES ('delta.appendOnly'='false')"
+    )
+
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    # When syncing a declaration that says nothing about properties
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Integer(), nullable=False),),
+        )
+    )
+
+    # Then the unregistered key is invisible — no failure, no action
+    assert report.any_failures is False
+    assert len(report.table_reports[0].plan) == 0
+
+
+def test_engine_property_sync_is_idempotent(spark, monkeypatch, temp_schema):
+    # Given a declaration synced once — also detects Delta value normalization:
+    # if the catalog stores a normalized form of a declared value, the second
+    # sync would plan a spurious PropertySet and this test fails
+    _patch_table_exists_for_local(monkeypatch)
+    table_name = f"prop_idem_{uuid4().hex[:8]}"
+    declaration = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(Column("id", Integer(), nullable=False),),
+        properties={
+            "delta.enableChangeDataFeed": "true",
+            "delta.logRetentionDuration": "interval 30 days",
+        },
+    )
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine.sync(declaration)
+
+    # When syncing the identical declaration again
+    report = engine.sync(declaration)
+
+    # Then nothing is planned
+    assert len(report.table_reports[0].plan) == 0
