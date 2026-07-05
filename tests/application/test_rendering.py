@@ -8,8 +8,10 @@ from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTab
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     SetColumnTag,
+    SetProperty,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -85,3 +87,25 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
 
     assert "(no changes)" in block
     assert "see failures" not in block
+
+
+def test_set_property_renders_plus_for_first_write():
+    # Given a property being written for the first time (absent from catalog)
+    line = action_diff_line(SetProperty(name="delta.enableChangeDataFeed", value="true"))
+
+    assert line == "+ property delta.enableChangeDataFeed = 'true'"
+
+
+def test_set_property_renders_tilde_with_was_for_update():
+    # Given a property whose catalog value is stale
+    line = action_diff_line(
+        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false")
+    )
+
+    assert line == "~ property delta.enableChangeDataFeed = 'true' (was 'false')"
+
+
+def test_unset_property_renders_minus():
+    line = action_diff_line(UnsetProperty(name="delta.logRetentionDuration"))
+
+    assert line == "- property delta.logRetentionDuration"

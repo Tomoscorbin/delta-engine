@@ -4,6 +4,7 @@ import pytest
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPhase,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -392,3 +393,16 @@ def test_plan_orders_set_column_tag_before_unset_column_tag():
 
     # Then sets run before unsets (documented phase precedence)
     assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]
+
+
+def test_unset_property_phases_immediately_after_set_property():
+    # Given the two property phases
+    # Then unset sorts directly after set so mixed plans stay deterministic
+    assert ActionPhase.UNSET_PROPERTY == ActionPhase.SET_PROPERTY + 1
+
+
+def test_set_property_observed_value_defaults_to_none():
+    # Given a SetProperty built without an observed value (first write)
+    action = SetProperty(name="delta.enableChangeDataFeed", value="true")
+
+    assert action.observed_value is None

@@ -16,6 +16,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
@@ -82,6 +83,7 @@ __all__ = [
     "TableTagSet",
     "TableTagUnset",
     "UnsetColumnTag",
+    "UnsetProperty",
     "UnsetTableTag",
     "diff_table",
 ]
