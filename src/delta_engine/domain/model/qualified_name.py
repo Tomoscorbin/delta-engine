@@ -21,18 +21,7 @@ class QualifiedName:
     catalog: str
     schema: str
     name: str
-
-    @classmethod
-    def parse(cls, raw: str) -> Self:
-        """Parse a canonical ``catalog.schema.name`` string into a qualified name."""
-        parts = raw.split(".")
-        if len(parts) != 3:
-            raise ValueError(
-                f"QualifiedName must be a fully qualified 'catalog.schema.table' name; got: {raw!r}"
-            )
-        catalog, schema, name = parts
-        return cls(catalog=catalog, schema=schema, name=name)
-
+    
     def __post_init__(self) -> None:
         """Raise if any part is blank or contains uppercase characters."""
         for field_name, value in (
@@ -48,6 +37,17 @@ class QualifiedName:
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""
         return f"{self.catalog}.{self.schema}.{self.name}"
+    
+    @classmethod
+    def parse(cls, raw: str) -> Self:
+        """Parse a canonical ``catalog.schema.name`` string into a qualified name."""
+        parts = raw.split(".")
+        if len(parts) != 3:
+            raise ValueError(
+                f"QualifiedName must be a fully qualified 'catalog.schema.table' name; got: {raw!r}"
+            )
+        catalog, schema, name = parts
+        return cls(catalog=catalog, schema=schema, name=name)
 
     @property
     def parts(self) -> tuple[str, str, str]:
