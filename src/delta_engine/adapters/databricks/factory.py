@@ -7,7 +7,7 @@ from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.engine import Engine
 
 
-def build_databricks_engine(spark: SparkSession) -> Engine:
+def build_engine(spark: SparkSession) -> Engine:
     """
     Create an engine configured for Databricks.
 

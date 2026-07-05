@@ -16,19 +16,14 @@ from delta_engine.application.engine import Engine
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
-__all__ = ["build_databricks_engine", "build_engine", "configure_logging"]
+__all__ = ["build_engine", "configure_logging"]
 
 
 def build_engine(spark: SparkSession) -> Engine:
     """Create an engine configured for Databricks."""
-    from delta_engine.adapters.databricks import build_databricks_engine
+    from delta_engine.adapters.databricks import build_engine as _build_engine
 
-    return build_databricks_engine(spark)
-
-
-def build_databricks_engine(spark: SparkSession) -> Engine:
-    """Compatibility alias for :func:`build_engine`."""
-    return build_engine(spark)
+    return _build_engine(spark)
 
 
 def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:

@@ -1,10 +1,9 @@
 """
-The top-level `delta_engine` namespace is the curated compatibility entry point.
+The top-level `delta_engine` namespace is the curated runtime entry point.
 
-The pyspark-free surface (define a table, the engine and its result types) is
-eagerly available. The Databricks factory and logging helper
-are exposed too, but imported lazily so `import delta_engine` never requires
-pyspark — keeping the "define tables without Spark" capability intact.
+The engine and its result types are eagerly available and pyspark-free. Schema
+declarations live in `delta_engine.schema`; Databricks helpers live in
+`delta_engine.databricks`.
 """
 
 import subprocess
@@ -15,66 +14,36 @@ import pytest
 import delta_engine
 
 _EAGER = {
-    # schema: define a table
-    "DeltaTable",
-    "Column",
-    "Array",
-    "Boolean",
-    "Date",
-    "Decimal",
-    "Double",
-    "Float",
-    "ForeignKey",
-    "Integer",
-    "Long",
-    "Map",
-    "Property",
-    "Self",
-    "String",
-    "Timestamp",
-    # application: run a sync and read the outcome
     "Engine",
     "SyncReport",
     "SyncFailedError",
     "Failure",
     "TableRunStatus",
 }
-_LAZY = {"build_databricks_engine", "configure_logging"}
 
 
 def test_eager_names_are_importable_and_identical_to_their_source():
     # Given the curated root namespace
     # Then every pyspark-free name resolves to the same object as its source module
-    from delta_engine import Column, DeltaTable, Engine, Property
-    from delta_engine.api import (
-        Column as ColumnImpl,
-        DeltaTable as DeltaTableImpl,
-        Property as PropertyImpl,
+    from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus
+    from delta_engine.application import (
+        Engine as EngineImpl,
+        Failure as FailureImpl,
+        SyncFailedError as SyncFailedErrorImpl,
+        SyncReport as SyncReportImpl,
+        TableRunStatus as TableRunStatusImpl,
     )
-    from delta_engine.application import Engine as EngineImpl
 
-    assert DeltaTable is DeltaTableImpl
-    assert Column is ColumnImpl
     assert Engine is EngineImpl
-    assert Property is PropertyImpl
-
-
-def test_lazy_factory_names_resolve_to_their_source():
-    # Given the lazily-exposed Databricks entry points
-    from delta_engine import build_databricks_engine, configure_logging
-    from delta_engine.adapters.databricks import (
-        build_databricks_engine as factory_impl,
-        configure_logging as configure_impl,
-    )
-
-    # Then they resolve to the same objects as their source module
-    assert build_databricks_engine is factory_impl
-    assert configure_logging is configure_impl
+    assert Failure is FailureImpl
+    assert SyncFailedError is SyncFailedErrorImpl
+    assert SyncReport is SyncReportImpl
+    assert TableRunStatus is TableRunStatusImpl
 
 
 def test_all_advertises_eager_and_lazy_names():
-    # Then __all__ lists the full curated surface, eager and lazy alike
-    assert set(delta_engine.__all__) == _EAGER | _LAZY
+    # Then __all__ lists the root runtime surface exactly
+    assert set(delta_engine.__all__) == _EAGER
 
 
 def test_unknown_attribute_raises_attribute_error():
@@ -90,10 +59,7 @@ def test_eager_surface_imports_without_pyspark_installed():
     # pyspark is a dev-only dependency)
     program = (
         "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine import (\n"
-        "    DeltaTable, Column, Integer, Property, Engine,\n"
-        "    SyncReport, SyncFailedError, Failure,\n"
-        ")\n"
+        "from delta_engine import Engine, SyncReport, SyncFailedError, Failure\n"
         "print('ok')\n"
     )
 

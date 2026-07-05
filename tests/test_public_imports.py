@@ -49,18 +49,8 @@ def test_databricks_import_path_exposes_backend_entry_points():
     assert isinstance(engine, Engine)
     assert set(databricks.__all__) == {
         "build_engine",
-        "build_databricks_engine",
         "configure_logging",
     }
-
-
-def test_compat_databricks_factory_alias_builds_an_engine():
-    # Given callers who still use the backend-specific factory name
-    from delta_engine.application import Engine
-
-    # Then the new Databricks import path still supports it
-    engine = databricks.build_databricks_engine(_DummySpark())
-    assert isinstance(engine, Engine)
 
 
 def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pyspark():
@@ -70,7 +60,7 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
         "from delta_engine.schema import Column, DeltaTable, Integer\n"
         "from delta_engine import Engine, SyncFailedError, SyncReport, TableRunStatus\n"
         "from delta_engine.databricks import (\n"
-        "    build_engine, build_databricks_engine, configure_logging,\n"
+        "    build_engine, configure_logging,\n"
         ")\n"
         "print('ok')\n"
     )
@@ -88,9 +78,7 @@ def test_logging_configuration_imports_and_runs_without_pyspark_installed():
     # Given an interpreter where pyspark cannot be imported
     program = (
         "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine import configure_logging as configure_root_logging\n"
         "from delta_engine.databricks import configure_logging as configure_databricks_logging\n"
-        "configure_root_logging()\n"
         "configure_databricks_logging()\n"
         "print('ok')\n"
     )

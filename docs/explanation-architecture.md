@@ -222,8 +222,8 @@ flowchart TB
 The arrows show source dependencies. The domain does not import Spark,
 Databricks, the application layer, or adapter code. Backend-specific code
 depends inward on the application ports and domain vocabulary. The top-level
-`delta_engine` package eagerly exposes the pure-Python API and application
-surface, and lazily exposes Databricks helpers so `import delta_engine` does not
+`delta_engine` package eagerly exposes backend-neutral runtime types such as
+`Engine`, `SyncReport`, and `SyncFailedError`, so `import delta_engine` does not
 require PySpark.
 
 `delta_engine.schema` and `delta_engine.databricks` are public import aliases
@@ -490,10 +490,9 @@ including `DeltaTable`, data types, `Engine`, `SyncReport`, and
 
 Databricks helpers live in the adapter package and import PySpark. The
 preferred import path is `delta_engine.databricks`, whose public functions
-import the real adapter only when called. `delta_engine.__init__` also exposes
-the legacy root names lazily with PEP 562 `__getattr__`:
+import the real adapter only when called:
 
-- `build_databricks_engine`
+- `build_engine`
 - `configure_logging`
 
 Calling the Databricks factory imports `delta_engine.adapters.databricks` on
