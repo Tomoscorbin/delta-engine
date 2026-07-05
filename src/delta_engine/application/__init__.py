@@ -1,11 +1,9 @@
 """
-Application layer: the engine and the public outcome types.
+Application layer: the engine and outcome types.
 
-These are the names a library consumer depends on -- pass tables to an `Engine`
-and call `sync`, and handle the `SyncReport` it returns or the `SyncFailedError`
-it raises (whose failures render via `Failure.format_lines`). The per-phase
-result types (`CatalogState`, `ExecutionSummary`, `TableRunReport`, ...) remain
-internal.
+The root ``delta_engine`` package re-exports this runtime surface for library
+users. The per-phase result types (`CatalogState`, `ExecutionSummary`,
+`TableRunReport`, ...) remain internal.
 """
 
 from delta_engine.application.engine import Engine

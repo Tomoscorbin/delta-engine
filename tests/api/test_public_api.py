@@ -1,4 +1,4 @@
-"""The user-facing api package re-exports the names needed to define a table."""
+"""The api package backs the preferred delta_engine.schema import path."""
 
 import delta_engine.api as api
 from delta_engine.api.table import DeltaTable as DeltaTableImpl
@@ -26,7 +26,7 @@ _EXPECTED = {
 
 
 def test_api_exposes_delta_table_column_and_all_data_types():
-    # Given the api package a user imports to define a table
+    # Given the api package behind the preferred schema import path
     # Then DeltaTable, Column, and every data type -- scalar and parameterised --
     # are importable from it directly, so defining a table never reaches into the
     # internal domain layer

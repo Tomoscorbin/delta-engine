@@ -1,11 +1,11 @@
-"""The application package declares its public surface for library consumers."""
+"""The application package declares the root runtime surface."""
 
 import delta_engine.application as application
 
 
 def test_public_api_exposes_the_intended_names():
     # Given the application package's declared public surface
-    # Then the entry points a consumer needs are importable from the package root
+    # Then the runtime names re-exported by delta_engine are importable here
     from delta_engine.application import (
         Engine,
         Failure,
