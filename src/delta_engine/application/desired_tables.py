@@ -8,12 +8,11 @@ tables in deterministic qualified-name order so a sync's report and execution
 order never depend on the order tables were passed.
 """
 
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from delta_engine.domain.model import DesiredTable
 
 
-@runtime_checkable
 class DesiredTableSource(Protocol):
     """A user-facing table specification that can produce a domain table."""
 
