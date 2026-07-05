@@ -43,5 +43,4 @@
 - [ ] Should we remove the concept of default properties altogether?
 - [ ] restructure files so that important things come first
 - [ ] is it possible to remove Changed[T] so that everything is either Added or Removed?
-- [ ] build_databricks_engine should live in API
-
+- [x] Teach Databricks factory through `delta_engine.databricks.build_engine` instead of moving it into API

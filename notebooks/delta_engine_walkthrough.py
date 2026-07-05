@@ -23,7 +23,9 @@ import sys
 
 import pyspark.sql.types as T
 
-from delta_engine import (
+from delta_engine import SyncFailedError, SyncReport, TableRunStatus
+from delta_engine.databricks import build_engine, configure_logging
+from delta_engine.schema import (
     Column,
     Date,
     Decimal,
@@ -34,12 +36,7 @@ from delta_engine import (
     Property,
     Self,
     String,
-    SyncFailedError,
-    SyncReport,
-    TableRunStatus,
     Timestamp,
-    build_databricks_engine,
-    configure_logging,
 )
 
 # COMMAND ----------
@@ -148,7 +145,7 @@ orders = DeltaTable(
 
 tables = [orders, customers]  # passed orders-first on purpose
 
-engine = build_databricks_engine(spark)
+engine = build_engine(spark)
 report = engine.sync(*tables)
 show_report(report)
 

@@ -1,7 +1,10 @@
 import io
 import logging
 
-from delta_engine.adapters.databricks import build_databricks_engine, configure_logging
+from delta_engine.adapters.databricks import (
+    build_databricks_engine,
+    configure_logging,
+)
 from delta_engine.adapters.databricks.log_config import LevelColorFormatter
 from delta_engine.application.engine import Engine
 

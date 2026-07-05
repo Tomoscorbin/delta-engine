@@ -1,15 +1,17 @@
 """
 delta-engine: declarative schema management for Delta Lake tables.
 
-This is the curated entry point. The common workflow imports from here directly::
+This is the curated compatibility entry point. The preferred user imports are::
 
-    from delta_engine import DeltaTable, Column, Integer, Engine, build_databricks_engine
+    from delta_engine.schema import DeltaTable, Column, Integer
+    from delta_engine.databricks import build_engine
+    from delta_engine import Engine
 
 The schema and engine surface (defining tables, the engine and its result types)
-is pyspark-free and eagerly available. ``build_databricks_engine``
-and ``configure_logging`` are exposed here too but imported lazily, so
-``import delta_engine`` never requires pyspark -- tables can be defined and
-planned without a Spark install.
+is still available here for compatibility. ``build_databricks_engine`` and
+``configure_logging`` are exposed here too but imported lazily, so ``import
+delta_engine`` never requires pyspark -- tables can be defined and planned
+without a Spark install.
 """
 
 from typing import TYPE_CHECKING

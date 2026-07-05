@@ -197,7 +197,7 @@ An `ActionPlan` is produced by iterating each change's `.actions()`; actions are
 
 | Package | Responsibility | Examples |
 |---|---|---|
-| `delta_engine.api` | User-facing declarations and import surface | `DeltaTable`, `ForeignKey`, `Property` |
+| `delta_engine.schema` / `delta_engine.api` | User-facing declarations and import surface | `DeltaTable`, `ForeignKey`, `Property` |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
 | `delta_engine.domain` | Backend-free snapshots, diffs, actions, and deterministic planning | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan` |
 | `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
@@ -205,7 +205,7 @@ An `ActionPlan` is produced by iterating each change's `.actions()`; actions are
 ```mermaid
 flowchart TB
     Public[delta_engine.__init__<br/>curated public exports]
-    API[api<br/>DeltaTable, ForeignKey, Property]
+    API[schema / api<br/>DeltaTable, ForeignKey, Property]
     App[application<br/>Engine, ports, validation, reports]
     Domain[domain<br/>snapshots, diffs, actions]
     Adapters[adapters<br/>Databricks reader, executor, SQL compiler]
@@ -225,6 +225,10 @@ depends inward on the application ports and domain vocabulary. The top-level
 `delta_engine` package eagerly exposes the pure-Python API and application
 surface, and lazily exposes Databricks helpers so `import delta_engine` does not
 require PySpark.
+
+`delta_engine.schema` and `delta_engine.databricks` are public import aliases
+for users: schema declarations still live in `delta_engine.api`, and Databricks
+integration still lives in `delta_engine.adapters.databricks`.
 
 ## Diff-first planning
 
@@ -484,14 +488,17 @@ PySpark installed. It eagerly exports pure-Python API and application objects,
 including `DeltaTable`, data types, `Engine`, `SyncReport`, and
 `SyncFailedError`.
 
-Databricks helpers live in the adapter package and import PySpark, so
-`delta_engine.__init__` exposes them lazily with PEP 562 `__getattr__`:
+Databricks helpers live in the adapter package and import PySpark. The
+preferred import path is `delta_engine.databricks`, whose public functions
+import the real adapter only when called. `delta_engine.__init__` also exposes
+the legacy root names lazily with PEP 562 `__getattr__`:
 
 - `build_databricks_engine`
 - `configure_logging`
 
-Accessing either name imports `delta_engine.adapters.databricks` on demand.
-Plain table declarations and schema-only tests do not pay that dependency cost.
+Calling the Databricks factory imports `delta_engine.adapters.databricks` on
+demand. Plain table declarations and schema-only tests do not pay that
+dependency cost.
 
 ## Where to make changes
 
@@ -502,7 +509,7 @@ Plain table declarations and schema-only tests do not pay that dependency cost.
 | Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter. |
 | Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` changes and return `ValidationFailure` values. |
 | Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
-| Change public declarations | `delta_engine.api` | Keep public ergonomics here and lower choices into domain snapshots before the engine phases begin. |
+| Change public declarations | `delta_engine.api`, surfaced through `delta_engine.schema` | Keep public ergonomics here and lower choices into domain snapshots before the engine phases begin. |
 | Change FK ordering or blocking | `delta_engine.application.dependency_resolution` | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler. |
 | Change report output | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects. |
 | Change Databricks SQL | `delta_engine.adapters.databricks.sql` | Compile domain actions to backend statements at the adapter boundary. |
@@ -517,5 +524,5 @@ Plain table declarations and schema-only tests do not pay that dependency cost.
   identifiers, parsing Spark types, and quoting SQL.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
-- Keep user-facing convenience in `delta_engine.api`, then lower to domain
-  snapshots before planning begins.
+- Keep user-facing schema convenience in `delta_engine.schema` / `delta_engine.api`,
+  then lower to domain snapshots before planning begins.

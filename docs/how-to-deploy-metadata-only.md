@@ -16,7 +16,7 @@ change can slip in.
 ## Declare a metadata-only table
 
 ```python
-from delta_engine import Column, DeltaTable, Integer, String
+from delta_engine.schema import Column, DeltaTable, Integer, String
 
 table = DeltaTable(
     catalog="dev",
