@@ -15,7 +15,6 @@ from delta_engine.domain.model.data_type import (
 )
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
-from delta_engine.domain.model.property import PropertyDefinition, PropertyRegistry
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
@@ -37,8 +36,6 @@ __all__ = [
     "Map",
     "ObservedTable",
     "PrimaryKeyConstraint",
-    "PropertyDefinition",
-    "PropertyRegistry",
     "QualifiedName",
     "String",
     "TableAspect",

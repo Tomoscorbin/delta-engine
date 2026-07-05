@@ -439,7 +439,8 @@ def test_engine_fails_loud_on_undeclared_column_mapping(spark, monkeypatch, temp
 
 
 def test_engine_ignores_platform_written_properties(spark, monkeypatch, temp_schema):
-    # Given a table carrying unregistered platform-style keys
+    # Given a table carrying unmanaged platform-style keys — the reader
+    # filters them out of the observed state before the domain sees them
     _patch_table_exists_for_local(monkeypatch)
     table_name = f"prop_invis_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"

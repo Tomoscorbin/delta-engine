@@ -380,17 +380,22 @@ def test_metadata_only_table_manages_metadata_aspects():
     assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
 
 
-def test_metadata_only_with_properties_raises():
-    # Given a metadata-only declaration that also states properties
-    with pytest.raises(ValueError, match="metadata-only"):
-        DeltaTable(
-            catalog="dev",
-            schema="silver",
-            name="orders",
-            columns=[Column("id", Integer())],
-            properties={Property.CHANGE_DATA_FEED.value: "true"},
-            metadata_only=True,
-        )
+def test_metadata_only_declaration_carries_properties_without_deploying_them():
+    # Given a metadata-only declaration of a full table, properties included —
+    # the flag scopes deployment, not what may be declared
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        properties={Property.CHANGE_DATA_FEED.value: "true"},
+        metadata_only=True,
+    )
+
+    # Then the declaration carries the property; PROPERTIES stays unmanaged
+    desired = table.to_desired_table()
+    assert desired.properties == {Property.CHANGE_DATA_FEED.value: "true"}
+    assert TableAspect.PROPERTIES not in desired.managed_aspects
 
 
 def test_metadata_only_without_properties_constructs_cleanly():

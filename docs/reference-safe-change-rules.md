@@ -13,9 +13,8 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `NullabilityTighteningOnExistingColumn` | Changing an existing nullable column to `NOT NULL` | Backfill existing NULLs first, then update the declaration |
 | `ColumnDataTypeChangeNotSupported` | Changing a column's declared data type | Drop and recreate the table out of band, then re-sync |
 | `PartitioningChangeNotSupported` | Changing `partitioned_by` on an existing table | Drop and recreate the table out of band, then re-sync |
-| `PropertyTransitionNotSupported` | A declared property value change the catalog rejects (e.g. `delta.columnMapping.mode` `name` → `none`) | Update the declaration to match the catalog value |
+| `PropertyTransitionNotSupported` | A property transition the catalog rejects — a value change (e.g. `delta.columnMapping.mode` `name` → `none`) or a removal of a key that cannot be unset | Update the declaration to match the catalog value |
 | `PropertyMustBeDeclared` | A managed property set on the table but missing from the declaration | Declare it (or declare it `None` to remove it, where removal is possible) |
-| `PropertyUnsetNotSupported` | Declaring `None` for a key that cannot be unset (`delta.columnMapping.mode`) | Declare its current value instead |
 
 Two further checks are scope invariants rather than rules — they define what a
 declaration is allowed to govern and always run, regardless of the rule set:

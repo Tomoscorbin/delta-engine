@@ -1,14 +1,16 @@
 """
 The Delta table properties this engine manages, and their restrictions.
 
-The registry's shape is domain (`PropertyDefinition`); the concrete keys are
-Databricks knowledge and live here, beside the other Databricks-flavoured
-policy (the validation rules that exist because Databricks rejects an
-operation).
+Properties share their namespace with the platform: Databricks writes keys
+like ``delta.minReaderVersion`` and ``delta.enableRowTracking`` into table
+metadata autonomously. The engine manages properties by exact declaration
+over the registered keys below; everything else is invisible — the reader
+adapter filters unregistered keys out of the observed state before the
+domain ever sees them.
 
 Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
-(workspaces auto-enable it on new tables), so the engine leaves it entirely
-to the platform — it is unregistered and therefore invisible to the diff.
+(workspaces auto-enable it on new tables), so the engine leaves the key
+entirely to the platform.
 
 Admission policy — adding a key is a breaking change: tables carrying it
 undeclared start failing validation on upgrade. Before registering a key,
@@ -19,10 +21,31 @@ it. Additions are called out in release notes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.domain.model.property import PropertyDefinition, PropertyRegistry
+
+@dataclass(frozen=True, slots=True)
+class PropertyDefinition:
+    """
+    One manageable property key and its restrictions.
+
+    ``permitted_transitions``: the ``(observed_value, desired_value)`` pairs
+    that are legal in-place changes, where a ``desired_value`` of ``None``
+    means removal (the key declared absent). Empty means unrestricted; a
+    non-empty set blocks any pair not in it. A first write (key absent from
+    the catalog) is always legal and is never looked up here.
+    """
+
+    key: str
+    permitted_transitions: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
+
+
+type PropertyRegistry = Mapping[str, PropertyDefinition]
+
+COLUMN_MAPPING_MODE_KEY: Final[str] = "delta.columnMapping.mode"
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     PropertyDefinition(key="delta.enableChangeDataFeed"),
@@ -30,12 +53,12 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     PropertyDefinition(key="delta.logRetentionDuration"),
     PropertyDefinition(key="delta.dataSkippingNumIndexedCols"),
     PropertyDefinition(
-        key="delta.columnMapping.mode",
+        key=COLUMN_MAPPING_MODE_KEY,
         # The protocol upgrade (minReader 2 / minWriter 5, physical column
-        # names) is permanent: only none -> name is a legal value change,
-        # and the key cannot be unset once present.
+        # names) is permanent: only none -> name is a legal change. The
+        # absence of any (value, None) pair blocks removal by the same
+        # mechanism — declaring the key absent is a transition to None.
         permitted_transitions=frozenset({("none", "name")}),
-        unset_permitted=False,
     ),
 )
 

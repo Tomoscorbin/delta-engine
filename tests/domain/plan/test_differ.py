@@ -11,8 +11,6 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     ObservedTable,
-    PropertyDefinition,
-    PropertyRegistry,
     QualifiedName,
     String,
     Timestamp,
@@ -39,15 +37,10 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.diff import diff_table
 
-_REGISTRY: PropertyRegistry = {
-    "delta.enableChangeDataFeed": PropertyDefinition(key="delta.enableChangeDataFeed"),
-    "delta.logRetentionDuration": PropertyDefinition(key="delta.logRetentionDuration"),
-}
-
 
 def _compute_plan(desired: DesiredTable, observed: ObservedTable | None) -> ActionPlan:
     """Local test helper: diff then produce the action plan."""
-    return diff_table(desired, observed, property_registry=_REGISTRY).plan()
+    return diff_table(desired, observed).plan()
 
 
 def _assert_set_fk_action_matches_constraint(
@@ -466,13 +459,12 @@ def test_updates_property_when_value_differs():
     )
 
 
-def test_ignores_observed_only_unregistered_properties():
-    # Given: observed contains a property the user never declared and the
-    #        registry does not know (e.g. one Databricks set autonomously)
+def test_matching_declared_property_plans_nothing():
+    # Given: the declared key matches the observed value (the reader has
+    # already filtered platform keys such as delta.minReaderVersion out of
+    # the observed mapping before the domain sees it)
     desired = _desired(properties={"delta.enableChangeDataFeed": "true"})
-    observed = _observed(
-        properties={"delta.enableChangeDataFeed": "true", "delta.minReaderVersion": "2"}
-    )
+    observed = _observed(properties={"delta.enableChangeDataFeed": "true"})
 
     # When computing the plan
     plan = _compute_plan(desired, observed)

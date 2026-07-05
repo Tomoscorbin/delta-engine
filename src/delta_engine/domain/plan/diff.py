@@ -31,10 +31,11 @@ Naming conventions:
 Semantics that differ by aspect:
 
 - Properties are exact-declaration: a declared value is reconciled, a
-  declared ``None`` asserts absence, and a registered key observed without a
-  declaration is a blocking change. Unregistered keys (platform-written,
-  e.g. ``delta.enableRowTracking``) are invisible in both directions. The
-  properties diff runs only when the declaration manages ``PROPERTIES``.
+  declared ``None`` asserts absence, and an observed key without a
+  declaration is a blocking change. The observed mapping carries managed
+  keys only — the reader adapter filters platform-written keys (e.g.
+  ``delta.enableRowTracking``) out of the catalog state. The properties
+  diff runs only when the declaration manages ``PROPERTIES``.
 - Tags are full-state: an observed-only tag is drift and is unset.
 - Nullability drift is suppressed for a column whose type also drifted — the
   column must be recreated first, so a nullability change would be noise.
@@ -50,7 +51,6 @@ from delta_engine.domain.model import Column, DesiredTable, ObservedTable
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
-from delta_engine.domain.model.property import PropertyRegistry
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,
@@ -261,7 +261,7 @@ class PropertyUnset:
 @dataclass(frozen=True, slots=True)
 class UndeclaredProperty:
     """
-    A registered key present in the catalog but missing from the declaration.
+    A managed key present in the catalog but missing from the declaration.
 
     The engine must not guess: it neither reconciles nor removes the key.
     actions() returns nothing; see PropertyMustBeDeclared.
@@ -505,11 +505,7 @@ type TableDiff = TableMissing | TableDrift
 # ---------------------------------------------------------------------------
 
 
-def diff_table(
-    desired: DesiredTable,
-    observed: ObservedTable | None,
-    property_registry: PropertyRegistry,
-) -> TableDiff:
+def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
     Compute the changes separating ``observed`` from ``desired``.
 
@@ -521,11 +517,8 @@ def diff_table(
     ``managed_aspects``, with scope judged in validation — except for
     properties, which are compared only when the declaration manages
     ``PROPERTIES``: under exact declaration an empty property mapping is an
-    assertion (any undeclared registered key is a blocking change), so an
-    unmanaged table must make no assertion at all.
-
-    ``property_registry`` names the manageable keys; it deliberately has no
-    default — an empty default would silently make every key invisible.
+    assertion (any undeclared key is a blocking change), so an unmanaged
+    table must make no assertion at all.
     """
     if observed is None:
         return TableMissing(desired=desired)
@@ -536,7 +529,7 @@ def diff_table(
         *_diff_column_tags(desired.columns, observed.columns),
         *_diff_table_comment(desired.comment, observed.comment),
         *(
-            _diff_properties(desired.properties, observed.properties, property_registry)
+            _diff_properties(desired.properties, observed.properties)
             if TableAspect.PROPERTIES in desired.managed_aspects
             else ()
         ),
@@ -646,18 +639,17 @@ def _diff_table_comment(desired: str, observed: str) -> list[Change]:
 
 
 def _diff_properties(
-    desired: Mapping[str, str | None],
-    observed: Mapping[str, str],
-    property_registry: PropertyRegistry,
+    desired: Mapping[str, str | None], observed: Mapping[str, str]
 ) -> list[Change]:
     """
     Property changes under exact-declaration semantics.
 
     The declaration is the complete list of managed keys: a declared value
     is reconciled, a declared None asserts absence (unset when present),
-    and a registered key observed without a declaration is a blocking
-    change — the engine must not guess. Unregistered keys are invisible in
-    both directions.
+    and an observed key without a declaration is a blocking change — the
+    engine must not guess. The observed mapping contains managed keys only:
+    the reader adapter filters platform-written keys out of the catalog
+    state before the domain sees them.
     """
     changes: list[Change] = []
 
@@ -674,11 +666,8 @@ def _diff_properties(
             )
 
     for name, observed_value in observed.items():
-        if name in desired:
-            continue
-        if name not in property_registry:
-            continue
-        changes.append(UndeclaredProperty(name=name, observed_value=observed_value))
+        if name not in desired:
+            changes.append(UndeclaredProperty(name=name, observed_value=observed_value))
 
     return changes
 

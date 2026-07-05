@@ -18,9 +18,12 @@ def test_column_mapping_mode_permits_only_the_upgrade_transition():
     assert definition.permitted_transitions == frozenset({("none", "name")})
 
 
-def test_column_mapping_mode_cannot_be_unset():
-    # Given the protocol upgrade is permanent — unsetting the property would lie
-    assert DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"].unset_permitted is False
+def test_column_mapping_mode_permits_no_removal():
+    # Given the protocol upgrade is permanent — removal is a transition to
+    # absence, and no (value, None) pair is permitted
+    transitions = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"].permitted_transitions
+
+    assert not any(desired is None for _, desired in transitions)
 
 
 def test_every_other_key_is_unrestricted():
@@ -28,7 +31,7 @@ def test_every_other_key_is_unrestricted():
     unrestricted = {
         key
         for key, definition in DELTA_PROPERTY_REGISTRY.items()
-        if definition.permitted_transitions == frozenset() and definition.unset_permitted
+        if definition.permitted_transitions == frozenset()
     }
 
     assert unrestricted == set(DELTA_PROPERTY_REGISTRY) - {"delta.columnMapping.mode"}

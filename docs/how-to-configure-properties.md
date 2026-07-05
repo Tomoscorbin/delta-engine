@@ -83,10 +83,10 @@ same sync as the drop is safe — properties are set before columns are
 dropped.
 
 Two operations on this key are blocked at validation because the table
-protocol upgrade is permanent: changing `name` back to `none`
-(`PropertyTransitionNotSupported`) and declaring it `None`
-(`PropertyUnsetNotSupported`). Once a table has column mapping, its
-declaration must carry `Property.COLUMN_MAPPING_MODE: "name"`.
+protocol upgrade is permanent: changing `name` back to `none`, and
+declaring it `None` (a removal is a transition to absence, judged by the
+same `PropertyTransitionNotSupported` rule). Once a table has column
+mapping, its declaration must carry `Property.COLUMN_MAPPING_MODE: "name"`.
 
 ## Migrating from older engine versions
 

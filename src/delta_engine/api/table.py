@@ -130,18 +130,14 @@ class DeltaTable:
             partitioned_by: Column names to partition by.
             foreign_keys: Foreign key relationships declared on this table.
             metadata_only: When ``True``, restricts the sync to catalog metadata:
-                comments, tags, and key constraints. Column structure, properties, and
-                partitioning are never changed. The live schema must match the declaration
-                exactly — any structural drift fails validation.
+                comments, tags, and key constraints. The full table is still
+                declared — columns, properties, partitioning — but only
+                metadata is deployed; the rest is never compared or changed,
+                except that the live schema must match the declared columns
+                exactly (structural drift fails validation).
 
         """
         user_properties = dict(properties or {})
-
-        if metadata_only and user_properties:
-            raise ValueError(
-                "metadata-only tables do not manage properties;"
-                " remove the properties argument or set metadata_only=False"
-            )
 
         # Fast-fail on property keys this engine does not manage (e.g. typos).
         # None-valued assertions are validated too: asserting absence of an

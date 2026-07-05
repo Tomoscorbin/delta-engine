@@ -6,7 +6,6 @@ from delta_engine.application.validation import (
     NullabilityTighteningOnExistingColumn,
     PropertyMustBeDeclared,
     PropertyTransitionNotSupported,
-    PropertyUnsetNotSupported,
     ValidationResult,
     validate_column_drop_preconditions,
     validate_diff,
@@ -290,7 +289,6 @@ def test_default_rules_cover_all_safety_policies():
         "PartitioningChangeNotSupported",
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
-        "PropertyUnsetNotSupported",
     }
 
 
@@ -496,23 +494,22 @@ def test_passes_when_no_undeclared_key():
     assert rule.evaluate(()) == ()
 
 
-# ---- PropertyUnsetNotSupported
-
-
-def test_blocks_none_declaration_on_unset_forbidden_key():
-    # Given a declaration asserting columnMapping.mode absent on a table that has it
-    rule = PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY)
+def test_blocks_none_declaration_on_removal_forbidden_key():
+    # Given a declaration asserting columnMapping.mode absent on a table that
+    # has it — a removal is a transition to absence, judged by the same rule
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
     changes = (PropertyUnset(name="delta.columnMapping.mode", observed_value="name"),)
 
     failures = rule.evaluate(changes)
 
     assert len(failures) == 1
-    assert failures[0].rule_name == "PropertyUnsetNotSupported"
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "cannot be removed" in failures[0].message
 
 
-def test_allows_none_declaration_on_unsettable_key():
-    # Given an absence assertion on a key whose removal is permitted
-    rule = PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY)
+def test_allows_none_declaration_on_unrestricted_key():
+    # Given an absence assertion on a key whose registry entry restricts nothing
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
     changes = (
         PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
     )

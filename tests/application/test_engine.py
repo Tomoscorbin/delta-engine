@@ -75,11 +75,10 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     """
     Build the present-state read of a table that is already fully in sync with _spec.
 
-    _spec declares no properties, so an in-sync table carries none of the
-    engine's registered keys. It does carry an observed-only unregistered
-    ``delta.enableDeletionVectors`` (as the Databricks runtime enables
-    autonomously) to confirm the engine ignores unregistered platform keys
-    rather than emitting a spurious action or failing loud.
+    _spec declares no properties, so an in-sync table carries no managed
+    properties. The reader adapter filters platform-written keys (e.g.
+    ``delta.enableDeletionVectors``) out of the observed state, so the fake
+    read hands the engine an empty properties mapping.
     """
     catalog, schema, name = fqn.split(".")
     return TablePresent(
@@ -89,7 +88,6 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
             qualified_name=QualifiedName(catalog, schema, name),
             columns=(Column("id", String(), nullable=False),),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{name}_pk"),
-            properties={"delta.enableDeletionVectors": "true"},
         )
     )
 

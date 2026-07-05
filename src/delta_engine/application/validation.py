@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
-from delta_engine.domain.model.property import PropertyRegistry
+from delta_engine.application.properties import (
+    COLUMN_MAPPING_MODE_KEY,
+    DELTA_PROPERTY_REGISTRY,
+    PropertyRegistry,
+)
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.diff import (
@@ -142,30 +145,55 @@ class PartitioningChangeNotSupported:
 
 @dataclass(frozen=True, slots=True)
 class PropertyTransitionNotSupported:
-    """Disallow property value transitions the catalog will reject."""
+    """
+    Disallow property transitions the catalog will reject.
+
+    A removal is a transition to absence: a ``PropertyUnset`` is judged as
+    ``(observed_value, None)`` against the same permitted set as value
+    changes, so a key whose registry entry permits no ``(value, None)``
+    pair cannot be declared absent.
+    """
 
     property_registry: PropertyRegistry
 
     name: ClassVar[str] = "PropertyTransitionNotSupported"
 
     def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
-        """Flag every restricted-key value change whose transition is not permitted."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    f"Operation not allowed: {change.name} cannot change"
-                    f" from '{change.observed_value}' to '{change.desired_value}'."
-                    " Update the declaration to match the catalog value."
-                ),
-            )
-            for change in changes
-            if isinstance(change, PropertySet)
-            and change.observed_value is not None
-            and self._is_blocked(change.name, change.observed_value, change.desired_value)
-        )
+        """Flag every restricted-key transition that is not permitted."""
+        failures: list[ValidationFailure] = []
+        for change in changes:
+            match change:
+                case PropertySet(
+                    name=name, desired_value=desired_value, observed_value=str() as observed_value
+                ) if self._is_blocked(name, observed_value, desired_value):
+                    failures.append(
+                        ValidationFailure(
+                            rule_name=self.name,
+                            message=(
+                                f"Operation not allowed: {name} cannot change"
+                                f" from '{observed_value}' to '{desired_value}'."
+                                " Update the declaration to match the catalog value."
+                            ),
+                        )
+                    )
+                case PropertyUnset(name=name, observed_value=observed_value) if self._is_blocked(
+                    name, observed_value, None
+                ):
+                    failures.append(
+                        ValidationFailure(
+                            rule_name=self.name,
+                            message=(
+                                f"Operation not allowed: {name} cannot be removed —"
+                                " the change is permanent on the table. Declare its"
+                                " current value."
+                            ),
+                        )
+                    )
+                case _:
+                    pass
+        return tuple(failures)
 
-    def _is_blocked(self, name: str, observed_value: str, desired_value: str) -> bool:
+    def _is_blocked(self, name: str, observed_value: str, desired_value: str | None) -> bool:
         definition = self.property_registry.get(name)
         if definition is None or not definition.permitted_transitions:
             return False
@@ -189,8 +217,7 @@ class PropertyMustBeDeclared:
         )
 
     def _message(self, change: UndeclaredProperty) -> str:
-        definition = self.property_registry.get(change.name)
-        if definition is not None and not definition.unset_permitted:
+        if not self._removal_permitted(change.name, change.observed_value):
             return (
                 f"Operation not allowed: {change.name} is set on the table"
                 f" (value '{change.observed_value}') but not declared; it cannot"
@@ -203,33 +230,11 @@ class PropertyMustBeDeclared:
             " to manage it, or declare it as None to remove it."
         )
 
-
-@dataclass(frozen=True, slots=True)
-class PropertyUnsetNotSupported:
-    """Disallow absence assertions on keys that cannot be unset."""
-
-    property_registry: PropertyRegistry
-
-    name: ClassVar[str] = "PropertyUnsetNotSupported"
-
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
-        """Flag every unset of a key whose removal the catalog cannot honour."""
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    f"Operation not allowed: {change.name} cannot be removed —"
-                    " the table protocol upgrade is permanent. Declare its"
-                    " current value."
-                ),
-            )
-            for change in changes
-            if isinstance(change, PropertyUnset) and self._unset_forbidden(change.name)
-        )
-
-    def _unset_forbidden(self, name: str) -> bool:
+    def _removal_permitted(self, name: str, observed_value: str) -> bool:
         definition = self.property_registry.get(name)
-        return definition is not None and not definition.unset_permitted
+        if definition is None or not definition.permitted_transitions:
+            return True
+        return (observed_value, None) in definition.permitted_transitions
 
 
 DEFAULT_RULES: tuple[Rule, ...] = (
@@ -239,7 +244,6 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PartitioningChangeNotSupported(),
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
-    PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY),
 )
 
 
@@ -266,9 +270,6 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
     )
 
 
-_COLUMN_MAPPING_KEY = "delta.columnMapping.mode"
-
-
 def validate_column_drop_preconditions(
     desired: DesiredTable, changes: tuple[Change, ...]
 ) -> tuple[ValidationFailure, ...]:
@@ -287,15 +288,15 @@ def validate_column_drop_preconditions(
     drops_a_column = any(isinstance(change, ColumnRemoved) for change in changes)
     if not drops_a_column:
         return ()
-    if desired.properties.get(_COLUMN_MAPPING_KEY) == "name":
+    if desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
         return ()
     return (
         ValidationFailure(
             rule_name="ColumnMappingRequiredForDrop",
             message=(
                 "Operation not allowed: dropping a column requires"
-                f" {_COLUMN_MAPPING_KEY}='name'. Declare"
-                f" properties={{'{_COLUMN_MAPPING_KEY}': 'name'}} on this table."
+                f" {COLUMN_MAPPING_MODE_KEY}='name'. Declare"
+                f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}} on this table."
             ),
         ),
     )
