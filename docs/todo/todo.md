@@ -44,3 +44,4 @@
 - [ ] restructure files so that important things come first
 - [ ] is it possible to remove Changed[T] so that everything is either Added or Removed?
 - [ ] `ignored_properties` escape hatch for coexistence with other tooling writing managed keys (deferred from the property-ownership design; see spec Known Limitations)
+- [x] Teach Databricks factory through `delta_engine.databricks.build_engine` instead of moving it into API

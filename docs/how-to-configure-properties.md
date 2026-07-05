@@ -41,7 +41,7 @@ leaves that key entirely to the platform.
 ## Declaring and removing properties
 
 ```python
-from delta_engine import Column, DeltaTable, Integer, Property
+from delta_engine.schema import Column, DeltaTable, Integer, Property
 
 orders = DeltaTable(
     catalog="prod",

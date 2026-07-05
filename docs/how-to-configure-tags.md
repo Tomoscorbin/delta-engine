@@ -12,7 +12,7 @@ Tags are **not** `TBLPROPERTIES`. If you want to change Delta behaviour (deletio
 ## Declare tags
 
 ```python
-from delta_engine import Column, DeltaTable, String
+from delta_engine.schema import Column, DeltaTable, String
 
 table = DeltaTable(
     catalog="dev",
@@ -52,7 +52,7 @@ Tags can also be declared on individual columns. Pass a `tags` dict to a
 `Column`:
 
 ```python
-from delta_engine import Column, DeltaTable, String
+from delta_engine.schema import Column, DeltaTable, String
 
 table = DeltaTable(
     catalog="dev",

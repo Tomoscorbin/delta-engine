@@ -5,12 +5,12 @@ tags:
 
 # API reference
 
-## User-facing surface
+## Schema declarations
 
 ### DeltaTable
 
 ```{eval-rst}
-.. autoclass:: delta_engine.DeltaTable
+.. autoclass:: delta_engine.schema.DeltaTable
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,7 +26,7 @@ exactly — any structural drift causes validation to fail.
 ### Column
 
 ```{eval-rst}
-.. autoclass:: delta_engine.Column
+.. autoclass:: delta_engine.schema.Column
    :members:
    :undoc-members:
 ```
@@ -34,7 +34,7 @@ exactly — any structural drift causes validation to fail.
 ### ForeignKey
 
 ```{eval-rst}
-.. autoclass:: delta_engine.ForeignKey
+.. autoclass:: delta_engine.schema.ForeignKey
    :members:
    :undoc-members:
 ```
@@ -42,15 +42,17 @@ exactly — any structural drift causes validation to fail.
 ### Self
 
 ```{eval-rst}
-.. autodata:: delta_engine.Self
+.. autodata:: delta_engine.schema.Self
 ```
 
 ### Property
 
 ```{eval-rst}
-.. autoclass:: delta_engine.Property
+.. autoclass:: delta_engine.schema.Property
    :members:
 ```
+
+## Engine
 
 ### Engine
 
@@ -92,9 +94,9 @@ exactly — any structural drift causes validation to fail.
 ## Databricks adapter
 
 ```{eval-rst}
-.. autofunction:: delta_engine.build_databricks_engine
+.. autofunction:: delta_engine.databricks.build_engine
 ```
 
 ```{eval-rst}
-.. autofunction:: delta_engine.configure_logging
+.. autofunction:: delta_engine.databricks.configure_logging
 ```

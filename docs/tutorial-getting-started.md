@@ -18,7 +18,7 @@ This tutorial walks you through defining your first Delta table, registering it,
 Import the building blocks and describe your table:
 
 ```python
-from delta_engine import Column, DeltaTable, Integer, String
+from delta_engine.schema import Column, DeltaTable, Integer, String
 
 customers = DeltaTable(
     catalog="dev",
@@ -39,7 +39,7 @@ Pass `partitioned_by` to `DeltaTable` to set partition columns when the table is
 created:
 
 ```python
-from delta_engine import Column, Date, DeltaTable, String
+from delta_engine.schema import Column, Date, DeltaTable, String
 
 events = DeltaTable(
     catalog="dev",
@@ -69,9 +69,9 @@ list of changes the engine rejects at validation.
 Build an engine and pass your table definitions straight to `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:
 
 ```python
-from delta_engine import build_databricks_engine
+from delta_engine.databricks import build_engine
 
-engine = build_databricks_engine(spark)
+engine = build_engine(spark)
 engine.sync(customers)
 ```
 
@@ -82,7 +82,7 @@ If the table does not exist, the engine creates it. If it already matches your d
 Call `configure_logging()` before `sync` to see colored progress output:
 
 ```python
-from delta_engine import configure_logging
+from delta_engine.databricks import configure_logging
 
 configure_logging()
 engine.sync(customers)

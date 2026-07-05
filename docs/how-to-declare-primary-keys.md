@@ -8,7 +8,7 @@ tags:
 Declare a primary key by setting `primary_key=True` on one or more `Column` objects. All primary key columns must be `NOT NULL`.
 
 ```python
-from delta_engine import Column, DeltaTable, Integer, String
+from delta_engine.schema import Column, DeltaTable, Integer, String
 
 orders = DeltaTable(
     catalog="dev",

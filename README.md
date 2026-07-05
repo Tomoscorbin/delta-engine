@@ -5,7 +5,8 @@ Declarative schema management for Delta Lake tables on Databricks. Define the sc
 ## Quickstart
 
 ```python
-from delta_engine import Column, DeltaTable, Integer, String, build_databricks_engine
+from delta_engine.databricks import build_engine
+from delta_engine.schema import Column, DeltaTable, Integer, String
 
 customers = DeltaTable(
     catalog="dev",
@@ -17,7 +18,7 @@ customers = DeltaTable(
     ],
 )
 
-engine = build_databricks_engine(spark)
+engine = build_engine(spark)
 engine.sync(customers)  # creates the table, or no-ops if it already matches
 ```
 
