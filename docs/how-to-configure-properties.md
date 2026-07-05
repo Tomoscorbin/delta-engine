@@ -22,7 +22,7 @@ Deletion vectors are intentionally **not** defaulted here — current Databricks
 ## Override a default
 
 ```python
-from delta_engine import Column, DeltaTable, Property, String
+from delta_engine.schema import Column, DeltaTable, Property, String
 
 table = DeltaTable(
     catalog="dev",
@@ -38,7 +38,7 @@ table = DeltaTable(
 ## Set additional properties
 
 ```python
-from delta_engine import Column, DeltaTable, Property, String
+from delta_engine.schema import Column, DeltaTable, Property, String
 
 table = DeltaTable(
     catalog="dev",

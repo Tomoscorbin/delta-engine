@@ -148,17 +148,23 @@ name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
 layers = [
-  "adapters | api",
+  "databricks | schema | adapters | api",
   "application",
   "domain",
 ]
 exhaustive = true
+ignore_imports = [
+  # Public import aliases only; implementations remain in api/adapters.
+  "delta_engine.databricks -> delta_engine.adapters.databricks",
+  "delta_engine.schema -> delta_engine.api",
+]
 
 [[tool.importlinter.contracts]]
 id = "backend-imports-stay-in-adapters"
 name = "Backend imports stay in adapters"
 type = "forbidden"
 source_modules = [
+  "delta_engine.schema",
   "delta_engine.api",
   "delta_engine.application",
   "delta_engine.domain",

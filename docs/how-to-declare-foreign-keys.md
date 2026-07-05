@@ -8,7 +8,7 @@ tags:
 Pass `foreign_keys` to `DeltaTable` with one `ForeignKey` per constraint. Each foreign key names the local columns and the table they reference; the referenced columns are inferred from that table's primary key.
 
 ```python
-from delta_engine import Column, DeltaTable, ForeignKey, Long, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
 
 customers = DeltaTable(
     catalog="dev",
@@ -45,7 +45,7 @@ The engine derives the constraint name as `{table_name}_{local_columns}_fk` — 
 Use the `Self` sentinel when a table references itself:
 
 ```python
-from delta_engine import Self
+from delta_engine.schema import Self
 
 employees = DeltaTable(
     catalog="dev",
