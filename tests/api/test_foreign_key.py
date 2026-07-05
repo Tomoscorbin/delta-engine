@@ -1,7 +1,7 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, Self
 from delta_engine.domain.model import QualifiedName
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Self
 
 
 def _customers() -> DeltaTable:

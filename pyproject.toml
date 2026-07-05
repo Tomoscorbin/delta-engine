@@ -154,9 +154,12 @@ layers = [
 ]
 exhaustive = true
 ignore_imports = [
-  # Public import aliases only; implementations remain in api/adapters.
+  # Public Databricks facade; implementation remains in adapters.
   "delta_engine.databricks -> delta_engine.adapters.databricks",
-  "delta_engine.schema -> delta_engine.api",
+  # Public schema facade: DeltaTable/ForeignKey/Self live in api.table (same
+  # layer, so the facade edge is exempted). Property is imported downward from
+  # application.properties, which the layer order already permits.
+  "delta_engine.schema -> delta_engine.api.table",
 ]
 
 [[tool.importlinter.contracts]]
