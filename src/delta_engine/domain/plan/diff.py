@@ -259,7 +259,7 @@ class PropertyUnset:
 
 
 @dataclass(frozen=True, slots=True)
-class UndeclaredProperty:
+class PropertyUndeclared:
     """
     A managed key present in the catalog but missing from the declaration.
 
@@ -431,7 +431,7 @@ type Change = (
     | TableCommentChanged
     | PropertySet
     | PropertyUnset
-    | UndeclaredProperty
+    | PropertyUndeclared
     | TableTagSet
     | TableTagUnset
     | PartitioningChanged
@@ -526,8 +526,9 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     ``TableDrift`` whose changes each record one atomic difference. An equal
     pair yields an empty drift.
 
-    The diff is scope-blind — every aspect is compared regardless of
-    ``managed_aspects``, with scope judged in validation — except for
+    Each aspect helper takes the two tables and pulls the slice it
+    compares. The diff is scope-blind — every aspect is compared regardless
+    of ``managed_aspects``, with scope judged in validation — except for
     properties, whose helper gates itself on the declaration's scope (see
     ``_diff_properties`` for why that aspect alone is assertion-like).
     """
@@ -535,25 +536,23 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         return TableMissing(desired=desired)
 
     changes: tuple[Change, ...] = (
-        *_diff_column_structure(desired.columns, observed.columns),
-        *_diff_column_comments(desired.columns, observed.columns),
-        *_diff_column_tags(desired.columns, observed.columns),
-        *_diff_table_comment(desired.comment, observed.comment),
-        *_diff_properties(desired.properties, observed.properties, desired.managed_aspects),
-        *_diff_table_tags(desired.tags, observed.tags),
-        *_diff_partitioning(desired.partitioned_by, observed.partitioned_by),
-        *_diff_primary_key(desired.primary_key, observed.primary_key),
-        *_diff_foreign_keys(desired.foreign_keys, observed.foreign_keys),
+        *_diff_column_structure(desired, observed),
+        *_diff_column_comments(desired, observed),
+        *_diff_column_tags(desired, observed),
+        *_diff_table_comment(desired, observed),
+        *_diff_properties(desired, observed),
+        *_diff_table_tags(desired, observed),
+        *_diff_partitioning(desired, observed),
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed),
     )
     return TableDrift(desired=desired, changes=changes)
 
 
-def _diff_column_structure(
-    desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[Change]:
+def _diff_column_structure(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """Return changes for column additions, removals, type drift, and nullability drift."""
-    desired_by_name = {column.name: column for column in desired}
-    observed_by_name = {column.name: column for column in observed}
+    desired_by_name = {column.name: column for column in desired.columns}
+    observed_by_name = {column.name: column for column in observed.columns}
     changes: list[Change] = []
 
     for name, column in desired_by_name.items():
@@ -587,13 +586,11 @@ def _diff_column_structure(
     return changes
 
 
-def _diff_column_comments(
-    desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[Change]:
+def _diff_column_comments(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """Comment changes for name-matched column pairs."""
-    observed_by_name = {column.name: column for column in observed}
+    observed_by_name = {column.name: column for column in observed.columns}
     changes: list[Change] = []
-    for column in desired:
+    for column in desired.columns:
         if column.name not in observed_by_name:
             continue
         observed_column = observed_by_name[column.name]
@@ -608,19 +605,17 @@ def _diff_column_comments(
     return changes
 
 
-def _diff_column_tags(
-    desired: tuple[Column, ...], observed: tuple[Column, ...]
-) -> list[Change]:
+def _diff_column_tags(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """
     Tag changes for every desired column, matched or added (full-state).
 
     A desired-only column's tags are included: the ADD_COLUMN phase precedes
     SET_COLUMN_TAG, so the column exists by the time its tags are applied.
     """
-    observed_by_name = {column.name: column for column in observed}
+    observed_by_name = {column.name: column for column in observed.columns}
     changes: list[Change] = []
 
-    for column in desired:
+    for column in desired.columns:
         observed_tags: Mapping[str, str] = (
             observed_by_name[column.name].tags if column.name in observed_by_name else {}
         )
@@ -638,18 +633,14 @@ def _diff_column_tags(
     return changes
 
 
-def _diff_table_comment(desired: str, observed: str) -> list[Change]:
+def _diff_table_comment(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """Return the table comment change, or nothing when the comments agree."""
-    if desired == observed:
+    if desired.comment == observed.comment:
         return []
-    return [TableCommentChanged(desired_comment=desired, observed_comment=observed)]
+    return [TableCommentChanged(desired_comment=desired.comment, observed_comment=observed.comment)]
 
 
-def _diff_properties(
-    desired: Mapping[str, str | None],
-    observed: Mapping[str, str],
-    managed_aspects: frozenset[TableAspect],
-) -> list[Change]:
+def _diff_properties(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """
     Property changes under exact-declaration semantics.
 
@@ -666,13 +657,13 @@ def _diff_properties(
     not manage ``PROPERTIES`` must make no assertion at all, and the diff
     returns nothing rather than facts for validation to judge.
     """
-    if TableAspect.PROPERTIES not in managed_aspects:
+    if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 
     changes: list[Change] = []
 
-    for name, declared_value in desired.items():
-        observed_value = observed.get(name)
+    for name, declared_value in desired.properties.items():
+        observed_value = observed.properties.get(name)
         if declared_value is None:
             if observed_value is not None:
                 changes.append(PropertyUnset(name=name, observed_value=observed_value))
@@ -683,65 +674,69 @@ def _diff_properties(
                 )
             )
 
-    for name, observed_value in observed.items():
-        if name not in desired:
-            changes.append(UndeclaredProperty(name=name, observed_value=observed_value))
+    for name, observed_value in observed.properties.items():
+        if name not in desired.properties:
+            changes.append(PropertyUndeclared(name=name, observed_value=observed_value))
 
     return changes
 
 
-def _diff_table_tags(desired: Mapping[str, str], observed: Mapping[str, str]) -> list[Change]:
+def _diff_table_tags(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """Tag changes under full-state semantics: observed-only tags are drift and are unset."""
     changes: list[Change] = []
 
-    for name, value in desired.items():
-        if name not in observed or observed[name] != value:
+    for name, value in desired.tags.items():
+        if name not in observed.tags or observed.tags[name] != value:
             changes.append(TableTagSet(name=name, value=value))
 
-    for name in observed:
-        if name not in desired:
+    for name in observed.tags:
+        if name not in desired.tags:
             changes.append(TableTagUnset(name=name))
 
     return changes
 
 
-def _diff_partitioning(desired: tuple[str, ...], observed: tuple[str, ...]) -> list[Change]:
+def _diff_partitioning(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """Return the partitioning change, or nothing when the specs agree."""
-    if desired == observed:
+    if desired.partitioned_by == observed.partitioned_by:
         return []
-    return [PartitioningChanged(desired_partitioning=desired, observed_partitioning=observed)]
+    return [
+        PartitioningChanged(
+            desired_partitioning=desired.partitioned_by,
+            observed_partitioning=observed.partitioned_by,
+        )
+    ]
 
 
-def _diff_primary_key(
-    desired: PrimaryKeyConstraint | None,
-    observed: PrimaryKeyConstraint | None,
-) -> list[Change]:
+def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """
     Return the primary key change, or nothing when the keys agree.
 
     Identity is column-set equality: order and constraint name do not make
     two keys different.
     """
-    if desired is not None and observed is None:
-        return [PrimaryKeyAdded(primary_key=desired)]
+    desired_key = desired.primary_key
+    observed_key = observed.primary_key
 
-    if desired is None and observed is not None:
-        return [PrimaryKeyRemoved(observed_primary_key=observed)]
+    if desired_key is not None and observed_key is None:
+        return [PrimaryKeyAdded(primary_key=desired_key)]
+
+    if desired_key is None and observed_key is not None:
+        return [PrimaryKeyRemoved(observed_primary_key=observed_key)]
 
     if (
-        desired is not None
-        and observed is not None
-        and set(desired.columns) != set(observed.columns)
+        desired_key is not None
+        and observed_key is not None
+        and set(desired_key.columns) != set(observed_key.columns)
     ):
-        return [PrimaryKeyChanged(desired_primary_key=desired, observed_primary_key=observed)]
+        return [
+            PrimaryKeyChanged(desired_primary_key=desired_key, observed_primary_key=observed_key)
+        ]
 
     return []
 
 
-def _diff_foreign_keys(
-    desired: tuple[ForeignKeyConstraint, ...],
-    observed: tuple[ForeignKeyConstraint, ...],
-) -> list[Change]:
+def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
     """
     Foreign key changes, matched by content signature.
 
@@ -749,8 +744,8 @@ def _diff_foreign_keys(
     an FK present on both sides under different constraint names produces
     nothing, so a sync over an unchanged catalog stays idempotent.
     """
-    desired_by_signature = {fk.signature: fk for fk in desired}
-    observed_by_signature = {fk.signature: fk for fk in observed}
+    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
     changes: list[Change] = []
 
     for signature, fk in desired_by_signature.items():

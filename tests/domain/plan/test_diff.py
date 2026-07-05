@@ -46,13 +46,13 @@ from delta_engine.domain.plan.diff import (
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
     PropertySet,
+    PropertyUndeclared,
     PropertyUnset,
     TableCommentChanged,
     TableDrift,
     TableMissing,
     TableTagSet,
     TableTagUnset,
-    UndeclaredProperty,
     diff_table,
 )
 
@@ -347,7 +347,7 @@ def test_undeclared_registered_key_produces_blocking_change():
     # Then the change records the fact for validation to fail; it plans nothing
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        UndeclaredProperty(name="delta.columnMapping.mode", observed_value="name"),
+        PropertyUndeclared(name="delta.columnMapping.mode", observed_value="name"),
     )
     assert diff.changes[0].actions() == ()
 
@@ -362,7 +362,7 @@ def test_every_observed_key_without_declaration_is_a_blocking_change():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        UndeclaredProperty(name="delta.enableChangeDataFeed", observed_value="true"),
+        PropertyUndeclared(name="delta.enableChangeDataFeed", observed_value="true"),
     )
 
 

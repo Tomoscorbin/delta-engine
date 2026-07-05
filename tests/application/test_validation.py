@@ -27,11 +27,11 @@ from delta_engine.domain.plan.diff import (
     ColumnRemoved,
     PartitioningChanged,
     PropertySet,
+    PropertyUndeclared,
     PropertyUnset,
     TableCommentChanged,
     TableDrift,
     TableMissing,
-    UndeclaredProperty,
 )
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
@@ -469,7 +469,7 @@ def test_ignores_value_changes_on_unrestricted_keys():
 def test_fails_undeclared_registered_key_offering_none():
     # Given an undeclared unrestricted key — removal via None is offered
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
-    changes = (UndeclaredProperty(name="delta.enableChangeDataFeed", observed_value="true"),)
+    changes = (PropertyUndeclared(name="delta.enableChangeDataFeed", observed_value="true"),)
 
     failures = rule.evaluate(_drift(*changes))
 
@@ -482,7 +482,7 @@ def test_fails_undeclared_unset_forbidden_key_without_offering_none():
     # Given columnMapping.mode undeclared — it cannot be removed, so the
     # message must not suggest declaring None
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
-    changes = (UndeclaredProperty(name="delta.columnMapping.mode", observed_value="name"),)
+    changes = (PropertyUndeclared(name="delta.columnMapping.mode", observed_value="name"),)
 
     failures = rule.evaluate(_drift(*changes))
 

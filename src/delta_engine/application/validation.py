@@ -19,11 +19,11 @@ from delta_engine.domain.plan.diff import (
     ColumnRemoved,
     PartitioningChanged,
     PropertySet,
+    PropertyUndeclared,
     PropertyUnset,
     TableDiff,
     TableDrift,
     TableMissing,
-    UndeclaredProperty,
 )
 
 
@@ -214,10 +214,10 @@ class PropertyMustBeDeclared:
         return tuple(
             ValidationFailure(rule_name=self.name, message=self._message(change))
             for change in drift.managed_changes
-            if isinstance(change, UndeclaredProperty)
+            if isinstance(change, PropertyUndeclared)
         )
 
-    def _message(self, change: UndeclaredProperty) -> str:
+    def _message(self, change: PropertyUndeclared) -> str:
         if not self._removal_permitted(change.name, change.observed_value):
             return (
                 f"Operation not allowed: {change.name} is set on the table"

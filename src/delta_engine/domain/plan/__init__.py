@@ -35,6 +35,7 @@ from delta_engine.domain.plan.diff import (
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
     PropertySet,
+    PropertyUndeclared,
     PropertyUnset,
     TableCommentChanged,
     TableDiff,
@@ -42,7 +43,6 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     TableTagSet,
     TableTagUnset,
-    UndeclaredProperty,
     diff_table,
 )
 
@@ -70,6 +70,7 @@ __all__ = [
     "PrimaryKeyChanged",
     "PrimaryKeyRemoved",
     "PropertySet",
+    "PropertyUndeclared",
     "PropertyUnset",
     "SetColumnComment",
     "SetColumnNullability",
@@ -85,7 +86,6 @@ __all__ = [
     "TableMissing",
     "TableTagSet",
     "TableTagUnset",
-    "UndeclaredProperty",
     "UnsetColumnTag",
     "UnsetProperty",
     "UnsetTableTag",
