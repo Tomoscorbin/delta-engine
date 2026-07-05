@@ -8,7 +8,7 @@
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
 - [ ] where does backticked_table_name belong? Should it be constructed inside the compiler dispatches?
 - [ ] should all of the sql statements live in a dedicated file and be imported into reader/exeecutor?
-- [ ] should databricks rules live in validator?
+- [ ] Make the application layer backend-agnostic, not just backend-library-free. Today the `backend-imports-stay-in-adapters` contract only forbids importing the `delta`/`pyspark` *packages*; the application layer still hardcodes Delta-family *policy* — the safe-change rules (`PartitioningChangeNotSupported`, `ColumnDataTypeChangeNotSupported`, `NonNullableColumnAdd`, `ColumnMappingRequiredForDrop`) exist because Databricks/Delta rejects those operations, and `application/properties.py` holds the Delta property catalogue (`DELTA_PROPERTY_REGISTRY`, `COLUMN_MAPPING_MODE_KEY`, `delta.*` key strings) consumed by `validation.py`, `api/properties.py`, and the reader. The layering is sound for now (application is the only layer all three consumers can reach without violating the `adapters|api → application → domain` order), but it means "backend-agnostic" is only half true. The real refactor: `application` holds only the *mechanism* (how rules run, the `Rule` protocol, how `validate_diff` composes them), and the backend *specifics* (which rules, which property keys and their restrictions) are injected from the composition root or an adapter-provided port. This must move ALL the backend-flavoured rules and the property catalogue together — moving only the property pieces just relocates a third of the problem. Larger change, own PR. See the property-ownership spec addendum for how the registry ended up in application.
 - [ ] review except AnalysisException in reader's _fetch_primary_key()
 - [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
 - [ ] make the nested if else statments in engine more readable
@@ -21,7 +21,7 @@
 - [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row
 - [ ] utilise __init__ __all__ so that we can reduce the number of import line
 - [ ] Add build docs to pre-commit?
-- [ ] Remove default properties from `DeltaTable` (no implicit `delta.columnMapping.mode=name`), add a `ColumnMappingRequiredForDrop` precondition check, and fast-fail `metadata_only=True` declarations that pass `properties`. The precondition check needs desired+observed property *state*, not drift — a property already correct in the catalog produces no fact — so it cannot live in unary `validate_diff`. Preferred shape: a separate `validate_execution_preconditions(desired, observed, facts)` composed by the engine's validate phase. Alternatives considered and parked: a bool field on `TableDrift` (leaks a Delta property key into the domain); full desired/observed snapshots on `TableDrift` (heavy test fixtures).
+- [x] Remove default properties from `DeltaTable`, `ColumnMappingRequiredForDrop` precondition, metadata-only property fast-fail — shipped in the property-ownership feature (exact declaration)
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] should DesiredTableSource live in ports.py?
 - [ ] Decide whether to emit `RELY` on FK/PK constraints. Without `RELY`, Databricks treats informational constraints as documentation only and the optimizer cannot use them for join elimination / query rewrite. If the point of declaring keys is optimization, they are currently inert. Weigh against the risk of `RELY` on unverified data (the optimizer trusts it). Would add a `rely: bool` to `ForeignKeyConstraint`/`PrimaryKeyConstraint` and a ` NOT ENFORCED RELY` / ` NOT ENFORCED` suffix in the compiler.
@@ -40,7 +40,8 @@
 - [ ] Put Propertiess into table.py alongside DeltaTable. rename table.py to delta_table.py
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
-- [ ] Should we remove the concept of default properties altogether?
+- [x] Should we remove the concept of default properties altogether? — yes; shipped in the property-ownership feature
 - [ ] restructure files so that important things come first
 - [ ] is it possible to remove Changed[T] so that everything is either Added or Removed?
+- [ ] `ignored_properties` escape hatch for coexistence with other tooling writing managed keys (deferred from the property-ownership design; see spec Known Limitations)
 - [x] Teach Databricks factory through `delta_engine.databricks.build_engine` instead of moving it into API

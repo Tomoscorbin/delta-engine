@@ -25,6 +25,7 @@ class ActionPhase(IntEnum):
 
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    UNSET_PROPERTY = auto()
     SET_TABLE_TAG = auto()
     UNSET_TABLE_TAG = auto()
     DROP_FOREIGN_KEY = auto()
@@ -107,12 +108,32 @@ class DropColumn(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetProperty(Action):
-    """Set a table property."""
+    """
+    Set a table property to its declared value.
+
+    ``observed_value`` records what the catalog held when the plan was built
+    (None = key absent). It does not affect the compiled SQL; it exists so
+    reports can distinguish a first write from an update.
+    """
 
     name: str
     value: str
+    observed_value: str | None = None
 
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PROPERTY
+
+    @property
+    def subject(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True, slots=True)
+class UnsetProperty(Action):
+    """Remove a table property the declaration asserts absent."""
+
+    name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.UNSET_PROPERTY
 
     @property
     def subject(self) -> str:

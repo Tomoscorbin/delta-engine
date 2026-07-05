@@ -212,15 +212,15 @@ class Engine:
             if run.diff is None:
                 continue
             result = validate_diff(run.diff)
-            if result.failed:
+            run.failures.extend(result.failures)
+            if run.failures:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
                     run.qualified_name,
-                    len(result.failures),
+                    len(run.failures),
                 )
             else:
                 logger.info("Validation passed for %s", run.qualified_name)
-            run.failures.extend(result.failures)
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:

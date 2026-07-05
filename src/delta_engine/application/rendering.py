@@ -28,6 +28,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -82,7 +83,14 @@ def _(action: SetTableComment) -> str:
 
 @action_diff_line.register
 def _(action: SetProperty) -> str:
-    return f"~ property {action.name} = '{action.value}'"
+    if action.observed_value is None:
+        return f"+ property {action.name} = '{action.value}'"
+    return f"~ property {action.name} = '{action.value}' (was '{action.observed_value}')"
+
+
+@action_diff_line.register
+def _(action: UnsetProperty) -> str:
+    return f"- property {action.name}"
 
 
 @action_diff_line.register

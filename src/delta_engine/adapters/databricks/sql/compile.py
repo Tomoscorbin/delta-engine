@@ -34,6 +34,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -119,6 +120,12 @@ def _(action: DropColumn, backticked_table_name: str) -> str:
 def _(action: SetProperty, backticked_table_name: str) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
     return f"ALTER TABLE {backticked_table_name} SET TBLPROPERTIES ({pair})"
+
+
+@_compile_action.register
+def _(action: UnsetProperty, backticked_table_name: str) -> str:
+    key = quote_literal(action.name)
+    return f"ALTER TABLE {backticked_table_name} UNSET TBLPROPERTIES IF EXISTS ({key})"
 
 
 @_compile_action.register
@@ -227,10 +234,15 @@ def _set_table_comment(comment: str) -> str:
     return f"COMMENT {quote_literal(comment)}"
 
 
-def _set_properties(props: Mapping[str, str]) -> str:
-    if not props:
+def _set_properties(props: Mapping[str, str | None]) -> str:
+    # None values are absence assertions: a new table simply omits the key.
+    pairs = ", ".join(
+        f"{quote_literal(name)}={quote_literal(value)}"
+        for name, value in sorted(props.items())
+        if value is not None
+    )
+    if not pairs:
         return ""
-    pairs = ", ".join(f"{quote_literal(k)}={quote_literal(v)}" for k, v in sorted(props.items()))
     return f"TBLPROPERTIES ({pairs})"
 
 

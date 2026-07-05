@@ -1,8 +1,11 @@
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.application.validation import (
     DEFAULT_RULES,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
+    PropertyMustBeDeclared,
+    PropertyTransitionNotSupported,
     ValidationResult,
     validate_diff,
 )
@@ -21,7 +24,11 @@ from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
+    ColumnRemoved,
     PartitioningChanged,
+    PropertySet,
+    PropertyUndeclared,
+    PropertyUnset,
     TableCommentChanged,
     TableDrift,
     TableMissing,
@@ -39,9 +46,13 @@ def _desired_table(managed_aspects: frozenset[TableAspect] = ALL_ASPECTS) -> Des
 
 
 def _drift(
-    *changes: Change, managed_aspects: frozenset[TableAspect] = ALL_ASPECTS
+    *changes: Change,
+    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    desired: DesiredTable | None = None,
 ) -> TableDrift:
-    return TableDrift(changes=tuple(changes), managed_aspects=managed_aspects)
+    if desired is None:
+        desired = _desired_table(managed_aspects)
+    return TableDrift(desired=desired, changes=tuple(changes))
 
 
 def _tightening(column_name: str = "id") -> ColumnNullabilityChanged:
@@ -65,7 +76,7 @@ def test_rejects_add_of_non_nullable_column():
     changes = (ColumnAdded(Column("order_id", Integer(), nullable=False)),)
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 1
@@ -82,7 +93,7 @@ def test_rejects_all_non_nullable_column_adds_in_a_single_pass():
     )
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 3
@@ -97,7 +108,7 @@ def test_allows_add_of_nullable_column():
     rule = NonNullableColumnAdd()
     changes = (ColumnAdded(Column("age", Integer())),)
 
-    assert rule.evaluate(changes) == ()
+    assert rule.evaluate(_drift(*changes)) == ()
 
 
 def test_non_nullable_column_add_ignores_creation():
@@ -118,7 +129,7 @@ def test_non_nullable_column_add_passes_when_no_changes():
     # Given an empty change tuple
     rule = NonNullableColumnAdd()
 
-    assert rule.evaluate(()) == ()
+    assert rule.evaluate(_drift()) == ()
 
 
 # ---- NullabilityTighteningOnExistingColumn
@@ -130,7 +141,7 @@ def test_rejects_tightening_an_existing_column_to_not_null():
     changes = (_tightening("order_id"),)
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 1
@@ -144,7 +155,7 @@ def test_rejects_all_nullability_tightenings_in_a_single_pass():
     changes = (_tightening("a"), _tightening("b"))
 
     # When
-    failures = rule.evaluate(changes)
+    failures = rule.evaluate(_drift(*changes))
 
     # Then
     assert len(failures) == 2
@@ -160,7 +171,7 @@ def test_allows_loosening_an_existing_column_to_nullable():
         column_name="id", desired_nullable=True, observed_nullable=False
     )
 
-    assert rule.evaluate((loosening,)) == ()
+    assert rule.evaluate(_drift(loosening)) == ()
 
 
 # ---- unsupported drift → ValidationFailure
@@ -279,6 +290,9 @@ def test_default_rules_cover_all_safety_policies():
         "NullabilityTighteningOnExistingColumn",
         "ColumnDataTypeChangeNotSupported",
         "PartitioningChangeNotSupported",
+        "PropertyTransitionNotSupported",
+        "PropertyMustBeDeclared",
+        "ColumnMappingRequiredForDrop",
     }
 
 
@@ -398,3 +412,142 @@ def test_validate_diff_passes_table_missing_when_column_structure_managed():
     result = validate_diff(TableMissing(desired=desired))
 
     assert result.failed is False
+
+
+# ---- PropertyTransitionNotSupported
+
+
+def test_blocks_column_mapping_downgrade():
+    # Given a declared downgrade from name to none — Databricks rejects it
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="none", observed_value="name"),
+    )
+
+    failures = rule.evaluate(_drift(*changes))
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "delta.columnMapping.mode" in failures[0].message
+
+
+def test_allows_column_mapping_upgrade():
+    # Given the one permitted transition: none -> name
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value="none"),
+    )
+
+    assert rule.evaluate(_drift(*changes)) == ()
+
+
+def test_allows_first_write_of_restricted_key():
+    # Given the key is absent from the catalog — first writes are always legal
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value=None),
+    )
+
+    assert rule.evaluate(_drift(*changes)) == ()
+
+
+def test_ignores_value_changes_on_unrestricted_keys():
+    # Given a value change on a key whose registry entry restricts nothing
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(
+            name="delta.enableChangeDataFeed", desired_value="false", observed_value="true"
+        ),
+    )
+
+    assert rule.evaluate(_drift(*changes)) == ()
+
+
+# ---- PropertyMustBeDeclared
+
+
+def test_fails_undeclared_registered_key_offering_none():
+    # Given an undeclared unrestricted key — removal via None is offered
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+    changes = (PropertyUndeclared(name="delta.enableChangeDataFeed", observed_value="true"),)
+
+    failures = rule.evaluate(_drift(*changes))
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyMustBeDeclared"
+    assert "None" in failures[0].message
+
+
+def test_fails_undeclared_unset_forbidden_key_without_offering_none():
+    # Given columnMapping.mode undeclared — it cannot be removed, so the
+    # message must not suggest declaring None
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+    changes = (PropertyUndeclared(name="delta.columnMapping.mode", observed_value="name"),)
+
+    failures = rule.evaluate(_drift(*changes))
+
+    assert len(failures) == 1
+    assert "cannot be unset" in failures[0].message
+    assert "None" not in failures[0].message
+
+
+def test_passes_when_no_undeclared_key():
+    # Given no changes at all
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+
+    assert rule.evaluate(_drift()) == ()
+
+
+def test_blocks_none_declaration_on_removal_forbidden_key():
+    # Given a declaration asserting columnMapping.mode absent on a table that
+    # has it — a removal is a transition to absence, judged by the same rule
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (PropertyUnset(name="delta.columnMapping.mode", observed_value="name"),)
+
+    failures = rule.evaluate(_drift(*changes))
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "cannot be removed" in failures[0].message
+
+
+def test_allows_none_declaration_on_unrestricted_key():
+    # Given an absence assertion on a key whose registry entry restricts nothing
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
+    )
+
+    assert rule.evaluate(_drift(*changes)) == ()
+
+
+# ---- column-drop precondition (through validate_diff)
+
+
+def test_drop_without_column_mapping_fails_before_execution():
+    # Given a plan that drops a column but the declaration lacks column mapping
+    diff = _drift(ColumnRemoved(Column("stale", Integer())))
+
+    failures = validate_diff(diff).failures
+
+    assert any(
+        f.rule_name == "ColumnMappingRequiredForDrop"
+        and "delta.columnMapping.mode" in f.message
+        for f in failures
+    )
+
+
+def test_drop_with_declared_column_mapping_passes():
+    # Given the declaration states mode=name (set phases before drop)
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    diff = _drift(ColumnRemoved(Column("stale", Integer())), desired=desired)
+
+    assert validate_diff(diff).failed is False
+
+
+def test_no_drop_means_no_precondition_failure():
+    assert validate_diff(_drift()).failed is False

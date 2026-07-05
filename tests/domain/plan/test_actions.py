@@ -4,6 +4,7 @@ import pytest
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPhase,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -19,6 +20,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -62,6 +64,7 @@ def test_plan_orders_actions_by_phase_in_documented_precedence():
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
+            UnsetProperty(name="p_unset"),
             SetColumnNullability(column_name="nn_col", nullable=False),
             DropColumn(column_name="d_col"),
             SetColumnComment(column_name="c_col", comment="c"),
@@ -73,6 +76,7 @@ def test_plan_orders_actions_by_phase_in_documented_precedence():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        UnsetProperty,
         AddColumn,
         DropColumn,
         SetColumnComment,
@@ -225,6 +229,7 @@ def test_plan_full_phase_order_with_all_action_types():
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
+            UnsetProperty(name="p_unset"),
             SetColumnNullability(column_name="nn_col", nullable=False),
             DropForeignKey(constraint_name="t_old_fk"),
             DropPrimaryKey(),
@@ -242,6 +247,7 @@ def test_plan_full_phase_order_with_all_action_types():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        UnsetProperty,
         SetTableTag,
         UnsetTableTag,
         DropForeignKey,
@@ -392,3 +398,16 @@ def test_plan_orders_set_column_tag_before_unset_column_tag():
 
     # Then sets run before unsets (documented phase precedence)
     assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]
+
+
+def test_unset_property_phases_immediately_after_set_property():
+    # Given the two property phases
+    # Then unset sorts directly after set so mixed plans stay deterministic
+    assert ActionPhase.UNSET_PROPERTY == ActionPhase.SET_PROPERTY + 1
+
+
+def test_set_property_observed_value_defaults_to_none():
+    # Given a SetProperty built without an observed value (first write)
+    action = SetProperty(name="delta.enableChangeDataFeed", value="true")
+
+    assert action.observed_value is None

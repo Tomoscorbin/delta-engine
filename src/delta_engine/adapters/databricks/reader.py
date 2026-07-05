@@ -26,6 +26,7 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -154,7 +155,14 @@ class DatabricksReader:
 
     def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
         """
-        Return all catalog table properties as a read-only mapping.
+        Return the managed catalog table properties as a read-only mapping.
+
+        The full catalog map is filtered to the keys in
+        ``DELTA_PROPERTY_REGISTRY``: platform-written keys (protocol
+        bookkeeping, auto-enabled features, internal counters) never reach
+        the domain, so they can neither trip validation nor churn plans.
+        This is backend normalization, owned here like identifier
+        lowercasing and type parsing.
 
         Raises when ``DESCRIBE DETAIL`` yields no row for a table the existence
         probe just reported present: an empty result there is not "a table with
@@ -163,6 +171,12 @@ class DatabricksReader:
         return ``ReadFailed`` — the honest outcome for "could not determine
         state" — rather than a ``TablePresent`` with no properties, which would
         make the differ re-apply every managed property on every sync.
+
+        DESCRIBE DETAIL is load-bearing here: its ``properties`` column is
+        ``Metadata.configuration`` verbatim — Delta strips protocol keys
+        (``delta.minReaderVersion``, ``delta.feature.*``) from it before
+        every commit. Never switch to ``SHOW TBLPROPERTIES``, which
+        synthesizes those protocol rows into its output at read time.
         """
         # The name is interpolated into SQL text here, so it must be backtick-quoted
         # to stay an identifier (and escape any embedded backtick). This differs
@@ -176,7 +190,12 @@ class DatabricksReader:
                 " existence probe just reported as present — the table was dropped"
                 " mid-read or the catalog is inconsistent."
             )
-        return MappingProxyType(dict(row["properties"]))
+        observed_properties = {
+            name: value
+            for name, value in dict(row["properties"]).items()
+            if name in DELTA_PROPERTY_REGISTRY
+        }
+        return MappingProxyType(observed_properties)
 
     def _fetch_primary_key(self, qualified_name: QualifiedName) -> PrimaryKeyConstraint | None:
         """

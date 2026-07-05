@@ -23,6 +23,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -431,3 +432,43 @@ def test_set_column_tag_escapes_single_quotes_in_key_and_value():
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')"
     )
+
+
+def test_unset_property_compiles_to_unset_tblproperties_if_exists():
+    # Given an UnsetProperty action
+    statements = compile_plan(
+        _TARGET, ActionPlan((UnsetProperty(name="delta.enableChangeDataFeed"),))
+    )
+
+    # Then it unsets with IF EXISTS so out-of-band removal stays idempotent
+    assert statements == (
+        "ALTER TABLE `cat`.`sch`.`tbl` "
+        "UNSET TBLPROPERTIES IF EXISTS ('delta.enableChangeDataFeed')",
+    )
+
+
+def test_set_property_sql_ignores_observed_value():
+    # Given two SetProperty actions differing only in observed_value
+    first_write = SetProperty(name="delta.enableChangeDataFeed", value="true")
+    update = SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false")
+
+    # Then both compile to identical SQL — observed_value is rendering-only
+    plan_a = compile_plan(_TARGET, ActionPlan((first_write,)))
+    plan_b = compile_plan(_TARGET, ActionPlan((update,)))
+    assert plan_a == plan_b
+
+
+def test_create_table_filters_none_property_assertions():
+    # Given a desired table asserting one value and one absence
+    desired = DesiredTable(
+        qualified_name=_TARGET,
+        columns=(Column("id", Integer()),),
+        properties={"delta.enableChangeDataFeed": "true", "delta.logRetentionDuration": None},
+    )
+
+    [statement] = compile_plan(_TARGET, ActionPlan((CreateTable(desired),)))
+
+    # Then only the valued key reaches TBLPROPERTIES — a new table cannot
+    # carry a key that needs removing
+    assert "delta.enableChangeDataFeed" in statement
+    assert "delta.logRetentionDuration" not in statement

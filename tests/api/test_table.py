@@ -1,8 +1,8 @@
 import pytest
 
 from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
-from delta_engine.api.properties import Property
 from delta_engine.api.table import METADATA_ASPECTS
+from delta_engine.application.properties import Property
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column as DomainColumn,
@@ -10,43 +10,6 @@ from delta_engine.domain.model import (
     TableAspect,
 )
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
-
-
-def test_user_overrides_take_precedence_over_defaults():
-    # Given the sole default property (column mapping=name) is overridden by the user
-    user_properties = {
-        Property.COLUMN_MAPPING_MODE.value: "none",  # user wants to disable
-    }
-    table = DeltaTable(
-        catalog="coredev",
-        schema="medallia",
-        name="responses",
-        columns=[Column("id", Integer())],
-        properties=user_properties,
-    )
-
-    # When computing effective properties
-    effective = table.effective_properties
-
-    # Then the user value wins over the default
-    assert effective[Property.COLUMN_MAPPING_MODE.value] == "none"
-
-
-def test_defaults_are_applied_when_no_user_properties_given():
-    # Given a table with no explicit properties
-    table = DeltaTable(
-        catalog="coredev",
-        schema="medallia",
-        name="responses",
-        columns=[Column("id", Integer())],
-    )
-
-    # When computing effective properties
-    effective = table.effective_properties
-
-    # Then the column-mapping default is present and no other property is defaulted in
-    # (deletion vectors is left to the Databricks runtime default, not managed here)
-    assert effective == {Property.COLUMN_MAPPING_MODE.value: "name"}
 
 
 @pytest.mark.parametrize(
@@ -74,7 +37,7 @@ def test_rejects_unknown_table_property_keys(bad_keys):
 def test_accepts_only_enum_property_keys():
     # Given user supplied allowed keys from the enum
     user_properties = {
-        Property.ENABLE_DELETION_VECTORS.value: "false",
+        Property.CHANGE_DATA_FEED.value: "true",
         Property.COLUMN_MAPPING_MODE.value: "name",
     }
 
@@ -88,13 +51,14 @@ def test_accepts_only_enum_property_keys():
     )
 
     # Then it succeeds and the keys are intact
-    assert table.effective_properties[Property.ENABLE_DELETION_VECTORS.value] == "false"
-    assert table.effective_properties[Property.COLUMN_MAPPING_MODE.value] == "name"
+    properties = table.to_desired_table().properties
+    assert properties[Property.CHANGE_DATA_FEED.value] == "true"
+    assert properties[Property.COLUMN_MAPPING_MODE.value] == "name"
 
 
 def test_accepts_property_enum_members_as_keys():
     # Given properties keyed by the Property enum members directly (not their .value)
-    user_properties = {Property.ENABLE_DELETION_VECTORS: "false"}
+    user_properties = {Property.CHANGE_DATA_FEED: "true"}
 
     # When constructing the table
     table = DeltaTable(
@@ -108,8 +72,7 @@ def test_accepts_property_enum_members_as_keys():
     # Then the enum key is accepted and resolves to the same managed property as
     # its string value, so callers can declare properties without reaching for .value
     desired = table.to_desired_table()
-    assert desired.properties[Property.ENABLE_DELETION_VECTORS.value] == "false"
-    assert desired.properties[Property.COLUMN_MAPPING_MODE.value] == "name"
+    assert desired.properties[Property.CHANGE_DATA_FEED.value] == "true"
 
 
 def test_partition_columns_must_exist():
@@ -168,23 +131,6 @@ def test_to_desired_table_preserves_columns_and_metadata():
     assert desired.comment == "Daily aggregated orders"
     assert desired.partitioned_by == ("ds",)
 
-
-def test_to_desired_table_carries_effective_properties_with_defaults():
-    # Given a table where the user declares a property alongside the defaults
-    table = DeltaTable(
-        catalog="cat",
-        schema="core",
-        name="dim_date",
-        columns=[Column("id", Integer())],
-        properties={Property.ENABLE_DELETION_VECTORS.value: "false"},
-    )
-
-    # When converting to the domain table
-    desired = table.to_desired_table()
-
-    # Then effective properties (defaults overlaid by user values) are carried through
-    assert desired.properties[Property.ENABLE_DELETION_VECTORS.value] == "false"
-    assert desired.properties[Property.COLUMN_MAPPING_MODE.value] == "name"
 
 
 def test_to_desired_table_defaults_partitioning_to_empty_tuple():
@@ -434,9 +380,25 @@ def test_metadata_only_table_manages_metadata_aspects():
     assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
 
 
-def test_metadata_only_table_has_no_properties():
-    # Given a metadata-only declaration — properties control physical Delta behaviour,
-    # so they are deliberately excluded from metadata-only mode
+def test_metadata_only_declaration_carries_properties_without_deploying_them():
+    # Given a metadata-only declaration of a full table, properties included —
+    # the flag scopes deployment, not what may be declared
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        properties={Property.CHANGE_DATA_FEED.value: "true"},
+        metadata_only=True,
+    )
+
+    # Then the declaration carries the property; PROPERTIES stays unmanaged
+    desired = table.to_desired_table()
+    assert desired.properties == {Property.CHANGE_DATA_FEED.value: "true"}
+    assert TableAspect.PROPERTIES not in desired.managed_aspects
+
+
+def test_metadata_only_without_properties_constructs_cleanly():
     table = DeltaTable(
         catalog="dev",
         schema="silver",
@@ -445,8 +407,45 @@ def test_metadata_only_table_has_no_properties():
         metadata_only=True,
     )
 
-    # Then no properties are injected (not even the column-mapping default)
     assert table.to_desired_table().properties == {}
+
+
+def test_no_properties_are_injected_by_default():
+    # Given a table declared without properties
+    table = DeltaTable(
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then the desired table carries exactly what was declared: nothing
+    assert table.to_desired_table().properties == {}
+
+
+def test_none_property_declarations_are_carried_through():
+    # Given a declaration asserting a key absent
+    table = DeltaTable(
+        catalog="coredev",
+        schema="medallia",
+        name="responses",
+        columns=[Column("id", Integer())],
+        properties={Property.CHANGE_DATA_FEED.value: None},
+    )
+
+    assert table.to_desired_table().properties == {Property.CHANGE_DATA_FEED.value: None}
+
+
+def test_rejects_unregistered_key_declared_as_none():
+    # Given an absence assertion for a key the engine does not manage
+    with pytest.raises(ValueError, match="not managed"):
+        DeltaTable(
+            catalog="coredev",
+            schema="medallia",
+            name="responses",
+            columns=[Column("id", Integer())],
+            properties={"delta.enableRowTracking": None},
+        )
 
 
 def test_metadata_only_table_still_lowers_the_full_schema():
