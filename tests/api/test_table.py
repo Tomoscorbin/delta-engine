@@ -1,8 +1,6 @@
 import pytest
 
-from delta_engine.api import Column, DeltaTable, ForeignKey, Integer, String
 from delta_engine.api.table import METADATA_ASPECTS
-from delta_engine.application.properties import Property
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column as DomainColumn,
@@ -10,6 +8,7 @@ from delta_engine.domain.model import (
     TableAspect,
 )
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Property, String
 
 
 @pytest.mark.parametrize(
@@ -466,8 +465,10 @@ def test_metadata_only_table_still_lowers_the_full_schema():
 def test_metadata_aspects_excludes_structure_properties_and_partitioning():
     # Given the metadata-only named mode
     # Then physical-behaviour aspects are excluded by design
-    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset({
-        TableAspect.COLUMN_STRUCTURE,
-        TableAspect.PROPERTIES,
-        TableAspect.PARTITIONING,
-    })
+    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
+        {
+            TableAspect.COLUMN_STRUCTURE,
+            TableAspect.PROPERTIES,
+            TableAspect.PARTITIONING,
+        }
+    )

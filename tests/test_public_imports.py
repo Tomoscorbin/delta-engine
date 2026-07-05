@@ -3,7 +3,27 @@
 import subprocess
 import sys
 
+from delta_engine.api.table import (
+    DeltaTable as DeltaTableImpl,
+    ForeignKey as ForeignKeyImpl,
+    Self as SelfImpl,
+)
+from delta_engine.application.properties import Property as PropertyImpl
 import delta_engine.databricks as databricks
+from delta_engine.domain.model import (
+    Array,
+    Boolean,
+    Column,
+    Date,
+    Decimal,
+    Double,
+    Float,
+    Integer,
+    Long,
+    Map,
+    String,
+    Timestamp,
+)
 import delta_engine.schema as schema
 
 _SCHEMA_EXPORTS = {
@@ -30,14 +50,41 @@ class _DummySpark:
     """Stand-in for a SparkSession; the factory only stores it on the adapters."""
 
 
-def test_schema_import_path_matches_the_existing_api_surface():
+def test_schema_import_path_matches_implementation_objects():
     # Given the preferred user-facing schema import path
+    implementations = {
+        "Array": Array,
+        "Boolean": Boolean,
+        "Column": Column,
+        "Date": Date,
+        "Decimal": Decimal,
+        "DeltaTable": DeltaTableImpl,
+        "Double": Double,
+        "Float": Float,
+        "ForeignKey": ForeignKeyImpl,
+        "Integer": Integer,
+        "Long": Long,
+        "Map": Map,
+        "Property": PropertyImpl,
+        "Self": SelfImpl,
+        "String": String,
+        "Timestamp": Timestamp,
+    }
+
+    # Then it exposes exactly the supported declaration names
+    assert set(schema.__all__) == _SCHEMA_EXPORTS
+    for name, implementation in implementations.items():
+        assert getattr(schema, name) is implementation
+
+
+def test_api_package_does_not_export_the_user_schema_surface():
+    # Given the implementation package behind the schema facade
     import delta_engine.api as api
 
-    # Then it exposes exactly the same declaration names as the existing API
-    assert set(schema.__all__) == _SCHEMA_EXPORTS
+    # Then declaration names are not re-exported from the package root
+    assert api.__all__ == []
     for name in _SCHEMA_EXPORTS:
-        assert getattr(schema, name) is getattr(api, name)
+        assert not hasattr(api, name)
 
 
 def test_databricks_import_path_exposes_backend_entry_points():

@@ -1,4 +1,4 @@
-"""Public API for describing a Delta table and its foreign keys."""
+"""Schema declaration implementation for Delta tables and foreign keys."""
 
 from __future__ import annotations
 
@@ -23,14 +23,16 @@ class _SelfReference:
 
 Self: Final = _SelfReference()
 
-METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset({
-    TableAspect.TABLE_COMMENT,
-    TableAspect.COLUMN_COMMENTS,
-    TableAspect.COLUMN_TAGS,
-    TableAspect.TABLE_TAGS,
-    TableAspect.PRIMARY_KEY,
-    TableAspect.FOREIGN_KEYS,
-})
+METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {
+        TableAspect.TABLE_COMMENT,
+        TableAspect.COLUMN_COMMENTS,
+        TableAspect.COLUMN_TAGS,
+        TableAspect.TABLE_TAGS,
+        TableAspect.PRIMARY_KEY,
+        TableAspect.FOREIGN_KEYS,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
