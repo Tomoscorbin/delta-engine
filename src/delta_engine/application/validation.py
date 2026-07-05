@@ -6,16 +6,23 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.domain.model.property import PropertyRegistry
+from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.diff import (
     Change,
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
+    ColumnRemoved,
     PartitioningChanged,
+    PropertySet,
+    PropertyUnset,
     TableDiff,
     TableDrift,
     TableMissing,
+    UndeclaredProperty,
 )
 
 
@@ -133,11 +140,106 @@ class PartitioningChangeNotSupported:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PropertyTransitionNotSupported:
+    """Disallow property value transitions the catalog will reject."""
+
+    property_registry: PropertyRegistry
+
+    name: ClassVar[str] = "PropertyTransitionNotSupported"
+
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+        """Flag every restricted-key value change whose transition is not permitted."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: {change.name} cannot change"
+                    f" from '{change.observed_value}' to '{change.desired_value}'."
+                    " Update the declaration to match the catalog value."
+                ),
+            )
+            for change in changes
+            if isinstance(change, PropertySet)
+            and change.observed_value is not None
+            and self._is_blocked(change.name, change.observed_value, change.desired_value)
+        )
+
+    def _is_blocked(self, name: str, observed_value: str, desired_value: str) -> bool:
+        definition = self.property_registry.get(name)
+        if definition is None or not definition.permitted_transitions:
+            return False
+        return (observed_value, desired_value) not in definition.permitted_transitions
+
+
+@dataclass(frozen=True, slots=True)
+class PropertyMustBeDeclared:
+    """Disallow leaving a registered catalog property undeclared."""
+
+    property_registry: PropertyRegistry
+
+    name: ClassVar[str] = "PropertyMustBeDeclared"
+
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+        """Flag every registered key set on the table but absent from the declaration."""
+        return tuple(
+            ValidationFailure(rule_name=self.name, message=self._message(change))
+            for change in changes
+            if isinstance(change, UndeclaredProperty)
+        )
+
+    def _message(self, change: UndeclaredProperty) -> str:
+        definition = self.property_registry.get(change.name)
+        if definition is not None and not definition.unset_permitted:
+            return (
+                f"Operation not allowed: {change.name} is set on the table"
+                f" (value '{change.observed_value}') but not declared; it cannot"
+                " be unset — declare it to continue managing this table's"
+                " properties."
+            )
+        return (
+            f"Operation not allowed: {change.name} is set on the table"
+            f" (value '{change.observed_value}') but not declared. Declare it"
+            " to manage it, or declare it as None to remove it."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PropertyUnsetNotSupported:
+    """Disallow absence assertions on keys that cannot be unset."""
+
+    property_registry: PropertyRegistry
+
+    name: ClassVar[str] = "PropertyUnsetNotSupported"
+
+    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+        """Flag every unset of a key whose removal the catalog cannot honour."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: {change.name} cannot be removed —"
+                    " the table protocol upgrade is permanent. Declare its"
+                    " current value."
+                ),
+            )
+            for change in changes
+            if isinstance(change, PropertyUnset) and self._unset_forbidden(change.name)
+        )
+
+    def _unset_forbidden(self, name: str) -> bool:
+        definition = self.property_registry.get(name)
+        return definition is not None and not definition.unset_permitted
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     ColumnDataTypeChangeNotSupported(),
     PartitioningChangeNotSupported(),
+    PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
+    PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
+    PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY),
 )
 
 
@@ -161,6 +263,41 @@ def _validate_managed_scope(drift: TableDrift) -> tuple[ValidationFailure, ...]:
             ),
         )
         for aspect in unmanaged_aspects
+    )
+
+
+_COLUMN_MAPPING_KEY = "delta.columnMapping.mode"
+
+
+def validate_column_drop_preconditions(
+    desired: DesiredTable, changes: tuple[Change, ...]
+) -> tuple[ValidationFailure, ...]:
+    """
+    Fail a plan that drops a column without column mapping declared.
+
+    Delta only permits DROP COLUMN when ``delta.columnMapping.mode`` is
+    ``name``. This is a precondition on state, not drift policy: when the
+    declaration and catalog already agree on the mode, no property change
+    exists in the diff, so no rule could judge it. Exact declaration
+    guarantees that a validated declaration states the mode whenever the
+    catalog has it, so checking the declaration alone is sufficient.
+    Declaring the mode in the same sync as the drop is safe: SET_PROPERTY
+    phases before DROP_COLUMN.
+    """
+    drops_a_column = any(isinstance(change, ColumnRemoved) for change in changes)
+    if not drops_a_column:
+        return ()
+    if desired.properties.get(_COLUMN_MAPPING_KEY) == "name":
+        return ()
+    return (
+        ValidationFailure(
+            rule_name="ColumnMappingRequiredForDrop",
+            message=(
+                "Operation not allowed: dropping a column requires"
+                f" {_COLUMN_MAPPING_KEY}='name'. Declare"
+                f" properties={{'{_COLUMN_MAPPING_KEY}': 'name'}} on this table."
+            ),
+        ),
     )
 
 

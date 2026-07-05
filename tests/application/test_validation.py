@@ -1,9 +1,14 @@
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.application.validation import (
     DEFAULT_RULES,
     NonNullableColumnAdd,
     NullabilityTighteningOnExistingColumn,
+    PropertyMustBeDeclared,
+    PropertyTransitionNotSupported,
+    PropertyUnsetNotSupported,
     ValidationResult,
+    validate_column_drop_preconditions,
     validate_diff,
 )
 from delta_engine.domain.model import (
@@ -21,10 +26,14 @@ from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
+    ColumnRemoved,
     PartitioningChanged,
+    PropertySet,
+    PropertyUnset,
     TableCommentChanged,
     TableDrift,
     TableMissing,
+    UndeclaredProperty,
 )
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
@@ -279,6 +288,9 @@ def test_default_rules_cover_all_safety_policies():
         "NullabilityTighteningOnExistingColumn",
         "ColumnDataTypeChangeNotSupported",
         "PartitioningChangeNotSupported",
+        "PropertyTransitionNotSupported",
+        "PropertyMustBeDeclared",
+        "PropertyUnsetNotSupported",
     }
 
 
@@ -398,3 +410,138 @@ def test_validate_diff_passes_table_missing_when_column_structure_managed():
     result = validate_diff(TableMissing(desired=desired))
 
     assert result.failed is False
+
+
+# ---- PropertyTransitionNotSupported
+
+
+def test_blocks_column_mapping_downgrade():
+    # Given a declared downgrade from name to none — Databricks rejects it
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="none", observed_value="name"),
+    )
+
+    failures = rule.evaluate(changes)
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "delta.columnMapping.mode" in failures[0].message
+
+
+def test_allows_column_mapping_upgrade():
+    # Given the one permitted transition: none -> name
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value="none"),
+    )
+
+    assert rule.evaluate(changes) == ()
+
+
+def test_allows_first_write_of_restricted_key():
+    # Given the key is absent from the catalog — first writes are always legal
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(name="delta.columnMapping.mode", desired_value="name", observed_value=None),
+    )
+
+    assert rule.evaluate(changes) == ()
+
+
+def test_ignores_value_changes_on_unrestricted_keys():
+    rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertySet(
+            name="delta.enableChangeDataFeed", desired_value="false", observed_value="true"
+        ),
+    )
+
+    assert rule.evaluate(changes) == ()
+
+
+# ---- PropertyMustBeDeclared
+
+
+def test_fails_undeclared_registered_key_offering_none():
+    # Given an undeclared unrestricted key — removal via None is offered
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+    changes = (UndeclaredProperty(name="delta.enableChangeDataFeed", observed_value="true"),)
+
+    failures = rule.evaluate(changes)
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyMustBeDeclared"
+    assert "None" in failures[0].message
+
+
+def test_fails_undeclared_unset_forbidden_key_without_offering_none():
+    # Given columnMapping.mode undeclared — it cannot be removed, so the
+    # message must not suggest declaring None
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+    changes = (UndeclaredProperty(name="delta.columnMapping.mode", observed_value="name"),)
+
+    failures = rule.evaluate(changes)
+
+    assert len(failures) == 1
+    assert "cannot be unset" in failures[0].message
+    assert "None" not in failures[0].message
+
+
+def test_passes_when_no_undeclared_key():
+    rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
+
+    assert rule.evaluate(()) == ()
+
+
+# ---- PropertyUnsetNotSupported
+
+
+def test_blocks_none_declaration_on_unset_forbidden_key():
+    # Given a declaration asserting columnMapping.mode absent on a table that has it
+    rule = PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (PropertyUnset(name="delta.columnMapping.mode", observed_value="name"),)
+
+    failures = rule.evaluate(changes)
+
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PropertyUnsetNotSupported"
+
+
+def test_allows_none_declaration_on_unsettable_key():
+    rule = PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY)
+    changes = (
+        PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
+    )
+
+    assert rule.evaluate(changes) == ()
+
+
+# ---- validate_column_drop_preconditions
+
+
+def test_drop_without_column_mapping_fails_before_execution():
+    # Given a plan that drops a column but the declaration lacks column mapping
+    desired = _desired_table()
+    changes = (ColumnRemoved(Column("stale", Integer())),)
+
+    failures = validate_column_drop_preconditions(desired, changes)
+
+    assert len(failures) == 1
+    assert "delta.columnMapping.mode" in failures[0].message
+
+
+def test_drop_with_declared_column_mapping_passes():
+    # Given the declaration states mode=name (set phases before drop)
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer()),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    changes = (ColumnRemoved(Column("stale", Integer())),)
+
+    assert validate_column_drop_preconditions(desired, changes) == ()
+
+
+def test_no_drop_means_no_precondition_failure():
+    assert validate_column_drop_preconditions(_desired_table(), ()) == ()

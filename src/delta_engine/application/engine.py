@@ -48,11 +48,11 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.application.validation import validate_diff
-from delta_engine.domain.model import QualifiedName
+from delta_engine.application.validation import validate_column_drop_preconditions, validate_diff
+from delta_engine.domain.model import QualifiedName, TableAspect
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan.actions import ActionPlan
-from delta_engine.domain.plan.diff import TableDiff, diff_table
+from delta_engine.domain.plan.diff import TableDiff, TableDrift, diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -217,15 +217,21 @@ class Engine:
             if run.diff is None:
                 continue
             result = validate_diff(run.diff)
-            if result.failed:
+            run.failures.extend(result.failures)
+            if isinstance(run.diff, TableDrift) and (
+                TableAspect.COLUMN_STRUCTURE in run.desired.managed_aspects
+            ):
+                run.failures.extend(
+                    validate_column_drop_preconditions(run.desired, run.diff.changes)
+                )
+            if run.failures:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
                     run.qualified_name,
-                    len(result.failures),
+                    len(run.failures),
                 )
             else:
                 logger.info("Validation passed for %s", run.qualified_name)
-            run.failures.extend(result.failures)
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
