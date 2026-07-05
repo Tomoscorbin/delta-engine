@@ -21,7 +21,7 @@ class QualifiedName:
     catalog: str
     schema: str
     name: str
-    
+
     def __post_init__(self) -> None:
         """Raise if any part is blank or contains uppercase characters."""
         for field_name, value in (
@@ -37,7 +37,7 @@ class QualifiedName:
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""
         return f"{self.catalog}.{self.schema}.{self.name}"
-    
+
     @classmethod
     def parse(cls, raw: str) -> Self:
         """Parse a canonical ``catalog.schema.name`` string into a qualified name."""
