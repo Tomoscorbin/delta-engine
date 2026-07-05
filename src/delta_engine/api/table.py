@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from delta_engine.api.properties import MANAGED_PROPERTY_KEYS
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import ALL_ASPECTS, Column, DesiredTable, QualifiedName, TableAspect
 from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
 from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
@@ -143,7 +143,7 @@ class DeltaTable:
         # None-valued assertions are validated too: asserting absence of an
         # unmanaged key is as meaningless as declaring it.
         if user_properties:
-            unmanaged = [k for k in user_properties if k not in MANAGED_PROPERTY_KEYS]
+            unmanaged = [k for k in user_properties if k not in DELTA_PROPERTY_REGISTRY]
             if unmanaged:
                 raise ValueError(
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"

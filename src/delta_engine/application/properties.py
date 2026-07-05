@@ -11,7 +11,7 @@ adapter filters unregistered keys out of the observed state before the
 domain ever sees them.
 
 ``Property`` is the single source of the managed key names: the catalogue
-below references its members, and ``api.properties`` re-exports it as the
+below references its members, and the api layer re-exports it as the
 user-facing declaration vocabulary. There is no second list to keep in sync.
 
 Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it

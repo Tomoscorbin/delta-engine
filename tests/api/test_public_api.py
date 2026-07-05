@@ -1,8 +1,8 @@
 """The user-facing api package re-exports the names needed to define a table."""
 
 import delta_engine.api as api
-from delta_engine.api.properties import Property as PropertyImpl
 from delta_engine.api.table import DeltaTable as DeltaTableImpl
+from delta_engine.application.properties import Property as PropertyImpl
 from delta_engine.domain.model import Array, Decimal, Map
 
 _EXPECTED = {
@@ -48,12 +48,10 @@ def test_api_exposes_delta_table_column_and_all_data_types():
 def test_property_enum_lists_the_keys_deltatable_accepts():
     # Given the property vocabulary a user must declare against — the enum is
     # the single source, and the catalogue the engine validates against is
-    # built from it, so the allowlist covers exactly the enum's keys
-    from delta_engine.api.properties import MANAGED_PROPERTY_KEYS
+    # built from it, so the registry covers exactly the enum's keys
     from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 
-    assert {member.value for member in api.Property} == set(MANAGED_PROPERTY_KEYS)
-    assert MANAGED_PROPERTY_KEYS == frozenset(DELTA_PROPERTY_REGISTRY)
+    assert {member.value for member in api.Property} == set(DELTA_PROPERTY_REGISTRY)
 
     # And Property is a str enum, so its members can be used directly as dict keys
     assert api.Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"
