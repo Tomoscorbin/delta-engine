@@ -20,6 +20,7 @@ from delta_engine.domain.plan.actions import (
     SetTableComment,
     SetTableTag,
     UnsetColumnTag,
+    UnsetProperty,
     UnsetTableTag,
 )
 
@@ -63,6 +64,7 @@ def test_plan_orders_actions_by_phase_in_documented_precedence():
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
+            UnsetProperty(name="p_unset"),
             SetColumnNullability(column_name="nn_col", nullable=False),
             DropColumn(column_name="d_col"),
             SetColumnComment(column_name="c_col", comment="c"),
@@ -74,6 +76,7 @@ def test_plan_orders_actions_by_phase_in_documented_precedence():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        UnsetProperty,
         AddColumn,
         DropColumn,
         SetColumnComment,
@@ -226,6 +229,7 @@ def test_plan_full_phase_order_with_all_action_types():
             SetTableComment(comment="tbl comment"),
             AddColumn(column=_column("a_col")),
             SetProperty(name="p_set", value="1"),
+            UnsetProperty(name="p_unset"),
             SetColumnNullability(column_name="nn_col", nullable=False),
             DropForeignKey(constraint_name="t_old_fk"),
             DropPrimaryKey(),
@@ -243,6 +247,7 @@ def test_plan_full_phase_order_with_all_action_types():
     assert [type(a) for a in plan] == [
         CreateTable,
         SetProperty,
+        UnsetProperty,
         SetTableTag,
         UnsetTableTag,
         DropForeignKey,

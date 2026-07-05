@@ -149,7 +149,7 @@ sequenceDiagram
     Engine->>Engine: prepare_desired_tables()
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
-    Engine->>Differ: diff_table(desired, observed_or_none)
+    Engine->>Differ: diff_table(desired, observed_or_none, registry)
     Differ-->>Engine: TableMissing / TableDrift
     Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
@@ -229,7 +229,7 @@ require PySpark.
 ## Diff-first planning
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
-observed)` produces a `TableDiff` — `TableMissing` when the table does not
+observed, property_registry)` produces a `TableDiff` — `TableMissing` when the table does not
 exist, else a `TableDrift` holding a flat tuple of changes. Each change is a
 frozen dataclass recording one atomic difference (`ColumnAdded`,
 `TableTagUnset`, `ColumnDataTypeChanged`, …) and carries two things: an
@@ -262,7 +262,9 @@ is unset).
 
 Every `DesiredTable` carries a `managed_aspects` field: a `frozenset[TableAspect]`
 naming the aspects the engine reconciles for that table. The differ
-(`diff_table`) is scope-blind and always compares all aspects; it copies
+(`diff_table`) is scope-blind for every aspect except properties — the
+properties diff runs only when the declaration manages `PROPERTIES` (see
+Diff-first planning) — and copies
 `managed_aspects` onto the `TableDrift` it produces, so the diff is
 self-contained and `validate_diff` takes only the diff. Scope awareness lives
 in validation, as an unconditional invariant rather than an optional rule:
@@ -278,7 +280,7 @@ The public API exposes named modes only: `DeltaTable(metadata_only=True)` maps
 to the metadata aspects (comments, tags, key constraints). The `TableAspect`
 enum stays internal.
 
-`diff_table(desired, observed)` produces a `TableDiff`:
+`diff_table(desired, observed, property_registry)` produces a `TableDiff`:
 
 - `TableMissing` means the catalog has no table at that name.
 - `TableDrift` means the table exists and carries a tuple of drift dimensions.
@@ -385,9 +387,8 @@ dependency's report, but it is not retroactively converted into
 `DeltaTable` is the public declaration object, but the engine plans with
 `DesiredTable`. The lowering boundary does several important things up front:
 
-- applies default managed properties, including `delta.columnMapping.mode =
-  name`
-- rejects property keys the engine does not manage
+- rejects property keys the engine does not manage (valued or ``None``),
+  and rejects ``metadata_only=True`` combined with ``properties``
 - generates a primary-key constraint from columns marked `primary_key=True`
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values

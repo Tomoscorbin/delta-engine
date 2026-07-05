@@ -89,6 +89,27 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     assert "see failures" not in block
 
 
+def test_every_action_type_has_a_registered_diff_line():
+    # Given every concrete Action subclass the plan vocabulary defines
+    import inspect
+
+    from delta_engine.domain.plan import actions as actions_module
+    from delta_engine.domain.plan.actions import Action
+
+    concrete_action_types = [
+        obj
+        for _, obj in inspect.getmembers(actions_module, inspect.isclass)
+        if issubclass(obj, Action) and obj is not Action
+    ]
+
+    # Then each dispatches to a real arm, not the NotImplementedError fallback
+    fallback = action_diff_line.dispatch(object)
+    for action_type in concrete_action_types:
+        assert action_diff_line.dispatch(action_type) is not fallback, (
+            f"No diff line registered for {action_type.__name__}"
+        )
+
+
 def test_set_property_renders_plus_for_first_write():
     # Given a property being written for the first time (absent from catalog)
     line = action_diff_line(SetProperty(name="delta.enableChangeDataFeed", value="true"))

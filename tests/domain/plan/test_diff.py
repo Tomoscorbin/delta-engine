@@ -613,6 +613,17 @@ def test_property_set_produces_set_property_carrying_observed_value():
     )
 
 
+def test_property_set_first_write_produces_set_property_with_no_observed_value():
+    # Given a first write — the catalog lacks the key
+    change = PropertySet(
+        name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
+    )
+
+    assert change.actions() == (
+        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value=None),
+    )
+
+
 def test_property_unset_produces_unset_property():
     change = PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days")
 

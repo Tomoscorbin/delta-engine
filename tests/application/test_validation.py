@@ -450,6 +450,7 @@ def test_allows_first_write_of_restricted_key():
 
 
 def test_ignores_value_changes_on_unrestricted_keys():
+    # Given a value change on a key whose registry entry restricts nothing
     rule = PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY)
     changes = (
         PropertySet(
@@ -489,6 +490,7 @@ def test_fails_undeclared_unset_forbidden_key_without_offering_none():
 
 
 def test_passes_when_no_undeclared_key():
+    # Given no changes at all
     rule = PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY)
 
     assert rule.evaluate(()) == ()
@@ -509,6 +511,7 @@ def test_blocks_none_declaration_on_unset_forbidden_key():
 
 
 def test_allows_none_declaration_on_unsettable_key():
+    # Given an absence assertion on a key whose removal is permitted
     rule = PropertyUnsetNotSupported(DELTA_PROPERTY_REGISTRY)
     changes = (
         PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
