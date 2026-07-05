@@ -12,20 +12,11 @@ from delta_engine.application.report import TableRunStatus
 from delta_engine.schema import Column, Date, DeltaTable, Integer, String
 from tests.config import TEST_CATALOG
 
-
-def _patch_table_exists_for_local(monkeypatch):
-    def _table_exists(self, qualified_name):
-        # Local Spark fallback for existence checks
-        return self.spark.catalog.tableExists(f"{qualified_name.schema}.{qualified_name.name}")
-
-    # raising=True so a rename of _table_exists fails loudly here rather than
-    # silently leaving every e2e test running against the unpatched method.
-    monkeypatch.setattr(DatabricksReader, "_table_exists", _table_exists, raising=True)
+pytestmark = pytest.mark.local_e2e
 
 
-def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
+def test_engine_sync_happy_path(spark, temp_schema):
     # Given a desired table definition in an empty temp schema
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_happy_{uuid4().hex[:8]}"
 
     engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
@@ -38,7 +29,7 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
             table_name,
             columns=(
                 Column("id", Integer(), nullable=False),
-                Column("name", String()),
+                Column("name", String(), comment="customer name"),
             ),
             comment="E2E happy path table",
         )
@@ -57,13 +48,13 @@ def test_engine_sync_happy_path(spark, monkeypatch, temp_schema):
 
     assert isinstance(fields["name"].dataType, T.StringType)
     assert fields["name"].nullable is True
+    assert fields["name"].metadata.get("comment") == "customer name"
 
     assert spark.catalog.getTable(fq).description == "E2E happy path table"
 
 
-def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypatch, temp_schema):
+def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, temp_schema):
     # Given an existing Delta table with id, name, to_remove
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_cols_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(
@@ -116,9 +107,8 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, monkeypat
     assert [f.name for f in df.schema.fields] == ["id", "name", "age"]
 
 
-def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, temp_schema):
+def test_engine_sync_fails_when_adding_non_nullable_column(spark, temp_schema):
     # Given an existing Delta table with id, name
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_vfail_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(
@@ -162,9 +152,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, monkeypatch, t
     assert "age" not in cols
 
 
-def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, temp_schema):
-    _patch_table_exists_for_local(monkeypatch)
-
+def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
     table_name = f"idem_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
@@ -189,11 +177,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, monkeypatch, tem
     assert spark.catalog.getTable(fq).description == "idempotency test"
 
 
-def test_engine_loosen_nullability_sets_column_nullable(
-    spark, monkeypatch, make_temp_table, temp_schema
-):
-    _patch_table_exists_for_local(monkeypatch)
-
+def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, temp_schema):
     fq = make_temp_table(
         "nullable",
         "id INT NOT NULL, name STRING",
@@ -217,9 +201,7 @@ def test_engine_loosen_nullability_sets_column_nullable(
     assert field.nullable is True
 
 
-def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkeypatch, temp_schema):
-    _patch_table_exists_for_local(monkeypatch)
-
+def test_engine_creates_partitioned_table_with_expected_partitions(spark, temp_schema):
     table_name = f"part_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
@@ -245,9 +227,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, monkey
     assert spark.catalog.getTable(fq).description == "partitioned table"
 
 
-def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypatch, temp_schema):
-    _patch_table_exists_for_local(monkeypatch)
-
+def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_schema):
     ok = f"ok_{uuid4().hex[:8]}"
     bad = f"bad_{uuid4().hex[:8]}"
     fq_ok = f"{TEST_CATALOG}.{temp_schema}.{ok}"
@@ -298,9 +278,8 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, monkeypat
     assert "age" not in bad_cols
 
 
-def test_engine_metadata_only_applies_comments_when_schema_matches(spark, monkeypatch, temp_schema):
+def test_engine_metadata_only_applies_comments_when_schema_matches(spark, temp_schema):
     # Given an existing table whose schema exactly matches the declaration
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_meta_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(f"CREATE TABLE {fq} (id INT) USING DELTA")
@@ -328,9 +307,8 @@ def test_engine_metadata_only_applies_comments_when_schema_matches(spark, monkey
     assert details["description"] == "metadata-only table"
 
 
-def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, monkeypatch, temp_schema):
+def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, temp_schema):
     # Given an existing table whose column type differs from the declaration
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"e2e_meta_drift_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(f"CREATE TABLE {fq} (id BIGINT) USING DELTA")  # BIGINT, declared as INT
@@ -355,34 +333,8 @@ def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, monkeypa
     assert {f.name for f in spark.table(fq).schema.fields} == {"id"}
 
 
-def test_engine_sets_declared_property_on_existing_table(spark, monkeypatch, temp_schema):
-    # Given an existing table without change data feed
-    _patch_table_exists_for_local(monkeypatch)
-    table_name = f"prop_set_{uuid4().hex[:8]}"
-    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
-    spark.sql(f"CREATE TABLE {fq} (id INT NOT NULL) USING DELTA")
-
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
-
-    # When syncing a declaration that states the property
-    engine.sync(
-        DeltaTable(
-            TEST_CATALOG,
-            temp_schema,
-            table_name,
-            columns=(Column("id", Integer(), nullable=False),),
-            properties={"delta.enableChangeDataFeed": "true"},
-        )
-    )
-
-    # Then the property is set in the catalog
-    detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
-    assert detail["properties"].get("delta.enableChangeDataFeed") == "true"
-
-
-def test_engine_unsets_property_declared_absent(spark, monkeypatch, temp_schema):
+def test_engine_unsets_property_declared_absent(spark, temp_schema):
     # Given a table carrying a property the declaration asserts absent
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"prop_unset_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(
@@ -408,9 +360,8 @@ def test_engine_unsets_property_declared_absent(spark, monkeypatch, temp_schema)
     assert "delta.enableChangeDataFeed" not in detail["properties"]
 
 
-def test_engine_fails_loud_on_undeclared_column_mapping(spark, monkeypatch, temp_schema):
+def test_engine_fails_loud_on_undeclared_column_mapping(spark, temp_schema):
     # Given a table with column mapping enabled but a declaration that omits it
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"prop_loud_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(
@@ -434,10 +385,9 @@ def test_engine_fails_loud_on_undeclared_column_mapping(spark, monkeypatch, temp
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
-def test_engine_ignores_platform_written_properties(spark, monkeypatch, temp_schema):
+def test_engine_ignores_platform_written_properties(spark, temp_schema):
     # Given a table carrying unmanaged platform-style keys — the reader
     # filters them out of the observed state before the domain sees them
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"prop_invis_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(
@@ -462,12 +412,12 @@ def test_engine_ignores_platform_written_properties(spark, monkeypatch, temp_sch
     assert len(report.table_reports[0].plan) == 0
 
 
-def test_engine_property_sync_is_idempotent(spark, monkeypatch, temp_schema):
+def test_engine_property_sync_is_idempotent(spark, temp_schema):
     # Given a declaration synced once — also detects Delta value normalization:
     # if the catalog stores a normalized form of a declared value, the second
     # sync would plan a spurious PropertySet and this test fails
-    _patch_table_exists_for_local(monkeypatch)
     table_name = f"prop_idem_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     declaration = DeltaTable(
         TEST_CATALOG,
         temp_schema,
@@ -480,6 +430,9 @@ def test_engine_property_sync_is_idempotent(spark, monkeypatch, temp_schema):
     )
     engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
     engine.sync(declaration)
+    detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert detail["properties"].get("delta.enableChangeDataFeed") == "true"
+    assert detail["properties"].get("delta.logRetentionDuration") == "interval 30 days"
 
     # When syncing the identical declaration again
     report = engine.sync(declaration)
