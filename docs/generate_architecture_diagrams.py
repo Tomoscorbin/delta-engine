@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "docs" / "_generated"
 
 
-def main() -> None:
+def generate() -> None:
     """Regenerate checked-in architecture diagrams."""
     OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -35,6 +35,11 @@ def main() -> None:
         cwd=ROOT,
         check=True,
     )
+
+
+def main() -> None:
+    """Regenerate architecture diagrams from the command line."""
+    generate()
 
 
 if __name__ == "__main__":

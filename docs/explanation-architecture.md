@@ -208,7 +208,8 @@ depends inward on the application ports and domain vocabulary. The top-level
 surface, and lazily exposes Databricks helpers so `import delta_engine` does not
 require PySpark.
 
-Regenerate this graph with:
+This graph is regenerated automatically when the documentation builds. To
+refresh it manually, run:
 
 ```bash
 uv run --group docs python docs/generate_architecture_diagrams.py
