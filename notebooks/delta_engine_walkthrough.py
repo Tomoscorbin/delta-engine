@@ -47,7 +47,7 @@ dbutils.widgets.text("schema", "delta_engine_demo")
 CATALOG = dbutils.widgets.get("catalog")
 SCHEMA = dbutils.widgets.get("schema")
 
-DEMO_TABLES = ("customers", "orders", "regions", "events", "line_items")
+DEMO_TABLES = ("customers", "orders", "events", "line_items")
 
 print(f"Target: {CATALOG}.{SCHEMA}")
 
@@ -227,15 +227,14 @@ print("Step 3 verified: resync was a true no-op; live catalog unchanged.")
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Evolve the live `customers` table through a series of small changes — adding
-# MAGIC and dropping columns, loosening nullability, setting and unsetting tags, and
-# MAGIC adding a foreign key — a single change per step.
+# MAGIC Evolve the live `customers` table through a series of changes — adding and
+# MAGIC dropping columns, loosening nullability, setting and unsetting tags, and
+# MAGIC demonstrating property visibility — batched where practical.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Each step re-declares the **full** desired `customers` state, changing only
-# MAGIC the item under demonstration, and the engine reconciles the live table to
-# MAGIC match.
+# MAGIC Each step re-declares the **full** desired `customers` state and the engine
+# MAGIC reconciles the live table to match.
 
 # COMMAND ----------
 
@@ -244,8 +243,13 @@ print("Step 3 verified: resync was a true no-op; live catalog unchanged.")
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Add `email`, drop `legacy_code`, set two tags, set a property, and change the
-# MAGIC table and a column comment — all declared at once.
+# MAGIC Add `email` (with a `pii` column tag), drop `legacy_code`, loosen `status`
+# MAGIC to nullable, set two table tags, set two properties, and change the table
+# MAGIC and a column comment — all declared at once.
+# MAGIC
+# MAGIC Dropping a column requires `delta.columnMapping.mode = name`. The engine
+# MAGIC enforces this at validation: declare the property on any table whose columns
+# MAGIC may be dropped.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
@@ -261,12 +265,15 @@ customers = DeltaTable(
     columns=[
         Column("id", Long(), nullable=False, primary_key=True),
         Column("name", String(), comment="Full legal name"),  # <-- added column comment
-        Column("email", String()),  # <-- added (legacy_code dropped by omission)
-        Column("status", String(), nullable=False),
+        Column("email", String(), tags={"pii": "true"}),  # <-- added with column tag (legacy_code dropped by omission)
+        Column("status", String()),  # <-- loosened from NOT NULL to nullable
     ],
     comment="Customer master table (with contact details)",  # <-- added table comment
-    tags={"domain": "sales", "owner": "data-eng"},  # <-- set 2 tags
-    properties={Property.CHANGE_DATA_FEED: "true"},  # <-- set a property
+    tags={"domain": "sales", "owner": "data-eng"},  # <-- set 2 table tags
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",  # <-- required to drop a column
+        Property.CHANGE_DATA_FEED: "true",  # <-- set a property
+    },
 )
 
 report = engine.sync(customers, orders)
@@ -275,8 +282,9 @@ show_report(report)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Verify** the batched change: new column present, old column gone, tags and
-# MAGIC property set, comments updated.
+# MAGIC **Verify** the batched change: new column present with its column tag, old
+# MAGIC column gone, `status` now nullable, table tags and properties set, comments
+# MAGIC updated.
 
 # COMMAND ----------
 
@@ -285,11 +293,14 @@ assert report.any_failures is False
 customer_fields = inspector.fields_of("customers")
 assert "email" in customer_fields and customer_fields["email"].nullable is True
 assert "legacy_code" not in customer_fields
+assert customer_fields["status"].nullable is True
+assert inspector.column_tags_of("customers")[("email", "pii")] == "true"
 assert inspector.tags_of("customers") == {"domain": "sales", "owner": "data-eng"}
-assert inspector.properties_of("customers").get("delta.enableChangeDataFeed") == "true"
+assert inspector.properties_of("customers").get(Property.COLUMN_MAPPING_MODE) == "name"
+assert inspector.properties_of("customers").get(Property.CHANGE_DATA_FEED) == "true"
 assert inspector.table_comment("customers") == "Customer master table (with contact details)"
 assert inspector.column_comment("customers", "name") == "Full legal name"
-print("Step 4a verified: batched add/drop/tags/property/comments applied together.")
+print("Step 4a verified: batched add/drop/nullability/tags/properties/comments applied together.")
 inspector.display_schema("customers")
 inspector.display_tags("customers")
 inspector.display_properties("customers")
@@ -297,16 +308,19 @@ inspector.display_properties("customers")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 4b. Loosen nullability
+# MAGIC ### 4b. Prove tag unset (table and column)
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Relax `status` from `NOT NULL` to nullable.
+# MAGIC Drop the `owner` table tag and the `pii` column tag from the declaration
+# MAGIC and resync.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC The engine *allows* loosening and applies it. Step 5 shows the reverse
-# MAGIC (tightening) is blocked — same rule, both directions.
+# MAGIC Tags are **full-state** at both levels: the declaration is the complete set,
+# MAGIC so any tag you stop declaring is removed. Only `domain` remains on the table;
+# MAGIC `email` loses its `pii` tag. Properties behave the opposite way — step 4c
+# MAGIC shows platform-managed properties are invisible to the engine.
 
 # COMMAND ----------
 
@@ -317,59 +331,15 @@ customers = DeltaTable(
     columns=[
         Column("id", Long(), nullable=False, primary_key=True),
         Column("name", String(), comment="Full legal name"),
-        Column("email", String()),
-        Column("status", String()),  # <-- was NOT NULL; now nullable
-    ],
-    comment="Customer master table (with contact details)",
-    tags={"domain": "sales", "owner": "data-eng"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-)
-
-report = engine.sync(customers, orders)
-show_report(report)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC **Verify** `status` is now nullable.
-
-# COMMAND ----------
-
-assert report.any_failures is False
-assert inspector.fields_of("customers")["status"].nullable is True
-print("Step 4b verified: nullability loosened (NOT NULL dropped).")
-inspector.display_schema("customers")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 4c. Prove tag unset
-# MAGIC
-# MAGIC **Goal**
-# MAGIC
-# MAGIC Drop the `owner` tag from the declaration and resync.
-# MAGIC
-# MAGIC **Outcome**
-# MAGIC
-# MAGIC Tags are **full-state**: the declaration is the complete set, so a tag you
-# MAGIC stop declaring is removed. Only `domain` remains. Properties behave the
-# MAGIC opposite way — step 4f shows undeclared properties are left alone.
-
-# COMMAND ----------
-
-customers = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String()),
+        Column("email", String()),  # <-- pii column tag dropped
         Column("status", String()),
     ],
     comment="Customer master table (with contact details)",
-    tags={"domain": "sales"},  # <-- "owner" dropped
-    properties={Property.CHANGE_DATA_FEED: "true"},
+    tags={"domain": "sales"},  # <-- "owner" table tag dropped
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
 )
 
 report = engine.sync(customers, orders)
@@ -378,119 +348,42 @@ show_report(report)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Verify** the `owner` tag is gone and only `domain` remains.
+# MAGIC **Verify** the `owner` table tag and `pii` column tag are both gone.
 
 # COMMAND ----------
 
 assert report.any_failures is False
 assert inspector.tags_of("customers") == {"domain": "sales"}
-print("Step 4c verified: undeclared tag removed by full-state reconciliation.")
+assert ("email", "pii") not in inspector.column_tags_of("customers")
+print("Step 4b verified: undeclared table and column tags removed by full-state reconciliation.")
 inspector.display_tags("customers")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 4d. Column tags — set then unset
+# MAGIC ### 4c. Platform-managed properties are invisible to the engine
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Add a column tag to `email` (`pii=true`) and sync, then re-declare `email`
-# MAGIC without the tag and resync.
+# MAGIC Read a property Databricks writes autonomously — `delta.enableRowTracking` —
+# MAGIC then resync `customers` without declaring it.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC The tag lands on the first sync and is removed on the second: column-tag
-# MAGIC reconciliation is **full-state**, so an absent declaration drops the tag.
-# MAGIC This is the column-level analogue of step 4c.
+# MAGIC The property is untouched. Unlike tags (step 4c), the engine does not treat
+# MAGIC `properties` as the complete set: it manages only the keys in its registry
+# MAGIC and leaves everything else invisible. This matters because Databricks writes
+# MAGIC many `delta.*` properties autonomously — a sync must never strip them.
 
 # COMMAND ----------
 
-customers = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String(), tags={"pii": "true"}),  # <-- column tag added
-        Column("status", String()),
-    ],
-    comment="Customer master table (with contact details)",
-    tags={"domain": "sales"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-)
+# Read the platform-written value before the sync.
+platform_props = inspector.properties_of("customers")
+row_tracking = platform_props.get("delta.enableRowTracking")
+assert row_tracking is not None, "Databricks should have written delta.enableRowTracking"
+print(f"Platform-managed delta.enableRowTracking = {row_tracking!r} (not declared by us)")
 
-report = engine.sync(customers, orders)
-show_report(report)
-
-# COMMAND ----------
-
-assert report.any_failures is False
-assert inspector.column_tags_of("customers")[("email", "pii")] == "true"
-print("Column tag set: customers.email pii=true")
-
-# COMMAND ----------
-
-customers = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String()),  # <-- column tag removed
-        Column("status", String()),
-    ],
-    comment="Customer master table (with contact details)",
-    tags={"domain": "sales"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-)
-
-report = engine.sync(customers, orders)
-show_report(report)
-
-# COMMAND ----------
-
-assert report.any_failures is False
-assert ("email", "pii") not in inspector.column_tags_of("customers")
-print("Column tag unset by full-state reconciliation: customers.email pii removed")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 4e. Foreign-key drift on an existing table
-# MAGIC
-# MAGIC **Goal**
-# MAGIC
-# MAGIC Create a `regions` dimension, then add a `region_id` column and a foreign key
-# MAGIC from the already-existing `customers` table to it.
-# MAGIC
-# MAGIC **Outcome**
-# MAGIC
-# MAGIC The engine adds the column and the foreign key to a live table. This is drift
-# MAGIC management on an existing table, distinct from step 2's create-time foreign
-# MAGIC key ordering.
-
-# COMMAND ----------
-
-regions = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="regions",
-    columns=[
-        Column("region_id", Long(), nullable=False, primary_key=True),
-        Column("region_name", String()),
-    ],
-    comment="Region dimension",
-)
-
-report = engine.sync(regions)
-show_report(report)
-assert report.any_failures is False
-assert spark.catalog.tableExists(inspector.fqname("regions"))
-
-# COMMAND ----------
-
+# Re-sync with the same declaration — delta.enableRowTracking is intentionally absent.
 customers = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -500,100 +393,33 @@ customers = DeltaTable(
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
-        Column("region_id", Long()),  # <-- added
     ],
     comment="Customer master table (with contact details)",
     tags={"domain": "sales"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-    foreign_keys=[  # <-- foreign key added to the existing table
-        ForeignKey(
-            local_columns=("region_id",),
-            references=regions,
-        )
-    ],
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
 )
 
-report = engine.sync(customers, orders, regions)
+report = engine.sync(customers, orders)
 show_report(report)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Verify** `customers` gained the column and the foreign key.
+# MAGIC **Verify** the platform-managed property survived the sync unchanged.
 
 # COMMAND ----------
 
 assert report.any_failures is False
-customer_fields = inspector.fields_of("customers")
-assert "region_id" in customer_fields and customer_fields["region_id"].nullable is True
-assert inspector.has_foreign_key("customers")
-print("Step 4e verified: foreign key added to an existing table.")
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 4f. Undeclared properties are left alone
-# MAGIC
-# MAGIC **Goal**
-# MAGIC
-# MAGIC Set a property directly with raw SQL — `delta.logRetentionDuration`, which
-# MAGIC the `customers` declaration never mentions — then resync `customers` with
-# MAGIC that same declaration.
-# MAGIC
-# MAGIC **Outcome**
-# MAGIC
-# MAGIC The property survives the sync. Unlike tags (step 4c), the engine does not
-# MAGIC treat your `properties` as the complete set: it manages only the keys you
-# MAGIC declare and leaves every other property untouched. This matters because
-# MAGIC Delta tables carry many system-managed `delta.*` properties — a sync must
-# MAGIC not strip the ones you did not list.
-
-# COMMAND ----------
-
-spark.sql(
-    f"ALTER TABLE {inspector.fqname('customers')}"
-    f" SET TBLPROPERTIES ('delta.logRetentionDuration' = 'interval 7 days')"
-)
-
-# Re-declare customers exactly as in step 4e (logRetentionDuration is NOT declared).
-customers = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String()),
-        Column("status", String()),
-        Column("region_id", Long()),
-    ],
-    comment="Customer master table (with contact details)",
-    tags={"domain": "sales"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-    foreign_keys=[
-        ForeignKey(
-            local_columns=("region_id",),
-            references=regions,
-        )
-    ],
-)
-
-report = engine.sync(customers, orders, regions)
-show_report(report)
+assert inspector.properties_of("customers").get("delta.enableRowTracking") == row_tracking
+print("Step 4c verified: platform-managed property left untouched by sync.")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC **Verify** the out-of-band property is untouched.
-
-# COMMAND ----------
-
-assert report.any_failures is False
-assert inspector.properties_of("customers").get("delta.logRetentionDuration") == "interval 7 days"
-print("Step 4f verified: undeclared property left untouched.")
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 5. Validation blocks unsafe changes
+# MAGIC ## 5. Validation blocks unsafe structural changes
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -765,7 +591,54 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. A foreign key that cannot be resolved
+# MAGIC ### 5e. Structural drift on a metadata-only table
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Declare a column that doesn't exist on the live table in a `metadata_only`
+# MAGIC declaration and attempt to sync.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Blocked: structural drift on a metadata-only table is a scope violation —
+# MAGIC the declaration promises not to manage columns, so any mismatch is an error
+# MAGIC the caller must resolve out of band.
+
+# COMMAND ----------
+
+customers_meta_drifted = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+        Column("ghost", String()),  # <-- does not exist on the live table
+    ],
+    comment="Customer master table (managed externally)",
+    tags={"domain": "sales"},
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
+    metadata_only=True,
+)
+
+report = sync_expecting_failure(customers_meta_drifted)
+
+# COMMAND ----------
+
+[customers_report] = report.table_reports
+assert customers_report.status is TableRunStatus.VALIDATION_FAILED
+assert "ghost" not in inspector.fields_of("customers")
+print("Step 5e verified: structural drift on metadata-only table blocked.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 5f. A foreign key that cannot be resolved
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -810,67 +683,12 @@ report = sync_expecting_failure(line_items)
 [line_items_report] = report.table_reports
 assert line_items_report.status is TableRunStatus.FOREIGN_KEY_FAILED
 assert spark.catalog.tableExists(inspector.fqname("line_items")) is False
-print("Step 6 verified: unresolved foreign key blocked, no table created.")
+print("Step 5f verified: unresolved foreign key blocked, no table created.")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Preview with a dry run, then commit
-# MAGIC
-# MAGIC **Goal**
-# MAGIC
-# MAGIC Add a nullable `phone` column and preview it with a dry run, then sync the
-# MAGIC same tables for real.
-# MAGIC
-# MAGIC **Outcome**
-# MAGIC
-# MAGIC The dry run plans and validates but executes nothing, so the catalog is
-# MAGIC unchanged; the real sync then applies the previewed change. This is the
-# MAGIC standard way to preview a change before committing it.
-
-# COMMAND ----------
-
-customers = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String()),
-        Column("status", String()),
-        Column("region_id", Long()),
-        Column("phone", String()),  # <-- added
-    ],
-    comment="Customer master table (with contact details)",
-    tags={"domain": "sales"},
-    properties={Property.CHANGE_DATA_FEED: "true"},
-    foreign_keys=[
-        ForeignKey(
-            local_columns=("region_id",),
-            references=regions,
-        )
-    ],
-)
-
-preview = engine.sync(customers, orders, regions, dry_run=True)
-show_report(preview)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC **Verify** the dry run executed nothing and `phone` is not yet in the table.
-
-# COMMAND ----------
-
-assert all(table_report.execution is None for table_report in preview)
-assert "phone" not in inspector.fields_of("customers")
-print("Dry run verified: plan shown, nothing executed.")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 8. Construction-time guards
+# MAGIC ## 6. Construction-time guards
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -887,7 +705,7 @@ print("Dry run verified: plan shown, nothing executed.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 8a. A nullable primary key
+# MAGIC ### 6a. A nullable primary key
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -914,7 +732,7 @@ except ValueError as error:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 8b. A foreign key on a column that does not exist
+# MAGIC ### 6b. A foreign key on a column that does not exist
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -946,7 +764,7 @@ except ValueError as error:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 8c. A foreign key referencing a table with no primary key
+# MAGIC ### 6c. A foreign key referencing a table with no primary key
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -983,6 +801,156 @@ try:
     raise AssertionError("expected ValueError")
 except ValueError as error:
     print(error)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 7. Metadata-only sync
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Sync only the catalog metadata — comments, tags, and key constraints — of a
+# MAGIC table that is owned by another process and must not have its columns or
+# MAGIC properties touched.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC With `metadata_only=True`, the engine updates metadata and ignores column
+# MAGIC and property state entirely. The declaration is still the full source of
+# MAGIC truth — columns and properties must match — but they are never compared or
+# MAGIC changed.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7a. Metadata-only update
+
+# COMMAND ----------
+
+# metadata_only=True restricts the sync to comments, tags, and key constraints.
+# Columns and properties are still declared (the engine validates structural
+# alignment) but never compared or changed.
+customers_meta = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+    ],
+    comment="Customer master table (managed externally)",  # <-- comment changed
+    tags={"domain": "sales"},
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
+    metadata_only=True,  # <-- restricts sync to metadata aspects only
+)
+
+report = engine.sync(customers_meta)
+show_report(report)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verify** the comment changed but the column schema is untouched.
+
+# COMMAND ----------
+
+assert report.any_failures is False
+assert inspector.table_comment("customers") == "Customer master table (managed externally)"
+assert set(inspector.fields_of("customers")) == {"id", "name", "email", "status"}
+print("Step 7a verified: metadata-only sync updated the comment; columns untouched.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7b. A metadata-only declaration cannot create a missing table
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Attempt to sync a `metadata_only` declaration for a table that does not yet
+# MAGIC exist in the catalog.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Blocked: creating a table requires managing column structure. A metadata-only
+# MAGIC declaration explicitly opts out of that, so the engine refuses rather than
+# MAGIC creating a structureless table.
+
+# COMMAND ----------
+
+new_table_meta_only = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="never_created",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+    ],
+    metadata_only=True,  # <-- cannot create; no column structure management
+)
+
+report = sync_expecting_failure(new_table_meta_only)
+
+# COMMAND ----------
+
+[report_entry] = report.table_reports
+assert report_entry.status is TableRunStatus.VALIDATION_FAILED
+assert spark.catalog.tableExists(inspector.fqname("never_created")) is False
+print("Step 7b verified: metadata-only declaration blocked from creating a missing table.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Preview with a dry run, then commit
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Add a nullable `phone` column and preview it with a dry run, then sync the
+# MAGIC same tables for real.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC The dry run plans and validates but executes nothing, so the catalog is
+# MAGIC unchanged; the real sync then applies the previewed change. This is the
+# MAGIC standard way to preview a change before committing it.
+
+# COMMAND ----------
+
+customers = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+        Column("phone", String()),  # <-- added
+    ],
+    comment="Customer master table (with contact details)",
+    tags={"domain": "sales"},
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
+)
+
+preview = engine.sync(customers, orders, dry_run=True)
+show_report(preview)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Verify** the dry run executed nothing and `phone` is not yet in the table.
+
+# COMMAND ----------
+
+assert all(table_report.execution is None for table_report in preview)
+assert "phone" not in inspector.fields_of("customers")
+print("Dry run verified: plan shown, nothing executed.")
 
 # COMMAND ----------
 
