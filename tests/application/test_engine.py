@@ -924,14 +924,16 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
     # Given a live table with an extra column, and a declaration without columnMapping
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")
-    reader = _FakeReader({
-        fqn: TablePresent(
-            table=ObservedTable(
-                qualified_name=QualifiedName(catalog, schema, name),
-                columns=(Column("id", String()), Column("stale", String())),
+    reader = _FakeReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()), Column("stale", String())),
+                )
             )
-        )
-    })
+        }
+    )
     engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
     spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
@@ -949,15 +951,17 @@ def test_sync_fails_loud_on_undeclared_registered_property():
     # Given a live table carrying columnMapping.mode that the spec omits
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")
-    reader = _FakeReader({
-        fqn: TablePresent(
-            table=ObservedTable(
-                qualified_name=QualifiedName(catalog, schema, name),
-                columns=(Column("id", String()),),
-                properties={"delta.columnMapping.mode": "name"},
+    reader = _FakeReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()),),
+                    properties={"delta.columnMapping.mode": "name"},
+                )
             )
-        )
-    })
+        }
+    )
     engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
     spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
@@ -974,14 +978,16 @@ def test_metadata_only_column_removal_fails_scope_only_without_drop_precondition
     # unmanaged ColumnRemoved drift) — the user never asked to drop anything
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")
-    reader = _FakeReader({
-        fqn: TablePresent(
-            table=ObservedTable(
-                qualified_name=QualifiedName(catalog, schema, name),
-                columns=(Column("id", String()), Column("extra", String())),
+    reader = _FakeReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()), Column("extra", String())),
+                )
             )
-        )
-    })
+        }
+    )
     engine = Engine(reader=reader, executor=_FakeExecutor(results=()))
 
     # When syncing

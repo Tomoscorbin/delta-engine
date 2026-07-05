@@ -256,9 +256,7 @@ class ColumnMappingRequiredForDrop:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a column drop when the declaration lacks column mapping."""
-        drops_a_column = any(
-            isinstance(change, ColumnRemoved) for change in drift.managed_changes
-        )
+        drops_a_column = any(isinstance(change, ColumnRemoved) for change in drift.managed_changes)
         if not drops_a_column:
             return ()
         if drift.desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
