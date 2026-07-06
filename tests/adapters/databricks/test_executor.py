@@ -1,6 +1,12 @@
+from hypothesis import given, strategies as st
 import pyspark.sql.types as T
+import pytest
 
-from delta_engine.adapters.databricks.executor import DatabricksExecutor, _execute_compiled
+from delta_engine.adapters.databricks.executor import (
+    DatabricksExecutor,
+    _execute_compiled,
+    _sql_preview,
+)
 from delta_engine.adapters.databricks.sql import CompiledAction
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
@@ -161,6 +167,53 @@ def test_execute_returns_empty_summary_for_empty_plan():
     assert spark.executed == []
     assert summary.results == ()
     assert summary.failed is False
+
+
+# ----------- _sql_preview: bounded single-line statement previews for results/logs
+
+
+def test_sql_preview_single_line_normalization_and_no_truncation():
+    sql = " \nSELECT   *\nFROM  foo\tWHERE  a = 1  \n"
+    assert _sql_preview(sql, max_chars=10_000) == "SELECT * FROM foo WHERE a = 1"
+
+
+def test_sql_preview_truncates_and_appends_unicode_ellipsis():
+    sql = "SELECT " + "x" * 300 + " FROM t"
+    out = _sql_preview(sql, max_chars=50)
+    assert out.endswith("…")
+    assert len(out) > 50  # because the ellipsis is appended after slicing
+    assert out.startswith("SELECT ")
+
+
+@pytest.mark.parametrize(
+    ("length", "truncated"),
+    [
+        (9, False),  # below the limit: unchanged
+        (10, False),  # exactly at the limit: unchanged (the boundary that pins <=)
+        (11, True),  # one over: truncated to max_chars + ellipsis
+    ],
+    ids=["below", "at-limit", "over"],
+)
+def test_sql_preview_truncates_only_beyond_max_chars(length: int, truncated: bool):
+    # Given a single-line SQL string of a known length around max_chars=10
+    sql = "x" * length
+
+    # When previewing it with max_chars=10
+    out = _sql_preview(sql, max_chars=10)
+
+    # Then it is left intact at or below the limit, and truncated only beyond it
+    if truncated:
+        assert out == "x" * 10 + "…"
+    else:
+        assert out == sql
+
+
+@given(st.text(), st.integers(min_value=1, max_value=500))
+def test_sql_preview_single_line_output_never_contains_newline(sql: str, max_chars: int):
+    # Given: any SQL string and any max_chars
+    result = _sql_preview(sql, max_chars=max_chars)
+    # Then: the output never contains a newline regardless of input content
+    assert "\n" not in result
 
 
 # ----------- Tests against real local Spark/Delta (auto-marked local_e2e via the

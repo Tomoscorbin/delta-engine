@@ -16,7 +16,6 @@ from delta_engine.adapters.databricks.errors import summarize_exception
 from delta_engine.adapters.databricks.sql import (
     CompiledAction,
     compile_plan,
-    sql_preview,
 )
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
@@ -85,7 +84,7 @@ def _run_statement(
     silent propagation of whichever type was missed.
     """
     action_name = type(action).__name__
-    preview = sql_preview(statement)
+    preview = _sql_preview(statement)
     try:
         spark.sql(statement)
     except Exception as exception:
@@ -107,3 +106,18 @@ def _run_statement(
         action_index=action_index,
         statement_preview=preview,
     )
+
+
+def _sql_preview(sql: str, *, max_chars: int = 240) -> str:
+    """
+    Return a compact, bounded preview of a SQL statement for logs/results.
+
+    - Normalizes all runs of whitespace to single spaces on one line.
+    - Truncates with an ellipsis when longer than max_chars.
+
+    The bound and formatting are this executor's reporting policy — the preview
+    lands in ``statement_preview`` on execution results and in log lines, never
+    back in SQL sent to Spark.
+    """
+    s = " ".join(sql.split())
+    return s if len(s) <= max_chars else (s[:max_chars] + "…")
