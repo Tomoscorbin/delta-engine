@@ -10,8 +10,7 @@ failed dependencies.
 from delta_engine.application.dependency_resolution import ResolveResult, resolve
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
 

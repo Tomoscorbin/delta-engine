@@ -4,7 +4,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,

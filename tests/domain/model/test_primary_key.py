@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 
 
 def test_rejects_empty_columns():

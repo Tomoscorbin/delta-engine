@@ -48,9 +48,8 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.data_type import DataType
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
     Action,

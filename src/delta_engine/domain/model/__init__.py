@@ -1,4 +1,5 @@
 from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.data_type import (
     Array,
     Boolean,
@@ -13,8 +14,6 @@ from delta_engine.domain.model.data_type import (
     String,
     Timestamp,
 )
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect

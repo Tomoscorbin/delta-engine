@@ -6,8 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
 
