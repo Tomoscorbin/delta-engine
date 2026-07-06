@@ -10,8 +10,7 @@ failed dependencies.
 from delta_engine.application.dependency_resolution import ResolveResult, resolve
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
 
@@ -440,6 +439,60 @@ def test_resolve_records_cycle_failure_only_for_fk_inside_the_cycle():
         references="cat.sch.a",
     )
     assert _failures_for(result, "cat.sch.c") == ()
+
+
+def test_resolve_reports_invalid_fk_target_over_cycle_for_the_same_fk():
+    # Given a <-> b form a cycle, but a's FK into b targets a non-primary-key column.
+    # The FK-target check runs before cycle classification (see _classify_failures),
+    # so the structural problem is reported per-FK even though a is also in a cycle.
+    b = DesiredTable(
+        qualified_name=_qualified_name("cat.sch.b"),
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("email", String()),
+            Column("ref_id", String()),
+        ),
+        primary_key=PrimaryKeyConstraint.generate(table_name="b", columns=("id",)),
+        foreign_keys=(
+            ForeignKeyConstraint.generate(
+                owner_table_name="b",
+                local_columns=("ref_id",),
+                referenced_table=_qualified_name("cat.sch.a"),
+                referenced_columns=("id",),
+            ),
+        ),
+    )
+    a = DesiredTable(
+        qualified_name=_qualified_name("cat.sch.a"),
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("ref_email", String()),
+        ),
+        primary_key=PrimaryKeyConstraint.generate(table_name="a", columns=("id",)),
+        foreign_keys=(
+            ForeignKeyConstraint.generate(
+                owner_table_name="a",
+                local_columns=("ref_email",),
+                referenced_table=_qualified_name("cat.sch.b"),
+                referenced_columns=("email",),
+            ),
+        ),
+    )
+
+    # When resolving dependencies
+    result = resolve((a, b))
+
+    # Then a's single failure is the invalid FK target, not a cycle failure
+    _assert_has_failure(
+        result,
+        "cat.sch.a",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
+        references="cat.sch.b",
+        local_columns=("ref_email",),
+    )
+    assert _failure_reasons_for(result, "cat.sch.a") == [
+        ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
+    ]
 
 
 def test_resolve_blocks_table_that_depends_on_a_cycle():

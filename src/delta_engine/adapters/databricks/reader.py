@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from itertools import groupby
 import logging
 from types import MappingProxyType
 
 from pyspark.errors.exceptions.base import AnalysisException
-from pyspark.sql import SparkSession
+from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 from pyspark.sql.types import DataType as SparkType
 
@@ -28,8 +29,7 @@ from delta_engine.application.ports import (
 )
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 
 logger = logging.getLogger(__name__)
 
@@ -339,36 +339,37 @@ class DatabricksReader:
             # there are no FK constraints to observe.
             return ()
 
-        # One row per local FK column, already ordered by ordinal_position within
-        # each constraint. Grouping by name preserves that order, so local and
-        # referenced columns stay positionally aligned (row K of the constraint
-        # is the K-th local column and its matching parent-key column).
-        grouped: dict[str, dict] = {}
-        for row in rows:
-            constraint_name = row.constraint_name
-            if constraint_name not in grouped:
-                grouped[constraint_name] = {
-                    "local_columns": [],
-                    "ref_catalog": row.ref_catalog,
-                    "ref_schema": row.ref_schema,
-                    "ref_table": row.ref_table,
-                    "referenced_columns": [],
-                }
-            grouped[constraint_name]["local_columns"].append(row.local_column.casefold())
-            grouped[constraint_name]["referenced_columns"].append(row.ref_column.casefold())
-
+        # The query orders by (constraint_name, ordinal_position), so each
+        # constraint's rows are contiguous and already in column order. groupby
+        # yields one contiguous run per constraint without a manual accumulator.
         return tuple(
-            ForeignKeyConstraint(
-                local_columns=tuple(data["local_columns"]),
-                referenced_table=QualifiedName(
-                    data["ref_catalog"].casefold(),
-                    data["ref_schema"].casefold(),
-                    data["ref_table"].casefold(),
-                ),
-                referenced_columns=tuple(data["referenced_columns"]),
-                constraint_name=constraint_name.casefold(),
+            self._foreign_key_from_rows(constraint_name, list(constraint_rows))
+            for constraint_name, constraint_rows in groupby(
+                rows, key=lambda row: row.constraint_name
             )
-            for constraint_name, data in grouped.items()
+        )
+
+    @staticmethod
+    def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyConstraint:
+        """
+        Build one foreign key constraint from its key_column_usage rows.
+
+        ``rows`` are all rows for a single constraint, ordered by
+        ordinal_position, so local and referenced columns stay positionally
+        aligned. The referenced table is identical on every row, so it is read
+        from the first. Column and table names are lowercased at the adapter
+        boundary, consistent with the rest of this reader.
+        """
+        first = rows[0]
+        return ForeignKeyConstraint(
+            local_columns=tuple(row.local_column.casefold() for row in rows),
+            referenced_table=QualifiedName(
+                first.ref_catalog.casefold(),
+                first.ref_schema.casefold(),
+                first.ref_table.casefold(),
+            ),
+            referenced_columns=tuple(row.ref_column.casefold() for row in rows),
+            constraint_name=constraint_name.casefold(),
         )
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:

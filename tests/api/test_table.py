@@ -7,7 +7,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     TableAspect,
 )
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Property, String
 
 

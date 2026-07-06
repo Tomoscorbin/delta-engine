@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint
 
 
 def _customers() -> QualifiedName:

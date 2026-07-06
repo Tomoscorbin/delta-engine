@@ -24,7 +24,7 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedTable, QualifiedName
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable, SetColumnComment, SetTableComment
 from delta_engine.schema import Column, DeltaTable, ForeignKey, String

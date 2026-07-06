@@ -8,8 +8,7 @@ import pytest
 from delta_engine.adapters.databricks.reader import DatabricksReader
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.foreign_key import ForeignKeyConstraint
-from delta_engine.domain.model.primary_key import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 
 # ---------- fakes & helpers ----------
 
