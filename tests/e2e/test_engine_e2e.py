@@ -177,6 +177,65 @@ def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
     assert spark.catalog.getTable(fq).description == "idempotency test"
 
 
+def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp_schema):
+    table_name = f"lifecycle_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    initial = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("name", String()),
+            Column("legacy", String()),
+        ),
+        comment="customer table v1",
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    first_report = engine.sync(initial)
+    assert first_report.any_failures is False
+
+    evolved = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(
+            Column("id", Integer(), nullable=False, comment="stable id"),
+            Column("name", String(), comment="display name"),
+            Column("age", Integer(), comment="age in years"),
+        ),
+        comment="customer table v2",
+        properties={
+            "delta.columnMapping.mode": "name",
+            "delta.logRetentionDuration": "interval 30 days",
+        },
+    )
+    second_report = engine.sync(evolved)
+    assert second_report.any_failures is False
+    assert second_report.table_reports[0].execution is not None
+
+    fields = {f.name: f for f in spark.table(fq).schema.fields}
+    assert set(fields) == {"id", "name", "age"}
+    assert isinstance(fields["id"].dataType, T.IntegerType)
+    assert fields["id"].nullable is False
+    assert fields["id"].metadata.get("comment") == "stable id"
+    assert isinstance(fields["name"].dataType, T.StringType)
+    assert fields["name"].metadata.get("comment") == "display name"
+    assert isinstance(fields["age"].dataType, T.IntegerType)
+    assert fields["age"].nullable is True
+    assert fields["age"].metadata.get("comment") == "age in years"
+    assert spark.catalog.getTable(fq).description == "customer table v2"
+
+    detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+    assert detail["properties"].get("delta.columnMapping.mode") == "name"
+    assert detail["properties"].get("delta.logRetentionDuration") == "interval 30 days"
+
+    third_report = engine.sync(evolved)
+    assert len(third_report.table_reports[0].plan) == 0
+
+
 def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, temp_schema):
     fq = make_temp_table(
         "nullable",
