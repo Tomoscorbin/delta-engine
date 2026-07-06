@@ -19,6 +19,13 @@ from delta_engine.adapters.databricks.sql.preview import (
     exception_type_name,
     sql_preview,
 )
+from delta_engine.adapters.databricks.sql.queries import (
+    column_tags_query,
+    describe_detail_query,
+    foreign_keys_query,
+    primary_key_query,
+    table_tags_query,
+)
 from delta_engine.adapters.databricks.sql.types import (
     domain_type_from_spark,
     sql_type_for_data_type,
@@ -27,11 +34,16 @@ from delta_engine.adapters.databricks.sql.types import (
 __all__ = [
     "backtick",
     "backtick_qualified_name",
+    "column_tags_query",
     "compile_plan",
+    "describe_detail_query",
     "domain_type_from_spark",
     "error_preview",
     "exception_type_name",
+    "foreign_keys_query",
+    "primary_key_query",
     "quote_literal",
     "sql_preview",
     "sql_type_for_data_type",
+    "table_tags_query",
 ]
