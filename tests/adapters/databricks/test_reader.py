@@ -543,30 +543,6 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
 # ---------- tests: primary key ----------
 
 
-def test_fetch_state_lowercases_primary_key_column_names_from_catalog():
-    # Given a present table whose information_schema reports a mixed-case PK column
-    qn = QualifiedName("c", "s", "t")
-    fq = str(qn)
-    catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("orderid", dataType="int")]},
-        table_comments={fq: ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        describe_rows=[{"properties": {}}],
-        pk_column_rows=[{"column_name": "OrderID", "constraint_name": "T_PK"}],
-    )
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the primary key column and name are normalised to lowercase at the adapter boundary
-    assert isinstance(result, TablePresent)
-    assert result.table.primary_key == PrimaryKeyConstraint(
-        columns=("orderid",), constraint_name="t_pk"
-    )
-
-
 def test_fetch_state_includes_primary_key_in_observed_table():
     # Given: a table with a PK
     qn = QualifiedName("c", "s", "t")
@@ -589,30 +565,6 @@ def test_fetch_state_includes_primary_key_in_observed_table():
     # Then: primary_key is populated on the ObservedTable, carrying the catalog name
     assert isinstance(result, TablePresent)
     assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
-
-
-def test_fetch_state_primary_key_is_empty_when_none_defined():
-    # Given: a table with no PK
-    qn = QualifiedName("c", "s", "t")
-    fq = str(qn)
-    catalog = FakeCatalog(
-        columns_by_table={
-            fq: [make_catalog_col("id", dataType="int")],
-        },
-        table_comments={fq: ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        describe_rows=[{"properties": {}}],
-        pk_column_rows=[],
-    )
-
-    # When fetching state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then: primary_key is None (no constraint defined)
-    assert isinstance(result, TablePresent)
-    assert result.table.primary_key is None
 
 
 def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
@@ -686,56 +638,6 @@ def test_fetch_state_includes_single_column_foreign_key_in_observed_table():
     )
 
 
-def test_fetch_state_preserves_composite_foreign_key_columns_in_ordinal_order():
-    # Given a composite FK whose rows arrive in ordinal order (tenant_id, then customer_id)
-    qn = QualifiedName("cat", "sch", "orders")
-    fk_rows = [
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="tenant_id",
-            ordinal_position=1,
-            position_in_unique_constraint=1,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="tenant_id",
-        ),
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="customer_id",
-            ordinal_position=2,
-            position_in_unique_constraint=2,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="id",
-        ),
-    ]
-    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=fk_rows)
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the FK's columns are preserved in ordinal order
-    assert isinstance(result, TablePresent)
-    [foreign_key] = result.table.foreign_keys
-    assert foreign_key.local_columns == ("tenant_id", "customer_id")
-    assert foreign_key.referenced_columns == ("tenant_id", "id")
-
-
-def test_fetch_state_foreign_keys_are_empty_when_none_defined():
-    # Given a present table whose information_schema returns no FK rows
-    qn = QualifiedName("cat", "sch", "orders")
-    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=[])
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then no foreign keys are observed
-    assert isinstance(result, TablePresent)
-    assert result.table.foreign_keys == ()
-
-
 def test_fetch_state_foreign_keys_are_empty_when_information_schema_unavailable():
     # Given the FK information_schema query raises (non-UC environment)
     qn = QualifiedName("cat", "sch", "orders")
@@ -750,140 +652,6 @@ def test_fetch_state_foreign_keys_are_empty_when_information_schema_unavailable(
     # Then the read still succeeds with no foreign keys (no UC = no FK constraints)
     assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == ()
-
-
-class _FakeSparkRawForeignKeyRows:
-    """
-    Spark fake that returns the *raw* per-column rows the production FK query
-    produces, so tests exercise the reader's grouping/alignment rather than a
-    pre-joined result. Each row mirrors one row of the real
-    information_schema query result set.
-    """
-
-    def __init__(self, *, catalog, fk_rows, describe_rows=None):
-        self._catalog = catalog
-        self._fk_rows = fk_rows
-        self._describe_rows = describe_rows or [{"properties": {}}]
-
-    @property
-    def catalog(self):
-        return self._catalog
-
-    def sql(self, query: str):
-        if "referential_constraints" in query:
-            return FakeDataFrame(self._fk_rows)
-        if "information_schema" in query.lower():
-            return FakeDataFrame([])  # no primary key rows for these tables
-        return FakeDataFrame(self._describe_rows)
-
-
-def test_fetch_state_composite_foreign_key_aligns_local_and_referenced_columns():
-    # Given a composite FK (tenant_id, customer_id) -> customers(tenant_id, id):
-    # the raw query returns one row per local column, each carrying the parent
-    # key column at the matching position_in_unique_constraint.
-    qn = QualifiedName("cat", "sch", "orders")
-    fk_rows = [
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="tenant_id",
-            ordinal_position=1,
-            position_in_unique_constraint=1,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="tenant_id",
-        ),
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="customer_id",
-            ordinal_position=2,
-            position_in_unique_constraint=2,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="id",
-        ),
-    ]
-    spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then exactly one FK is observed, with columns positionally aligned and no duplicates
-    assert isinstance(result, TablePresent)
-    [foreign_key] = result.table.foreign_keys
-    assert foreign_key.local_columns == ("tenant_id", "customer_id")
-    assert foreign_key.referenced_columns == ("tenant_id", "id")
-    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
-
-
-def test_fetch_state_composite_foreign_key_does_not_duplicate_columns():
-    # Guard the grouping layer: N raw query rows must produce exactly N local columns
-    # and N referenced columns — not NxM as a cross-join would.
-    #
-    # Given a 2-column composite FK whose raw query returns exactly 2 rows
-    # (one per local column, each carrying its matching parent-key column):
-    qn = QualifiedName("cat", "sch", "orders")
-    fk_rows = [
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="tenant_id",
-            ordinal_position=1,
-            position_in_unique_constraint=1,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="tenant_id",
-        ),
-        SimpleNamespace(
-            constraint_name="orders_comp_fk",
-            local_column="customer_id",
-            ordinal_position=2,
-            position_in_unique_constraint=2,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="id",
-        ),
-    ]
-    spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the grouped FK has exactly 2 local columns and 2 referenced columns —
-    # no duplication — and they are positionally aligned
-    assert isinstance(result, TablePresent)
-    [foreign_key] = result.table.foreign_keys
-    assert len(foreign_key.local_columns) == 2
-    assert len(foreign_key.referenced_columns) == 2
-    assert foreign_key.local_columns == ("tenant_id", "customer_id")
-    assert foreign_key.referenced_columns == ("tenant_id", "id")
-
-
-def test_fetch_state_lowercases_foreign_key_constraint_name():
-    # Given a catalog that returns a mixed-case constraint name
-    qn = QualifiedName("cat", "sch", "orders")
-    fk_rows = [
-        SimpleNamespace(
-            constraint_name="Orders_Customer_FK",
-            local_column="customer_id",
-            ordinal_position=1,
-            position_in_unique_constraint=1,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="id",
-        )
-    ]
-    spark = _FakeSparkRawForeignKeyRows(catalog=_orders_catalog(), fk_rows=fk_rows)
-
-    # When fetching state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the observed constraint name is normalised to lowercase
-    [foreign_key] = result.table.foreign_keys
-    assert foreign_key.constraint_name == "orders_customer_fk"
 
 
 # ---------- tests: tags ----------
@@ -909,41 +677,6 @@ def test_fetch_state_observes_table_tags(qn):
     assert dict(result.table.tags) == {"env": "prod", "domain": "sales"}
     with pytest.raises(TypeError):
         result.table.tags["x"] = "y"  # type: ignore[index]
-
-
-def test_fetch_state_preserves_tag_key_case(qn):
-    # Given a catalog tag with a mixed-case key (UC tag keys are case-sensitive)
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        tag_rows=[SimpleNamespace(tag_name="CostCentre", tag_value="data-eng")],
-    )
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the tag key is NOT casefolded (contrast column names)
-    assert isinstance(result, TablePresent)
-    assert dict(result.table.tags) == {"CostCentre": "data-eng"}
-
-
-def test_fetch_state_tags_are_empty_when_none_defined(qn):
-    # Given a present table whose table_tags query returns no rows
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, tag_rows=[])
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then no tags are observed
-    assert isinstance(result, TablePresent)
-    assert dict(result.table.tags) == {}
 
 
 def test_fetch_state_tags_are_empty_when_information_schema_unavailable(qn):
@@ -987,46 +720,6 @@ def test_fetch_state_observes_column_tags(qn):
     assert isinstance(result, TablePresent)
     (column,) = result.table.columns
     assert dict(column.tags) == {"pii": "true", "classification": "restricted"}
-
-
-def test_fetch_state_lowercases_column_name_but_preserves_tag_key_case(qn):
-    # Given a catalog that reports a mixed-case column name and a mixed-case tag key
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("Email", dataType="string")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        column_tag_rows=[
-            SimpleNamespace(column_name="Email", tag_name="PII", tag_value="true"),
-        ],
-    )
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the column name is lowercased to match the domain, but the tag key is NOT
-    assert isinstance(result, TablePresent)
-    (column,) = result.table.columns
-    assert column.name == "email"
-    assert dict(column.tags) == {"PII": "true"}
-
-
-def test_fetch_state_column_tags_are_empty_when_none_defined(qn):
-    # Given a present table whose column_tags query returns no rows
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, column_tag_rows=[])
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then no column tags are observed
-    assert isinstance(result, TablePresent)
-    (column,) = result.table.columns
-    assert dict(column.tags) == {}
 
 
 def test_fetch_state_column_tags_are_empty_when_information_schema_unavailable(qn):

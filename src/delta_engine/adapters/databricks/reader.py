@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from itertools import groupby
 import logging
@@ -87,6 +88,94 @@ def _to_column_mapping(
     )
 
 
+def _primary_key_from_rows(rows: Sequence[Row]) -> PrimaryKeyConstraint | None:
+    """
+    Build the primary key from its information_schema rows, or ``None``.
+
+    Constraint and column names are normalised to lowercase at the adapter
+    boundary.
+    """
+    columns = tuple(row["column_name"].casefold() for row in rows)
+    if not columns:
+        return None
+    constraint_name = rows[0]["constraint_name"].casefold()
+    return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
+
+
+def _foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyConstraint, ...]:
+    """
+    Build all foreign keys from information_schema rows.
+
+    The query orders by (constraint_name, ordinal_position), so each
+    constraint's rows are contiguous and already in column order. groupby
+    yields one contiguous run per constraint without a manual accumulator.
+    """
+    return tuple(
+        _foreign_key_from_rows(constraint_name, list(constraint_rows))
+        for constraint_name, constraint_rows in groupby(rows, key=lambda row: row.constraint_name)
+    )
+
+
+def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyConstraint:
+    """
+    Build one foreign key constraint from its key_column_usage rows.
+
+    ``rows`` are all rows for a single constraint, ordered by
+    ordinal_position, so local and referenced columns stay positionally
+    aligned. The referenced table is identical on every row, so it is read
+    from the first. Column and table names are lowercased at the adapter
+    boundary, consistent with the rest of this reader.
+    """
+    first = rows[0]
+    return ForeignKeyConstraint(
+        local_columns=tuple(row.local_column.casefold() for row in rows),
+        referenced_table=QualifiedName(
+            first.ref_catalog.casefold(),
+            first.ref_schema.casefold(),
+            first.ref_table.casefold(),
+        ),
+        referenced_columns=tuple(row.ref_column.casefold() for row in rows),
+        constraint_name=constraint_name.casefold(),
+    )
+
+
+def _table_tags_from_rows(rows: Iterable[Row]) -> MappingProxyType[str, str]:
+    """Map table-tag rows to a read-only mapping; tag case is preserved verbatim."""
+    return MappingProxyType({row.tag_name: row.tag_value for row in rows})
+
+
+def _column_tags_from_rows(
+    rows: Iterable[Row],
+) -> MappingProxyType[str, MappingProxyType[str, str]]:
+    """
+    Map column-tag rows to ``{column_name: {tag: value}}``.
+
+    Column names are casefolded to match the domain's lowercase columns; tag
+    keys and values are case-sensitive and returned verbatim — never casefolded.
+    """
+    grouped: dict[str, dict[str, str]] = {}
+    for row in rows:
+        grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
+    return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})
+
+
+def _managed_properties_from_row(row: Row) -> MappingProxyType[str, str]:
+    """
+    Filter a DESCRIBE DETAIL row's properties to the managed registry keys.
+
+    Platform-written keys (protocol bookkeeping, auto-enabled features,
+    internal counters) never reach the domain, so they can neither trip
+    validation nor churn plans. This is backend normalization, owned here
+    like identifier lowercasing and type parsing.
+    """
+    observed_properties = {
+        name: value
+        for name, value in dict(row["properties"]).items()
+        if name in DELTA_PROPERTY_REGISTRY
+    }
+    return MappingProxyType(observed_properties)
+
+
 class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
@@ -134,7 +223,7 @@ class DatabricksReader:
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=self._fetch_properties(qualified_name),
+            properties=_managed_properties_from_row(self._describe_detail_row(qualified_name)),
             tags=self._fetch_table_tags(qualified_name),
             partitioned_by=partition_columns,
             primary_key=self._fetch_primary_key(qualified_name),
@@ -155,24 +244,18 @@ class DatabricksReader:
         """
         return self.spark.catalog.tableExists(str(qualified_name))
 
-    def _fetch_properties(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
+    def _describe_detail_row(self, qualified_name: QualifiedName) -> Row:
         """
-        Return the managed catalog table properties as a read-only mapping.
+        Return the table's DESCRIBE DETAIL row.
 
-        The full catalog map is filtered to the keys in
-        ``DELTA_PROPERTY_REGISTRY``: platform-written keys (protocol
-        bookkeeping, auto-enabled features, internal counters) never reach
-        the domain, so they can neither trip validation nor churn plans.
-        This is backend normalization, owned here like identifier
-        lowercasing and type parsing.
-
-        Raises when ``DESCRIBE DETAIL`` yields no row for a table the existence
-        probe just reported present: an empty result there is not "a table with
-        no properties" (that is a present row with an empty map) but a race or a
-        catalog inconsistency. Failing loud lets ``fetch_state``'s error boundary
-        return ``ReadFailed`` — the honest outcome for "could not determine
-        state" — rather than a ``TablePresent`` with no properties, which would
-        make the differ re-apply every managed property on every sync.
+        Raises when the query yields no row for a table the existence probe
+        just reported present: an empty result there is not "a table with no
+        properties" (that is a present row with an empty map) but a race or a
+        catalog inconsistency. Failing loud lets ``fetch_state``'s error
+        boundary return ``ReadFailed`` — the honest outcome for "could not
+        determine state" — rather than a ``TablePresent`` with no properties,
+        which would make the differ re-apply every managed property on every
+        sync.
         """
         row = self.spark.sql(describe_detail_query(qualified_name)).first()
         if row is None:
@@ -181,134 +264,45 @@ class DatabricksReader:
                 " existence probe just reported as present — the table was dropped"
                 " mid-read or the catalog is inconsistent."
             )
-        observed_properties = {
-            name: value
-            for name, value in dict(row["properties"]).items()
-            if name in DELTA_PROPERTY_REGISTRY
-        }
-        return MappingProxyType(observed_properties)
+        return row
 
     def _fetch_primary_key(self, qualified_name: QualifiedName) -> PrimaryKeyConstraint | None:
-        """
-        Return the primary key from Unity Catalog information_schema, or None.
-
-        Returns ``None`` when no primary key is defined. Column names are
-        normalised to lowercase at the adapter boundary.
-        """
-        query = primary_key_query(qualified_name)
+        """Return the primary key from information_schema, or ``None``."""
         try:
-            rows = self.spark.sql(query).collect()
+            rows = self.spark.sql(primary_key_query(qualified_name)).collect()
         except AnalysisException:
             # information_schema is only available in Unity Catalog. On plain
             # Spark (e.g. local tests), there are no PK constraints to observe.
             return None
-        columns = tuple(row["column_name"].casefold() for row in rows)
-        if not columns:
-            return None
-        constraint_name = rows[0]["constraint_name"].casefold()
-        return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
+        return _primary_key_from_rows(rows)
 
     def _fetch_table_tags(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
-        """
-        Return the table's Unity Catalog tags as a read-only mapping.
-
-        Reads information_schema.table_tags — tags are a separate UC governance
-        object and are NOT part of the DESCRIBE DETAIL properties map, so they
-        must be queried directly or the differ would re-apply them on every
-        sync. Returns an empty mapping on AnalysisException: information_schema
-        is only available in Unity Catalog, so on plain Spark (e.g. local tests)
-        there are no tags to observe. Tag keys and values are case-sensitive and
-        are returned exactly as stored — never casefolded.
-        """
-        query = table_tags_query(qualified_name)
+        """Return the table's Unity Catalog tags as a read-only mapping."""
         try:
-            rows = self.spark.sql(query).collect()
+            rows = self.spark.sql(table_tags_query(qualified_name)).collect()
         except AnalysisException:
             return MappingProxyType({})
-        return MappingProxyType({row.tag_name: row.tag_value for row in rows})
+        return _table_tags_from_rows(rows)
 
     def _fetch_column_tags(
         self, qualified_name: QualifiedName
     ) -> MappingProxyType[str, MappingProxyType[str, str]]:
-        """
-        Return the table's column tags as ``{column_name: {tag: value}}``.
-
-        Reads information_schema.column_tags in a single query for the whole
-        table (avoiding a per-column round-trip). Column names are casefolded to
-        match the domain's lowercase columns; tag keys and values are
-        case-sensitive and returned verbatim — never casefolded. Returns an empty
-        mapping on AnalysisException: information_schema is only available in
-        Unity Catalog, so on plain Spark (e.g. local tests) there are no column
-        tags to observe. Without this guard an unobservable tag would be re-set
-        on every sync and the differ would never converge.
-        """
-        query = column_tags_query(qualified_name)
+        """Return the table's column tags as ``{column_name: {tag: value}}``."""
         try:
-            rows = self.spark.sql(query).collect()
+            rows = self.spark.sql(column_tags_query(qualified_name)).collect()
         except AnalysisException:
             return MappingProxyType({})
-        grouped: dict[str, dict[str, str]] = {}
-        for row in rows:
-            grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
-        return MappingProxyType(
-            {column: MappingProxyType(tags) for column, tags in grouped.items()}
-        )
+        return _column_tags_from_rows(rows)
 
     def _fetch_foreign_keys(
         self, qualified_name: QualifiedName
     ) -> tuple[ForeignKeyConstraint, ...]:
-        """
-        Return foreign key constraints from Unity Catalog information_schema.
-
-        Returns an empty tuple when no FKs are defined, or on AnalysisException
-        (plain Spark / non-Unity Catalog environment).
-
-        Constraint names are read from the catalog so observed-only constraints
-        can be dropped by their real names. Column names are lowercased at the
-        adapter boundary, consistent with how primary key and column names are
-        normalised throughout this reader.
-        """
-        query = foreign_keys_query(qualified_name)
+        """Return foreign key constraints from information_schema."""
         try:
-            rows = self.spark.sql(query).collect()
+            rows = self.spark.sql(foreign_keys_query(qualified_name)).collect()
         except AnalysisException:
-            # information_schema is only available in Unity Catalog. On plain
-            # Spark (e.g. local tests without UC), the view does not exist and
-            # there are no FK constraints to observe.
             return ()
-
-        # The query orders by (constraint_name, ordinal_position), so each
-        # constraint's rows are contiguous and already in column order. groupby
-        # yields one contiguous run per constraint without a manual accumulator.
-        return tuple(
-            self._foreign_key_from_rows(constraint_name, list(constraint_rows))
-            for constraint_name, constraint_rows in groupby(
-                rows, key=lambda row: row.constraint_name
-            )
-        )
-
-    @staticmethod
-    def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyConstraint:
-        """
-        Build one foreign key constraint from its key_column_usage rows.
-
-        ``rows`` are all rows for a single constraint, ordered by
-        ordinal_position, so local and referenced columns stay positionally
-        aligned. The referenced table is identical on every row, so it is read
-        from the first. Column and table names are lowercased at the adapter
-        boundary, consistent with the rest of this reader.
-        """
-        first = rows[0]
-        return ForeignKeyConstraint(
-            local_columns=tuple(row.local_column.casefold() for row in rows),
-            referenced_table=QualifiedName(
-                first.ref_catalog.casefold(),
-                first.ref_schema.casefold(),
-                first.ref_table.casefold(),
-            ),
-            referenced_columns=tuple(row.ref_column.casefold() for row in rows),
-            constraint_name=constraint_name.casefold(),
-        )
+        return _foreign_keys_from_rows(rows)
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""
