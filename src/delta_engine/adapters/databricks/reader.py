@@ -67,7 +67,9 @@ def _to_column_mapping(
     if domain_data_type is None:
         logger.warning(
             "Skipping column %r in %s: unrecognised Spark type %r"
-            " — column will be unmanaged until support is added",
+            " — the column is invisible to this sync; if a declaration includes"
+            " it, the planned ADD COLUMN will fail at execution because the"
+            " column already exists",
             spark_column.name,
             qualified_name,
             spark_column.dataType,

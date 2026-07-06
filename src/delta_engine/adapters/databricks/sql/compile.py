@@ -80,9 +80,9 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
-    table_comment = _set_table_comment(table.comment)
-    properties = _set_properties(table.properties)
-    partition_by = _set_partitioned_by(table.partitioned_by)
+    table_comment = _table_comment_clause(table.comment)
+    properties = _properties_clause(table.properties)
+    partition_by = _partitioned_by_clause(table.partitioned_by)
 
     # IF NOT EXISTS, even though CreateTable is only emitted after the reader
     # reports the table absent. It guards the read-then-create race: if another
@@ -244,14 +244,14 @@ def _column_definition(column: Column) -> str:
     return " ".join(part for part in (column_name, sql_type, nullable, comment) if part)
 
 
-def _set_table_comment(comment: str) -> str:
+def _table_comment_clause(comment: str) -> str:
     """Render the table COMMENT clause, or '' when there is no comment to set."""
     if not comment:
         return ""
     return f"COMMENT {quote_literal(comment)}"
 
 
-def _set_properties(props: Mapping[str, str | None]) -> str:
+def _properties_clause(props: Mapping[str, str | None]) -> str:
     # None values are absence assertions: a new table simply omits the key.
     pairs = ", ".join(
         f"{quote_literal(name)}={quote_literal(value)}"
@@ -263,7 +263,7 @@ def _set_properties(props: Mapping[str, str | None]) -> str:
     return f"TBLPROPERTIES ({pairs})"
 
 
-def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
+def _partitioned_by_clause(partitioned_by: tuple[str, ...] = ()) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
