@@ -70,7 +70,11 @@ def table_tags_query(qualified_name: QualifiedName) -> str:
 
 
 def column_tags_query(qualified_name: QualifiedName) -> str:
-    """Render the information_schema query for all column tags of one table."""
+    """
+    Render the information_schema query for all column tags of one table.
+
+    One query covers all of the table's columns, avoiding a per-column round-trip.
+    """
     catalog = backtick(qualified_name.catalog)
     return (
         f"SELECT column_name, tag_name, tag_value"

@@ -124,7 +124,9 @@ def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyC
     ordinal_position, so local and referenced columns stay positionally
     aligned. The referenced table is identical on every row, so it is read
     from the first. Column and table names are lowercased at the adapter
-    boundary, consistent with the rest of this reader.
+    boundary, consistent with the rest of this reader. Constraint names are
+    read from the catalog so observed-only constraints can be dropped by
+    their real names.
     """
     first = rows[0]
     return ForeignKeyConstraint(
@@ -213,21 +215,28 @@ class DatabricksReader:
             for c in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(m for m in all_mappings if m is not None)
-        column_tags = self._fetch_column_tags(qualified_name)
+        column_tags = _column_tags_from_rows(
+            self._information_schema_rows(column_tags_query(qualified_name))
+        )
         columns = tuple(
             replace(m.column, tags=column_tags.get(m.column.name, MappingProxyType({})))
             for m in mappings
         )
-        partition_columns = tuple(m.column.name for m in mappings if m.is_partition)
         observed = ObservedTable(
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
             properties=_managed_properties_from_row(self._describe_detail_row(qualified_name)),
-            tags=self._fetch_table_tags(qualified_name),
-            partitioned_by=partition_columns,
-            primary_key=self._fetch_primary_key(qualified_name),
-            foreign_keys=self._fetch_foreign_keys(qualified_name),
+            tags=_table_tags_from_rows(
+                self._information_schema_rows(table_tags_query(qualified_name))
+            ),
+            partitioned_by=tuple(m.column.name for m in mappings if m.is_partition),
+            primary_key=_primary_key_from_rows(
+                self._information_schema_rows(primary_key_query(qualified_name))
+            ),
+            foreign_keys=_foreign_keys_from_rows(
+                self._information_schema_rows(foreign_keys_query(qualified_name))
+            ),
         )
         return TablePresent(table=observed)
 
@@ -266,43 +275,21 @@ class DatabricksReader:
             )
         return row
 
-    def _fetch_primary_key(self, qualified_name: QualifiedName) -> PrimaryKeyConstraint | None:
-        """Return the primary key from information_schema, or ``None``."""
-        try:
-            rows = self.spark.sql(primary_key_query(qualified_name)).collect()
-        except AnalysisException:
-            # information_schema is only available in Unity Catalog. On plain
-            # Spark (e.g. local tests), there are no PK constraints to observe.
-            return None
-        return _primary_key_from_rows(rows)
+    def _information_schema_rows(self, query: str) -> list[Row]:
+        """
+        Run a Unity Catalog information_schema query and return its rows.
 
-    def _fetch_table_tags(self, qualified_name: QualifiedName) -> MappingProxyType[str, str]:
-        """Return the table's Unity Catalog tags as a read-only mapping."""
+        The single home of the "information_schema may not exist here" policy:
+        on plain Spark (e.g. local tests without UC) these views do not exist
+        and the query raises ``AnalysisException`` — there is no constraint or
+        tag state to observe, so the result is no rows. Without this guard an
+        unobservable tag would be re-set on every sync and the differ would
+        never converge.
+        """
         try:
-            rows = self.spark.sql(table_tags_query(qualified_name)).collect()
+            return self.spark.sql(query).collect()
         except AnalysisException:
-            return MappingProxyType({})
-        return _table_tags_from_rows(rows)
-
-    def _fetch_column_tags(
-        self, qualified_name: QualifiedName
-    ) -> MappingProxyType[str, MappingProxyType[str, str]]:
-        """Return the table's column tags as ``{column_name: {tag: value}}``."""
-        try:
-            rows = self.spark.sql(column_tags_query(qualified_name)).collect()
-        except AnalysisException:
-            return MappingProxyType({})
-        return _column_tags_from_rows(rows)
-
-    def _fetch_foreign_keys(
-        self, qualified_name: QualifiedName
-    ) -> tuple[ForeignKeyConstraint, ...]:
-        """Return foreign key constraints from information_schema."""
-        try:
-            rows = self.spark.sql(foreign_keys_query(qualified_name)).collect()
-        except AnalysisException:
-            return ()
-        return _foreign_keys_from_rows(rows)
+            return []
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""

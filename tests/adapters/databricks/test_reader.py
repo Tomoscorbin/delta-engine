@@ -1,3 +1,13 @@
+"""
+Shell tests for DatabricksReader: sequencing, normalization at the boundary,
+and fetch_state's totality.
+
+Row->domain mapping is covered directly in test_reader_mappers.py; query text
+is pinned in sql/test_queries.py. The fake here routes spark.sql() by EXACT
+query text (keyed by the same builders the reader uses), so no fake ever
+parses SQL.
+"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,6 +16,13 @@ from pyspark.errors.exceptions.base import AnalysisException
 import pytest
 
 from delta_engine.adapters.databricks.reader import DatabricksReader
+from delta_engine.adapters.databricks.sql import (
+    column_tags_query,
+    describe_detail_query,
+    foreign_keys_query,
+    primary_key_query,
+    table_tags_query,
+)
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
@@ -16,9 +33,6 @@ from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryK
 class FakeDataFrame:
     def __init__(self, rows):
         self._rows = rows
-
-    def head(self, n):
-        return self._rows[:n]
 
     def first(self):
         return self._rows[0] if self._rows else None
@@ -54,105 +68,54 @@ class FakeCatalog:
         return SimpleNamespace(description=self._table_comments.get(fully_qualified_name, ""))
 
 
-class FakeSparkForFetchState:
+class RoutedSpark:
     """
-    Spark fake for fetch_state().
+    SparkSession fake whose sql() answers from an exact query-text table.
 
-      catalog.tableExists() -> existence probe (configured on the FakeCatalog)
-      sql() -> DESCRIBE DETAIL (returns rows or raises)
+    A response value may be a list of rows (returned in a FakeDataFrame) or an
+    Exception instance (raised). Unexpected query text fails the test loudly.
     """
 
-    def __init__(
-        self,
-        *,
-        catalog: FakeCatalog,
-        describe_rows=None,
-        describe_exc: Exception | None = None,
-    ):
+    def __init__(self, *, catalog: FakeCatalog, responses: dict):
         self._catalog = catalog
-        self._describe_rows = describe_rows
-        self._describe_exc = describe_exc
+        self._responses = responses
+        self.queries: list[str] = []
 
     @property
     def catalog(self):
         return self._catalog
 
     def sql(self, query: str):
-        if "referential_constraints" in query:
-            return FakeDataFrame([])
-        if "column_tags" in query.lower():
-            return FakeDataFrame([])
-        if "table_tags" in query.lower():
-            return FakeDataFrame([])
-        if self._describe_exc is not None:
-            raise self._describe_exc
-        return FakeDataFrame(self._describe_rows or [])
+        self.queries.append(query)
+        if query not in self._responses:
+            raise AssertionError(f"unexpected query: {query}")
+        value = self._responses[query]
+        if isinstance(value, Exception):
+            raise value
+        return FakeDataFrame(value)
 
 
-class FakeSparkWithPrimaryKey:
-    """
-    Spark fake that handles the queries `fetch_state` issues against a present
-    table: DESCRIBE DETAIL (properties), the information_schema primary key
-    query, the information_schema foreign key query, the
-    information_schema.table_tags query, and the
-    information_schema.column_tags query.
-
-    sql() distinguishes them by query text: the FK query references
-    'referential_constraints'; the column_tags query references 'column_tags';
-    the table_tags query references 'table_tags'; the PK query is the other
-    'information_schema' query; everything else is treated as DESCRIBE DETAIL.
-    The 'column_tags' and 'table_tags' checks must both precede the generic
-    'information_schema' check because those queries also contain that string;
-    the order between 'column_tags' and 'table_tags' themselves is unimportant.
-    """
-
-    def __init__(
-        self,
-        *,
-        catalog: FakeCatalog,
-        describe_rows=None,
-        pk_column_rows=None,
-        pk_exc: Exception | None = None,
-        fk_rows=None,
-        fk_exc: Exception | None = None,
-        tag_rows=None,
-        tags_exc: Exception | None = None,
-        column_tag_rows=None,
-        column_tags_exc: Exception | None = None,
-    ):
-        self._catalog = catalog
-        self._describe_rows = describe_rows or [{"properties": {}}]
-        self._pk_column_rows = pk_column_rows or []
-        self._pk_exc = pk_exc
-        self._fk_rows = fk_rows or []
-        self._fk_exc = fk_exc
-        self._tag_rows = tag_rows or []
-        self._tags_exc = tags_exc
-        self._column_tag_rows = column_tag_rows or []
-        self._column_tags_exc = column_tags_exc
-
-    @property
-    def catalog(self):
-        return self._catalog
-
-    def sql(self, query: str):
-        if "referential_constraints" in query:
-            if self._fk_exc is not None:
-                raise self._fk_exc
-            return FakeDataFrame(self._fk_rows)
-        if "column_tags" in query.lower():
-            if self._column_tags_exc is not None:
-                raise self._column_tags_exc
-            return FakeDataFrame(self._column_tag_rows)
-        if "table_tags" in query.lower():
-            if self._tags_exc is not None:
-                raise self._tags_exc
-            return FakeDataFrame(self._tag_rows)
-        if "information_schema" in query.lower():
-            if self._pk_exc is not None:
-                raise self._pk_exc
-            return FakeDataFrame(self._pk_column_rows)
-        return FakeDataFrame(self._describe_rows)
+def routed_spark(
+    qn: QualifiedName,
+    *,
+    catalog: FakeCatalog,
+    describe=None,
+    pk=(),
+    fks=(),
+    tags=(),
+    column_tags=(),
+):
+    """Build a RoutedSpark with a full default response set for one table."""
+    responses = {
+        describe_detail_query(qn): describe if describe is not None else [{"properties": {}}],
+        primary_key_query(qn): list(pk) if not isinstance(pk, Exception) else pk,
+        foreign_keys_query(qn): list(fks) if not isinstance(fks, Exception) else fks,
+        table_tags_query(qn): list(tags) if not isinstance(tags, Exception) else tags,
+        column_tags_query(qn): (
+            list(column_tags) if not isinstance(column_tags, Exception) else column_tags
+        ),
+    }
+    return RoutedSpark(catalog=catalog, responses=responses)
 
 
 def make_catalog_col(
@@ -173,6 +136,36 @@ def make_catalog_col(
     )
 
 
+def single_column_catalog(qn: QualifiedName, **catalog_kwargs) -> FakeCatalog:
+    return FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
+        **catalog_kwargs,
+    )
+
+
+def fk_row(
+    *,
+    constraint_name="fk_orders_customers",
+    local_column="customer_id",
+    ordinal_position=1,
+    position_in_unique_constraint=1,
+    ref_catalog="c",
+    ref_schema="s",
+    ref_table="customers",
+    ref_column="id",
+):
+    return SimpleNamespace(
+        constraint_name=constraint_name,
+        local_column=local_column,
+        ordinal_position=ordinal_position,
+        position_in_unique_constraint=position_in_unique_constraint,
+        ref_catalog=ref_catalog,
+        ref_schema=ref_schema,
+        ref_table=ref_table,
+        ref_column=ref_column,
+    )
+
+
 # ---------- shared fixtures ----------
 
 
@@ -182,11 +175,9 @@ def _active_spark_session(spark):
     Keep a live SparkSession up for every test in this module.
 
     The reader maps each catalog column's DDL type string through
-    ``domain_type_from_ddl``, which delegates to ``SparkType.fromDDL`` — and that
-    parser needs an active session. Production always has one; requesting the
-    session fixture here exercises the column-mapping path against the same DDL
-    strings Unity Catalog reports, rather than pre-parsed type instances the
-    reader never actually receives.
+    ``SparkType.fromDDL``, and that parser needs an active session. Production
+    always has one; requesting the session fixture here exercises the
+    column-mapping path against the same DDL strings Unity Catalog reports.
     """
 
 
@@ -195,11 +186,10 @@ def qn() -> QualifiedName:
     return QualifiedName("c", "s", "t")
 
 
-# ---------- tests: columns & partitions ----------
+# ---------- columns & partitions ----------
 
 
 def test_columns_maps_name_nullability_and_comment(qn):
-    # Given a catalog exposing two columns
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
@@ -208,12 +198,8 @@ def test_columns_maps_name_nullability_and_comment(qn):
             ]
         }
     )
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
-    # When we fetch state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then names, nullability, and comments are mapped correctly
     assert isinstance(result, TablePresent)
     cols = result.table.columns
     assert [c.name for c in cols] == ["id", "p_date"]
@@ -222,7 +208,6 @@ def test_columns_maps_name_nullability_and_comment(qn):
 
 
 def test_partition_columns_returns_only_partition_names_in_order(qn):
-    # Given a mix of regular and partition columns
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
@@ -232,22 +217,16 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
             ]
         }
     )
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
-    # When we fetch state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then only partition columns are returned and ordering is preserved
     assert isinstance(result, TablePresent)
     assert result.table.partitioned_by == ("p_store", "p_date")
 
 
-def test_partition_columns_ignores_missing_or_false_flags():
-    # Given columns with isPartition absent or False
+def test_partition_columns_ignores_missing_or_false_flags(qn):
     class NoIsPartition(SimpleNamespace):
         pass
 
-    qn = QualifiedName("c", "s", "u")
     catalog = FakeCatalog(
         columns_by_table={
             str(qn): [
@@ -256,33 +235,72 @@ def test_partition_columns_ignores_missing_or_false_flags():
             ]
         }
     )
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
-    # When we fetch state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then no partitions are reported
     assert isinstance(result, TablePresent)
     assert result.table.partitioned_by == ()
 
 
-# ---------- tests: properties ----------
+def test_fetch_state_lowercases_mixed_case_column_names_from_catalog(qn):
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("CustomerID", dataType="int")]}
+    )
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    assert [c.name for c in result.table.columns] == ["customerid"]
+
+
+def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact(qn):
+    catalog = FakeCatalog(
+        columns_by_table={
+            str(qn): [
+                make_catalog_col("id", dataType="int"),
+                make_catalog_col("blob", dataType="binary"),
+            ]
+        }
+    )
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    assert [c.name for c in result.table.columns] == ["id"]
+
+
+def test_fetch_state_returns_failed_when_all_columns_are_unsupported(qn):
+    # An ObservedTable requires at least one column; a table whose every column
+    # is unmappable cannot be honestly observed, so the read fails.
+    catalog = FakeCatalog(columns_by_table={str(qn): [make_catalog_col("blob", dataType="binary")]})
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+
+
+# ---------- table comment ----------
+
+
+@pytest.mark.parametrize(
+    ("desc_value", "expected"),
+    [("a comment", "a comment"), (None, "")],
+    ids=["set", "unset"],
+)
+def test_observed_comment_is_description_or_empty_string(qn, desc_value, expected):
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
+        table_comments={str(qn): desc_value},
+    )
+    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    assert result.table.comment == expected
+
+
+# ---------- properties ----------
 
 
 def test_observed_properties_are_empty_and_read_only_when_table_has_no_properties(qn):
-    # Given a present table whose DESCRIBE DETAIL yields a row with an empty properties map
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
-    )
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=[{"properties": {}}])
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the observed table carries an empty, read-only property mapping
     assert isinstance(result, TablePresent)
     properties = result.table.properties
     assert dict(properties) == {}
@@ -290,33 +308,8 @@ def test_observed_properties_are_empty_and_read_only_when_table_has_no_propertie
         properties["x"] = "y"  # type: ignore[index]
 
 
-def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
-    # Given a table the existence probe reports present, but DESCRIBE DETAIL
-    # yields no row at all -- a race or catalog inconsistency, distinct from a
-    # table whose properties map is merely empty
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    reader = DatabricksReader(FakeSparkForFetchState(catalog=catalog, describe_rows=[]))
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the read fails loud rather than reporting a property-less present table,
-    # so the differ never re-applies every managed property against a phantom state
-    assert isinstance(result, ReadFailed)
-    assert result.failure.exception_type == "RuntimeError"
-
-
 def test_observed_properties_are_filtered_to_managed_keys(qn):
-    # Given a present table whose DESCRIBE DETAIL returns a mix of managed
-    # keys and platform-written keys the engine does not manage
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    describe_rows = [
+    describe = [
         {
             "properties": {
                 "delta.columnMapping.mode": "name",
@@ -325,418 +318,151 @@ def test_observed_properties_are_filtered_to_managed_keys(qn):
             }
         }
     ]
-    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows))
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=describe)
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then only managed keys reach the domain — platform-written keys can
-    # never trip validation or churn plans — and the mapping is read-only
     assert isinstance(result, TablePresent)
-    properties = result.table.properties
-    assert dict(properties) == {"delta.columnMapping.mode": "name"}
-    with pytest.raises(TypeError):
-        properties["x"] = "y"  # type: ignore[index]
+    assert dict(result.table.properties) == {"delta.columnMapping.mode": "name"}
 
 
-# ---------- tests: table comment ----------
+def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
+    # DESCRIBE DETAIL yielding no row for a present table is a race or catalog
+    # inconsistency, distinct from a table whose properties map is merely empty.
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=[])
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "RuntimeError"
 
 
-@pytest.mark.parametrize(
-    "desc_value, expected", [("orders table", "orders table"), (None, ""), ("", "")]
-)
-def test_observed_comment_is_description_or_empty_string(desc_value, expected):
-    # Given a present table whose catalog description may be set, None, or empty
-    qualified_name = QualifiedName("c", "s", "t")
-    catalog = FakeCatalog(
-        columns_by_table={str(qualified_name): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qualified_name): desc_value},
-    )
-    reader = DatabricksReader(FakeSparkWithPrimaryKey(catalog=catalog))
-
-    # When we fetch state
-    result = reader.fetch_state(qualified_name)
-
-    # Then the observed comment is the description, or an empty string when unset
-    assert isinstance(result, TablePresent)
-    assert result.table.comment == expected
+# ---------- totality ----------
 
 
 def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
-    # Given a reader whose existence probe returns empty
-    reader = DatabricksReader(FakeSparkForFetchState(catalog=FakeCatalog(exists=False)))
+    spark = routed_spark(qn, catalog=FakeCatalog(exists=False))
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the catalog reports the table as absent
     assert isinstance(result, TableAbsent)
+    assert spark.queries == []
 
 
-def test_fetch_state_returns_present_with_columns_partitions_comment_and_properties():
-    # Given a table that exists with two columns (one partition), a comment, and properties
-    qn = QualifiedName("c", "s", "t")
-    fq = str(qn)
+def test_fetch_state_returns_failed_when_existence_probe_raises(qn):
+    spark = routed_spark(qn, catalog=FakeCatalog(exists_exc=RuntimeError("catalog down")))
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    catalog = FakeCatalog(
-        columns_by_table={
-            fq: [
-                make_catalog_col("id", dataType="int", nullable=False, description="identifier"),
-                make_catalog_col("p_date", dataType="date", isPartition=True),
-            ]
-        },
-        table_comments={fq: "orders table"},
-    )
-    describe_rows = [
-        {
-            "properties": {
-                "delta.columnMapping.mode": "name",
-                "delta.deletedFileRetentionDuration": "interval 1 day",
-            }
-        }
-    ]
-
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=describe_rows),
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the observed payload contains correct columns, partitions, comment, and properties
-    assert isinstance(result, TablePresent)
-    observed = result.table
-    assert [c.name for c in observed.columns] == ["id", "p_date"]
-    assert observed.partitioned_by == ("p_date",)
-    assert observed.comment == "orders table"
-    assert dict(observed.properties) == {
-        "delta.columnMapping.mode": "name",
-        "delta.deletedFileRetentionDuration": "interval 1 day",
-    }
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "RuntimeError"
 
 
-def test_fetch_state_returns_present_with_empty_properties_when_table_has_no_properties():
-    # Given a table that exists and whose DESCRIBE DETAIL row carries an empty properties map
-    qn = QualifiedName("c", "s", "no_props")
-    fq = str(qn)
+def test_fetch_state_returns_failed_when_describe_detail_raises(qn):
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=AnalysisException("boom"))
+    result = DatabricksReader(spark).fetch_state(qn)
 
-    catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("id", dataType="int", nullable=False)]},
-        table_comments={fq: ""},
-    )
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}]),
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the table is present with empty properties and the expected comment
-    assert isinstance(result, TablePresent)
-    assert dict(result.table.properties) == {}
-    assert result.table.comment == ""
-
-
-def test_fetch_state_returns_failed_when_spark_raises_analysis_exception():
-    # Given a table that exists but DESCRIBE DETAIL raises AnalysisException
-    qn = QualifiedName("c", "s", "boom")
-    fq = str(qn)
-    catalog = FakeCatalog(columns_by_table={fq: []}, table_comments={fq: ""})
-    reader = DatabricksReader(
-        FakeSparkForFetchState(catalog=catalog, describe_exc=AnalysisException("kaboom"))
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the result encodes failure with the Spark exception type
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"
 
 
-def test_fetch_state_returns_failed_when_existence_probe_raises():
-    # Given the existence probe itself raises (e.g. the namespace is missing)
-    qn = QualifiedName("c", "s", "missing_ns")
-    reader = DatabricksReader(
-        FakeSparkForFetchState(
-            catalog=FakeCatalog(exists_exc=AnalysisException("namespace not found")),
-        )
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the failure is isolated to this table rather than escaping the reader
-    assert isinstance(result, ReadFailed)
-    assert result.failure.exception_type == "AnalysisException"
+# ---------- primary key ----------
 
 
-def test_fetch_state_returns_failed_when_all_columns_are_unsupported():
-    # Given a table whose only column has a type the engine cannot map (BinaryType)
-    qn = QualifiedName("c", "s", "structy")
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("payload", dataType="binary")]},
-        table_comments={str(qn): ""},
-    )
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the table fails: skipping its only column leaves zero columns, which
-    # violates the TableSnapshot invariant and surfaces as a ReadFailed
-    assert isinstance(result, ReadFailed)
-
-
-def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact():
-    # Given a table with one unsupported column (BinaryType) and two supported ones
-    qn = QualifiedName("c", "s", "mixed")
-    catalog = FakeCatalog(
-        columns_by_table={
-            str(qn): [
-                make_catalog_col("id", dataType="int"),
-                make_catalog_col("payload", dataType="binary"),
-                make_catalog_col("name", dataType="string"),
-            ]
-        },
-        table_comments={str(qn): ""},
-    )
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then the table is present with only the two mappable columns; payload is dropped
-    assert isinstance(result, TablePresent)
-    assert [c.name for c in result.table.columns] == ["id", "name"]
-
-
-def test_fetch_state_lowercases_mixed_case_column_names_from_catalog():
-    # Given a catalog (e.g. Hive Metastore) that preserves mixed-case column names
-    qn = QualifiedName("c", "s", "hms")
-    catalog = FakeCatalog(
-        columns_by_table={
-            str(qn): [
-                make_catalog_col("EventId", dataType="int"),
-                make_catalog_col("UserName", dataType="string", isPartition=True),
-            ]
-        },
-        table_comments={str(qn): ""},
-    )
-    reader = DatabricksReader(
-        FakeSparkWithPrimaryKey(catalog=catalog, describe_rows=[{"properties": {}}])
-    )
-
-    # When we fetch state
-    result = reader.fetch_state(qn)
-
-    # Then names are normalised to lowercase at the adapter boundary (no crash)
-    assert isinstance(result, TablePresent)
-    assert [c.name for c in result.table.columns] == ["eventid", "username"]
-    assert result.table.partitioned_by == ("username",)
-
-
-# ---------- tests: primary key ----------
-
-
-def test_fetch_state_includes_primary_key_in_observed_table():
-    # Given: a table with a PK
-    qn = QualifiedName("c", "s", "t")
-    fq = str(qn)
-    catalog = FakeCatalog(
-        columns_by_table={
-            fq: [make_catalog_col("id", dataType="int", nullable=False)],
-        },
-        table_comments={fq: ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        describe_rows=[{"properties": {}}],
-        pk_column_rows=[{"column_name": "id", "constraint_name": "t_pk"}],
-    )
-
-    # When fetching state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then: primary_key is populated on the ObservedTable, carrying the catalog name
-    assert isinstance(result, TablePresent)
-    assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
-
-
-def test_fetch_primary_key_returns_empty_when_information_schema_unavailable():
-    # Given: information_schema raises AnalysisException (non-Unity Catalog Spark)
-    qn = QualifiedName("c", "s", "t")
-    fq = str(qn)
-    catalog = FakeCatalog(
-        columns_by_table={fq: [make_catalog_col("id", dataType="int")]},
-        table_comments={fq: ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        describe_rows=[{"properties": {}}],
-        pk_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
-    )
-
-    # When fetching state for the table
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then: the read succeeds and primary_key is None (no UC = no PK constraints)
-    assert isinstance(result, TablePresent)
-    assert result.table.primary_key is None
-
-
-# ---------- tests: foreign keys ----------
-
-
-def _orders_catalog() -> FakeCatalog:
-    """Build a present 'cat.sch.orders' table with the columns the FK tests reference."""
-    fq = "cat.sch.orders"
-    return FakeCatalog(
-        columns_by_table={
-            fq: [
-                make_catalog_col("tenant_id", dataType="int"),
-                make_catalog_col("customer_id", dataType="int"),
-            ]
-        },
-        table_comments={fq: ""},
-    )
-
-
-def test_fetch_state_includes_single_column_foreign_key_in_observed_table():
-    # Given a present table whose information_schema describes one FK
-    qn = QualifiedName("cat", "sch", "orders")
-    fk_rows = [
-        SimpleNamespace(
-            constraint_name="orders_customer_id_fk",
-            local_column="customer_id",
-            ordinal_position=1,
-            position_in_unique_constraint=1,
-            ref_catalog="cat",
-            ref_schema="sch",
-            ref_table="customers",
-            ref_column="id",
-        )
+def test_fetch_state_includes_primary_key_in_observed_table(qn):
+    pk_rows = [
+        {"constraint_name": "pk_t", "column_name": "id"},
     ]
-    spark = FakeSparkWithPrimaryKey(catalog=_orders_catalog(), fk_rows=fk_rows)
-
-    # When we fetch state
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), pk=pk_rows)
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then the observed table carries the foreign key, named from the catalog
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="pk_t")
+
+
+# ---------- foreign keys ----------
+
+
+def test_fetch_state_includes_single_column_foreign_key_in_observed_table(qn):
+    # ObservedTable requires a foreign key's local columns to exist among the
+    # table's own columns, so this table declares customer_id rather than the
+    # single_column_catalog default of "id".
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("customer_id", dataType="int")]}
+    )
+    spark = routed_spark(qn, catalog=catalog, fks=[fk_row()])
+    result = DatabricksReader(spark).fetch_state(qn)
+
     assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == (
         ForeignKeyConstraint(
             local_columns=("customer_id",),
-            referenced_table=QualifiedName("cat", "sch", "customers"),
+            referenced_table=QualifiedName("c", "s", "customers"),
             referenced_columns=("id",),
-            constraint_name="orders_customer_id_fk",
+            constraint_name="fk_orders_customers",
         ),
     )
 
 
-def test_fetch_state_foreign_keys_are_empty_when_information_schema_unavailable():
-    # Given the FK information_schema query raises (non-UC environment)
-    qn = QualifiedName("cat", "sch", "orders")
-    spark = FakeSparkWithPrimaryKey(
-        catalog=_orders_catalog(),
-        fk_exc=AnalysisException("no information_schema"),
-    )
+# ---------- tags ----------
 
-    # When we fetch state
+
+def test_fetch_state_observes_table_tags(qn):
+    tag_rows = [SimpleNamespace(tag_name="Owner", tag_value="data-platform")]
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), tags=tag_rows)
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then the read still succeeds with no foreign keys (no UC = no FK constraints)
+    assert isinstance(result, TablePresent)
+    assert dict(result.table.tags) == {"Owner": "data-platform"}
+
+
+def test_fetch_state_attaches_column_tags_to_their_columns(qn):
+    column_tag_rows = [SimpleNamespace(column_name="ID", tag_name="key", tag_value="primary")]
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), column_tags=column_tag_rows)
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    (column,) = result.table.columns
+    assert dict(column.tags) == {"key": "primary"}
+
+
+# ---------- information_schema unavailable (plain Spark) ----------
+
+
+def test_fetch_state_metadata_is_empty_when_primary_key_view_is_unavailable(qn):
+    spark = routed_spark(
+        qn, catalog=single_column_catalog(qn), pk=AnalysisException("no information_schema")
+    )
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    assert result.table.primary_key is None
+
+
+def test_fetch_state_metadata_is_empty_when_foreign_key_view_is_unavailable(qn):
+    spark = routed_spark(
+        qn, catalog=single_column_catalog(qn), fks=AnalysisException("no information_schema")
+    )
+    result = DatabricksReader(spark).fetch_state(qn)
+
     assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == ()
 
 
-# ---------- tests: tags ----------
-
-
-def test_fetch_state_observes_table_tags(qn):
-    # Given a present table whose information_schema.table_tags carries two tags
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
+def test_fetch_state_metadata_is_empty_when_table_tags_view_is_unavailable(qn):
+    spark = routed_spark(
+        qn, catalog=single_column_catalog(qn), tags=AnalysisException("no information_schema")
     )
-    tag_rows = [
-        SimpleNamespace(tag_name="env", tag_value="prod"),
-        SimpleNamespace(tag_name="domain", tag_value="sales"),
-    ]
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, tag_rows=tag_rows)
-
-    # When we fetch state
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then the observed table carries the tags as a read-only mapping
-    assert isinstance(result, TablePresent)
-    assert dict(result.table.tags) == {"env": "prod", "domain": "sales"}
-    with pytest.raises(TypeError):
-        result.table.tags["x"] = "y"  # type: ignore[index]
-
-
-def test_fetch_state_tags_are_empty_when_information_schema_unavailable(qn):
-    # Given the table_tags query raises (non-Unity-Catalog Spark, e.g. local tests)
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        tags_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
-    )
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the read still succeeds with no tags (no UC = no tags to observe)
     assert isinstance(result, TablePresent)
     assert dict(result.table.tags) == {}
 
 
-# ---------- tests: column tags ----------
-
-
-def test_fetch_state_observes_column_tags(qn):
-    # Given a present table whose information_schema.column_tags carries tags on a column
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
-        table_comments={str(qn): ""},
+def test_fetch_state_metadata_is_empty_when_column_tags_view_is_unavailable(qn):
+    spark = routed_spark(
+        qn,
+        catalog=single_column_catalog(qn),
+        column_tags=AnalysisException("no information_schema"),
     )
-    column_tag_rows = [
-        SimpleNamespace(column_name="email", tag_name="pii", tag_value="true"),
-        SimpleNamespace(column_name="email", tag_name="classification", tag_value="restricted"),
-    ]
-    spark = FakeSparkWithPrimaryKey(catalog=catalog, column_tag_rows=column_tag_rows)
-
-    # When we fetch state
     result = DatabricksReader(spark).fetch_state(qn)
 
-    # Then the observed column carries the tags
-    assert isinstance(result, TablePresent)
-    (column,) = result.table.columns
-    assert dict(column.tags) == {"pii": "true", "classification": "restricted"}
-
-
-def test_fetch_state_column_tags_are_empty_when_information_schema_unavailable(qn):
-    # Given the column_tags query raises (non-Unity-Catalog Spark, e.g. local tests)
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("email", dataType="string")]},
-        table_comments={str(qn): ""},
-    )
-    spark = FakeSparkWithPrimaryKey(
-        catalog=catalog,
-        column_tags_exc=AnalysisException("TABLE_OR_VIEW_NOT_FOUND"),
-    )
-
-    # When we fetch state
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    # Then the read still succeeds with no column tags (no UC = nothing to observe)
     assert isinstance(result, TablePresent)
     (column,) = result.table.columns
     assert dict(column.tags) == {}
