@@ -147,6 +147,20 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     )
 
 
+def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
+    """Build an observed table that already matches _spec_with_fk(fqn, references)."""
+    desired = _spec_with_fk(fqn, references).to_desired_table()
+
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=desired.qualified_name,
+            columns=desired.columns,
+            primary_key=desired.primary_key,
+            foreign_keys=desired.foreign_keys,
+        )
+    )
+
+
 def _metadata_only_spec(fqn: str) -> DeltaTable:
     """Build a metadata-only declaration with table and column comments."""
     catalog, schema, table_name = _split_fqn(fqn)
@@ -707,13 +721,6 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     assert executor.executed_names == ["cat.sch.customers"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Current Engine._execute() does not yet block FK dependents when a "
-        "parent fails during execution. Remove this marker after fixing _execute()."
-    ),
-)
 def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
     # Given orders depends on customers, and customers fails during execution
     reader = _RecordingReader()
@@ -754,6 +761,155 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
         references="cat.sch.customers",
     )
+
+
+def test_execution_failure_blocks_transitively_along_fk_chain():
+    # Given c -> b -> a, and a fails during execution
+    reader = _RecordingReader()
+    executor = _RecordingExecutor([(_failed_exec(0),)])  # a only; b and c must not run
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.c", "cat.sch.b"),
+            _spec_with_fk("cat.sch.b", "cat.sch.a"),
+            _spec("cat.sch.a"),
+        )
+
+    # Then the block propagates from a through b to c before execution
+    report = exc_info.value.report
+    _assert_status(report, "cat.sch.a", TableRunStatus.EXECUTION_FAILED)
+    table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
+    table_c = _assert_status(report, "cat.sch.c", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    _assert_has_fk_failure(
+        table_b,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.a",
+    )
+    _assert_has_fk_failure(
+        table_c,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.b",
+    )
+
+    assert table_b.execution is None
+    assert table_c.execution is None
+    assert executor.executed_names == ["cat.sch.a"]
+
+
+def test_partial_execution_failure_in_parent_blocks_dependent():
+    # Given customers' plan fails on one action among successful ones
+    reader = _RecordingReader()
+    executor = _RecordingExecutor([(_ok_exec(0), _failed_exec(1))])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+            _spec("cat.sch.customers"),
+        )
+
+    # Then a partially failed parent still blocks its dependent
+    report = exc_info.value.report
+    customers = _assert_status(report, "cat.sch.customers", TableRunStatus.EXECUTION_FAILED)
+    orders = _assert_status(report, "cat.sch.orders", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    _assert_has_fk_failure(
+        orders,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.customers",
+    )
+
+    assert customers.execution is not None
+    assert orders.execution is None
+    assert executor.executed_names == ["cat.sch.customers"]
+
+
+def test_execution_failure_blocks_dependent_that_needed_no_changes():
+    # Given orders already matches its declaration (empty plan)
+    # and customers fails during execution
+    reader = _RecordingReader(
+        {"cat.sch.orders": _existing_fk_table_synced("cat.sch.orders", "cat.sch.customers")}
+    )
+    executor = _RecordingExecutor([(_failed_exec(0),)])  # customers only
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+            _spec("cat.sch.customers"),
+        )
+
+    # Then the no-op dependent is blocked too: one blocking rule everywhere
+    report = exc_info.value.report
+    _assert_status(report, "cat.sch.customers", TableRunStatus.EXECUTION_FAILED)
+    orders = _assert_status(report, "cat.sch.orders", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    _assert_has_fk_failure(
+        orders,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.customers",
+    )
+
+    assert orders.execution is None
+    assert executor.executed_names == ["cat.sch.customers"]
+
+
+def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
+    # Given d -> b and d -> c, both b and c -> a, and a fails during execution
+    spec_d = DeltaTable(
+        "cat",
+        "sch",
+        "d",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("b_id", String()),
+            Column("c_id", String()),
+        ),
+        foreign_keys=[
+            ForeignKey(local_columns=("b_id",), references=_referenced_spec("cat.sch.b")),
+            ForeignKey(local_columns=("c_id",), references=_referenced_spec("cat.sch.c")),
+        ],
+    )
+
+    reader = _RecordingReader()
+    executor = _RecordingExecutor([(_failed_exec(0),)])  # a only
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            spec_d,
+            _spec_with_fk("cat.sch.b", "cat.sch.a"),
+            _spec_with_fk("cat.sch.c", "cat.sch.a"),
+            _spec("cat.sch.a"),
+        )
+
+    # Then the block flows through both branches and d records both blocking FKs
+    report = exc_info.value.report
+    _assert_status(report, "cat.sch.a", TableRunStatus.EXECUTION_FAILED)
+    _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
+    _assert_status(report, "cat.sch.c", TableRunStatus.FOREIGN_KEY_FAILED)
+    table_d = _assert_status(report, "cat.sch.d", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    assert len(_foreign_key_failures(table_d)) == 2
+    _assert_has_fk_failure(
+        table_d,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.b",
+        local_columns=("b_id",),
+    )
+    _assert_has_fk_failure(
+        table_d,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.c",
+        local_columns=("c_id",),
+    )
+    assert executor.executed_names == ["cat.sch.a"]
 
 
 # ---------------------------------------------------------------------------
