@@ -912,6 +912,25 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
     assert executor.executed_names == ["cat.sch.a"]
 
 
+def test_synced_fk_parent_with_no_work_does_not_block_dependent():
+    # Given customers already matches its declaration and orders is absent
+    reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
+    executor = _RecordingExecutor([(_ok_exec(0),)])  # orders only
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    report = engine.sync(
+        _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _spec("cat.sch.customers"),
+    )
+
+    # Then the healthy no-op parent does not block its dependent
+    assert report.any_failures is False
+    _assert_status(report, "cat.sch.customers", TableRunStatus.SUCCESS)
+    _assert_status(report, "cat.sch.orders", TableRunStatus.SUCCESS)
+    assert executor.executed_names == ["cat.sch.orders"]
+
+
 # ---------------------------------------------------------------------------
 # Duplicate declarations
 # ---------------------------------------------------------------------------
