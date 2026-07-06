@@ -92,3 +92,10 @@ def make_temp_table(spark, temp_schema):
     finally:
         for fq in created:
             spark.sql(f"DROP TABLE IF EXISTS {fq}")
+
+
+def pytest_collection_modifyitems(items):
+    """Auto-mark any test that (transitively) requests the spark fixture."""
+    for item in items:
+        if "spark" in item.fixturenames:
+            item.add_marker(pytest.mark.local_e2e)

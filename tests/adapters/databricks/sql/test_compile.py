@@ -33,11 +33,10 @@ _TARGET = QualifiedName("cat", "sch", "tbl")
 def _create_table(
     *columns: Column,
     comment: str = "",
-    properties=None,
-    partitioned_by=(),
+    properties: dict[str, str | None] | None = None,
+    partitioned_by: tuple[str, ...] = (),
     primary_key: PrimaryKeyConstraint | None = None,
-):
-    """Wrap columns in a CreateTable action for the target table."""
+) -> CreateTable:
     return CreateTable(
         table=DesiredTable(
             qualified_name=_TARGET,
@@ -50,13 +49,17 @@ def _create_table(
     )
 
 
-def _concrete_action_types():
-    """
-    Return every concrete Action subclass the actions module exposes.
+def _compile_single(action: Action) -> str:
+    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
+    return statement
 
-    Discovered from the module namespace rather than ``Action.__subclasses__()``
-    because ``@dataclass(slots=True)`` leaves a stale pre-slots class object in
-    ``__subclasses__()``; the module binds each name to the real class.
+
+def _concrete_action_types() -> list[type[Action]]:
+    """
+    Return every concrete Action subclass exposed by the actions module.
+
+    This uses the module namespace rather than Action.__subclasses__() because
+    dataclass(slots=True) can leave stale pre-slots class objects there.
     """
     return [
         obj
@@ -67,48 +70,74 @@ def _concrete_action_types():
     ]
 
 
-def _compile_single(action) -> str:
-    """Compile a one-action plan and return the single SQL statement."""
-    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
-    return statement
+def test_compile_empty_plan_returns_empty_tuple():
+    assert compile_plan(_TARGET, ActionPlan(actions=())) == ()
+
+
+def test_compile_plan_compiles_each_action_in_action_plan_order():
+    # Given an ActionPlan containing three actions
+    plan = ActionPlan(
+        actions=(
+            SetTableComment(comment="first"),
+            SetProperty(name="second", value="true"),
+            DropColumn(column_name="third"),
+        )
+    )
+
+    # When compiling the plan
+    statements = compile_plan(_TARGET, plan)
+
+    # Then each action in the normalized ActionPlan is compiled to its SQL statement
+    assert statements == tuple(_compile_single(action) for action in plan)
+
+
+def test_compile_backticks_table_and_column_identifiers():
+    # Given identifiers that need quoting
+    target = QualifiedName("cat-alog", "sch ema", "select")
+    plan = ActionPlan(actions=(AddColumn(Column("weird column", Integer())),))
+
+    # When compiling
+    statements = compile_plan(target, plan)
+
+    # Then table and column identifiers are backticked
+    assert statements == (
+        "ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT",
+    )
 
 
 def test_add_column_with_comment_includes_comment_clause():
-    # Given a new column that carries a comment
+    # Given a new column with a comment
     action = AddColumn(Column("age", Integer(), comment="user age"))
 
-    # When compiling the add
+    # When compiling
     statement = _compile_single(action)
 
-    # Then the ADD COLUMN carries the comment
+    # Then the comment is included
     assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT COMMENT 'user age'")
 
 
 def test_add_column_without_comment_omits_comment_clause():
-    # Given a new column with no comment (the common case)
+    # Given a new column with no comment
     action = AddColumn(Column("age", Integer()))
 
-    # When compiling the add
+    # When compiling
     statement = _compile_single(action)
 
     # Then no empty COMMENT clause is emitted
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT"
 
 
-def test_create_table_renders_column_comment_in_the_definition():
-    # Given a CREATE TABLE whose column carries a comment
-    action = _create_table(Column("id", Integer(), comment="primary key"))
+def test_add_column_rejects_non_nullable_column():
+    # Given an AddColumn action carrying a NOT NULL column
+    action = AddColumn(Column("age", Integer(), nullable=False))
 
-    # When compiling the create
-    statement = _compile_single(action)
-
-    # Then the column definition carries the comment (lost before this fix, so a
-    # freshly-created table kept its column comments only after a second sync)
-    assert "`id` INT COMMENT 'primary key'" in statement
+    # When / Then compiling fails loudly rather than silently dropping NOT NULL
+    with pytest.raises(AssertionError, match="age"):
+        _compile_single(action)
 
 
-def test_create_table_renders_columns_nullability_comment_and_properties():
-    # Given a CREATE TABLE with a NOT NULL column, a table comment, and a property
+def test_create_table_renders_columns_nullability_comments_table_comment_and_properties():
+    # Given a CREATE TABLE with column metadata, table comment, and property
     action = _create_table(
         Column("id", Integer(), nullable=False),
         Column("name", String(), comment="customer"),
@@ -116,10 +145,10 @@ def test_create_table_renders_columns_nullability_comment_and_properties():
         properties={"delta.appendOnly": "true"},
     )
 
-    # When compiling the create
+    # When compiling
     statement = _compile_single(action)
 
-    # Then columns, nullability, comments, USING, table comment, and properties all render
+    # Then all CREATE TABLE clauses are rendered
     assert statement == (
         "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
         " (`id` INT NOT NULL, `name` STRING COMMENT 'customer')"
@@ -133,210 +162,166 @@ def test_create_table_omits_comment_clause_when_table_comment_is_empty():
     # Given a CREATE TABLE with no table-level comment
     action = _create_table(Column("id", Integer()))
 
-    # When compiling the create
+    # When compiling
     statement = _compile_single(action)
 
-    # Then no empty COMMENT '' clause is emitted
-    assert "COMMENT" not in statement
+    # Then no empty table COMMENT clause is emitted
     assert statement == "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl` (`id` INT) USING delta"
 
 
 def test_create_table_renders_partition_clause():
-    # Given a CREATE TABLE partitioned by a column
+    # Given a partitioned table
     action = _create_table(
         Column("id", Integer()),
         Column("ds", String()),
         partitioned_by=("ds",),
     )
 
-    # When compiling the create
+    # When compiling
     statement = _compile_single(action)
 
-    # Then a PARTITIONED BY clause names the partition column
+    # Then the partition clause is rendered
     assert statement.endswith("PARTITIONED BY (`ds`)")
 
 
-def test_add_column_rejects_non_nullable_column():
-    # Given an AddColumn carrying a NOT NULL column -- validation (NonNullableColumnAdd)
-    # blocks this before execution, so the compiler must never silently emit an
-    # ADD COLUMN that drops the NOT NULL constraint
-    action = AddColumn(Column("age", Integer(), nullable=False))
+def test_create_table_renders_properties_in_sorted_order_and_filters_none_values():
+    # Given a desired table with valued properties and absence assertions
+    action = _create_table(
+        Column("id", Integer()),
+        properties={
+            "z": "last",
+            "delta.logRetentionDuration": None,
+            "a": "first",
+        },
+    )
 
-    # Then compiling it fails loudly rather than producing nullable-by-stealth SQL
-    with pytest.raises(AssertionError, match="age"):
-        _compile_single(action)
+    # When compiling
+    statement = _compile_single(action)
+
+    # Then valued properties are deterministic and None values are omitted
+    assert "TBLPROPERTIES ('a'='first', 'z'='last')" in statement
+    assert "delta.logRetentionDuration" not in statement
 
 
-def test_drop_column_renders_alter_drop():
-    # When compiling a DropColumn
-    statement = _compile_single(DropColumn("legacy"))
+def test_create_table_inlines_primary_key_constraint():
+    # Given a CREATE TABLE with a primary key
+    action = _create_table(
+        Column("id", Integer(), nullable=False),
+        Column("name", String()),
+        primary_key=PrimaryKeyConstraint.generate(
+            table_name=_TARGET.name,
+            columns=("id",),
+        ),
+    )
 
-    # Then it renders an ALTER TABLE ... DROP COLUMN
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` DROP COLUMN `legacy`"
+    # When compiling
+    statement = _compile_single(action)
 
-
-def test_set_property_renders_alter_set_tblproperties():
-    # When compiling a SetProperty
-    statement = _compile_single(SetProperty(name="delta.appendOnly", value="true"))
-
-    # Then it renders an ALTER TABLE ... SET TBLPROPERTIES
+    # Then the primary key constraint is inlined in the column list
     assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.appendOnly'='true')"
+        "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
+        " (`id` INT NOT NULL, `name` STRING, CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
+        " USING delta"
     )
 
 
-def test_set_property_escapes_single_quotes_in_value_end_to_end():
-    # Given a property value containing a single quote (the escaping edge case)
-    statement = _compile_single(SetProperty(name="owner", value="O'Reilly"))
+def test_create_table_without_primary_key_omits_constraint_clause():
+    # Given a CREATE TABLE with no primary key
+    action = _create_table(Column("id", Integer()))
 
-    # Then the quote is doubled in the emitted SQL, all the way through compile
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('owner'='O''Reilly')"
-
-
-def test_set_column_comment_renders_alter_alter_column_comment():
-    # When compiling a SetColumnComment
-    statement = _compile_single(SetColumnComment(column_name="id", comment="primary key"))
-
-    # Then it renders an ALTER COLUMN ... COMMENT
-    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'primary key'")
-
-
-def test_set_column_comment_escapes_single_quotes_end_to_end():
-    # Given a column comment containing a single quote
-    statement = _compile_single(SetColumnComment(column_name="id", comment="it's the key"))
-
-    # Then the quote is doubled in the emitted SQL
-    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'")
-
-
-def test_set_column_comment_emits_unset_when_comment_is_empty():
-    # Given a SetColumnComment with an empty comment (clearing the comment)
-    statement = _compile_single(SetColumnComment(column_name="id", comment=""))
-
-    # Then it emits UNSET COMMENT rather than COMMENT '' to avoid storing an empty string
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET COMMENT"
-
-
-def test_set_table_comment_renders_comment_on_table():
-    # When compiling a SetTableComment
-    statement = _compile_single(SetTableComment(comment="core table"))
-
-    # Then it renders a COMMENT ON TABLE
-    assert statement == "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'core table'"
-
-
-def test_set_column_nullability_drops_not_null_when_made_nullable():
-    # When compiling a loosening to nullable
-    statement = _compile_single(SetColumnNullability(column_name="id", nullable=True))
-
-    # Then it DROPs the NOT NULL constraint
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` DROP NOT NULL"
-
-
-def test_set_column_nullability_sets_not_null_when_made_non_nullable():
-    # When compiling a tightening to NOT NULL
-    statement = _compile_single(SetColumnNullability(column_name="id", nullable=False))
-
-    # Then it SETs the NOT NULL constraint
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL"
-
-
-def test_every_action_type_has_a_registered_compiler():
-    # Given every concrete Action subclass the domain defines
-    fallback = _compile_action.dispatch(object)
-
-    # Then each one resolves to a dedicated compiler, not the raising fallback
-    # (so a newly added action cannot silently lack SQL until it hits a plan)
-    unregistered = [
-        action_type.__name__
-        for action_type in _concrete_action_types()
-        if _compile_action.dispatch(action_type) is fallback
-    ]
-    assert unregistered == []
-
-
-def test_drop_primary_key_renders_alter_drop_primary_key():
-    # When compiling a DropPrimaryKey action
-    statement = _compile_single(DropPrimaryKey())
-
-    # Then it renders ALTER TABLE ... DROP PRIMARY KEY IF EXISTS
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS"
-
-
-def test_set_primary_key_renders_add_constraint_primary_key():
-    # Given a SetPrimaryKey carrying its column names and engine-generated constraint name
-    action = SetPrimaryKey(columns=("tenant_id", "order_id"), constraint_name="tbl_pk")
-
-    # When compiling the action
+    # When compiling
     statement = _compile_single(action)
 
-    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
+    # Then no constraint clause appears
+    assert "PRIMARY KEY" not in statement
+    assert "CONSTRAINT" not in statement
+
+
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        (
+            DropColumn(column_name="legacy"),
+            "ALTER TABLE `cat`.`sch`.`tbl` DROP COLUMN `legacy`",
+        ),
+        (
+            SetProperty(name="delta.appendOnly", value="true"),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.appendOnly'='true')",
+        ),
+        (
+            UnsetProperty(name="delta.enableChangeDataFeed"),
+            "ALTER TABLE `cat`.`sch`.`tbl` UNSET TBLPROPERTIES IF EXISTS "
+            "('delta.enableChangeDataFeed')",
+        ),
+        (
+            SetTableComment(comment="core table"),
+            "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'core table'",
+        ),
+        (
+            SetColumnComment(column_name="id", comment="primary key"),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'primary key'",
+        ),
+        (
+            SetColumnComment(column_name="id", comment=""),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET COMMENT",
+        ),
+        (
+            SetColumnNullability(column_name="id", nullable=True),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` DROP NOT NULL",
+        ),
+        (
+            SetColumnNullability(column_name="id", nullable=False),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
+        ),
+        (
+            DropPrimaryKey(),
+            "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
+        ),
+        (
+            DropForeignKey(constraint_name="orders_customer_id_fk"),
+            "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`",
+        ),
+        (
+            SetTableTag(name="env", value="prod"),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('env'='prod')",
+        ),
+        (
+            UnsetTableTag(name="env"),
+            "ALTER TABLE `cat`.`sch`.`tbl` UNSET TAGS ('env')",
+        ),
+        (
+            SetColumnTag(column_name="email", name="pii", value="true"),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('pii'='true')",
+        ),
+        (
+            UnsetColumnTag(column_name="email", name="pii"),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` UNSET TAGS ('pii')",
+        ),
+    ],
+)
+def test_simple_actions_compile_to_expected_sql(action: Action, expected: str):
+    assert _compile_single(action) == expected
+
+
+def test_set_primary_key_renders_composite_primary_key():
+    # Given a composite primary-key action
+    action = SetPrimaryKey(
+        columns=("tenant_id", "order_id"),
+        constraint_name="tbl_pk",
+    )
+
+    # When compiling
+    statement = _compile_single(action)
+
+    # Then all columns are rendered in order
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`tenant_id`, `order_id`)"
     )
 
 
-def test_set_primary_key_renders_alter_add_constraint():
-    # When compiling a SetPrimaryKey with one column
-    action = SetPrimaryKey(columns=("id",), constraint_name="tbl_pk")
-    statement = _compile_single(action)
-
-    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY (...)
-    assert statement == ("ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)")
-
-
-def test_set_primary_key_renders_multiple_columns():
-    # When compiling a SetPrimaryKey with two columns
-    action = SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk")
-    statement = _compile_single(action)
-
-    # Then both columns appear in the PRIMARY KEY clause
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`id`, `tenant_id`)"
-    )
-
-
-def test_create_table_inlines_primary_key_constraint():
-    # Given a CREATE TABLE with a primary key column
-    action = _create_table(
-        Column("id", Integer(), nullable=False),
-        Column("name", String()),
-        primary_key=PrimaryKeyConstraint.generate(table_name=_TARGET.name, columns=("id",)),
-    )
-    statement = _compile_single(action)
-
-    # Then the constraint is inlined in the column list
-    assert "CONSTRAINT `tbl_pk` PRIMARY KEY (`id`)" in statement
-    # And it appears after the column definitions, inside the parentheses
-    assert statement.startswith("CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl` (")
-
-
-def test_create_table_without_pk_omits_constraint_clause():
-    # Given a CREATE TABLE with no primary key
-    action = _create_table(Column("id", Integer()))
-    statement = _compile_single(action)
-
-    # Then no CONSTRAINT clause appears
-    assert "PRIMARY KEY" not in statement
-    assert "CONSTRAINT" not in statement
-
-
-def test_drop_foreign_key_renders_drop_constraint_if_exists():
-    # Given a DropForeignKey action with a catalog constraint name
-    action = DropForeignKey(constraint_name="orders_customer_id_fk")
-
-    # When compiling the action
-    statement = _compile_single(action)
-
-    # Then the SQL drops that constraint if it exists
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`"
-    )
-
-
-def test_set_foreign_key_renders_add_constraint_foreign_key():
-    # Given a foreign key action carrying compiler-ready fields
+def test_set_foreign_key_renders_single_column_fk():
+    # Given a single-column foreign-key action
     action = SetForeignKey(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
@@ -344,10 +329,10 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
         constraint_name="tbl_customer_id_fk",
     )
 
-    # When compiling it
+    # When compiling
     statement = _compile_single(action)
 
-    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ...
+    # Then it renders ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_customer_id_fk`"
@@ -356,7 +341,7 @@ def test_set_foreign_key_renders_add_constraint_foreign_key():
 
 
 def test_set_foreign_key_renders_composite_fk():
-    # Given a composite FK action (two local columns) carrying its generated name
+    # Given a composite foreign-key action
     action = SetForeignKey(
         local_columns=("tenant_id", "customer_id"),
         referenced_table=QualifiedName("cat", "sch", "customers"),
@@ -364,10 +349,10 @@ def test_set_foreign_key_renders_composite_fk():
         constraint_name="tbl_tenant_id_customer_id_fk",
     )
 
-    # When compiling it
+    # When compiling
     statement = _compile_single(action)
 
-    # Then both column pairs render in order
+    # Then both local and referenced columns render in order
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_tenant_id_customer_id_fk`"
@@ -376,99 +361,61 @@ def test_set_foreign_key_renders_composite_fk():
     )
 
 
-# ---------- tags ----------
-
-
-def test_set_table_tag_renders_alter_set_tags():
-    # When compiling a SetTableTag
-    statement = _compile_single(SetTableTag(name="env", value="prod"))
-
-    # Then it renders ALTER TABLE ... SET TAGS with quoted key and value
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('env'='prod')"
-
-
-def test_unset_table_tag_renders_alter_unset_tags():
-    # When compiling an UnsetTableTag
-    statement = _compile_single(UnsetTableTag(name="env"))
-
-    # Then it renders ALTER TABLE ... UNSET TAGS with the quoted key only
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` UNSET TAGS ('env')"
-
-
-def test_set_table_tag_escapes_single_quotes_in_key_and_value():
-    # Given a tag key and value each containing a single quote (escaping edge case)
-    statement = _compile_single(SetTableTag(name="o'k", value="v'x"))
-
-    # Then both quotes are doubled all the way through compile
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('o''k'='v''x')"
-
-
-# ---------- column tags ----------
-
-
-def test_set_column_tag_renders_alter_column_set_tags():
-    # When compiling a SetColumnTag
-    statement = _compile_single(SetColumnTag(column_name="email", name="pii", value="true"))
-
-    # Then it renders ALTER COLUMN ... SET TAGS with backticked column and quoted pair
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('pii'='true')"
-    )
-
-
-def test_unset_column_tag_renders_alter_column_unset_tags():
-    # When compiling an UnsetColumnTag
-    statement = _compile_single(UnsetColumnTag(column_name="email", name="pii"))
-
-    # Then it renders ALTER COLUMN ... UNSET TAGS with the quoted key only
-    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` UNSET TAGS ('pii')"
-
-
-def test_set_column_tag_escapes_single_quotes_in_key_and_value():
-    # Given a column-tag key and value each containing a single quote (escaping edge case)
-    statement = _compile_single(SetColumnTag(column_name="email", name="o'k", value="v'x"))
-
-    # Then both quotes are doubled all the way through compile
-    assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')"
-    )
-
-
-def test_unset_property_compiles_to_unset_tblproperties_if_exists():
-    # Given an UnsetProperty action
-    statements = compile_plan(
-        _TARGET, ActionPlan((UnsetProperty(name="delta.enableChangeDataFeed"),))
-    )
-
-    # Then it unsets with IF EXISTS so out-of-band removal stays idempotent
-    assert statements == (
-        "ALTER TABLE `cat`.`sch`.`tbl` "
-        "UNSET TBLPROPERTIES IF EXISTS ('delta.enableChangeDataFeed')",
-    )
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        (
+            SetProperty(name="owner", value="O'Reilly"),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('owner'='O''Reilly')",
+        ),
+        (
+            SetColumnComment(column_name="id", comment="it's the key"),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'",
+        ),
+        (
+            SetTableTag(name="o'k", value="v'x"),
+            "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('o''k'='v''x')",
+        ),
+        (
+            SetColumnTag(column_name="email", name="o'k", value="v'x"),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')",
+        ),
+    ],
+)
+def test_string_literals_escape_single_quotes(action: Action, expected: str):
+    assert _compile_single(action) == expected
 
 
 def test_set_property_sql_ignores_observed_value():
     # Given two SetProperty actions differing only in observed_value
-    first_write = SetProperty(name="delta.enableChangeDataFeed", value="true")
-    update = SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false")
-
-    # Then both compile to identical SQL — observed_value is rendering-only
-    plan_a = compile_plan(_TARGET, ActionPlan((first_write,)))
-    plan_b = compile_plan(_TARGET, ActionPlan((update,)))
-    assert plan_a == plan_b
-
-
-def test_create_table_filters_none_property_assertions():
-    # Given a desired table asserting one value and one absence
-    desired = DesiredTable(
-        qualified_name=_TARGET,
-        columns=(Column("id", Integer()),),
-        properties={"delta.enableChangeDataFeed": "true", "delta.logRetentionDuration": None},
+    first_write = SetProperty(
+        name="delta.enableChangeDataFeed",
+        value="true",
+    )
+    update = SetProperty(
+        name="delta.enableChangeDataFeed",
+        value="true",
+        observed_value="false",
     )
 
-    [statement] = compile_plan(_TARGET, ActionPlan((CreateTable(desired),)))
+    # When compiling both
+    first_statement = compile_plan(_TARGET, ActionPlan(actions=(first_write,)))
+    update_statement = compile_plan(_TARGET, ActionPlan(actions=(update,)))
 
-    # Then only the valued key reaches TBLPROPERTIES — a new table cannot
-    # carry a key that needs removing
-    assert "delta.enableChangeDataFeed" in statement
-    assert "delta.logRetentionDuration" not in statement
+    # Then observed_value has no effect on rendered SQL
+    assert first_statement == update_statement
+
+
+def test_every_action_type_has_a_registered_compiler():
+    # Given every concrete domain action type
+    fallback = _compile_action.dispatch(object)
+
+    # When checking the singledispatch registry
+    unregistered = [
+        action_type.__name__
+        for action_type in _concrete_action_types()
+        if _compile_action.dispatch(action_type) is fallback
+    ]
+
+    # Then every action has a specific compiler
+    assert unregistered == []
