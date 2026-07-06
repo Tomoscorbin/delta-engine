@@ -4,6 +4,7 @@ from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
     foreign_keys_query,
+    information_schema_probe_query,
     primary_key_query,
     table_tags_query,
 )
@@ -90,7 +91,6 @@ def test_queries_escape_identifiers_and_literals():
 
 
 def test_information_schema_probe_query_golden():
-    from delta_engine.adapters.databricks.sql import information_schema_probe_query
 
     assert information_schema_probe_query("cat") == (
         "SELECT 1 FROM `cat`.information_schema.schemata WHERE 1 = 0"

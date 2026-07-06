@@ -468,7 +468,6 @@ def test_fetch_state_fails_when_a_metadata_query_fails_on_unity_catalog(qn):
 
 
 def test_information_schema_probe_runs_once_per_catalog_across_reads(qn):
-
     spark = routed_spark(qn, catalog=single_column_catalog(qn))
     reader = DatabricksReader(spark)
     reader.fetch_state(qn)
