@@ -1,15 +1,12 @@
 # Open questions and decisions
 
-- [x] Work through the diff-module design review (see [diff-module-design-review.md](diff-module-design-review.md)) — resolved: flat-facts model implemented on PR #127, properties bug fixed
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
 - [ ] add unique columns: ALTER TABLE U ADD CONSTRAINT u_uq_email UNIQUE(email);
-- [ ] where does backticked_table_name belong? Should it be constructed inside the compiler dispatches?
 - [ ] should all of the sql statements live in a dedicated file and be imported into reader/exeecutor?
 - [ ] Make the application layer backend-agnostic, not just backend-library-free. Today the `backend-imports-stay-in-adapters` contract only forbids importing the `delta`/`pyspark` *packages*; the application layer still hardcodes Delta-family *policy* — the safe-change rules (`PartitioningChangeNotSupported`, `ColumnDataTypeChangeNotSupported`, `NonNullableColumnAdd`, `ColumnMappingRequiredForDrop`) exist because Databricks/Delta rejects those operations, and `application/properties.py` holds the Delta property catalogue (`DELTA_PROPERTY_REGISTRY`, `COLUMN_MAPPING_MODE_KEY`, `delta.*` key strings) consumed by `validation.py`, `api/properties.py`, and the reader. The layering is sound for now (application is the only layer all three consumers can reach without violating the `adapters|api → application → domain` order), but it means "backend-agnostic" is only half true. The real refactor: `application` holds only the *mechanism* (how rules run, the `Rule` protocol, how `validate_diff` composes them), and the backend *specifics* (which rules, which property keys and their restrictions) are injected from the composition root or an adapter-provided port. This must move ALL the backend-flavoured rules and the property catalogue together — moving only the property pieces just relocates a third of the problem. Larger change, own PR. See the property-ownership spec addendum for how the registry ended up in application.
-- [ ] review except AnalysisException in reader's _fetch_primary_key()
 - [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
 - [ ] make the nested if else statments in engine more readable
 - [ ] do we need backticked things in sql compiler or can we do without?
@@ -21,13 +18,11 @@
 - [ ] Simplify `_fetch_foreign_keys` in the reader: replace the stringly-typed `dict[str, dict]` grouping with `itertools.groupby` (the query already does `ORDER BY constraint_name, ordinal_position`, so rows are contiguous) plus a named `_foreign_key_from_rows(constraint_name, rows)` helper that reads local/referenced columns in ordinal order and takes the referenced table from the first row
 - [ ] utilise __init__ __all__ so that we can reduce the number of import line
 - [ ] Add build docs to pre-commit?
-- [x] Remove default properties from `DeltaTable`, `ColumnMappingRequiredForDrop` precondition, metadata-only property fast-fail — shipped in the property-ownership feature (exact declaration)
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] should DesiredTableSource live in ports.py?
 - [ ] Decide whether to emit `RELY` on FK/PK constraints. Without `RELY`, Databricks treats informational constraints as documentation only and the optimizer cannot use them for join elimination / query rewrite. If the point of declaring keys is optimization, they are currently inert. Weigh against the risk of `RELY` on unverified data (the optimizer trusts it). Would add a `rely: bool` to `ForeignKeyConstraint`/`PrimaryKeyConstraint` and a ` NOT ENFORCED RELY` / ` NOT ENFORCED` suffix in the compiler.
 - [ ] Add a test for the cycle + invalid-FK-target combination in resolve(): a table that is both on a foreign key cycle AND references a non-primary-key column currently reports REFERENCED_COLUMNS_NOT_A_KEY (the FK->PK check runs before the CYCLE check, by design). No test covers this interaction; document the precedence or add coverage.
 - [ ] investigate TableSnapshot.__post_init__(self) on DesiredTable. Should all validation be in DesiredTable?
-- [ ] Review the user report formatting. Make sure is has everything it needs
 - [ ] look for redundancies; things like frozenset for local variables
 - [ ] review if we need from __future__ import annotations
 - [ ] review types hints; things like Mapping, AbstractSet, etc
@@ -37,11 +32,8 @@
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] improve Report display formatting
-- [ ] Put Propertiess into table.py alongside DeltaTable. rename table.py to delta_table.py
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
-- [x] Should we remove the concept of default properties altogether? — yes; shipped in the property-ownership feature
 - [ ] restructure files so that important things come first
 - [ ] is it possible to remove Changed[T] so that everything is either Added or Removed?
 - [ ] `ignored_properties` escape hatch for coexistence with other tooling writing managed keys (deferred from the property-ownership design; see spec Known Limitations)
-- [x] Teach Databricks factory through `delta_engine.databricks.build_engine` instead of moving it into API
