@@ -105,6 +105,39 @@ def _table_with_fk(
     ).to_desired_table()
 
 
+def _fk_column_name(referenced_fqn: str) -> str:
+    """Derive the local FK column name for a reference: cat.sch.orders -> orders_id."""
+    _, _, referenced_table_name = _split_fqn(referenced_fqn)
+    return f"{referenced_table_name}_id"
+
+
+def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
+    """
+    Build a table with one single-column foreign key per referenced table.
+
+    Each foreign key's local column is named after its referenced table:
+    a reference to cat.sch.orders uses local column orders_id.
+    """
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            *(Column(_fk_column_name(reference), String()) for reference in references),
+        ),
+        foreign_keys=[
+            ForeignKey(
+                local_columns=(_fk_column_name(reference),),
+                references=_referenced_table(reference),
+            )
+            for reference in references
+        ],
+    ).to_desired_table()
+
+
 def _names(result: ResolveResult) -> list[str]:
     return [str(name) for name in result.ordered_names]
 
@@ -212,29 +245,8 @@ def test_resolve_handles_chain_of_dependencies():
 
 def test_resolve_orders_table_after_all_fk_parents():
     # Given order_items depends on both orders and products
-    order_items = DeltaTable(
-        "cat",
-        "sch",
-        "order_items",
-        columns=(
-            Column("id", String(), nullable=False, primary_key=True),
-            Column("order_id", String()),
-            Column("product_id", String()),
-        ),
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("order_id",),
-                references=_referenced_table("cat.sch.orders"),
-            ),
-            ForeignKey(
-                local_columns=("product_id",),
-                references=_referenced_table("cat.sch.products"),
-            ),
-        ],
-    ).to_desired_table()
-
     tables = (
-        order_items,
+        _table_with_fks("cat.sch.order_items", "cat.sch.orders", "cat.sch.products"),
         _table("cat.sch.products"),
         _table("cat.sch.orders"),
     )
@@ -270,26 +282,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
 
 def test_resolve_records_one_failure_per_unresolvable_fk():
     # Given a table has two FKs to missing tables
-    shipments = DeltaTable(
-        "cat",
-        "sch",
-        "shipments",
-        columns=(
-            Column("id", String(), nullable=False, primary_key=True),
-            Column("order_id", String()),
-            Column("customer_id", String()),
-        ),
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("order_id",),
-                references=_referenced_table("cat.sch.orders"),
-            ),
-            ForeignKey(
-                local_columns=("customer_id",),
-                references=_referenced_table("cat.sch.customers"),
-            ),
-        ],
-    ).to_desired_table()
+    shipments = _table_with_fks("cat.sch.shipments", "cat.sch.orders", "cat.sch.customers")
 
     # When resolving dependencies
     result = resolve((shipments,))
@@ -301,12 +294,12 @@ def test_resolve_records_one_failure_per_unresolvable_fk():
         (failure.local_columns, failure.references, failure.reason) for failure in failures
     } == {
         (
-            ("order_id",),
+            ("orders_id",),
             _qualified_name("cat.sch.orders"),
             ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
         ),
         (
-            ("customer_id",),
+            ("customers_id",),
             _qualified_name("cat.sch.customers"),
             ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
         ),
@@ -419,6 +412,36 @@ def test_resolve_propagates_block_along_a_chain():
         )
 
 
+def test_resolve_records_cycle_failure_only_for_fk_inside_the_cycle():
+    # Given a <-> b form a cycle, and a also references healthy table c
+    tables = (
+        _table_with_fks("cat.sch.a", "cat.sch.b", "cat.sch.c"),
+        _table_with_fk("cat.sch.b", "cat.sch.a"),
+        _table("cat.sch.c"),
+    )
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then a's FK into the cycle fails, but its FK to the healthy table does not
+    failures_for_a = _failures_for(result, "cat.sch.a")
+
+    assert len(failures_for_a) == 1
+    _assert_has_failure(
+        result,
+        "cat.sch.a",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.b",
+    )
+    _assert_has_failure(
+        result,
+        "cat.sch.b",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.a",
+    )
+    assert _failures_for(result, "cat.sch.c") == ()
+
+
 def test_resolve_blocks_table_that_depends_on_a_cycle():
     # Given b <-> c form a cycle, and a depends on b
     tables = (
@@ -499,29 +522,8 @@ def test_resolve_treats_self_referential_fk_as_applicable():
 
 def test_resolve_propagates_block_through_a_diamond():
     # Given d depends on b and c; both b and c depend on a; a is missing a parent
-    table_d = DeltaTable(
-        "cat",
-        "sch",
-        "d",
-        columns=(
-            Column("id", String(), nullable=False, primary_key=True),
-            Column("b_id", String()),
-            Column("c_id", String()),
-        ),
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("b_id",),
-                references=_referenced_table("cat.sch.b"),
-            ),
-            ForeignKey(
-                local_columns=("c_id",),
-                references=_referenced_table("cat.sch.c"),
-            ),
-        ],
-    ).to_desired_table()
-
     tables = (
-        table_d,
+        _table_with_fks("cat.sch.d", "cat.sch.b", "cat.sch.c"),
         _table_with_fk("cat.sch.b", "cat.sch.a"),
         _table_with_fk("cat.sch.c", "cat.sch.a"),
         _table_with_fk("cat.sch.a", "cat.sch.missing"),
@@ -727,25 +729,9 @@ def test_resolve_blocks_dependents_of_table_with_invalid_fk_target():
 
 def test_resolve_valid_chain_where_middle_table_has_pk_and_fk_executes():
     # Given c -> a -> b, and a has both its own PK and an FK to b
-    table_a = DeltaTable(
-        "cat",
-        "sch",
-        "a",
-        columns=(
-            Column("id", String(), nullable=False, primary_key=True),
-            Column("ref_id", String()),
-        ),
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("ref_id",),
-                references=_referenced_table("cat.sch.b"),
-            )
-        ],
-    ).to_desired_table()
-
     tables = (
         _table_with_fk("cat.sch.c", "cat.sch.a"),
-        table_a,
+        _table_with_fk("cat.sch.a", "cat.sch.b"),
         _table("cat.sch.b"),
     )
 
