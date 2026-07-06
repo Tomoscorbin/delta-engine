@@ -1,9 +1,13 @@
 """
 Foreign key dependency resolution for sync ordering and failure classification.
 
-The public entry point is `resolve`, which takes the registered tables and
+The public entry points are `resolve`, which takes the registered tables and
 returns a :class:`ResolveResult` with all table names in dependency-first order
-and a mapping of FK failures per table.
+and a mapping of FK failures per table, and `blocking_failures`, which
+classifies which of one table's foreign keys reference already-failed tables.
+`resolve` uses `blocking_failures` for pre-execution propagation and the
+engine reuses it while executing, so both phases block dependents by the
+same rule.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm, reverse-reachability propagation) are
@@ -79,6 +83,31 @@ def resolve(
 
     ordered_names = tuple(table.qualified_name for table in ordered)
     return ResolveResult(ordered_names=ordered_names, fk_failures=failures_by_table)
+
+
+def blocking_failures(
+    table: DesiredTable,
+    failed: AbstractSet[QualifiedName],
+) -> tuple[ForeignKeyFailure, ...]:
+    """
+    Classify which of ``table``'s foreign keys are blocked by failed tables.
+
+    Returns one BLOCKED_BY_FAILED_DEPENDENCY failure per foreign key that
+    references a table in ``failed``. This is the single owner of the blocking
+    rule: `resolve` applies it when propagating pre-execution failures, and the
+    engine applies it again while executing, so a dependency that will not
+    reach desired state blocks its dependents identically in every phase.
+    """
+    return tuple(
+        ForeignKeyFailure(
+            table=table.qualified_name,
+            local_columns=foreign_key.local_columns,
+            references=foreign_key.referenced_table,
+            reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        )
+        for foreign_key in table.foreign_keys
+        if foreign_key.referenced_table in failed
+    )
 
 
 def _build_dependency_graph(
@@ -245,10 +274,9 @@ def _classify_failures(
             table_name = table.qualified_name
             if table_name in failed_names:
                 continue
-            blocking = [fk for fk in table.foreign_keys if fk.referenced_table in failed_names]
+            blocking = blocking_failures(table, failed_names)
             if blocking:
-                for foreign_key in blocking:
-                    record(table, foreign_key, ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY)
+                failures.setdefault(table_name, []).extend(blocking)
                 failed_names.add(table_name)
                 changed = True
 
