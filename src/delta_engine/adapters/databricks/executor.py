@@ -12,11 +12,10 @@ import logging
 
 from pyspark.sql import SparkSession
 
+from delta_engine.adapters.databricks.errors import summarize_exception
 from delta_engine.adapters.databricks.sql import (
+    CompiledAction,
     compile_plan,
-    error_preview,
-    exception_type_name,
-    sql_preview,
 )
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
@@ -48,28 +47,22 @@ class DatabricksExecutor:
         attempted, ending at the one that failed; actions after it are left
         unattempted rather than run against an inconsistent table.
         """
-        statements = compile_plan(qualified_name, plan)
-        return _execute_statements(self.spark, plan, statements)
+        return _execute_compiled(self.spark, compile_plan(qualified_name, plan))
 
 
-def _execute_statements(
-    spark: SparkSession, plan: ActionPlan, statements: Iterable[str]
-) -> ExecutionSummary:
+def _execute_compiled(spark: SparkSession, compiled: Iterable[CompiledAction]) -> ExecutionSummary:
     """
-    Run each compiled statement in plan order, stopping at the first failure.
+    Run each compiled action in plan order, stopping at the first failure.
 
     Holds the stop-on-first-failure loop as a free function so it is testable
-    without a Spark session: a unit test passes a fake ``spark`` and a pre-canned
-    ``statements`` list, with no need to inject a compiler.
-
-    The compiler emits exactly one statement per action, in plan order, so zip
-    pairs each action with its statement directly -- no positional index into the
-    plan to keep in step with the loop counter. strict=True turns a compiler/plan
-    length mismatch into a loud error rather than a silent truncation.
+    without a Spark session: a unit test passes a fake ``spark`` and pre-built
+    ``CompiledAction`` pairs, with no need to inject a compiler.
     """
     results: list[ExecutionResult] = []
-    for action_index, (action, statement) in enumerate(zip(plan, statements, strict=True)):
-        result = _run_statement(spark, action, action_index, statement)
+    for action_index, compiled_action in enumerate(compiled):
+        result = _run_statement(
+            spark, compiled_action.action, action_index, compiled_action.statement
+        )
         results.append(result)
         if isinstance(result, ExecutionFailed):
             break
@@ -91,18 +84,18 @@ def _run_statement(
     silent propagation of whichever type was missed.
     """
     action_name = type(action).__name__
-    preview = sql_preview(statement)
+    preview = _sql_preview(statement)
     try:
         spark.sql(statement)
     except Exception as exception:
-        error_message = error_preview(exception)
-        logger.warning("%s failed: %s\nSQL: %s", action_name, error_message, preview)
+        summary = summarize_exception(exception)
+        logger.warning("%s failed: %s\nSQL: %s", action_name, summary.message, preview)
         return ExecutionFailed(
             action=action_name,
             failure=ExecutionFailure(
                 action_index=action_index,
-                exception_type=exception_type_name(exception),
-                message=error_message,
+                exception_type=summary.type_name,
+                message=summary.message,
                 statement_preview=preview,
             ),
         )
@@ -113,3 +106,18 @@ def _run_statement(
         action_index=action_index,
         statement_preview=preview,
     )
+
+
+def _sql_preview(sql: str, *, max_chars: int = 240) -> str:
+    """
+    Return a compact, bounded preview of a SQL statement for logs/results.
+
+    - Normalizes all runs of whitespace to single spaces on one line.
+    - Truncates with an ellipsis when longer than max_chars.
+
+    The bound and formatting are this executor's reporting policy — the preview
+    lands in ``statement_preview`` on execution results and in log lines, never
+    back in SQL sent to Spark.
+    """
+    s = " ".join(sql.split())
+    return s if len(s) <= max_chars else (s[:max_chars] + "…")

@@ -2,12 +2,14 @@
 Compile domain action plans into Spark/Databricks SQL statements.
 
 Uses `functools.singledispatch` to render SQL per action type and returns a
-tuple of statements ready to execute against a Spark session.
+tuple of :class:`CompiledAction` pairs — each plan action alongside the one
+statement that applies it — ready to execute against a Spark session.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql.dialect import (
@@ -39,10 +41,25 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-    """Compile an :class:`ActionPlan` for ``qualified_name`` into Spark SQL statements."""
+@dataclass(frozen=True, slots=True)
+class CompiledAction:
+    """One plan action paired with the single SQL statement that applies it."""
+
+    action: Action
+    statement: str
+
+
+def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[CompiledAction, ...]:
+    """
+    Compile an :class:`ActionPlan` for ``qualified_name`` into paired statements.
+
+    Returning the action alongside its statement makes the pairing explicit
+    data instead of a positional convention the executor must re-derive.
+    """
     backticked_table_name = backtick_qualified_name(qualified_name)
-    return tuple(_compile_action(action, backticked_table_name) for action in plan)
+    return tuple(
+        CompiledAction(action, _compile_action(action, backticked_table_name)) for action in plan
+    )
 
 
 @singledispatch
@@ -63,9 +80,9 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
-    table_comment = _set_table_comment(table.comment)
-    properties = _set_properties(table.properties)
-    partition_by = _set_partitioned_by(table.partitioned_by)
+    table_comment = _table_comment_clause(table.comment)
+    properties = _properties_clause(table.properties)
+    partition_by = _partitioned_by_clause(table.partitioned_by)
 
     # IF NOT EXISTS, even though CreateTable is only emitted after the reader
     # reports the table absent. It guards the read-then-create race: if another
@@ -227,14 +244,14 @@ def _column_definition(column: Column) -> str:
     return " ".join(part for part in (column_name, sql_type, nullable, comment) if part)
 
 
-def _set_table_comment(comment: str) -> str:
+def _table_comment_clause(comment: str) -> str:
     """Render the table COMMENT clause, or '' when there is no comment to set."""
     if not comment:
         return ""
     return f"COMMENT {quote_literal(comment)}"
 
 
-def _set_properties(props: Mapping[str, str | None]) -> str:
+def _properties_clause(props: Mapping[str, str | None]) -> str:
     # None values are absence assertions: a new table simply omits the key.
     pairs = ", ".join(
         f"{quote_literal(name)}={quote_literal(value)}"
@@ -246,7 +263,7 @@ def _set_properties(props: Mapping[str, str | None]) -> str:
     return f"TBLPROPERTIES ({pairs})"
 
 
-def _set_partitioned_by(partitioned_by: tuple[str, ...] = ()) -> str:
+def _partitioned_by_clause(partitioned_by: tuple[str, ...] = ()) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""

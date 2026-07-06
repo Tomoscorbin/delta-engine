@@ -51,8 +51,12 @@ def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -
     """
     Configure root logging with a colored formatter.
 
-    Installs a single shutdown-safe handler on the root logger and quiets noisy
-    third-party loggers.
+    Takes over the root logger: any handlers already installed on it are
+    removed and replaced with this package's single shutdown-safe coloured
+    handler, and noisy third-party loggers (py4j) are quieted. Intended for
+    scripts and notebooks that want ready-made output; embedders who own
+    their application's logging should configure it themselves and not call
+    this function.
 
     Args:
         level: Root log level to set (default ``logging.INFO``).

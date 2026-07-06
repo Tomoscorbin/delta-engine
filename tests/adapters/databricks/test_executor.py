@@ -1,7 +1,13 @@
+from hypothesis import given, strategies as st
 import pyspark.sql.types as T
 import pytest
 
-from delta_engine.adapters.databricks.executor import DatabricksExecutor, _execute_statements
+from delta_engine.adapters.databricks.executor import (
+    DatabricksExecutor,
+    _execute_compiled,
+    _sql_preview,
+)
+from delta_engine.adapters.databricks.sql import CompiledAction
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
@@ -88,20 +94,14 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
 
 
 def test_execute_maps_success_and_failure_without_leaking_backend_exception():
-    # Given a two-action plan and precompiled statements where the second fails
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-        )
+    # Given compiled actions where the second statement fails
+    compiled = (
+        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
+        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
     )
-    statements = [
-        "SELECT 1",
-        "SELECT * FROM __nope__",
-    ]
 
-    # When executing statements
-    summary = _execute_statements(_FakeSpark(), plan, statements)
+    # When executing them
+    summary = _execute_compiled(_FakeSpark(), compiled)
 
     # Then success and failure are mapped to execution results
     results = summary.results
@@ -114,12 +114,11 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
 
 
 def test_execute_failure_records_exception_details_and_sql_preview():
-    # Given a failing statement
-    plan = ActionPlan(actions=(DropColumn("legacy"),))
-    statements = ["SELECT * FROM __nope__"]
+    # Given a failing compiled action
+    compiled = (CompiledAction(DropColumn("legacy"), "SELECT * FROM __nope__"),)
 
     # When executing it
-    summary = _execute_statements(_FakeSpark(), plan, statements)
+    summary = _execute_compiled(_FakeSpark(), compiled)
 
     # Then useful debugging details are captured
     [result] = summary.results
@@ -133,26 +132,19 @@ def test_execute_failure_records_exception_details_and_sql_preview():
 
 
 def test_execute_stops_at_first_failure_to_avoid_half_migrating():
-    # Given a three-action plan whose middle statement fails
+    # Given three compiled actions whose middle statement fails
     spark = _FakeSpark()
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-            AddColumn(Column("c", Integer())),
-        )
+    compiled = (
+        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
+        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
+        CompiledAction(AddColumn(Column("c", Integer())), "SELECT 2"),
     )
-    statements = [
-        "SELECT 1",
-        "SELECT * FROM __nope__",
-        "SELECT 2",
-    ]
 
-    # When executing statements
-    summary = _execute_statements(spark, plan, statements)
+    # When executing them
+    summary = _execute_compiled(spark, compiled)
 
     # Then the third statement is never attempted
-    assert spark.executed == statements[:2]
+    assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
 
     results = summary.results
     assert [type(result) for result in results] == [
@@ -177,19 +169,51 @@ def test_execute_returns_empty_summary_for_empty_plan():
     assert summary.failed is False
 
 
-def test_execute_fails_loudly_when_plan_and_statement_lengths_differ():
-    # Given a compiler bug produced fewer statements than actions
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-        )
-    )
-    statements = ["SELECT 1"]
+# ----------- _sql_preview: bounded single-line statement previews for results/logs
 
-    # When / Then the strict zip guard raises rather than silently truncating
-    with pytest.raises(ValueError):
-        _execute_statements(_FakeSpark(), plan, statements)
+
+def test_sql_preview_single_line_normalization_and_no_truncation():
+    sql = " \nSELECT   *\nFROM  foo\tWHERE  a = 1  \n"
+    assert _sql_preview(sql, max_chars=10_000) == "SELECT * FROM foo WHERE a = 1"
+
+
+def test_sql_preview_truncates_and_appends_unicode_ellipsis():
+    sql = "SELECT " + "x" * 300 + " FROM t"
+    out = _sql_preview(sql, max_chars=50)
+    assert out.endswith("…")
+    assert len(out) > 50  # because the ellipsis is appended after slicing
+    assert out.startswith("SELECT ")
+
+
+@pytest.mark.parametrize(
+    ("length", "truncated"),
+    [
+        (9, False),  # below the limit: unchanged
+        (10, False),  # exactly at the limit: unchanged (the boundary that pins <=)
+        (11, True),  # one over: truncated to max_chars + ellipsis
+    ],
+    ids=["below", "at-limit", "over"],
+)
+def test_sql_preview_truncates_only_beyond_max_chars(length: int, truncated: bool):
+    # Given a single-line SQL string of a known length around max_chars=10
+    sql = "x" * length
+
+    # When previewing it with max_chars=10
+    out = _sql_preview(sql, max_chars=10)
+
+    # Then it is left intact at or below the limit, and truncated only beyond it
+    if truncated:
+        assert out == "x" * 10 + "…"
+    else:
+        assert out == sql
+
+
+@given(st.text(), st.integers(min_value=1, max_value=500))
+def test_sql_preview_single_line_output_never_contains_newline(sql: str, max_chars: int):
+    # Given: any SQL string and any max_chars
+    result = _sql_preview(sql, max_chars=max_chars)
+    # Then: the output never contains a newline regardless of input content
+    assert "\n" not in result
 
 
 # ----------- Tests against real local Spark/Delta (auto-marked local_e2e via the

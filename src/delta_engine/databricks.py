@@ -21,13 +21,15 @@ __all__ = ["build_engine", "configure_logging"]
 
 def build_engine(spark: SparkSession) -> Engine:
     """Create an engine configured for Databricks."""
-    from delta_engine.adapters.databricks import build_engine as _build_engine
+    from delta_engine.adapters.databricks.factory import build_engine as _build_engine
 
     return _build_engine(spark)
 
 
 def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:
     """Install the package's colored logging handler."""
-    from delta_engine.adapters.databricks import configure_logging as _configure_logging
+    from delta_engine.adapters.databricks.log_config import (
+        configure_logging as _configure_logging,
+    )
 
     _configure_logging(level=level, stream=stream)
