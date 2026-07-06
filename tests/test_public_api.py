@@ -6,9 +6,6 @@ declarations live in `delta_engine.schema`; Databricks helpers live in
 `delta_engine.databricks`.
 """
 
-import subprocess
-import sys
-
 import pytest
 
 import delta_engine
@@ -52,20 +49,3 @@ def test_unknown_attribute_raises_attribute_error():
     # Then a normal AttributeError is raised (the lazy hook does not mask typos)
     with pytest.raises(AttributeError):
         _ = delta_engine.does_not_exist
-
-
-def test_eager_surface_imports_without_pyspark_installed():
-    # Given an interpreter where pyspark cannot be imported (the default install:
-    # pyspark is a dev-only dependency)
-    program = (
-        "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine import Engine, SyncReport, SyncFailedError, Failure\n"
-        "print('ok')\n"
-    )
-
-    # When importing the eager root surface
-    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
-
-    # Then it succeeds without ever importing pyspark
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"

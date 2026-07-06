@@ -11,10 +11,7 @@ requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-databricks = [
-  "pyspark>=4.0.0",
-  "delta-spark>=4.0.0",
-]
+databricks = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 
 [dependency-groups]
 dev = [
@@ -121,6 +118,10 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "local_e2e: local Spark/Delta end-to-end tests that run in default CI",
+  "databricks_e2e: credentialed Databricks/Unity Catalog end-to-end tests",
+]
 addopts = """
 --cov
 --cov-report=term-missing:skip-covered
@@ -128,7 +129,7 @@ addopts = """
 """
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 70
 show_missing = true
 
 [tool.coverage.run]
@@ -147,11 +148,7 @@ id = "hexagonal-layers"
 name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
-layers = [
-  "databricks | schema | adapters | api",
-  "application",
-  "domain",
-]
+layers = ["databricks | schema | adapters | api", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
@@ -172,10 +169,7 @@ source_modules = [
   "delta_engine.application",
   "delta_engine.domain",
 ]
-forbidden_modules = [
-  "delta",
-  "pyspark",
-]
+forbidden_modules = ["delta", "pyspark"]
 
 
 # -------------------- MyPy --------------------

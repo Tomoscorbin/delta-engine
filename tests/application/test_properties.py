@@ -1,4 +1,14 @@
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
+
+
+def test_property_enum_values_match_the_registry_keys():
+    # Given the property vocabulary a user declares against — the enum is the
+    # single source, and the catalogue the engine validates against is built
+    # from it, so the registry covers exactly the enum's keys
+    assert {member.value for member in Property} == set(DELTA_PROPERTY_REGISTRY)
+
+    # And Property is a str enum, so its members can be used directly as dict keys
+    assert Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"
 
 
 def test_registry_covers_the_five_managed_keys():
