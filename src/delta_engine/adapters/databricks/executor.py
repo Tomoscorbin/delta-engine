@@ -12,11 +12,10 @@ import logging
 
 from pyspark.sql import SparkSession
 
+from delta_engine.adapters.databricks.errors import summarize_exception
 from delta_engine.adapters.databricks.sql import (
     CompiledAction,
     compile_plan,
-    error_preview,
-    exception_type_name,
     sql_preview,
 )
 from delta_engine.application.failures import ExecutionFailure
@@ -90,14 +89,14 @@ def _run_statement(
     try:
         spark.sql(statement)
     except Exception as exception:
-        error_message = error_preview(exception)
-        logger.warning("%s failed: %s\nSQL: %s", action_name, error_message, preview)
+        summary = summarize_exception(exception)
+        logger.warning("%s failed: %s\nSQL: %s", action_name, summary.message, preview)
         return ExecutionFailed(
             action=action_name,
             failure=ExecutionFailure(
                 action_index=action_index,
-                exception_type=exception_type_name(exception),
-                message=error_message,
+                exception_type=summary.type_name,
+                message=summary.message,
                 statement_preview=preview,
             ),
         )

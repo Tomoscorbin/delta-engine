@@ -13,12 +13,11 @@ from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 from pyspark.sql.types import DataType as SparkType
 
+from delta_engine.adapters.databricks.errors import summarize_exception
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
     domain_type_from_spark,
-    error_preview,
-    exception_type_name,
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
@@ -204,8 +203,8 @@ class DatabricksReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            failure = ReadFailure(exception_type_name(exception), error_preview(exception))
-            return ReadFailed(failure=failure)
+            summary = summarize_exception(exception)
+            return ReadFailed(failure=ReadFailure(summary.type_name, summary.message))
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""

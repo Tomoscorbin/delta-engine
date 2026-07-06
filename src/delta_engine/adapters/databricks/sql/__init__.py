@@ -14,11 +14,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
-from delta_engine.adapters.databricks.sql.preview import (
-    error_preview,
-    exception_type_name,
-    sql_preview,
-)
+from delta_engine.adapters.databricks.sql.preview import sql_preview
 from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
     describe_detail_query,
@@ -40,8 +36,6 @@ __all__ = [
     "compile_plan",
     "describe_detail_query",
     "domain_type_from_spark",
-    "error_preview",
-    "exception_type_name",
     "foreign_keys_query",
     "information_schema_probe_query",
     "primary_key_query",
