@@ -205,6 +205,7 @@ class Engine:
         for run in runs:
             if isinstance(run.read, ReadFailed):
                 continue
+            # An absent table diffs against None, which yields TableMissing — a create.
             observed = run.read.table if isinstance(run.read, TablePresent) else None
             run.diff = diff_table(desired=run.desired, observed=observed)
         return runs
@@ -216,6 +217,8 @@ class Engine:
                 continue
             result = validate_diff(run.diff)
             run.failures.extend(result.failures)
+            # A run that has a diff passed its read, so any failures counted
+            # here are validation's own.
             if run.failures:
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
@@ -229,6 +232,8 @@ class Engine:
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """Build the action plan for each run by delegating to the diff."""
         for run in runs:
+            # Only validated drift is lowered into actions: a run that failed
+            # read or validation keeps its empty plan.
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
@@ -277,6 +282,9 @@ class Engine:
             if run.failures:
                 failed.add(run.qualified_name)
                 continue
+            # _resolve propagated failures known before execution; a parent can
+            # also fail while executing, so re-apply the same blocking rule as
+            # the walk reaches each run.
             blocking = blocking_failures(run.desired, failed)
             if blocking:
                 logger.error(
@@ -287,6 +295,8 @@ class Engine:
                 run.failures.extend(blocking)
                 failed.add(run.qualified_name)
                 continue
+            # Checked after blocking, so a no-op dependent of a failed parent is
+            # still blocked; a healthy no-op run counts as a healthy parent.
             if not run.plan:
                 continue
             summary = self.executor.execute(run.qualified_name, run.plan)

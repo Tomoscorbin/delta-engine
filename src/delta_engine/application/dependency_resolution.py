@@ -9,9 +9,27 @@ classifies which of one table's foreign keys reference already-failed tables.
 engine reuses it while executing, so both phases block dependents by the
 same rule.
 
+For example, given these declared foreign keys (child ──► parent)::
+
+    order_items ──► orders ──► customers      invoices ◄──► ledger
+    payments ──► invoices                     refunds ──► archive (not registered)
+
+`resolve` orders every table dependency-first and classifies the failures::
+
+    ordered_names: customers, orders, order_items, ...  (parents before
+                   children; failed tables keep their place in the order)
+    fk_failures:
+        invoices  CYCLE                         (references ledger)
+        ledger    CYCLE                         (references invoices)
+        payments  BLOCKED_BY_FAILED_DEPENDENCY  (references invoices)
+        refunds   UNRESOLVABLE_REFERENCE        (references archive)
+
+Healthy tables execute in that order; the engine gates failed tables out by
+their recorded failures.
+
 All graph-traversal implementation details (adjacency map, Tarjan's
-strongly-connected-components algorithm, reverse-reachability propagation) are
-hidden behind that interface.
+strongly-connected-components algorithm, fixpoint propagation of blocked
+dependents) are hidden behind that interface.
 """
 
 from __future__ import annotations
@@ -74,12 +92,12 @@ def resolve(
 
     """
     registered_names = {table.qualified_name for table in tables}
-    graph = _build_dependency_graph(tables, registered_names)
-    components = _strongly_connected_components(graph)
+    dependencies_by_table = _build_dependency_graph(tables, registered_names)
+    components = _strongly_connected_components(dependencies_by_table)
 
-    cycle_members = {name for component in components if _is_cycle(component) for name in component}
+    cycle_partners = _cycle_partners_by_table(components)
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(tables, registered_names, cycle_members, set(blocked))
+    failures_by_table = _classify_failures(tables, registered_names, cycle_partners, set(blocked))
 
     ordered_names = tuple(table.qualified_name for table in ordered)
     return ResolveResult(ordered_names=ordered_names, fk_failures=failures_by_table)
@@ -123,7 +141,7 @@ def _build_dependency_graph(
     create the table, then add the constraint. Excluding the self-edge
     keeps the table a non-cyclic single-node component.
     """
-    graph: dict[QualifiedName, set[QualifiedName]] = {
+    dependencies_by_table: dict[QualifiedName, set[QualifiedName]] = {
         table.qualified_name: set() for table in tables
     }
     for table in tables:
@@ -131,25 +149,34 @@ def _build_dependency_graph(
         for foreign_key in table.foreign_keys:
             referenced_table = foreign_key.referenced_table
             if referenced_table in registered_names and referenced_table != table_name:
-                graph[table_name].add(referenced_table)
-    return graph
+                dependencies_by_table[table_name].add(referenced_table)
+    return dependencies_by_table
 
 
 def _strongly_connected_components(
-    graph: dict[QualifiedName, set[QualifiedName]],
+    dependencies_by_table: dict[QualifiedName, set[QualifiedName]],
 ) -> list[list[QualifiedName]]:
     """
     Return the graph's strongly-connected components in dependency-first order.
 
     Uses Tarjan's algorithm, which emits each component only after every
     component it depends on has been emitted — so a referenced table's component
-    always precedes its dependents'. Neighbours are visited in sorted order and
-    nodes in graph insertion order, making the result deterministic
+    always precedes its dependents'. Dependencies are visited in sorted order
+    and nodes in graph insertion order, making the result deterministic
     regardless of set-iteration order or hash seed.
 
     A component of more than one node is a true dependency cycle. (Self-loops are
     excluded from the graph, so a single node is never cyclic.)
+
+    Reference:
+    https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
+    The implementation matches the reference pseudocode, with one deliberate
+    divergence: the sorted dependency visits described above.
     """
+    # Tarjan's bookkeeping: `indices` numbers nodes in DFS visit order, and
+    # `low_links[node]` tracks the smallest index reachable from the node's
+    # DFS subtree without leaving the stack. A node whose low-link stays equal
+    # to its own index is the root of a strongly-connected component.
     index_counter = 0
     indices: dict[QualifiedName, int] = {}
     low_links: dict[QualifiedName, int] = {}
@@ -165,14 +192,18 @@ def _strongly_connected_components(
         stack.append(node)
         on_stack.add(node)
 
-        for neighbour in sorted(graph[node], key=str):
-            if neighbour not in indices:
-                strong_connect(neighbour)
-                low_links[node] = min(low_links[node], low_links[neighbour])
-            elif neighbour in on_stack:
-                low_links[node] = min(low_links[node], indices[neighbour])
+        for dependency in sorted(dependencies_by_table[node], key=str):
+            if dependency not in indices:
+                strong_connect(dependency)
+                low_links[node] = min(low_links[node], low_links[dependency])
+            elif dependency in on_stack:
+                # A dependency still on the stack is a back-edge into the
+                # component being built; one already popped belongs to a
+                # completed component and cannot lower this low-link.
+                low_links[node] = min(low_links[node], indices[dependency])
 
         if low_links[node] == indices[node]:
+            # This node roots a component: pop the stack down to it to collect its members.
             component: list[QualifiedName] = []
             while True:
                 member = stack.pop()
@@ -182,7 +213,7 @@ def _strongly_connected_components(
                     break
             components.append(component)
 
-    for node in graph:
+    for node in dependencies_by_table:
         if node not in indices:
             strong_connect(node)
 
@@ -192,6 +223,25 @@ def _strongly_connected_components(
 def _is_cycle(component: list[QualifiedName]) -> bool:
     """Return True if the component is a true multi-node dependency cycle."""
     return len(component) > 1
+
+
+def _cycle_partners_by_table(
+    components: list[list[QualifiedName]],
+) -> dict[QualifiedName, frozenset[QualifiedName]]:
+    """
+    Map each member of a cyclic component to the other members of its component.
+
+    A foreign key is part of a cycle exactly when its referenced table is one
+    of the owning table's cycle partners; a cycle member's FK to a table
+    outside its component is not itself cyclic.
+    """
+    partners: dict[QualifiedName, frozenset[QualifiedName]] = {}
+    for component in components:
+        if _is_cycle(component):
+            members = frozenset(component)
+            for name in component:
+                partners[name] = members - {name}
+    return partners
 
 
 def _order_tables(
@@ -213,7 +263,7 @@ def _order_tables(
 def _classify_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: set[QualifiedName],
-    cycle_members: set[QualifiedName],
+    cycle_partners_by_table: dict[QualifiedName, frozenset[QualifiedName]],
     already_failed: set[QualifiedName],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
@@ -222,12 +272,20 @@ def _classify_failures(
     Two passes:
 
     1. Direct failures — a foreign key to an unregistered table
-       (UNRESOLVABLE_REFERENCE) or any foreign key on a cycle member (CYCLE).
+       (UNRESOLVABLE_REFERENCE) or a foreign key into the owning table's own
+       dependency cycle (CYCLE).
     2. Propagation — a table that references a table which will not be built
        cannot be built either (its foreign key would target a missing table).
        This repeats to a fixpoint so the block flows along chains of dependents.
        `already_failed` seeds this pass with names that failed for external
        reasons (e.g. validation), so their FK dependents are also blocked.
+
+    For example, with `archive` not registered::
+
+        c ──► b ──► a ──► archive
+
+    pass 1 fails `a` (UNRESOLVABLE_REFERENCE) and pass 2 blocks `b` and `c`
+    (BLOCKED_BY_FAILED_DEPENDENCY).
     """
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
@@ -257,11 +315,11 @@ def _classify_failures(
             referenced_table = foreign_key.referenced_table
             if referenced_table not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
-            # Checked before cycle membership so that a structural FK-target problem is
+            # Checked before the cycle test so that a structural FK-target problem is
             # reported per-FK even when the table also participates in a cycle.
             elif set(foreign_key.referenced_columns) != primary_key_by_name[referenced_table]:
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
-            elif table_name in cycle_members:
+            elif referenced_table in cycle_partners_by_table.get(table_name, frozenset()):
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 
     # Pass 2 — propagate to dependents until no new table is blocked.
