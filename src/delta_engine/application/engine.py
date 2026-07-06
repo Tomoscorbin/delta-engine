@@ -13,13 +13,16 @@ The six phases, each taking the runs and returning them:
   4. Plan     — lower every diff into its action plan
   5. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  6. Execute  — run the plan of every run with no failures and a non-empty plan
+  6. Execute  — run the plan of every run with no failures and a non-empty
+                plan, blocking FK dependents of runs that fail mid-execution
 
 Running `resolve()` after validation means a table that fails validation
 blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
-with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). The rule is
-uniform: if a dependency won't reach desired state this sync, its dependents
-don't execute either.
+with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). Execution
+applies the same rule as it walks the dependency-ordered runs: a run whose
+dependency fails during execution is blocked rather than executed. The rule
+is uniform: if a dependency won't reach desired state this sync, its
+dependents don't execute either.
 
 A table that fails an early phase carries that failure forward on its run and
 is skipped by execution, so all tables are attempted and the report is always
@@ -31,7 +34,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import logging
 
-from delta_engine.application.dependency_resolution import resolve
+from delta_engine.application.dependency_resolution import blocking_failures, resolve
 from delta_engine.application.desired_tables import DesiredTableSource, prepare_desired_tables
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import Failure
@@ -257,14 +260,34 @@ class Engine:
         """
         Execute the plan of every run with no failures and a non-empty plan.
 
-        Skipped runs pass through unchanged. Execution failures are appended to
-        the run's ``failures`` and the summary is set on ``execution``. A dry run
-        executes nothing and returns the runs unchanged.
+        Walks the runs in dependency-first order, tracking every table that has
+        failed so far. A run whose foreign key references a failed table is
+        blocked with BLOCKED_BY_FAILED_DEPENDENCY instead of executed, so an
+        execution failure in a parent blocks its FK dependents in the same
+        sync — even dependents with no work of their own. A run with an empty
+        plan and no blocking failures is skipped and counts as a healthy
+        parent. Execution failures are appended to the run's ``failures`` and
+        the summary is set on ``execution``. A dry run executes nothing and
+        returns the runs unchanged.
         """
         if dry_run:
             return runs
+        failed: set[QualifiedName] = set()
         for run in runs:
-            if run.failures or not run.plan:
+            if run.failures:
+                failed.add(run.qualified_name)
+                continue
+            blocking = blocking_failures(run.desired, failed)
+            if blocking:
+                logger.error(
+                    "Execution blocked for %s (%d foreign key failure(s))",
+                    run.qualified_name,
+                    len(blocking),
+                )
+                run.failures.extend(blocking)
+                failed.add(run.qualified_name)
+                continue
+            if not run.plan:
                 continue
             summary = self.executor.execute(run.qualified_name, run.plan)
             logger.info(
@@ -275,4 +298,6 @@ class Engine:
             )
             run.execution = summary
             run.failures.extend(summary.failures)
+            if run.failures:
+                failed.add(run.qualified_name)
         return runs

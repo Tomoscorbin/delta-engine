@@ -29,13 +29,13 @@ for table_report in report:
 
 `table_report.status` is one of five `TableRunStatus` values:
 
-| Status | Meaning |
-|---|---|
-| `SUCCESS` | Table synced without issues |
-| `READ_FAILED` | Could not read current catalog state |
-| `VALIDATION_FAILED` | Plan was rejected before any SQL ran |
+| Status               | Meaning                                                         |
+| -------------------- | --------------------------------------------------------------- |
+| `SUCCESS`            | Table synced without issues                                     |
+| `READ_FAILED`        | Could not read current catalog state                            |
+| `VALIDATION_FAILED`  | Plan was rejected before any SQL ran                            |
 | `FOREIGN_KEY_FAILED` | A foreign key could not be applied, or a dependency won't build |
-| `EXECUTION_FAILED` | SQL ran but a statement failed |
+| `EXECUTION_FAILED`   | SQL ran but a statement failed                                  |
 
 ## Read failure details
 
@@ -78,7 +78,7 @@ See [reference-safe-change-rules.md](reference-safe-change-rules.md) for the ful
 
 ## Act on foreign key failures
 
-A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an unregistered table, a dependency cycle, or a dependency that won't reach its desired state this sync. When a dependency fails, every table downstream of it is blocked too — so fix the upstream table first, then re-run.
+A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an unregistered table, a dependency cycle, a foreign key that does not target the referenced table's primary key, or a dependency that won't reach its desired state this sync — whether it failed before execution (read or validation) or while executing earlier in the same run. When a dependency fails, every table downstream of it is blocked too — so fix the upstream table first, then re-run.
 
 ```python
 for table_report in report:
@@ -91,7 +91,7 @@ See [how-to-declare-foreign-keys.md](how-to-declare-foreign-keys.md) for how dep
 
 ## Act on execution failures
 
-Execution failures are partial: actions before the failure ran and committed; actions after were not attempted. Fix the root cause and re-run — the engine re-reads live state and plans only the remaining drift.
+Execution failures are partial: actions before the failure ran and committed; actions after were not attempted. Tables whose foreign keys depend on the failed table are blocked in the same run and report `FOREIGN_KEY_FAILED`. Fix the root cause and re-run — the engine re-reads live state and plans only the remaining drift.
 
 (runtime-and-delta-feature-compatibility)=
 

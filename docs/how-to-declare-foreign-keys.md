@@ -108,7 +108,7 @@ A foreign key fails its whole table when:
 - It forms a dependency cycle with other tables (`CYCLE`).
 - The table it references won't reach its desired state this sync, for any reason (`BLOCKED_BY_FAILED_DEPENDENCY`).
 
-The third case is transitive. If `customers` fails validation, `orders` won't execute either — and any table that references `orders` is blocked in turn. A dependency that won't build blocks every table downstream of it.
+The third case is transitive and applies at any point in the run. If `customers` fails validation, `orders` won't execute either — and any table that references `orders` is blocked in turn. The same happens when `customers` fails during execution: `orders` is blocked before any of its SQL runs. A dependency that won't build blocks every table downstream of it.
 
 A blocked table reports `FOREIGN_KEY_FAILED`. See [how-to-handle-sync-failures.md](how-to-handle-sync-failures.md) for reading the failure report.
 
@@ -116,13 +116,13 @@ A blocked table reports `FOREIGN_KEY_FAILED`. See [how-to-handle-sync-failures.m
 
 The engine matches foreign keys by content — local columns, referenced table, and referenced columns — not by constraint name.
 
-| Change | Actions emitted |
-|---|---|
-| Foreign key added | `SetForeignKey` |
-| Foreign key removed | `DropForeignKey` |
-| Foreign key changed | `DropForeignKey` then `SetForeignKey` |
-| Same foreign key, different constraint name | nothing |
-| No change | nothing |
+| Change                                      | Actions emitted                       |
+| ------------------------------------------- | ------------------------------------- |
+| Foreign key added                           | `SetForeignKey`                       |
+| Foreign key removed                         | `DropForeignKey`                      |
+| Foreign key changed                         | `DropForeignKey` then `SetForeignKey` |
+| Same foreign key, different constraint name | nothing                               |
+| No change                                   | nothing                               |
 
 Matching by content keeps syncs idempotent: a foreign key created outside this engine, under a name the engine wouldn't derive, produces no actions as long as its columns and referenced table match the declaration.
 
