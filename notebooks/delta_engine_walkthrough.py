@@ -593,54 +593,7 @@ print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 5e. Structural drift on a metadata-only table
-# MAGIC
-# MAGIC **Goal**
-# MAGIC
-# MAGIC Declare a column that doesn't exist on the live table in a `metadata_only`
-# MAGIC declaration and attempt to sync.
-# MAGIC
-# MAGIC **Outcome**
-# MAGIC
-# MAGIC Blocked: structural drift on a metadata-only table is a scope violation —
-# MAGIC the declaration promises not to manage columns, so any mismatch is an error
-# MAGIC the caller must resolve out of band.
-
-# COMMAND ----------
-
-customers_meta_drifted = DeltaTable(
-    catalog=CATALOG,
-    schema=SCHEMA,
-    name="customers",
-    columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
-        Column("name", String(), comment="Full legal name"),
-        Column("email", String()),
-        Column("status", String()),
-        Column("ghost", String()),  # <-- does not exist on the live table
-    ],
-    comment="Customer master table (managed externally)",
-    tags={"domain": "sales"},
-    properties={
-        Property.COLUMN_MAPPING_MODE: "name",
-        Property.CHANGE_DATA_FEED: "true",
-    },
-    metadata_only=True,
-)
-
-report = sync_expecting_failure(customers_meta_drifted)
-
-# COMMAND ----------
-
-[customers_report] = report.table_reports
-assert customers_report.status is TableRunStatus.VALIDATION_FAILED
-assert "ghost" not in inspector.fields_of("customers")
-print("Step 5e verified: structural drift on metadata-only table blocked.")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### 5f. A foreign key that cannot be resolved
+# MAGIC ### 5e. A foreign key that cannot be resolved
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
@@ -685,7 +638,7 @@ report = sync_expecting_failure(line_items)
 [line_items_report] = report.table_reports
 assert line_items_report.status is TableRunStatus.FOREIGN_KEY_FAILED
 assert spark.catalog.tableExists(inspector.fqname("line_items")) is False
-print("Step 5f verified: unresolved foreign key blocked, no table created.")
+print("Step 5e verified: unresolved foreign key blocked, no table created.")
 
 # COMMAND ----------
 
@@ -813,14 +766,17 @@ except ValueError as error:
 # MAGIC
 # MAGIC Sync only the catalog metadata — comments, tags, and key constraints — of a
 # MAGIC table that is owned by another process and must not have its columns or
-# MAGIC properties touched.
+# MAGIC properties touched. Two failure cases follow the happy path: attempting to
+# MAGIC create a missing table and declaring structural drift the engine cannot resolve.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
 # MAGIC With `metadata_only=True`, the engine updates metadata and ignores column
-# MAGIC and property state entirely. The declaration is still the full source of
-# MAGIC truth — columns and properties must match — but they are never compared or
-# MAGIC changed.
+# MAGIC and property state entirely (7a). Attempting to create a table that does not
+# MAGIC exist is blocked — column structure management is required for creation (7b).
+# MAGIC Declaring columns that do not match the live table is also blocked — structural
+# MAGIC drift on a metadata-only table is a scope violation the caller must resolve out
+# MAGIC of band (7c).
 
 # COMMAND ----------
 
@@ -894,6 +850,10 @@ new_table_meta_only = DeltaTable(
     metadata_only=True,  # <-- cannot create; no column structure management
 )
 
+# COMMAND ----------
+# assert table does not exist
+assert not spark.catalog.tableExists(inspector.fqname("never_created"))
+
 report = sync_expecting_failure(new_table_meta_only)
 
 # COMMAND ----------
@@ -902,6 +862,53 @@ report = sync_expecting_failure(new_table_meta_only)
 assert report_entry.status is TableRunStatus.VALIDATION_FAILED
 assert spark.catalog.tableExists(inspector.fqname("never_created")) is False
 print("Step 7b verified: metadata-only declaration blocked from creating a missing table.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 7c. Structural drift on a metadata-only table
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Declare a column that doesn't exist on the live table in a `metadata_only`
+# MAGIC declaration and attempt to sync.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Blocked: structural drift on a metadata-only table is a scope violation —
+# MAGIC the declaration promises not to manage columns, so any mismatch is an error
+# MAGIC the caller must resolve out of band.
+
+# COMMAND ----------
+
+customers_meta_drifted = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+        Column("ghost", String()),  # <-- does not exist on the live table
+    ],
+    comment="Customer master table (managed externally)",
+    tags={"domain": "sales"},
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
+    metadata_only=True,  # <-- restricts sync to metadata aspects only
+)
+
+report = sync_expecting_failure(customers_meta_drifted)
+
+# COMMAND ----------
+
+[customers_report] = report.table_reports
+assert customers_report.status is TableRunStatus.VALIDATION_FAILED
+assert "ghost" not in inspector.fields_of("customers")
+print("Step 7c verified: structural drift on metadata-only table blocked.")
 
 # COMMAND ----------
 
@@ -953,6 +960,22 @@ show_report(preview)
 assert all(table_report.execution is None for table_report in preview)
 assert "phone" not in inspector.fields_of("customers")
 print("Dry run verified: plan shown, nothing executed.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Commit** the previewed change with a real sync.
+
+# COMMAND ----------
+
+report = engine.sync(customers, orders)
+show_report(report)
+
+# COMMAND ----------
+
+assert report.any_failures is False
+assert "phone" in inspector.fields_of("customers")
+print("Step 8 verified: dry-run previewed the change; real sync applied it.")
 
 # COMMAND ----------
 
