@@ -8,7 +8,7 @@ import from each other directly (not through this ``__init__``) to avoid import
 cycles.
 """
 
-from delta_engine.adapters.databricks.sql.compile import compile_plan
+from delta_engine.adapters.databricks.sql.compile import CompiledAction, compile_plan
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
     backtick_qualified_name,
@@ -33,6 +33,7 @@ from delta_engine.adapters.databricks.sql.types import (
 )
 
 __all__ = [
+    "CompiledAction",
     "backtick",
     "backtick_qualified_name",
     "column_tags_query",

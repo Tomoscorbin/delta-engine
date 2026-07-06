@@ -2,12 +2,14 @@
 Compile domain action plans into Spark/Databricks SQL statements.
 
 Uses `functools.singledispatch` to render SQL per action type and returns a
-tuple of statements ready to execute against a Spark session.
+tuple of :class:`CompiledAction` pairs — each plan action alongside the one
+statement that applies it — ready to execute against a Spark session.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import singledispatch
 
 from delta_engine.adapters.databricks.sql.dialect import (
@@ -39,10 +41,25 @@ from delta_engine.domain.plan.actions import (
 )
 
 
-def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-    """Compile an :class:`ActionPlan` for ``qualified_name`` into Spark SQL statements."""
+@dataclass(frozen=True, slots=True)
+class CompiledAction:
+    """One plan action paired with the single SQL statement that applies it."""
+
+    action: Action
+    statement: str
+
+
+def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[CompiledAction, ...]:
+    """
+    Compile an :class:`ActionPlan` for ``qualified_name`` into paired statements.
+
+    Returning the action alongside its statement makes the pairing explicit
+    data instead of a positional convention the executor must re-derive.
+    """
     backticked_table_name = backtick_qualified_name(qualified_name)
-    return tuple(_compile_action(action, backticked_table_name) for action in plan)
+    return tuple(
+        CompiledAction(action, _compile_action(action, backticked_table_name)) for action in plan
+    )
 
 
 @singledispatch

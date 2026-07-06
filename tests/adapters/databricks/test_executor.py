@@ -1,7 +1,7 @@
 import pyspark.sql.types as T
-import pytest
 
-from delta_engine.adapters.databricks.executor import DatabricksExecutor, _execute_statements
+from delta_engine.adapters.databricks.executor import DatabricksExecutor, _execute_compiled
+from delta_engine.adapters.databricks.sql import CompiledAction
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
@@ -88,20 +88,14 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
 
 
 def test_execute_maps_success_and_failure_without_leaking_backend_exception():
-    # Given a two-action plan and precompiled statements where the second fails
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-        )
+    # Given compiled actions where the second statement fails
+    compiled = (
+        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
+        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
     )
-    statements = [
-        "SELECT 1",
-        "SELECT * FROM __nope__",
-    ]
 
-    # When executing statements
-    summary = _execute_statements(_FakeSpark(), plan, statements)
+    # When executing them
+    summary = _execute_compiled(_FakeSpark(), compiled)
 
     # Then success and failure are mapped to execution results
     results = summary.results
@@ -114,12 +108,11 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
 
 
 def test_execute_failure_records_exception_details_and_sql_preview():
-    # Given a failing statement
-    plan = ActionPlan(actions=(DropColumn("legacy"),))
-    statements = ["SELECT * FROM __nope__"]
+    # Given a failing compiled action
+    compiled = (CompiledAction(DropColumn("legacy"), "SELECT * FROM __nope__"),)
 
     # When executing it
-    summary = _execute_statements(_FakeSpark(), plan, statements)
+    summary = _execute_compiled(_FakeSpark(), compiled)
 
     # Then useful debugging details are captured
     [result] = summary.results
@@ -133,26 +126,19 @@ def test_execute_failure_records_exception_details_and_sql_preview():
 
 
 def test_execute_stops_at_first_failure_to_avoid_half_migrating():
-    # Given a three-action plan whose middle statement fails
+    # Given three compiled actions whose middle statement fails
     spark = _FakeSpark()
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-            AddColumn(Column("c", Integer())),
-        )
+    compiled = (
+        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
+        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
+        CompiledAction(AddColumn(Column("c", Integer())), "SELECT 2"),
     )
-    statements = [
-        "SELECT 1",
-        "SELECT * FROM __nope__",
-        "SELECT 2",
-    ]
 
-    # When executing statements
-    summary = _execute_statements(spark, plan, statements)
+    # When executing them
+    summary = _execute_compiled(spark, compiled)
 
     # Then the third statement is never attempted
-    assert spark.executed == statements[:2]
+    assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
 
     results = summary.results
     assert [type(result) for result in results] == [
@@ -175,21 +161,6 @@ def test_execute_returns_empty_summary_for_empty_plan():
     assert spark.executed == []
     assert summary.results == ()
     assert summary.failed is False
-
-
-def test_execute_fails_loudly_when_plan_and_statement_lengths_differ():
-    # Given a compiler bug produced fewer statements than actions
-    plan = ActionPlan(
-        actions=(
-            AddColumn(Column("a", Integer())),
-            DropColumn("b"),
-        )
-    )
-    statements = ["SELECT 1"]
-
-    # When / Then the strict zip guard raises rather than silently truncating
-    with pytest.raises(ValueError):
-        _execute_statements(_FakeSpark(), plan, statements)
 
 
 # ----------- Tests against real local Spark/Delta (auto-marked local_e2e via the
