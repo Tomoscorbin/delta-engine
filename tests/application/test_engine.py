@@ -29,7 +29,6 @@ from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import CreateTable, SetColumnComment, SetTableComment
 from delta_engine.schema import Column, DeltaTable, ForeignKey, String
 
-
 # ---------------------------------------------------------------------------
 # Helpers and fakes
 # ---------------------------------------------------------------------------
@@ -920,3 +919,85 @@ def test_metadata_only_sync_fails_when_table_is_missing():
     assert table_report.execution is None
     assert executor.executed_names == []
     assert any("does not exist" in failure.message for failure in table_report.failures)
+
+
+def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
+    # Given a live table with an extra column, and a declaration without columnMapping
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _RecordingReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()), Column("stale", String())),
+                )
+            )
+        }
+    )
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+    spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
+
+    # When syncing (the plan would drop `stale`)
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(spec)
+
+    # Then it fails at validation, naming the property to declare
+    table_report = excinfo.value.report.table_reports[0]
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
+
+
+def test_sync_fails_loud_on_undeclared_registered_property():
+    # Given a live table carrying columnMapping.mode that the spec omits
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _RecordingReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()),),
+                    properties={"delta.columnMapping.mode": "name"},
+                )
+            )
+        }
+    )
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+    spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
+
+    # When / Then the sync stops at validation naming the key
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(spec)
+    table_report = excinfo.value.report.table_reports[0]
+    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
+
+
+def test_metadata_only_column_removal_fails_scope_only_without_drop_precondition():
+    # Given a metadata-only spec over a table with an extra column (an
+    # unmanaged ColumnRemoved drift) — the user never asked to drop anything
+    fqn = "cat.sch.orders"
+    catalog, schema, name = fqn.split(".")
+    reader = _RecordingReader(
+        {
+            fqn: TablePresent(
+                table=ObservedTable(
+                    qualified_name=QualifiedName(catalog, schema, name),
+                    columns=(Column("id", String()), Column("extra", String())),
+                )
+            )
+        }
+    )
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as excinfo:
+        engine.sync(_metadata_only_spec(fqn))
+
+    # Then the single failure is the scope violation — the drop-column
+    # precondition is guarded out for unmanaged column structure
+    table_report = excinfo.value.report.table_reports[0]
+    assert len(table_report.failures) == 1
+    assert not any("ColumnMappingRequiredForDrop" in f.rule_name for f in table_report.failures)
+    assert any("column structure" in f.message.lower() for f in table_report.failures)
