@@ -20,6 +20,7 @@ from delta_engine.adapters.databricks.sql import (
     error_preview,
     exception_type_name,
     foreign_keys_query,
+    information_schema_probe_query,
     primary_key_query,
     table_tags_query,
 )
@@ -184,6 +185,7 @@ class DatabricksReader:
     def __init__(self, spark: SparkSession) -> None:
         """Initialize the reader with a `SparkSession`."""
         self.spark = spark
+        self._information_schema_availability: dict[str, bool] = {}
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """
@@ -209,6 +211,7 @@ class DatabricksReader:
         """Read current state, letting any failure propagate to ``fetch_state``."""
         if not self._table_exists(qualified_name):
             return TableAbsent()
+        catalog = qualified_name.catalog
 
         all_mappings = (
             _to_column_mapping(c, qualified_name)
@@ -216,7 +219,7 @@ class DatabricksReader:
         )
         mappings = tuple(m for m in all_mappings if m is not None)
         column_tags = _column_tags_from_rows(
-            self._information_schema_rows(column_tags_query(qualified_name))
+            self._information_schema_rows(catalog, column_tags_query(qualified_name))
         )
         columns = tuple(
             replace(m.column, tags=column_tags.get(m.column.name, MappingProxyType({})))
@@ -228,14 +231,14 @@ class DatabricksReader:
             comment=self._fetch_table_comment(qualified_name),
             properties=_managed_properties_from_row(self._describe_detail_row(qualified_name)),
             tags=_table_tags_from_rows(
-                self._information_schema_rows(table_tags_query(qualified_name))
+                self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
             partitioned_by=tuple(m.column.name for m in mappings if m.is_partition),
             primary_key=_primary_key_from_rows(
-                self._information_schema_rows(primary_key_query(qualified_name))
+                self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),
             foreign_keys=_foreign_keys_from_rows(
-                self._information_schema_rows(foreign_keys_query(qualified_name))
+                self._information_schema_rows(catalog, foreign_keys_query(qualified_name))
             ),
         )
         return TablePresent(table=observed)
@@ -275,21 +278,33 @@ class DatabricksReader:
             )
         return row
 
-    def _information_schema_rows(self, query: str) -> list[Row]:
+    def _information_schema_rows(self, catalog: str, query: str) -> list[Row]:
         """
         Run a Unity Catalog information_schema query and return its rows.
 
-        The single home of the "information_schema may not exist here" policy:
-        on plain Spark (e.g. local tests without UC) these views do not exist
-        and the query raises ``AnalysisException`` — there is no constraint or
-        tag state to observe, so the result is no rows. Without this guard an
-        unobservable tag would be re-set on every sync and the differ would
-        never converge.
+        Where ``catalog`` has no information_schema (plain Spark, e.g. local
+        tests), returns no rows without querying: the views' absence is probed
+        once per catalog and cached, so there is no per-query exception
+        heuristic. Where information_schema exists, failures propagate to
+        ``fetch_state``'s boundary and become ``ReadFailed`` — a permission
+        error or query regression must not masquerade as "no constraints, no
+        tags", which would churn tags on every sync and plan constraint DDL
+        that fails at execution.
         """
-        try:
-            return self.spark.sql(query).collect()
-        except AnalysisException:
+        if not self._information_schema_available(catalog):
             return []
+        return self.spark.sql(query).collect()
+
+    def _information_schema_available(self, catalog: str) -> bool:
+        """Probe (once per catalog) whether information_schema is queryable."""
+        if catalog not in self._information_schema_availability:
+            try:
+                self.spark.sql(information_schema_probe_query(catalog)).collect()
+            except AnalysisException:
+                self._information_schema_availability[catalog] = False
+            else:
+                self._information_schema_availability[catalog] = True
+        return self._information_schema_availability[catalog]
 
     def _fetch_table_comment(self, qualified_name: QualifiedName) -> str:
         """Return the table comment (empty string when not set)."""

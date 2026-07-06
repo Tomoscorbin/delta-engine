@@ -23,6 +23,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
     describe_detail_query,
     foreign_keys_query,
+    information_schema_probe_query,
     primary_key_query,
     table_tags_query,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "error_preview",
     "exception_type_name",
     "foreign_keys_query",
+    "information_schema_probe_query",
     "primary_key_query",
     "quote_literal",
     "sql_preview",

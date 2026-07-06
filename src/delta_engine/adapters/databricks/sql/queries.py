@@ -120,3 +120,14 @@ def foreign_keys_query(qualified_name: QualifiedName) -> str:
         f" AND kcu.table_name = {quote_literal(qualified_name.name)}"
         f" ORDER BY rc.constraint_name, kcu.ordinal_position"
     )
+
+
+def information_schema_probe_query(catalog: str) -> str:
+    """
+    Render a cheap query that succeeds exactly where information_schema exists.
+
+    Takes the catalog name (not a table's QualifiedName): availability is a
+    per-catalog fact, probed once and cached by the reader. ``WHERE 1 = 0``
+    keeps it free — the planner still resolves the view, which is the test.
+    """
+    return f"SELECT 1 FROM {backtick(catalog)}.information_schema.schemata WHERE 1 = 0"

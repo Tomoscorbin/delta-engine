@@ -87,3 +87,11 @@ def test_queries_escape_identifiers_and_literals():
     qn = QualifiedName("ca`t", "sc'h", "tbl")
     assert "`ca``t`" in primary_key_query(qn)
     assert "'sc''h'" in primary_key_query(qn)
+
+
+def test_information_schema_probe_query_golden():
+    from delta_engine.adapters.databricks.sql import information_schema_probe_query
+
+    assert information_schema_probe_query("cat") == (
+        "SELECT 1 FROM `cat`.information_schema.schemata WHERE 1 = 0"
+    )

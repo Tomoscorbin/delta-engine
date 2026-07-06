@@ -20,6 +20,7 @@ from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
     foreign_keys_query,
+    information_schema_probe_query,
     primary_key_query,
     table_tags_query,
 )
@@ -104,6 +105,7 @@ def routed_spark(
     fks=(),
     tags=(),
     column_tags=(),
+    probe=(),
 ):
     """Build a RoutedSpark with a full default response set for one table."""
     responses = {
@@ -113,6 +115,9 @@ def routed_spark(
         table_tags_query(qn): list(tags) if not isinstance(tags, Exception) else tags,
         column_tags_query(qn): (
             list(column_tags) if not isinstance(column_tags, Exception) else column_tags
+        ),
+        information_schema_probe_query(qn.catalog): (
+            list(probe) if not isinstance(probe, Exception) else probe
         ),
     }
     return RoutedSpark(catalog=catalog, responses=responses)
@@ -422,47 +427,52 @@ def test_fetch_state_attaches_column_tags_to_their_columns(qn):
     assert dict(column.tags) == {"key": "primary"}
 
 
-# ---------- information_schema unavailable (plain Spark) ----------
+# ---------- information_schema availability ----------
 
 
-def test_fetch_state_metadata_is_empty_when_primary_key_view_is_unavailable(qn):
+def test_fetch_state_skips_metadata_queries_when_information_schema_is_absent(qn):
+    # Plain Spark (no Unity Catalog): the probe fails once, and no
+    # information_schema query is ever issued -- constraints and tags read as
+    # empty rather than failing the table.
     spark = routed_spark(
-        qn, catalog=single_column_catalog(qn), pk=AnalysisException("no information_schema")
+        qn,
+        catalog=single_column_catalog(qn),
+        probe=AnalysisException("no information_schema"),
     )
     result = DatabricksReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.primary_key is None
-
-
-def test_fetch_state_metadata_is_empty_when_foreign_key_view_is_unavailable(qn):
-    spark = routed_spark(
-        qn, catalog=single_column_catalog(qn), fks=AnalysisException("no information_schema")
-    )
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == ()
-
-
-def test_fetch_state_metadata_is_empty_when_table_tags_view_is_unavailable(qn):
-    spark = routed_spark(
-        qn, catalog=single_column_catalog(qn), tags=AnalysisException("no information_schema")
-    )
-    result = DatabricksReader(spark).fetch_state(qn)
-
-    assert isinstance(result, TablePresent)
     assert dict(result.table.tags) == {}
+    issued = set(spark.queries)
+    assert primary_key_query(qn) not in issued
+    assert foreign_keys_query(qn) not in issued
+    assert table_tags_query(qn) not in issued
+    assert column_tags_query(qn) not in issued
 
 
-def test_fetch_state_metadata_is_empty_when_column_tags_view_is_unavailable(qn):
+def test_fetch_state_fails_when_a_metadata_query_fails_on_unity_catalog(qn):
+    # The probe succeeded, so information_schema exists: a failing metadata
+    # query (permissions, query regression) must surface as ReadFailed, not
+    # masquerade as "no constraints, no tags".
     spark = routed_spark(
         qn,
         catalog=single_column_catalog(qn),
-        column_tags=AnalysisException("no information_schema"),
+        fks=AnalysisException("PERMISSION_DENIED"),
     )
     result = DatabricksReader(spark).fetch_state(qn)
 
-    assert isinstance(result, TablePresent)
-    (column,) = result.table.columns
-    assert dict(column.tags) == {}
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "AnalysisException"
+
+
+def test_information_schema_probe_runs_once_per_catalog_across_reads(qn):
+
+    spark = routed_spark(qn, catalog=single_column_catalog(qn))
+    reader = DatabricksReader(spark)
+    reader.fetch_state(qn)
+    reader.fetch_state(qn)
+
+    probe = information_schema_probe_query(qn.catalog)
+    assert spark.queries.count(probe) == 1
