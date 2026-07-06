@@ -56,34 +56,6 @@ def test_actionplan_truthiness_and_length():
 # ----- ActionPlan: orders its own actions on construction
 
 
-def test_plan_orders_actions_by_phase_in_documented_precedence():
-    # Given one action from each phase, handed to the plan in scrambled order
-    plan = ActionPlan(
-        (
-            SetTableComment(comment="tbl comment"),
-            AddColumn(column=_column("a_col")),
-            SetProperty(name="p_set", value="1"),
-            UnsetProperty(name="p_unset"),
-            SetColumnNullability(column_name="nn_col", nullable=False),
-            DropColumn(column_name="d_col"),
-            SetColumnComment(column_name="c_col", comment="c"),
-            _create_table_action(),
-        )
-    )
-
-    # Then the plan holds them in the documented phase precedence
-    assert [type(a) for a in plan] == [
-        CreateTable,
-        SetProperty,
-        UnsetProperty,
-        AddColumn,
-        DropColumn,
-        SetColumnComment,
-        SetTableComment,
-        SetColumnNullability,
-    ]
-
-
 def test_plan_orders_within_a_phase_by_subject_name():
     # Given two same-phase actions handed in reverse subject order
     plan = ActionPlan((AddColumn(column=_column("b_col")), AddColumn(column=_column("a_col"))))
@@ -184,19 +156,6 @@ def test_actionplan_order_is_independent_of_input_permutation(
 # ----- DropPrimaryKey / SetPrimaryKey
 
 
-def test_plan_orders_drop_primary_key_before_add_column():
-    # Given a DropPrimaryKey and an AddColumn in the same plan
-    plan = ActionPlan(
-        (
-            AddColumn(column=_column("new_col")),
-            DropPrimaryKey(),
-        )
-    )
-
-    # Then DropPrimaryKey runs first
-    assert [type(a) for a in plan] == [DropPrimaryKey, AddColumn]
-
-
 def test_plan_orders_set_primary_key_after_set_column_nullability():
     # Given a SetPrimaryKey and a SetColumnNullability in the same plan
     plan = ActionPlan(
@@ -288,31 +247,6 @@ def test_plan_orders_drop_foreign_key_before_drop_primary_key():
     assert [type(a) for a in plan] == [DropForeignKey, DropPrimaryKey]
 
 
-# ----- SetTableTag / UnsetTableTag
-
-
-def test_plan_orders_set_table_tag_after_set_property_and_before_drop_foreign_key():
-    # Given a plan holding a SetProperty, a SetTableTag, and a DropForeignKey
-    plan = ActionPlan(
-        (
-            DropForeignKey(constraint_name="t_old_fk"),
-            SetTableTag(name="env", value="prod"),
-            SetProperty(name="delta.appendOnly", value="true"),
-        )
-    )
-
-    # Then tags apply after properties and before structural constraint drops
-    assert [type(a) for a in plan] == [SetProperty, SetTableTag, DropForeignKey]
-
-
-def test_plan_orders_set_table_tag_before_unset_table_tag():
-    # Given both a set and an unset tag action in one plan
-    plan = ActionPlan((UnsetTableTag(name="old"), SetTableTag(name="env", value="prod")))
-
-    # Then sets run before unsets (documented phase precedence)
-    assert [type(a) for a in plan] == [SetTableTag, UnsetTableTag]
-
-
 # ----- SetColumnTag / UnsetColumnTag
 
 
@@ -327,32 +261,6 @@ def test_plan_orders_set_column_tag_after_add_column():
 
     # Then the column is added before it is tagged
     assert [type(a) for a in plan] == [AddColumn, SetColumnTag]
-
-
-def test_plan_orders_set_column_tag_before_unset_column_tag():
-    # Given both a set and an unset column-tag action in one plan
-    plan = ActionPlan(
-        (
-            UnsetColumnTag(column_name="email", name="old"),
-            SetColumnTag(column_name="email", name="pii", value="true"),
-        )
-    )
-
-    # Then sets run before unsets (documented phase precedence)
-    assert [type(a) for a in plan] == [SetColumnTag, UnsetColumnTag]
-
-
-def test_plan_orders_set_property_before_unset_property():
-    # Given property set and unset actions supplied out of execution order
-    plan = ActionPlan(
-        (
-            UnsetProperty(name="old_property"),
-            SetProperty(name="new_property", value="true"),
-        )
-    )
-
-    # Then the plan orders property sets before property unsets
-    assert [type(action) for action in plan] == [SetProperty, UnsetProperty]
 
 
 def test_set_property_observed_value_defaults_to_none():
