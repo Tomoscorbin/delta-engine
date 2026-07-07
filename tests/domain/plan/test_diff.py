@@ -792,6 +792,37 @@ def test_changed_primary_key_produces_changed_change():
     )
 
 
+def test_primary_key_change_carries_observed_referencing_foreign_keys():
+    # Given desired and observed primary keys over different column sets, where
+    # another table references the observed key by foreign key
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
+    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
+    columns = (
+        Column("id", Integer(), nullable=False),
+        Column("other_id", Integer(), nullable=False),
+    )
+
+    # When diffing a declaration that changes the primary key
+    diff = diff_table(
+        _desired(columns=columns, primary_key=desired_primary_key),
+        _observed(
+            columns=columns,
+            primary_key=observed_primary_key,
+            referencing_foreign_keys=(reference,),
+        ),
+    )
+
+    # Then the changed fact carries the inbound reference for validation to judge
+    assert isinstance(diff, TableDrift)
+    (change,) = diff.changes
+    assert isinstance(change, PrimaryKeyChanged)
+    assert change.referencing_foreign_keys == (reference,)
+
+
 def test_observed_only_foreign_key_produces_removed_change():
     # Given a catalog foreign key that is absent from the declaration
     foreign_key = _foreign_key("legacy_fk")

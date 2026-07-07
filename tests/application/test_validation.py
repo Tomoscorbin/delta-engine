@@ -10,9 +10,12 @@ from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column,
     DesiredTable,
+    ForeignKeyConstraint,
+    ForeignKeyReference,
     Integer,
     Long,
     ObservedTable,
+    PrimaryKeyConstraint,
     QualifiedName,
     String,
     TableAspect,
@@ -22,6 +25,9 @@ from delta_engine.domain.plan.diff import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnRemoved,
+    ForeignKeyRemoved,
+    PrimaryKeyChanged,
+    PrimaryKeyRemoved,
     TableCommentChanged,
     TableDrift,
     TableMissing,
@@ -117,6 +123,7 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
+        "PrimaryKeyReferencedByForeignKeys",
     }
 
 
@@ -651,3 +658,80 @@ def test_multiple_column_drops_produce_one_column_mapping_failure():
 
     # Then the precondition is reported once for the table
     assert [failure.rule_name for failure in result.failures] == ["ColumnMappingRequiredForDrop"]
+
+
+# ---- primary key referenced by foreign keys
+
+
+def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
+    # Given a PK removal observed to be referenced by another table's FK
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    change = PrimaryKeyRemoved(
+        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+        referencing_foreign_keys=(reference,),
+    )
+
+    result = validate_diff(_drift(change))
+
+    # Then validation fails naming the referencing constraint
+    assert result.failed
+    assert any(
+        failure.rule_name == "PrimaryKeyReferencedByForeignKeys"
+        and "orders_customer_id_fk" in failure.message
+        for failure in result.failures
+    )
+
+
+def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
+    change = PrimaryKeyRemoved(
+        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+    )
+
+    result = validate_diff(_drift(change))
+
+    assert not result.failed
+
+
+def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_this_table():
+    # Given a self-referential FK dropped in the same sync as the PK
+    # (DROP_FOREIGN_KEY phases before DROP_PRIMARY_KEY, so execution succeeds)
+    own_fk = ForeignKeyConstraint(
+        local_columns=("parent_id",),
+        referenced_table=_QUALIFIED_NAME,
+        referenced_columns=("id",),
+        constraint_name="test_parent_id_fk",
+    )
+    reference = ForeignKeyReference(
+        constraint_name="test_parent_id_fk",
+        referencing_table=_QUALIFIED_NAME,
+    )
+    pk_change = PrimaryKeyRemoved(
+        observed_primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
+        referencing_foreign_keys=(reference,),
+    )
+    fk_change = ForeignKeyRemoved(constraint=own_fk)
+
+    result = validate_diff(_drift(pk_change, fk_change))
+
+    assert not any(
+        failure.rule_name == "PrimaryKeyReferencedByForeignKeys" for failure in result.failures
+    )
+
+
+def test_primary_key_change_blocked_while_foreign_keys_reference_it():
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    change = PrimaryKeyChanged(
+        desired_primary_key=PrimaryKeyConstraint(("id", "region"), "customers_pk"),
+        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+        referencing_foreign_keys=(reference,),
+    )
+
+    result = validate_diff(_drift(change))
+
+    assert result.failed

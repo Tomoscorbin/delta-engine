@@ -15,7 +15,10 @@ from delta_engine.domain.plan import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ForeignKeyRemoved,
     PartitioningChanged,
+    PrimaryKeyChanged,
+    PrimaryKeyRemoved,
     PropertySet,
     PropertyUndeclared,
     PropertyUnset,
@@ -271,6 +274,62 @@ class ColumnMappingRequiredForDrop:
         )
 
 
+class PrimaryKeyReferencedByForeignKeys:
+    """
+    Disallow dropping or changing a primary key while foreign keys reference it.
+
+    DROP PRIMARY KEY is RESTRICT by default: it fails while any FK references
+    the key. The referencing constraints ride on the primary-key change (an
+    observed fact), so this rule needs no second input. A referencing FK on
+    *this* table that this same sync also drops is exempt — DROP_FOREIGN_KEY
+    phases before DROP_PRIMARY_KEY, so that plan executes cleanly. FKs on
+    other tables cannot be exempted per-table: even when the other table's
+    declaration drops the FK in the same sync run, tables execute
+    parent-first, so the PK drop would still hit the live FK.
+
+    information_schema is per-catalog, so references from other catalogs are
+    not observed; those still fail at execution.
+    """
+
+    name: ClassVar[str] = "PrimaryKeyReferencedByForeignKeys"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every PK drop/change still referenced by a surviving foreign key."""
+        dropped_here = {
+            change.constraint.constraint_name
+            for change in drift.managed_changes
+            if isinstance(change, ForeignKeyRemoved)
+        }
+        failures: list[ValidationFailure] = []
+        for change in drift.managed_changes:
+            if not isinstance(change, PrimaryKeyRemoved | PrimaryKeyChanged):
+                continue
+            blockers = tuple(
+                reference
+                for reference in change.referencing_foreign_keys
+                if not (
+                    reference.referencing_table == drift.desired.qualified_name
+                    and reference.constraint_name in dropped_here
+                )
+            )
+            if blockers:
+                referenced_by = ", ".join(
+                    f"{ref.constraint_name} on {ref.referencing_table}" for ref in blockers
+                )
+                failures.append(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: the primary key cannot be"
+                            f" dropped or changed while foreign keys reference it:"
+                            f" {referenced_by}. Sync the referencing tables without"
+                            " those foreign keys first, then change the key."
+                        ),
+                    )
+                )
+        return tuple(failures)
+
+
 DEFAULT_RULES: tuple[Rule, ...] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
@@ -279,6 +338,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
     ColumnMappingRequiredForDrop(),
+    PrimaryKeyReferencedByForeignKeys(),
 )
 
 
