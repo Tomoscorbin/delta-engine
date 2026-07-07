@@ -52,6 +52,25 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
 )
 
+# Unity Catalog limits per securable object (a table and each of its
+# columns are separate securables).
+_MAX_TAGS_PER_SECURABLE: Final[int] = 50
+_MAX_TAG_VALUE_LENGTH: Final[int] = 1000
+
+
+def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
+    if len(tags) > _MAX_TAGS_PER_SECURABLE:
+        raise ValueError(
+            f"{subject} declares {len(tags)} tags; Unity Catalog allows at"
+            f" most {_MAX_TAGS_PER_SECURABLE} per securable"
+        )
+    for key, value in tags.items():
+        if len(value) > _MAX_TAG_VALUE_LENGTH:
+            raise ValueError(
+                f"Tag {key!r} on {subject} has a {len(value)}-character"
+                f" value; Unity Catalog allows at most {_MAX_TAG_VALUE_LENGTH}"
+            )
+
 
 @dataclass(frozen=True, slots=True)
 class ForeignKey:
@@ -208,6 +227,11 @@ class DeltaTable:
                     f" {Property.CHANGE_DATA_FEED}."
                 )
 
+        table_tags = dict(tags or {})
+        _validate_tags(f"table '{name}'", table_tags)
+        for column in columns:
+            _validate_tags(f"column '{column.name}'", column.tags)
+
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
         primary_key = (
             PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
@@ -230,7 +254,7 @@ class DeltaTable:
             columns=columns,
             comment=comment,
             properties=user_properties,
-            tags=dict(tags or {}),
+            tags=table_tags,
             partitioned_by=tuple(partitioned_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
