@@ -1,7 +1,5 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Self
 

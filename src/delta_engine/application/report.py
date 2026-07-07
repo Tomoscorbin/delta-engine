@@ -5,8 +5,6 @@ Run reports: per-table and run-level outcome aggregates.
 its status from the earliest failing phase; `SyncReport` aggregates a run.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime

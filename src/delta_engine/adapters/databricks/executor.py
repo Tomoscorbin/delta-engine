@@ -5,8 +5,6 @@ Compiles an `ActionPlan` to SQL, runs each statement via a `SparkSession`, and
 returns `ExecutionResult` entries including SQL previews and failure details.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable
 import logging
 

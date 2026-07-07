@@ -6,8 +6,6 @@ Application-level exception types for sync operations.
 SQL previews for any failed actions.
 """
 
-from __future__ import annotations
-
 from delta_engine.application.report import SyncReport, TableRunReport
 
 

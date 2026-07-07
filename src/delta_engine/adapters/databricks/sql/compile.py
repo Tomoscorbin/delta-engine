@@ -6,8 +6,6 @@ tuple of :class:`CompiledAction` pairs — each plan action alongside the one
 statement that applies it — ready to execute against a Spark session.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import singledispatch

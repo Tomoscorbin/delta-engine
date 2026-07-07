@@ -8,8 +8,6 @@ them to the same two facts a failure report needs: the most informative type
 name and a bounded message.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

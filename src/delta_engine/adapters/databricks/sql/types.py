@@ -12,8 +12,6 @@ compiler because the ``Action`` hierarchy is open to extension; it would only ad
 ceremony here.
 """
 
-from __future__ import annotations
-
 from pyspark.sql.types import (
     ArrayType,
     BooleanType,

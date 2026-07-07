@@ -7,8 +7,6 @@ derive a table's status from the earliest failing phase, so the family stays
 together rather than being scattered across its producers.
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum

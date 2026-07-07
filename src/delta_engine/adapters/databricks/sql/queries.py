@@ -10,8 +10,6 @@ All information_schema queries are Unity Catalog only; the reader owns the
 policy for environments where information_schema does not exist.
 """
 
-from __future__ import annotations
-
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
     backtick_qualified_name,

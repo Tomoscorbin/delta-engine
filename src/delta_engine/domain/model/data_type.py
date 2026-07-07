@@ -1,7 +1,5 @@
 """Domain data type variants used to describe table schemas."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

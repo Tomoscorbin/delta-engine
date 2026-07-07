@@ -41,8 +41,6 @@ Semantics that differ by aspect:
   column must be recreated first, so a nullability change would be noise.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar

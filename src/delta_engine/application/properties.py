@@ -25,8 +25,6 @@ DETAIL's properties: if the platform auto-writes the key, do not register
 it. Additions are called out in release notes.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum

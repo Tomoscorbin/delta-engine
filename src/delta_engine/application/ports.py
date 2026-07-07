@@ -7,8 +7,6 @@ the Protocol that requires it, so an adapter author reads one file to learn
 the whole contract.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Protocol
 

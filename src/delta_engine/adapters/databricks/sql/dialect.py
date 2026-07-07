@@ -1,7 +1,5 @@
 """Spark/Databricks SQL quoting & name rendering."""
 
-from __future__ import annotations
-
 from delta_engine.domain.model import QualifiedName
 
 
