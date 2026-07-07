@@ -5,6 +5,7 @@ from delta_engine.domain.model import (
     Column,
     Date,
     DesiredTable,
+    ForeignKeyReference,
     Integer,
     Map,
     ObservedTable,
@@ -484,3 +485,32 @@ def test_observed_table_accepts_layouts_desired_tables_reject() -> None:
         partitioned_by=("id", "day"),
     )
     assert observed.partitioned_by == ("id", "day")
+
+
+# ---------- referencing_foreign_keys ----------
+
+
+def test_observed_table_carries_referencing_foreign_keys() -> None:
+    # Given a ForeignKeyReference describing an inbound FK
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    # When building an ObservedTable with referencing_foreign_keys
+    observed = ObservedTable(
+        qualified_name=QualifiedName("dev", "silver", "customers"),
+        columns=(Column("id", Integer()),),
+        referencing_foreign_keys=(reference,),
+    )
+    # Then the field is readable and returns the value object
+    assert observed.referencing_foreign_keys == (reference,)
+
+
+def test_foreign_key_reference_rejects_blank_constraint_name() -> None:
+    # Given a blank constraint_name
+    # When / Then construction raises ValueError
+    with pytest.raises(ValueError):
+        ForeignKeyReference(
+            constraint_name="  ",
+            referencing_table=QualifiedName("dev", "silver", "orders"),
+        )
