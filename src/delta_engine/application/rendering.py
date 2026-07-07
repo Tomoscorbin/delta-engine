@@ -8,6 +8,7 @@ render_grid, render_diff_block, run_summary_footer, and _action_entries
 are the building blocks they compose.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import IntEnum
 import functools
@@ -231,14 +232,40 @@ _DETAIL_MAX_CHARS = 60
 _GRID_HEADERS = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
 
 
+def _grid_actions_cell(report: TableRunReport) -> str:
+    """ACTIONS cell: applied/total when execution ran, — on a plan-less failure, else count."""
+    execution = report.execution
+    if execution is not None:
+        applied = len(execution.results) - execution.failed_count
+        return f"{applied}/{len(report.plan)}"
+    if report.has_failures:
+        return "—"
+    return str(len(report.plan))
+
+
+def _humanized_action_summary(plan: ActionPlan) -> str:
+    """Summarise a plan as per-category change counts in display order, e.g. '2 columns, 1 key'."""
+    counts: Counter[DiffCategory] = Counter()
+    for action in plan:
+        for entry in _action_entries(action):
+            counts[entry.category] += 1
+    parts: list[str] = []
+    for category in DiffCategory:
+        count = counts.get(category, 0)
+        if count:
+            singular, plural = _CATEGORY_NOUN[category]
+            parts.append(f"{count} {singular if count == 1 else plural}")
+    return ", ".join(parts) or _NO_CHANGES
+
+
 def _grid_detail(report: TableRunReport) -> str:
-    """Return the DETAIL cell: first failure summary, action names, or 'no changes'."""
+    """Return the DETAIL cell: first failure summary, or a per-category change count."""
     if report.has_failures:
         failures = report.failures
         first = failures[0].format_lines()[0]
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
-    return ", ".join(type(action).__name__ for action in report.plan) or _NO_CHANGES
+    return _humanized_action_summary(report.plan)
 
 
 def _truncate(text: str, limit: int = _DETAIL_MAX_CHARS) -> str:
@@ -251,7 +278,7 @@ def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
     return (
         str(report.qualified_name),
         report.status.value,
-        str(len(report.plan)),
+        _grid_actions_cell(report),
         _truncate(_grid_detail(report)),
     )
 

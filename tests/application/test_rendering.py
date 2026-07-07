@@ -3,8 +3,14 @@ from datetime import datetime
 
 import pytest
 
-from delta_engine.application.failures import ReadFailure, ValidationFailure
-from delta_engine.application.ports import ReadFailed, TablePresent
+from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
+from delta_engine.application.ports import (
+    ExecutionFailed,
+    ExecutionSucceeded,
+    ExecutionSummary,
+    ReadFailed,
+    TablePresent,
+)
 from delta_engine.application.rendering import (
     DiffCategory,
     DiffEntry,
@@ -296,20 +302,67 @@ def _grid_report(name, *, plan=None, failures=()):
     )
 
 
-def test_grid_detail_lists_action_type_names_for_a_changed_table():
-    # Given a table with a two-action plan and no failures
+def _execution(*, applied: int, failed: int) -> ExecutionSummary:
+    succeeded = tuple(
+        ExecutionSucceeded(action="A", action_index=index, statement_preview="SQL")
+        for index in range(applied)
+    )
+    failures = tuple(
+        ExecutionFailed(
+            action="A",
+            failure=ExecutionFailure(
+                action_index=applied + index,
+                exception_type="AnalysisException",
+                message="boom",
+                statement_preview="SQL",
+            ),
+        )
+        for index in range(failed)
+    )
+    return ExecutionSummary(results=succeeded + failures)
+
+
+def test_grid_detail_summarizes_changes_by_category_not_class_names():
+    # Given a changed table with two column adds and one property set
     report = _grid_report(
         "orders",
         plan=ActionPlan(
-            (SetTableComment(comment="c"), SetProperty(name="delta.appendOnly", value="true"))
+            (
+                AddColumn(Column("a", Integer())),
+                AddColumn(Column("b", Integer())),
+                SetProperty(name="delta.appendOnly", value="true"),
+            )
         ),
     )
 
     # When rendering the single-row grid
     data_row = render_grid((report,)).splitlines()[1]
 
-    # Then the DETAIL cell lists the action type names in plan order
-    assert data_row.endswith("SetProperty, SetTableComment")
+    # Then DETAIL counts by category and does not leak class names
+    assert "2 columns, 1 property" in data_row
+    assert "AddColumn" not in data_row
+
+
+def test_grid_actions_cell_shows_applied_over_total_on_partial_failure():
+    # Given a three-action plan where two applied and one failed during execution
+    plan = ActionPlan(
+        (
+            AddColumn(Column("a", Integer())),
+            AddColumn(Column("b", Integer())),
+            AddColumn(Column("c", Integer())),
+        )
+    )
+    report = dataclasses.replace(
+        _grid_report("orders", plan=plan),
+        execution=_execution(applied=2, failed=1),
+        failures=(ExecutionFailure(2, "AnalysisException", "boom", "SQL"),),
+    )
+
+    # When rendering the grid row
+    data_row = render_grid((report,)).splitlines()[1]
+
+    # Then the ACTIONS cell reads applied/total
+    assert "2/3" in data_row
 
 
 def test_grid_detail_shows_first_failure_and_extra_count_when_multiple():
