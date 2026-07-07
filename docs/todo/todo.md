@@ -24,7 +24,6 @@
 - [ ] Add tags, comment, schema, etc as properties to DeltaTable
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
-- [ ] improve Report display formatting
 - [ ] Remove table.py from api/ and put it in src/delta_table??
 - [ ] Review if any classes/functions/methods/modules etc should be made private
 - [ ] restructure files so that important things come first
