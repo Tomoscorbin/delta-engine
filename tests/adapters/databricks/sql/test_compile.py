@@ -256,6 +256,7 @@ def test_create_table_without_primary_key_omits_constraint_clause():
 
     # Then no constraint clause appears
     assert "PRIMARY KEY" not in statement
+    assert "CONSTRAINT" not in statement
 
 
 def test_create_table_backticks_struct_field_names_and_renders_variant():
@@ -277,7 +278,6 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
         " USING delta"
         " TBLPROPERTIES ('delta.columnMapping.mode'='name')"
     )
-    assert "CONSTRAINT" not in statement
 
 
 @pytest.mark.parametrize(
