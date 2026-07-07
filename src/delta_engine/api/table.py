@@ -13,11 +13,15 @@ from delta_engine.application.properties import (
 )
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Array,
     Column,
+    DataType,
     DesiredTable,
     ForeignKeyConstraint,
+    Map,
     PrimaryKeyConstraint,
     QualifiedName,
+    Struct,
     TableAspect,
 )
 
@@ -72,6 +76,38 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
             )
 
 
+def _column_declared_names(column: Column) -> tuple[str, ...]:
+    """
+    Return every name a column declares under Delta's naming rules.
+
+    This is the column's own name, plus every struct field name reachable
+    through nested ``Struct``/``Array``/``Map`` types (struct-in-array,
+    struct-in-struct, and so on). The column's own name is returned bare;
+    nested field names are returned as dotted paths from the column, e.g.
+    ``"payload.order id"`` for a field named ``"order id"`` inside a struct
+    column named ``"payload"``.
+    """
+    return (column.name, *_nested_field_paths(column.name, column.data_type))
+
+
+def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
+    """Recursively collect dotted struct-field paths reachable from `data_type`."""
+    match data_type:
+        case Struct(fields):
+            paths: list[str] = []
+            for field in fields:
+                field_path = f"{path}.{field.name}"
+                paths.append(field_path)
+                paths.extend(_nested_field_paths(field_path, field.data_type))
+            return tuple(paths)
+        case Array(element):
+            return _nested_field_paths(path, element)
+        case Map(key, value):
+            return _nested_field_paths(path, key) + _nested_field_paths(path, value)
+        case _:
+            return ()
+
+
 @dataclass(frozen=True, slots=True)
 class ForeignKey:
     """
@@ -101,10 +137,13 @@ class ForeignKey:
         Lower this declaration into a domain constraint.
 
         Resolves ``references`` to a concrete table and infers the referenced
-        columns from that table's primary key. ``owner_name``, ``owner_columns``,
-        and ``owner_primary_key`` describe the enclosing table, used when
-        ``references`` is :data:`Self`. Each local column's data type must match
-        its corresponding referenced primary-key column's data type.
+        columns from that table's primary key. ``owner_name`` and
+        ``owner_columns`` describe the enclosing table and are used
+        unconditionally, for error messages and local column types;
+        ``owner_primary_key`` is used only when ``references`` is
+        :data:`Self`, to supply the enclosing table's own primary key as the
+        referenced columns. Each local column's data type must match its
+        corresponding referenced primary-key column's data type.
         """
         match self.references:
             case _SelfReference():
@@ -223,13 +262,14 @@ class DeltaTable:
 
         if not metadata_only and user_properties.get(COLUMN_MAPPING_MODE_KEY) != "name":
             offending = [
-                column.name
+                name
                 for column in columns
-                if set(column.name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+                for name in _column_declared_names(column)
+                if set(name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
             ]
             if offending:
                 raise ValueError(
-                    f"Column names {offending} contain characters Delta only"
+                    f"Column or struct field names {offending} contain characters Delta only"
                     " permits with column mapping. Declare"
                     f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}}"
                     " or rename the columns."

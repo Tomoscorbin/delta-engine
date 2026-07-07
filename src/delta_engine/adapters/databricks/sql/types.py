@@ -35,6 +35,7 @@ from pyspark.sql.types import (
     VariantType,
 )
 
+from delta_engine.adapters.databricks.sql.dialect import backtick
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -95,7 +96,8 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             return "VARIANT"
         case Struct(fields):
             rendered = ", ".join(
-                f"{field.name}: {sql_type_for_data_type(field.data_type)}" for field in fields
+                f"{backtick(field.name)}: {sql_type_for_data_type(field.data_type)}"
+                for field in fields
             )
             return f"STRUCT<{rendered}>"
         case _:
