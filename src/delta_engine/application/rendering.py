@@ -310,9 +310,34 @@ def run_summary_footer(report: SyncReport) -> str:
     )
 
 
+def _dry_run_banner(report: SyncReport) -> str:
+    """Return the dry-run banner, or empty for an applied run."""
+    return "DRY RUN — no changes applied" if report.dry_run else ""
+
+
+def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
+    """Render full per-table failure detail for every failed table; empty when none failed."""
+    failed = [report for report in reports if report.has_failures]
+    if not failed:
+        return ""
+    blocks: list[str] = []
+    for report in failed:
+        lines = [f"  {report.qualified_name}"]
+        for failure in report.failures:
+            lines.extend(f"    {line}" for line in failure.format_lines())
+        blocks.append("\n".join(lines))
+    return "\n".join(["Failures", *blocks])
+
+
 def render_report(report: SyncReport) -> str:
-    """Render a run's aligned status grid followed by its one-line summary footer."""
-    return f"{render_grid(report.table_reports)}\n\n{run_summary_footer(report)}"
+    """Render the run: optional dry-run banner, status grid, failures section, summary footer."""
+    parts = (
+        _dry_run_banner(report),
+        render_grid(report.table_reports),
+        render_failures_section(report.table_reports),
+        run_summary_footer(report),
+    )
+    return "\n\n".join(part for part in parts if part)
 
 
 def render_diff(report: SyncReport) -> str:

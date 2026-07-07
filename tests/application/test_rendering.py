@@ -472,6 +472,59 @@ def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
     assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (3.0s)")
 
 
+def test_render_report_shows_a_full_failures_section_for_failed_tables():
+    # Given a run with a table that failed validation twice
+    failed = _grid_report(
+        "orders",
+        failures=(
+            ValidationFailure(rule_name="R1", message="first"),
+            ValidationFailure(rule_name="R2", message="second"),
+        ),
+    )
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(failed,),
+    )
+
+    rendered = render_report(sync)
+
+    # Then a Failures section lists every failure in full (not '+N more')
+    assert "Failures" in rendered
+    assert "Validation failed: R1 - first" in rendered
+    assert "Validation failed: R2 - second" in rendered
+
+
+def test_render_report_has_no_failures_section_when_all_succeed():
+    # Given a run where every table succeeds
+    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(changed,),
+    )
+
+    # Then no Failures section is rendered
+    assert "Failures" not in render_report(sync)
+
+
+def test_render_report_shows_dry_run_banner_only_for_dry_runs():
+    # Given the same run rendered as a dry run and as an applied run
+    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    base = dict(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(changed,),
+    )
+
+    dry = render_report(SyncReport(**base, dry_run=True))
+    applied = render_report(SyncReport(**base, dry_run=False))
+
+    # Then the banner is the first line of a dry run and absent otherwise
+    assert dry.splitlines()[0] == "DRY RUN — no changes applied"
+    assert "DRY RUN" not in applied
+
+
 def test_render_diff_joins_each_tables_change_block_in_report_order():
     # Given a run over two tables with plans
     first = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
