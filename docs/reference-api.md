@@ -70,6 +70,19 @@ exactly — any structural drift causes validation to fail.
    :members:
 ```
 
+### Rendering a report
+
+`SyncReport` is a pure data object. To turn one into human-readable text, pass
+it to one of these functions:
+
+```{eval-rst}
+.. autofunction:: delta_engine.render_report
+```
+
+```{eval-rst}
+.. autofunction:: delta_engine.render_diff
+```
+
 ### TableRunStatus
 
 ```{eval-rst}

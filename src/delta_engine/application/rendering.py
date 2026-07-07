@@ -1,18 +1,20 @@
 """
 Diff and grid rendering for table and sync run reports.
 
-Separates display logic from the result/report value types in report.py.
-The three public entry points are render_diff_block, render_grid, and
-run_summary_footer; action_diff_line handles per-action diff lines via
-singledispatch.
+The report value types in report.py are pure data; all human-readable
+formatting lives here. The public entry points are render_report (status
+grid plus summary footer) and render_diff (per-table change blocks);
+render_grid, render_diff_block, run_summary_footer, and action_diff_line
+are the building blocks they compose.
 """
 
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING
 
-from delta_engine.domain.plan.actions import (
+from delta_engine.application.ports import ReadFailed
+from delta_engine.application.report import SyncReport, TableRunReport
+from delta_engine.domain.plan import (
     Action,
     AddColumn,
     CreateTable,
@@ -31,9 +33,6 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-
-if TYPE_CHECKING:
-    from delta_engine.application.report import SyncReport, TableRunReport
 
 
 def _type_name(data_type: object) -> str:
@@ -143,8 +142,6 @@ _NO_CHANGES = "no changes"
 
 def render_diff_block(report: TableRunReport) -> str:
     """Render one table's change block: its name then one line per planned action."""
-    from delta_engine.application.ports import ReadFailed
-
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailed):
         return f"{header}\n  (could not read — no diff)"
@@ -211,3 +208,13 @@ def run_summary_footer(report: SyncReport) -> str:
         f"{total} tables: {changed} changed, {unchanged} unchanged, "
         f"{failed} failed ({seconds:.1f}s)"
     )
+
+
+def render_report(report: SyncReport) -> str:
+    """Render a run's aligned status grid followed by its one-line summary footer."""
+    return f"{render_grid(report.table_reports)}\n\n{run_summary_footer(report)}"
+
+
+def render_diff(report: SyncReport) -> str:
+    """Render every table's planned changes as +/-/~ blocks, in report order."""
+    return "\n\n".join(render_diff_block(table_report) for table_report in report.table_reports)

@@ -9,6 +9,15 @@ users. The per-phase result types (`CatalogState`, `ExecutionSummary`,
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import Failure
+from delta_engine.application.rendering import render_diff, render_report
 from delta_engine.application.report import SyncReport, TableRunStatus
 
-__all__ = ["Engine", "Failure", "SyncFailedError", "SyncReport", "TableRunStatus"]
+__all__ = [
+    "Engine",
+    "Failure",
+    "SyncFailedError",
+    "SyncReport",
+    "TableRunStatus",
+    "render_diff",
+    "render_report",
+]

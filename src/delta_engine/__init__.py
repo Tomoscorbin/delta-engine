@@ -17,6 +17,8 @@ from delta_engine.application import (
     SyncFailedError,
     SyncReport,
     TableRunStatus,
+    render_diff,
+    render_report,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "SyncFailedError",
     "SyncReport",
     "TableRunStatus",
+    "render_diff",
+    "render_report",
 ]

@@ -7,8 +7,10 @@ from delta_engine.application.failures import ReadFailure, ValidationFailure
 from delta_engine.application.ports import ReadFailed, TablePresent
 from delta_engine.application.rendering import (
     action_diff_line,
+    render_diff,
     render_diff_block,
     render_grid,
+    render_report,
     run_summary_footer,
 )
 from delta_engine.application.report import SyncReport, TableRunReport
@@ -338,3 +340,59 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 
     # Then it says the table could not be read rather than showing a diff
     assert block == "cat.sch.orders\n  (could not read — no diff)"
+
+
+# ---------- whole-report rendering ----------
+
+
+def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
+    # Given a run over one changed and one failed table
+    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    failed = _grid_report("b", failures=(ValidationFailure(rule_name="R", message="m"),))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(changed, failed),
+    )
+
+    # When rendering the whole report
+    rendered = render_report(sync)
+
+    # Then it opens with the grid header and ends with the summary footer
+    assert rendered.splitlines()[0].split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    assert rendered.endswith("2 tables: 1 changed, 0 unchanged, 1 failed (3.0s)")
+
+
+def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
+    # Given a run over no tables
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(),
+    )
+
+    # When rendering the whole report
+    rendered = render_report(sync)
+
+    # Then the grid header and a zero-count footer are shown -- no empty-run sentinel
+    assert rendered.splitlines()[0].split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (3.0s)")
+
+
+def test_render_diff_joins_each_tables_change_block_in_report_order():
+    # Given a run over two tables with plans
+    first = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    second = _grid_report("b", plan=ActionPlan((AddColumn(Column("age", Integer())),)))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(first, second),
+    )
+
+    # When rendering the run's diff
+    rendered = render_diff(sync)
+
+    # Then each table's change block appears, in report order
+    assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
+    assert "~ comment on table" in rendered
+    assert "+ column age Integer" in rendered
