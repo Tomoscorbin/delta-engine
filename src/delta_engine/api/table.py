@@ -92,23 +92,29 @@ class ForeignKey:
     references: DeltaTable | _SelfReference
 
     def _to_constraint(
-        self, owner_name: QualifiedName, owner_primary_key: tuple[str, ...]
+        self,
+        owner_name: QualifiedName,
+        owner_columns: tuple[Column, ...],
+        owner_primary_key: tuple[str, ...],
     ) -> ForeignKeyConstraint:
         """
         Lower this declaration into a domain constraint.
 
         Resolves ``references`` to a concrete table and infers the referenced
-        columns from that table's primary key. ``owner_name`` and
-        ``owner_primary_key`` describe the enclosing table, used when
-        ``references`` is :data:`Self`.
+        columns from that table's primary key. ``owner_name``, ``owner_columns``,
+        and ``owner_primary_key`` describe the enclosing table, used when
+        ``references`` is :data:`Self`. Each local column's data type must match
+        its corresponding referenced primary-key column's data type.
         """
         match self.references:
             case _SelfReference():
                 referenced_table, referenced_columns = owner_name, owner_primary_key
+                referenced_table_columns = owner_columns
             case DeltaTable() as target:
                 desired = target.to_desired_table()
                 referenced_table = desired.qualified_name
                 referenced_columns = desired.primary_key_columns
+                referenced_table_columns = desired.columns
             case _:
                 raise TypeError(
                     f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
@@ -124,6 +130,19 @@ class ForeignKey:
                 f" {owner_name} declares {len(self.local_columns)} local column(s)"
                 f" but {referenced_table}'s primary key has {len(referenced_columns)}"
             )
+        local_types = {column.name: column.data_type for column in owner_columns}
+        referenced_types = {column.name: column.data_type for column in referenced_table_columns}
+        for local_name, referenced_name in zip(self.local_columns, referenced_columns, strict=True):
+            local_type = local_types.get(local_name)
+            referenced_type = referenced_types.get(referenced_name)
+            if local_type is None or referenced_type is None:
+                continue  # column existence is enforced when the DesiredTable is built
+            if local_type != referenced_type:
+                raise ValueError(
+                    f"foreign key column type mismatch: {owner_name}.{local_name}"
+                    f" is {local_type} but {referenced_table}.{referenced_name}"
+                    f" is {referenced_type}"
+                )
         return ForeignKeyConstraint.generate(
             owner_table_name=owner_name.name,
             local_columns=tuple(self.local_columns),
@@ -241,7 +260,7 @@ class DeltaTable:
 
         qualified_name = QualifiedName(catalog, schema, name)
         lowered_foreign_keys = tuple(
-            declaration._to_constraint(qualified_name, primary_key_columns)
+            declaration._to_constraint(qualified_name, columns, primary_key_columns)
             for declaration in (foreign_keys or ())
         )
 
