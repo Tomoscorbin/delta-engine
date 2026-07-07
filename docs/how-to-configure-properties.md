@@ -60,6 +60,11 @@ changes.
 A key declared `None` asserts absence, not a value, so it is exempt from
 this check.
 
+Retention durations accept a single `interval <n> <unit>` term only.
+Compound intervals such as `interval 1 hour 30 minutes` are rejected at
+declaration even though the catalog itself accepts them; declare a
+single-unit equivalent instead (e.g. `interval 90 minutes`).
+
 ## Declaring and removing properties
 
 ```python

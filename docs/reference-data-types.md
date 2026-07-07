@@ -25,6 +25,11 @@ tags:
 | `Variant()`                              | `VARIANT`              | Requires a runtime with variant support                             |
 | `Struct((StructField(name, type), ...))` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable |
 
+Any change to a struct's fields (adding, removing, renaming, or retyping a
+field) surfaces as a column type change on the owning column and is blocked
+by `ColumnDataTypeChangeNotSupported`, the same as any other unsupported type
+change; recreate the table to change a struct.
+
 ## Unsupported types
 
 A column whose Spark type is outside this table (`VOID`, `INTERVAL`, geospatial types, etc.) is skipped with a logged warning. The engine leaves it unmanaged — it neither creates, alters, nor drops it. All other columns on the table are still managed normally.
