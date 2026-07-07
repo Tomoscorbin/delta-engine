@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model import QualifiedName
-from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Self
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Long, Self, String
 
 
 def _customers() -> DeltaTable:
@@ -155,3 +155,65 @@ def test_delta_table_rejects_non_table_reference():
                 ForeignKey(local_columns=("customer_id",), references="cat.sch.customers")  # type: ignore[arg-type]
             ],
         )
+
+
+def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key():
+    # Given a referenced primary key of type Long and a local column of type String
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    )
+
+    # When / Then construction fails because the local column type does not match
+    with pytest.raises(ValueError, match="type mismatch"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[
+                Column("id", Long(), nullable=False, primary_key=True),
+                Column("customer_id", String()),
+            ],
+            foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        )
+
+
+def test_self_referential_foreign_key_rejects_type_mismatch():
+    # Given a self-referential foreign key whose local column type differs from the primary key
+    # When / Then construction fails because the local column type does not match
+    with pytest.raises(ValueError, match="type mismatch"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="employees",
+            columns=[
+                Column("id", Long(), nullable=False, primary_key=True),
+                Column("manager_id", Integer()),
+            ],
+            foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
+        )
+
+
+def test_foreign_key_with_matching_types_still_lowers():
+    # Given a referenced primary key and local column that share the same type
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    )
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[
+            Column("id", Long(), nullable=False, primary_key=True),
+            Column("customer_id", Long()),
+        ],
+        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+    )
+
+    # Then the foreign key lowers normally
+    assert orders.foreign_keys[0].local_columns == ("customer_id",)
