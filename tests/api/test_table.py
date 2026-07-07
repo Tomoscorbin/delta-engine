@@ -601,3 +601,40 @@ def test_delta_table_accepts_cdf_reserved_column_names_when_cdf_not_enabled() ->
         columns=[Column("id", Integer()), Column("_change_type", String())],
     )
     assert len(table.to_desired_table().columns) == 2
+
+
+# ---- tag limits (Unity Catalog) ----
+
+
+def test_delta_table_rejects_more_than_fifty_table_tags() -> None:
+    too_many = {f"tag_{i}": "v" for i in range(51)}
+    with pytest.raises(ValueError, match="50"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            tags=too_many,
+        )
+
+
+def test_delta_table_rejects_overlong_tag_value_on_a_column() -> None:
+    with pytest.raises(ValueError, match="1000"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer(), tags={"note": "x" * 1001})],
+        )
+
+
+def test_delta_table_accepts_tags_at_the_limits() -> None:
+    at_limit = {f"tag_{i}": "x" * 1000 for i in range(50)}
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags=at_limit,
+    )
+    assert len(table.to_desired_table().tags) == 50
