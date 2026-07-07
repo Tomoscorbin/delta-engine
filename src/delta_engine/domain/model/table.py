@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    PrimaryKeyConstraint,
+)
 from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
@@ -177,3 +181,4 @@ class ObservedTable(TableSnapshot):
     """Observed definition derived from the catalog (current state)."""
 
     properties: Mapping[str, str] = field(default_factory=dict)
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()

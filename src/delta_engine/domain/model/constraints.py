@@ -106,3 +106,21 @@ class ForeignKeyConstraint:
         catalog's name) compare equal when they describe the same relationship.
         """
         return (self.local_columns, self.referenced_table, self.referenced_columns)
+
+
+@dataclass(frozen=True, slots=True)
+class ForeignKeyReference:
+    """
+    A foreign key on some table that references *this* table's key.
+
+    The inbound counterpart of :class:`ForeignKeyConstraint`: it identifies
+    the referencing constraint and its owner without carrying column detail —
+    enough for validation to name what blocks a primary-key change.
+    """
+
+    constraint_name: str
+    referencing_table: QualifiedName
+
+    def __post_init__(self) -> None:
+        if not self.constraint_name.strip():
+            raise ValueError("constraint_name must not be blank")
