@@ -25,9 +25,10 @@ DETAIL's properties: if the platform auto-writes the key, do not register
 it. Additions are called out in release notes.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+import re
 from types import MappingProxyType
 from typing import Final
 
@@ -44,11 +45,45 @@ class Property(StrEnum):
 
 COLUMN_MAPPING_MODE_KEY: Final[str] = Property.COLUMN_MAPPING_MODE.value
 
+_INTERVAL_FORMAT = re.compile(
+    r"interval\s+\d+\s+(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?",
+    re.IGNORECASE,
+)
+
+
+def _is_lowercase_boolean(value: str) -> bool:
+    # The catalog stores 'true'/'false'; any other casing would re-diff
+    # as drift on every sync.
+    return value in {"true", "false"}
+
+
+def _is_interval(value: str) -> bool:
+    return _INTERVAL_FORMAT.fullmatch(value.strip()) is not None
+
+
+def _is_integer_at_least_minus_one(value: str) -> bool:
+    try:
+        return int(value) >= -1
+    except ValueError:
+        return False
+
+
+def _is_column_mapping_mode(value: str) -> bool:
+    return value in {"none", "name"}
+
 
 @dataclass(frozen=True, slots=True)
 class PropertyDefinition:
     """
-    One manageable property key and its restrictions.
+    One manageable property key, its value constraints, and its restrictions.
+
+    ``value_description``: a human phrase describing the expected value
+    format, used in error messages when a declared value fails
+    ``is_valid_value``.
+
+    ``is_valid_value``: the predicate a declared value must satisfy. Declared
+    ``None`` asserts absence rather than a value, so it is exempt from this
+    check — the caller must not invoke it for ``None``.
 
     ``permitted_transitions``: the ``(observed_value, desired_value)`` pairs
     that are legal in-place changes, where a ``desired_value`` of ``None``
@@ -58,18 +93,38 @@ class PropertyDefinition:
     """
 
     key: str
+    value_description: str
+    is_valid_value: Callable[[str], bool]
     permitted_transitions: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
 
 
 type PropertyRegistry = Mapping[str, PropertyDefinition]
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
-    PropertyDefinition(key=Property.CHANGE_DATA_FEED),
-    PropertyDefinition(key=Property.DELETED_FILE_RETENTION_DURATION),
-    PropertyDefinition(key=Property.LOG_RETENTION_DURATION),
-    PropertyDefinition(key=Property.DATA_SKIPPING_NUM_INDEXED_COLS),
+    PropertyDefinition(
+        key=Property.CHANGE_DATA_FEED,
+        value_description="'true' or 'false' (lowercase, as the catalog stores it)",
+        is_valid_value=_is_lowercase_boolean,
+    ),
+    PropertyDefinition(
+        key=Property.DELETED_FILE_RETENTION_DURATION,
+        value_description="an interval string such as 'interval 7 days'",
+        is_valid_value=_is_interval,
+    ),
+    PropertyDefinition(
+        key=Property.LOG_RETENTION_DURATION,
+        value_description="an interval string such as 'interval 30 days'",
+        is_valid_value=_is_interval,
+    ),
+    PropertyDefinition(
+        key=Property.DATA_SKIPPING_NUM_INDEXED_COLS,
+        value_description="an integer >= -1 (-1 indexes all columns)",
+        is_valid_value=_is_integer_at_least_minus_one,
+    ),
     PropertyDefinition(
         key=Property.COLUMN_MAPPING_MODE,
+        value_description="'none' or 'name'",
+        is_valid_value=_is_column_mapping_mode,
         # The protocol upgrade (minReader 2 / minWriter 5, physical column
         # names) is permanent: only none -> name is a legal change. The
         # absence of any (value, None) pair blocks removal by the same

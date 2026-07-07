@@ -157,6 +157,18 @@ class DeltaTable:
                     f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
                 )
 
+        # Fast-fail on malformed values. Declared None asserts absence, not a
+        # value, so it is exempt from this check.
+        for key, declared_value in user_properties.items():
+            if declared_value is None:
+                continue
+            definition = DELTA_PROPERTY_REGISTRY[key]
+            if not definition.is_valid_value(declared_value):
+                raise ValueError(
+                    f"Invalid value for {key}: {declared_value!r}."
+                    f" Expected {definition.value_description}."
+                )
+
         columns = tuple(columns)
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
         primary_key = (
