@@ -9,7 +9,9 @@ from delta_engine.api.table import DeltaTable, ForeignKey, Self
 from delta_engine.application.properties import Property
 from delta_engine.domain.model import (
     Array,
+    Binary,
     Boolean,
+    Byte,
     Column,
     Date,
     Decimal,
@@ -18,13 +20,18 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     Map,
+    Short,
     String,
     Timestamp,
+    TimestampNtz,
+    Variant,
 )
 
 __all__ = [
     "Array",
+    "Binary",
     "Boolean",
+    "Byte",
     "Column",
     "Date",
     "Decimal",
@@ -37,6 +44,9 @@ __all__ = [
     "Map",
     "Property",
     "Self",
+    "Short",
     "String",
     "Timestamp",
+    "TimestampNtz",
+    "Variant",
 ]

@@ -14,7 +14,10 @@ ceremony here.
 
 from pyspark.sql.types import (
     ArrayType,
+    BinaryType,
     BooleanType,
+    ByteType,
+    CharType,
     DataType as SparkType,
     DateType,
     DecimalType,
@@ -23,13 +26,19 @@ from pyspark.sql.types import (
     IntegerType,
     LongType,
     MapType,
+    ShortType,
     StringType,
+    TimestampNTZType,
     TimestampType,
+    VarcharType,
+    VariantType,
 )
 
 from delta_engine.domain.model import (
     Array,
+    Binary,
     Boolean,
+    Byte,
     DataType,
     Date,
     Decimal,
@@ -38,8 +47,11 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     Map,
+    Short,
     String,
     Timestamp,
+    TimestampNtz,
+    Variant,
 )
 
 
@@ -68,6 +80,16 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             return f"ARRAY<{sql_type_for_data_type(element)}>"
         case Map(key, value):
             return f"MAP<{sql_type_for_data_type(key)},{sql_type_for_data_type(value)}>"
+        case Byte():
+            return "TINYINT"
+        case Short():
+            return "SMALLINT"
+        case Binary():
+            return "BINARY"
+        case TimestampNtz():
+            return "TIMESTAMP_NTZ"
+        case Variant():
+            return "VARIANT"
         case _:
             cls = data_type.__class__.__name__
             raise TypeError(f"Unsupported DataType variant: {cls}")
@@ -77,10 +99,10 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
     """
     Map a ``pyspark`` type instance to a domain type.
 
-    Returns ``None`` when the type has no domain mapping (e.g. ``BINARY``,
-    ``STRUCT``, ``VARIANT``, ``TIMESTAMP_NTZ``). An unmappable element inside an
-    ``ARRAY`` or ``MAP`` makes the whole type unmappable. An unmappable type is a
-    routine, expected condition -- new Spark types appear over time -- so it is a
+    Returns ``None`` when the type has no domain mapping (e.g. ``VOID``,
+    ``INTERVAL``, ``STRUCT``). An unmappable element inside an ``ARRAY`` or
+    ``MAP`` makes the whole type unmappable. An unmappable type is a routine,
+    expected condition -- new Spark types appear over time -- so it is a
     ``None`` return, not an exception. Callers decide what to do with ``None``
     (the reader skips the column and logs a warning).
 
@@ -117,5 +139,20 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
             if key is None or value is None:
                 return None
             return Map(key, value)
+        case ByteType():
+            return Byte()
+        case ShortType():
+            return Short()
+        case BinaryType():
+            return Binary()
+        case TimestampNTZType():
+            return TimestampNtz()
+        case VariantType():
+            return Variant()
+        case CharType() | VarcharType():
+            # Lossy normalization: the length bound is not modeled, so the
+            # engine sees these as plain strings, plans no change for them,
+            # and never emits CHAR/VARCHAR in DDL.
+            return String()
         case _:
             return None
