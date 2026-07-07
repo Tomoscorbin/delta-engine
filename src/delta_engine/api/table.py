@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import COLUMN_MAPPING_MODE_KEY, DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column,
@@ -39,6 +39,9 @@ METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
         TableAspect.FOREIGN_KEYS,
     }
 )
+
+# Delta permits these characters in column names only under column mapping.
+_CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +173,21 @@ class DeltaTable:
                 )
 
         columns = tuple(columns)
+
+        if not metadata_only and user_properties.get(COLUMN_MAPPING_MODE_KEY) != "name":
+            offending = [
+                column.name
+                for column in columns
+                if set(column.name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+            ]
+            if offending:
+                raise ValueError(
+                    f"Column names {offending} contain characters Delta only"
+                    " permits with column mapping. Declare"
+                    f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}}"
+                    " or rename the columns."
+                )
+
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
         primary_key = (
             PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
