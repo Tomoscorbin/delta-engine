@@ -46,7 +46,11 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from delta_engine.domain.model import Column, DesiredTable, ObservedTable
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    PrimaryKeyConstraint,
+)
 from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.table_aspect import TableAspect
 from delta_engine.domain.plan.actions import (
@@ -341,9 +345,15 @@ class PrimaryKeyAdded:
 
 @dataclass(frozen=True, slots=True)
 class PrimaryKeyRemoved:
-    """A primary key present in the catalog but absent from the declaration."""
+    """
+    A primary key present in the catalog but absent from the declaration.
+
+    ``referencing_foreign_keys`` rides along so validation can judge whether
+    the key can be dropped; it does not affect ``actions()``.
+    """
 
     observed_primary_key: PrimaryKeyConstraint
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
@@ -360,10 +370,14 @@ class PrimaryKeyChanged:
     Both sides travel as one atomic pair so validation can report from/to and
     ``actions()`` can emit Drop then Set. Splitting into separate
     added/removed changes would make an orphaned half representable.
+
+    ``referencing_foreign_keys`` rides along so validation can judge whether
+    the key can be dropped; it does not affect ``actions()``.
     """
 
     desired_primary_key: PrimaryKeyConstraint
     observed_primary_key: PrimaryKeyConstraint
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
@@ -717,7 +731,12 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Ch
         return [PrimaryKeyAdded(primary_key=desired_key)]
 
     if desired_key is None and observed_key is not None:
-        return [PrimaryKeyRemoved(observed_primary_key=observed_key)]
+        return [
+            PrimaryKeyRemoved(
+                observed_primary_key=observed_key,
+                referencing_foreign_keys=observed.referencing_foreign_keys,
+            )
+        ]
 
     if (
         desired_key is not None
@@ -725,7 +744,11 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Ch
         and set(desired_key.columns) != set(observed_key.columns)
     ):
         return [
-            PrimaryKeyChanged(desired_primary_key=desired_key, observed_primary_key=observed_key)
+            PrimaryKeyChanged(
+                desired_primary_key=desired_key,
+                observed_primary_key=observed_key,
+                referencing_foreign_keys=observed.referencing_foreign_keys,
+            )
         ]
 
     return []

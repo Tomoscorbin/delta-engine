@@ -4,6 +4,7 @@ from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column,
     DesiredTable,
+    ForeignKeyReference,
     Integer,
     Long,
     ObservedTable,
@@ -743,6 +744,27 @@ def test_observed_only_primary_key_produces_removed_change():
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
     assert diff.changes == (PrimaryKeyRemoved(observed_primary_key=primary_key),)
+
+
+def test_primary_key_removal_carries_observed_referencing_foreign_keys():
+    # Given a catalog primary key that other tables reference by foreign key
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="customers_pk")
+
+    # When diffing a declaration that drops the primary key
+    diff = diff_table(
+        _desired(),
+        _observed(primary_key=primary_key, referencing_foreign_keys=(reference,)),
+    )
+
+    # Then the removal change carries the inbound reference for validation to judge
+    assert isinstance(diff, TableDrift)
+    (change,) = diff.changes
+    assert isinstance(change, PrimaryKeyRemoved)
+    assert change.referencing_foreign_keys == (reference,)
 
 
 def test_changed_primary_key_produces_changed_change():
