@@ -1,7 +1,5 @@
 """Validation rules judging the diff between desired and observed table state."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import ClassVar, Protocol, assert_never
 

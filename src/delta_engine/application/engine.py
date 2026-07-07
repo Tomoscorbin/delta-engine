@@ -29,8 +29,6 @@ is skipped by execution, so all tables are attempted and the report is always
 complete.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 import logging
 

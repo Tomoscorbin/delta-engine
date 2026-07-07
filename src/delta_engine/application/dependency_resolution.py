@@ -32,8 +32,6 @@ strongly-connected-components algorithm, fixpoint propagation of blocked
 dependents) are hidden behind that interface.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 

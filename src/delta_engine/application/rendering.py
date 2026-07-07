@@ -8,8 +8,6 @@ render_grid, render_diff_block, run_summary_footer, and action_diff_line
 are the building blocks they compose.
 """
 
-from __future__ import annotations
-
 import functools
 
 from delta_engine.application.ports import ReadFailed
