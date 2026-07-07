@@ -4,11 +4,16 @@ Direct tests for the reader's pure row->domain mappers.
 No Spark session, no fakes: mappers take plain rows (dicts for primary-key and
 DESCRIBE DETAIL rows, attribute-style objects for FK/tag rows — matching how
 the real query results are accessed) and return domain values.
+
+The column-mapping tests below are the exception: ``_to_column_mapping`` parses
+each Spark DDL type string through ``SparkType.fromDDL``, which needs a live
+SparkSession, so those tests request the ``spark`` fixture directly.
 """
 
 from types import SimpleNamespace
 
 from pyspark.sql import Row
+from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
 from delta_engine.adapters.databricks.reader import (
@@ -18,6 +23,7 @@ from delta_engine.adapters.databricks.reader import (
     _primary_key_from_rows,
     _referencing_foreign_keys_from_rows,
     _table_tags_from_rows,
+    _to_column_mapping,
 )
 from delta_engine.domain.model import ForeignKeyReference, QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
@@ -199,3 +205,42 @@ def test_properties_mapper_returns_empty_read_only_mapping_for_empty_map():
     assert dict(properties) == {}
     with pytest.raises(TypeError):
         properties["x"] = "y"  # type: ignore[index]
+
+
+# ---------- column mapping ----------
+
+
+def spark_column(
+    *,
+    name: str,
+    dataType: str,
+    isPartition: bool,
+    description: str | None = None,
+    nullable: bool = True,
+    isBucket: bool = False,
+) -> SparkColumn:
+    """Build a real pyspark catalog ``Column``, matching what Unity Catalog returns."""
+    return SparkColumn(
+        name=name,
+        description=description,
+        dataType=dataType,
+        nullable=nullable,
+        isPartition=isPartition,
+        isBucket=isBucket,
+        isCluster=False,
+    )
+
+
+def test_unmappable_partition_column_fails_the_read(spark) -> None:
+    # A skipped partition column would fabricate PartitioningChanged drift,
+    # so the read must fail loudly instead.
+    column = spark_column(name="part", dataType="void", isPartition=True)
+
+    with pytest.raises(RuntimeError, match="partition"):
+        _to_column_mapping(column, QualifiedName("dev", "silver", "orders"))
+
+
+def test_unmappable_non_partition_column_is_still_skipped(spark) -> None:
+    column = spark_column(name="extra", dataType="void", isPartition=False)
+
+    assert _to_column_mapping(column, QualifiedName("dev", "silver", "orders")) is None
