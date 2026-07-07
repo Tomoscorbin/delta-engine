@@ -23,7 +23,7 @@ import sys
 
 import pyspark.sql.types as T
 
-from delta_engine import SyncFailedError, SyncReport, TableRunStatus
+from delta_engine import SyncFailedError, SyncReport, TableRunStatus, render_diff, render_report
 from delta_engine.databricks import build_engine, configure_logging
 from delta_engine.schema import (
     Column,
@@ -34,7 +34,6 @@ from delta_engine.schema import (
     ForeignKey,
     Long,
     Property,
-    Self,
     String,
     Timestamp,
 )
@@ -86,10 +85,11 @@ inspector = CatalogInspector(CATALOG, SCHEMA)
 # COMMAND ----------
 def show_report(report: SyncReport) -> None:
     """Print a sync report and its diff under labelled section headers."""
-    print("\n\n---------------- Sync Report ----------------")
-    print(report)
-    print("\n\n---------------- Diff ----------------")
-    print(report.diff())
+
+    print(render_report(report))
+    print()
+    print(render_diff(report))
+
 
 
 # COMMAND ----------
