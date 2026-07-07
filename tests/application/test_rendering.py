@@ -6,7 +6,9 @@ import pytest
 from delta_engine.application.failures import ReadFailure, ValidationFailure
 from delta_engine.application.ports import ReadFailed, TablePresent
 from delta_engine.application.rendering import (
-    action_diff_line,
+    DiffCategory,
+    DiffEntry,
+    _action_entries,
     render_diff,
     render_diff_block,
     render_grid,
@@ -19,6 +21,7 @@ from delta_engine.domain.model import (
     DesiredTable,
     Integer,
     ObservedTable,
+    PrimaryKeyConstraint,
     QualifiedName,
     String,
 )
@@ -42,42 +45,154 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 
-# ---------- tag diff lines ----------
+# ---------- action diff entries ----------
 
 
-def test_set_table_tag_renders_a_tilde_tag_line():
-    # Given a SetTableTag action
-    line = action_diff_line(SetTableTag(name="env", value="prod"))
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        (
+            AddColumn(Column("age", Integer())),
+            (DiffEntry(DiffCategory.COLUMNS, "+", ("age", "Integer")),),
+        ),
+        (
+            AddColumn(Column("age", Integer(), nullable=False)),
+            (DiffEntry(DiffCategory.COLUMNS, "+", ("age", "Integer", "NOT NULL")),),
+        ),
+        (
+            DropColumn(column_name="legacy"),
+            (DiffEntry(DiffCategory.COLUMNS, "-", ("legacy",)),),
+        ),
+        (
+            SetColumnNullability(column_name="id", nullable=False),
+            (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "set NOT NULL (was nullable)")),),
+        ),
+        (
+            SetColumnNullability(column_name="id", nullable=True),
+            (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "drop NOT NULL (was NOT NULL)")),),
+        ),
+        (
+            SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk"),
+            (DiffEntry(DiffCategory.KEYS, "+", ("primary key (id, tenant_id)",)),),
+        ),
+        (
+            DropPrimaryKey(),
+            (DiffEntry(DiffCategory.KEYS, "-", ("primary key",)),),
+        ),
+        (
+            SetForeignKey(
+                local_columns=("customer_id",),
+                referenced_table=QualifiedName("cat", "sch", "customers"),
+                referenced_columns=("id",),
+                constraint_name="orders_customer_id_fk",
+            ),
+            (
+                DiffEntry(
+                    DiffCategory.KEYS, "+", ("foreign key (customer_id) → cat.sch.customers",)
+                ),
+            ),
+        ),
+        (
+            DropForeignKey(constraint_name="orders_customer_id_fk"),
+            (DiffEntry(DiffCategory.KEYS, "-", ("foreign key orders_customer_id_fk",)),),
+        ),
+        (
+            SetProperty(name="delta.enableChangeDataFeed", value="true"),
+            (DiffEntry(DiffCategory.PROPERTIES, "+", ("delta.enableChangeDataFeed = 'true'",)),),
+        ),
+        (
+            SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false"),
+            (
+                DiffEntry(
+                    DiffCategory.PROPERTIES,
+                    "~",
+                    ("delta.enableChangeDataFeed = 'true' (was 'false')",),
+                ),
+            ),
+        ),
+        (
+            UnsetProperty(name="delta.logRetentionDuration"),
+            (DiffEntry(DiffCategory.PROPERTIES, "-", ("delta.logRetentionDuration",)),),
+        ),
+        (
+            SetTableTag(name="env", value="prod"),
+            (DiffEntry(DiffCategory.TAGS, "~", ("env = 'prod'",)),),
+        ),
+        (
+            UnsetTableTag(name="env"),
+            (DiffEntry(DiffCategory.TAGS, "-", ("env",)),),
+        ),
+        (
+            SetColumnTag(column_name="email", name="pii", value="true"),
+            (DiffEntry(DiffCategory.TAGS, "~", ("column email.pii = 'true'",)),),
+        ),
+        (
+            UnsetColumnTag(column_name="email", name="pii"),
+            (DiffEntry(DiffCategory.TAGS, "-", ("column email.pii",)),),
+        ),
+        (
+            SetColumnComment(column_name="id", comment="the key"),
+            (DiffEntry(DiffCategory.COMMENTS, "~", ("column id: 'the key'",)),),
+        ),
+        (
+            SetColumnComment(column_name="id", comment=""),
+            (DiffEntry(DiffCategory.COMMENTS, "~", ("column id comment (unset)",)),),
+        ),
+        (
+            SetTableComment(comment="core table"),
+            (DiffEntry(DiffCategory.COMMENTS, "~", ("table: 'core table'",)),),
+        ),
+        (
+            SetTableComment(comment=""),
+            (DiffEntry(DiffCategory.COMMENTS, "~", ("table comment (unset)",)),),
+        ),
+    ],
+)
+def test_action_entries_render_expected(action, expected):
+    # Then each action lowers to its category-tagged diff entries
+    assert _action_entries(action) == expected
 
-    # Then it renders as a change line naming the tag and its value
-    assert line == "~ tag env = 'prod'"
+
+def test_create_table_entries_list_columns_with_types_and_primary_key():
+    # Given a CreateTable for a table with a not-null id, a nullable name, and a PK
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "orders"),
+            columns=(
+                Column("id", Integer(), nullable=False, primary_key=True),
+                Column("name", String()),
+            ),
+            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        )
+    )
+
+    # Then it expands to one columns entry per column (with types) plus the primary key
+    assert _action_entries(action) == (
+        DiffEntry(DiffCategory.COLUMNS, "+", ("id", "Integer", "NOT NULL")),
+        DiffEntry(DiffCategory.COLUMNS, "+", ("name", "String")),
+        DiffEntry(DiffCategory.KEYS, "+", ("primary key (id)",)),
+    )
 
 
-def test_unset_table_tag_renders_a_minus_tag_line():
-    # Given an UnsetTableTag action
-    line = action_diff_line(UnsetTableTag(name="env"))
+def test_every_action_type_has_registered_diff_entries():
+    # Given every concrete Action subclass the plan vocabulary defines
+    import inspect
 
-    # Then it renders as a removal line naming the tag
-    assert line == "- tag env"
+    from delta_engine.domain.plan import actions as actions_module
+    from delta_engine.domain.plan.actions import Action
 
+    concrete_action_types = [
+        obj
+        for _, obj in inspect.getmembers(actions_module, inspect.isclass)
+        if issubclass(obj, Action) and obj is not Action
+    ]
 
-# ---------- column tag diff lines ----------
-
-
-def test_set_column_tag_renders_a_tilde_column_tag_line():
-    # Given a SetColumnTag action
-    line = action_diff_line(SetColumnTag(column_name="email", name="pii", value="true"))
-
-    # Then it renders as a change line naming the column, tag, and value
-    assert line == "~ column tag email.pii = 'true'"
-
-
-def test_unset_column_tag_renders_a_minus_column_tag_line():
-    # Given an UnsetColumnTag action
-    line = action_diff_line(UnsetColumnTag(column_name="email", name="pii"))
-
-    # Then it renders as a removal line naming the column and tag
-    assert line == "- column tag email.pii"
+    # Then each dispatches to a real arm, not the NotImplementedError fallback
+    fallback = _action_entries.dispatch(object)
+    for action_type in concrete_action_types:
+        assert _action_entries.dispatch(action_type) is not fallback, (
+            f"No diff entries registered for {action_type.__name__}"
+        )
 
 
 # ---------- diff block with failures hint ----------
@@ -116,95 +231,54 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     assert "see failures" not in block
 
 
-def test_every_action_type_has_a_registered_diff_line():
-    # Given every concrete Action subclass the plan vocabulary defines
-    import inspect
-
-    from delta_engine.domain.plan import actions as actions_module
-    from delta_engine.domain.plan.actions import Action
-
-    concrete_action_types = [
-        obj
-        for _, obj in inspect.getmembers(actions_module, inspect.isclass)
-        if issubclass(obj, Action) and obj is not Action
-    ]
-
-    # Then each dispatches to a real arm, not the NotImplementedError fallback
-    fallback = action_diff_line.dispatch(object)
-    for action_type in concrete_action_types:
-        assert action_diff_line.dispatch(action_type) is not fallback, (
-            f"No diff line registered for {action_type.__name__}"
-        )
+# ---------- diff block rendering ----------
 
 
-def test_set_property_renders_plus_for_first_write():
-    # Given a property being written for the first time (absent from catalog)
-    line = action_diff_line(SetProperty(name="delta.enableChangeDataFeed", value="true"))
-
-    assert line == "+ property delta.enableChangeDataFeed = 'true'"
-
-
-def test_set_property_renders_tilde_with_was_for_update():
-    # Given a property whose catalog value is stale
-    line = action_diff_line(
-        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false")
+def test_diff_block_groups_lines_under_category_headings_in_plan_order():
+    # Given a table whose plan sets the table comment and adds a column
+    report = _grid_report(
+        "orders",
+        plan=ActionPlan((SetTableComment(comment="c"), AddColumn(Column("age", Integer())))),
     )
 
-    assert line == "~ property delta.enableChangeDataFeed = 'true' (was 'false')"
+    # When rendering the diff block
+    lines = render_diff_block(report).splitlines()
+
+    # Then lines sit under 2-space category headings, entries indented 4 spaces,
+    # with categories in DiffCategory order (columns before comments)
+    assert lines[0] == "cat.sch.orders"
+    assert "  columns" in lines
+    assert "    + age  Integer" in lines
+    assert "  comments" in lines
+    assert "    ~ table: 'c'" in lines
+    assert lines.index("  columns") < lines.index("  comments")
 
 
-def test_unset_property_renders_minus():
-    line = action_diff_line(UnsetProperty(name="delta.logRetentionDuration"))
+def test_diff_block_marks_a_create_in_the_header():
+    # Given a plan that creates a table
+    report = _grid_report(
+        "orders",
+        plan=ActionPlan((CreateTable(table=_grid_report("orders").desired),)),
+    )
 
-    assert line == "- property delta.logRetentionDuration"
+    # Then the block header flags the table as newly created
+    assert render_diff_block(report).splitlines()[0] == "cat.sch.orders  (CREATE)"
 
 
-# ---------- structural action diff lines ----------
+def test_diff_block_reports_a_read_failure_instead_of_a_diff():
+    # Given a table whose catalog read failed
+    qualified_name = QualifiedName("cat", "sch", "orders")
+    report = TableRunReport(
+        qualified_name=qualified_name,
+        desired=DesiredTable(qualified_name=qualified_name, columns=(Column("id", Integer()),)),
+        read=ReadFailed(ReadFailure("IOError", "boom")),
+    )
 
+    # When rendering the diff block
+    block = render_diff_block(report)
 
-@pytest.mark.parametrize(
-    ("action", "expected"),
-    [
-        (
-            CreateTable(
-                table=DesiredTable(
-                    qualified_name=QualifiedName("cat", "sch", "orders"),
-                    columns=(Column("id", Integer()), Column("name", String())),
-                )
-            ),
-            "+ create table (columns: id, name)",
-        ),
-        (AddColumn(Column("age", Integer())), "+ column age Integer"),
-        (AddColumn(Column("age", Integer(), nullable=False)), "+ column age Integer NOT NULL"),
-        (DropColumn(column_name="legacy"), "- column legacy"),
-        (SetColumnNullability(column_name="id", nullable=True), "~ column id drop NOT NULL"),
-        (SetColumnNullability(column_name="id", nullable=False), "~ column id set NOT NULL"),
-        (SetColumnComment(column_name="id", comment="primary key"), "~ comment on column id"),
-        (SetColumnComment(column_name="id", comment=""), "~ comment on column id (unset)"),
-        (SetTableComment(comment="core table"), "~ comment on table"),
-        (
-            SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk"),
-            "+ primary key (id, tenant_id)",
-        ),
-        (DropPrimaryKey(), "- primary key"),
-        (
-            SetForeignKey(
-                local_columns=("customer_id",),
-                referenced_table=QualifiedName("cat", "sch", "customers"),
-                referenced_columns=("id",),
-                constraint_name="orders_customer_id_fk",
-            ),
-            "+ foreign key (customer_id) → cat.sch.customers",
-        ),
-        (
-            DropForeignKey(constraint_name="orders_customer_id_fk"),
-            "- foreign key orders_customer_id_fk",
-        ),
-    ],
-)
-def test_action_diff_line_renders_expected_text(action, expected):
-    # Then each structural action renders as its documented +/-/~ diff line
-    assert action_diff_line(action) == expected
+    # Then it says the table could not be read rather than showing a diff
+    assert block == "cat.sch.orders\n  (could not read — no diff)"
 
 
 # ---------- grid rendering ----------
@@ -308,40 +382,6 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
     assert footer == "3 tables: 1 changed, 1 unchanged, 1 failed (3.0s)"
 
 
-# ---------- diff block ----------
-
-
-def test_diff_block_lists_one_indented_line_per_planned_action():
-    # Given a table whose plan holds two actions
-    report = _grid_report(
-        "orders",
-        plan=ActionPlan((SetTableComment(comment="c"), AddColumn(Column("age", Integer())))),
-    )
-
-    # When rendering the diff block
-    lines = render_diff_block(report).splitlines()
-
-    # Then the header names the table and each action is one indented line, in plan order
-    assert lines[0] == "cat.sch.orders"
-    assert lines[1:] == ["  + column age Integer", "  ~ comment on table"]
-
-
-def test_diff_block_reports_a_read_failure_instead_of_a_diff():
-    # Given a table whose catalog read failed
-    qualified_name = QualifiedName("cat", "sch", "orders")
-    report = TableRunReport(
-        qualified_name=qualified_name,
-        desired=DesiredTable(qualified_name=qualified_name, columns=(Column("id", Integer()),)),
-        read=ReadFailed(ReadFailure("IOError", "boom")),
-    )
-
-    # When rendering the diff block
-    block = render_diff_block(report)
-
-    # Then it says the table could not be read rather than showing a diff
-    assert block == "cat.sch.orders\n  (could not read — no diff)"
-
-
 # ---------- whole-report rendering ----------
 
 
@@ -394,5 +434,5 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
 
     # Then each table's change block appears, in report order
     assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
-    assert "~ comment on table" in rendered
-    assert "+ column age Integer" in rendered
+    assert "~ table: 'c'" in rendered
+    assert "+ age  Integer" in rendered
