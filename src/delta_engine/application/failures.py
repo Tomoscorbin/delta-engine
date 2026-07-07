@@ -59,6 +59,11 @@ class Failure(ABC):
         """Return one or more human-readable lines describing this failure."""
         ...
 
+    @abstractmethod
+    def headline(self) -> str:
+        """Return a compact one-line summary without the detail message, for the report grid."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ReadFailure(Failure):
@@ -71,6 +76,9 @@ class ReadFailure(Failure):
     def format_lines(self) -> tuple[str, ...]:
         return (f"Read error: {self.exception_type} - {self.message}",)
 
+    def headline(self) -> str:
+        return f"Read error: {self.exception_type}"
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationFailure(Failure):
@@ -82,6 +90,9 @@ class ValidationFailure(Failure):
 
     def format_lines(self) -> tuple[str, ...]:
         return (f"Validation failed: {self.rule_name} - {self.message}",)
+
+    def headline(self) -> str:
+        return f"Validation failed: {self.rule_name}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +112,9 @@ class ExecutionFailure(Failure):
             f"    SQL preview: {self.statement_preview}",
         )
 
+    def headline(self) -> str:
+        return f"Execution failed at action {self.action_index}: {self.exception_type}"
+
 
 @dataclass(frozen=True, slots=True)
 class ForeignKeyFailure(Failure):
@@ -118,3 +132,7 @@ class ForeignKeyFailure(Failure):
             f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
             f"{self.reason.detail}.",
         )
+
+    def headline(self) -> str:
+        columns = ", ".join(self.local_columns)
+        return f"Foreign key ({columns}) → {self.references} not applied"

@@ -378,16 +378,17 @@ def test_grid_detail_shows_first_failure_and_extra_count_when_multiple():
     # When rendering the grid
     data_row = render_grid((report,)).splitlines()[1]
 
-    # Then DETAIL shows the first failure and a count of the rest
-    assert "Validation failed: R1 - first" in data_row
+    # Then DETAIL shows the first failure's headline (no detail message) and a count of the rest
+    assert "Validation failed: R1" in data_row
+    assert " - first" not in data_row
     assert data_row.endswith("(+1 more)")
 
 
 def test_grid_detail_truncates_an_overlong_detail_with_an_ellipsis():
-    # Given a failure whose rendered line exceeds the detail width
+    # Given a failure whose headline exceeds the detail width
     report = _grid_report(
         "orders",
-        failures=(ValidationFailure(rule_name="R", message="x" * 80),),
+        failures=(ValidationFailure(rule_name="R" * 80, message="short"),),
     )
 
     # When rendering the grid
@@ -499,6 +500,22 @@ def test_render_report_shows_a_full_failures_section_for_failed_tables():
     assert "Failures" in rendered
     assert "Validation failed: R1 - first" in rendered
     assert "Validation failed: R2 - second" in rendered
+
+
+def test_render_report_failures_section_has_an_underlined_header():
+    # Given a run with a failed table
+    failed = _grid_report("orders", failures=(ValidationFailure(rule_name="R", message="m"),))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(failed,),
+    )
+
+    lines = render_report(sync).splitlines()
+
+    # Then the Failures section is introduced by an underlined header
+    index = lines.index("Failures")
+    assert lines[index + 1] == "-" * len("Failures")
 
 
 def test_render_report_has_no_failures_section_when_all_succeed():

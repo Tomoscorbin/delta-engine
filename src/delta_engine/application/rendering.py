@@ -259,10 +259,10 @@ def _humanized_action_summary(plan: ActionPlan) -> str:
 
 
 def _grid_detail(report: TableRunReport) -> str:
-    """Return the DETAIL cell: first failure summary, or a per-category change count."""
+    """Return the DETAIL cell: first failure headline, or a per-category change count."""
     if report.has_failures:
         failures = report.failures
-        first = failures[0].format_lines()[0]
+        first = failures[0].headline()
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
     return _humanized_action_summary(report.plan)
@@ -310,6 +310,11 @@ def run_summary_footer(report: SyncReport) -> str:
     )
 
 
+def _heading(text: str, rule: str = "=") -> str:
+    """Render a section title underlined with a rule the width of the text."""
+    return f"{text}\n{rule * len(text)}"
+
+
 def _dry_run_banner(report: SyncReport) -> str:
     """Return the dry-run banner, or empty for an applied run."""
     return "DRY RUN — no changes applied" if report.dry_run else ""
@@ -326,12 +331,7 @@ def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
         for failure in report.failures:
             lines.extend(f"    {line}" for line in failure.format_lines())
         blocks.append("\n".join(lines))
-    return "\n".join(["Failures", *blocks])
-
-
-def _heading(text: str) -> str:
-    """Render a top-level output title, underlined with a rule the width of the text."""
-    return f"{text}\n{'=' * len(text)}"
+    return "\n".join([_heading("Failures", rule="-"), *blocks])
 
 
 def render_report(report: SyncReport) -> str:
