@@ -130,3 +130,15 @@ def test_domain_type_from_spark_maps_struct_and_casefolds_field_names() -> None:
 def test_domain_type_from_spark_returns_none_for_struct_with_unmappable_field() -> None:
     spark_struct = T.StructType([T.StructField("x", T.NullType())])
     assert domain_type_from_spark(spark_struct) is None
+
+
+def test_domain_type_from_spark_returns_none_for_struct_with_casefold_colliding_field_names() -> (
+    None
+):
+    spark_struct = T.StructType(
+        [
+            T.StructField("Amount", T.IntegerType()),
+            T.StructField("amount", T.StringType()),
+        ]
+    )
+    assert domain_type_from_spark(spark_struct) is None
