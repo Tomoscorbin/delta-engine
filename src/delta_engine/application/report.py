@@ -73,6 +73,7 @@ class SyncReport:
     started_at: datetime
     ended_at: datetime
     table_reports: tuple[TableRunReport, ...]
+    dry_run: bool = False
 
     @property
     def any_failures(self) -> bool:

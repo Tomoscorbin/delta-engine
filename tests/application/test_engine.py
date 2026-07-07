@@ -394,6 +394,35 @@ def test_real_run_records_the_applied_plan_on_the_report():
     assert executor.executed_names == [fqn]
 
 
+def test_dry_run_is_recorded_on_the_report():
+    # Given a dry run over one table
+    fqn = "c.s.new_table"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing as a dry run
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then the report records that no changes were applied
+    assert report.dry_run is True
+    assert executor.executed_names == []
+
+
+def test_real_run_records_dry_run_false():
+    # Given a normal (applied) run
+    fqn = "c.s.new_table"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    executor = _RecordingExecutor([(_ok_exec(0),)])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing for real
+    report = engine.sync(_spec(fqn))
+
+    # Then the report is marked as not a dry run
+    assert report.dry_run is False
+
+
 # ---------------------------------------------------------------------------
 # Phase ordering and failure gating
 # ---------------------------------------------------------------------------
