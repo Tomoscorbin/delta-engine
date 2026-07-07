@@ -55,7 +55,7 @@ class Decimal(DataType):
     Fixed-precision decimal type.
 
     Attributes:
-        precision: Total number of digits (1–38, Delta/Spark limit).
+        precision: Total number of digits (1-38, Delta/Spark limit).
         scale: Digits to the right of the decimal point.
 
     """
