@@ -451,8 +451,11 @@ def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     # When rendering the whole report
     rendered = render_report(sync)
 
-    # Then it opens with the grid header and ends with the summary footer
-    assert rendered.splitlines()[0].split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    # Then it opens with the SYNC REPORT title, shows the grid header, and ends with the footer
+    lines = rendered.splitlines()
+    assert lines[0] == "SYNC REPORT"
+    grid_header = next(line for line in lines if line.startswith("TABLE"))
+    assert grid_header.split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
     assert rendered.endswith("2 tables: 1 changed, 0 unchanged, 1 failed (3.0s)")
 
 
@@ -467,8 +470,11 @@ def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
     # When rendering the whole report
     rendered = render_report(sync)
 
-    # Then the grid header and a zero-count footer are shown -- no empty-run sentinel
-    assert rendered.splitlines()[0].split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    # Then the title, grid header, and a zero-count footer are shown -- no empty-run sentinel
+    lines = rendered.splitlines()
+    assert lines[0] == "SYNC REPORT"
+    grid_header = next(line for line in lines if line.startswith("TABLE"))
+    assert grid_header.split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
     assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (3.0s)")
 
 
@@ -520,9 +526,41 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
     dry = render_report(SyncReport(**base, dry_run=True))
     applied = render_report(SyncReport(**base, dry_run=False))
 
-    # Then the banner is the first line of a dry run and absent otherwise
-    assert dry.splitlines()[0] == "DRY RUN — no changes applied"
+    # Then the banner appears (below the title) for a dry run and is absent otherwise
+    assert "DRY RUN — no changes applied" in dry.splitlines()
     assert "DRY RUN" not in applied
+
+
+def test_render_report_is_titled():
+    # Given any run
+    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(changed,),
+    )
+
+    lines = render_report(sync).splitlines()
+
+    # Then a SYNC REPORT title, underlined with a rule, heads the output
+    assert lines[0] == "SYNC REPORT"
+    assert lines[1] == "=" * len("SYNC REPORT")
+
+
+def test_render_diff_is_titled():
+    # Given any run
+    first = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(first,),
+    )
+
+    lines = render_diff(sync).splitlines()
+
+    # Then a DIFF title, underlined with a rule, heads the output
+    assert lines[0] == "DIFF"
+    assert lines[1] == "=" * len("DIFF")
 
 
 def test_render_diff_joins_each_tables_change_block_in_report_order():

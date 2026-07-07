@@ -329,9 +329,15 @@ def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
     return "\n".join(["Failures", *blocks])
 
 
+def _heading(text: str) -> str:
+    """Render a top-level output title, underlined with a rule the width of the text."""
+    return f"{text}\n{'=' * len(text)}"
+
+
 def render_report(report: SyncReport) -> str:
-    """Render the run: optional dry-run banner, status grid, failures section, summary footer."""
+    """Render the run: title, optional dry-run banner, status grid, failures section, footer."""
     parts = (
+        _heading("SYNC REPORT"),
         _dry_run_banner(report),
         render_grid(report.table_reports),
         render_failures_section(report.table_reports),
@@ -341,5 +347,6 @@ def render_report(report: SyncReport) -> str:
 
 
 def render_diff(report: SyncReport) -> str:
-    """Render every table's planned changes as +/-/~ blocks, in report order."""
-    return "\n\n".join(render_diff_block(table_report) for table_report in report.table_reports)
+    """Render every table's planned changes as +/-/~ blocks, under a DIFF title."""
+    blocks = [render_diff_block(table_report) for table_report in report.table_reports]
+    return "\n\n".join([_heading("DIFF"), *blocks])
