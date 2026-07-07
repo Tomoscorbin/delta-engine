@@ -77,6 +77,9 @@ def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
         (Property.LOG_RETENTION_DURATION, "interval thirty days"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-2"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "many"),
+        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "1_000"),
+        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "+5"),
+        (Property.DATA_SKIPPING_NUM_INDEXED_COLS, " 5 "),
     ],
 )
 def test_registry_rejects_invalid_property_values(key: str, value: str) -> None:
