@@ -528,3 +528,24 @@ def test_metadata_only_table_mirrors_special_character_columns_without_the_prope
         metadata_only=True,
     )
     assert table.to_desired_table().columns[0].name == "order id"
+
+
+def test_delta_table_rejects_cdf_reserved_column_names_when_cdf_enabled() -> None:
+    with pytest.raises(ValueError, match="_change_type"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer()), Column("_change_type", String())],
+            properties={"delta.enableChangeDataFeed": "true"},
+        )
+
+
+def test_delta_table_accepts_cdf_reserved_column_names_when_cdf_not_enabled() -> None:
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer()), Column("_change_type", String())],
+    )
+    assert len(table.to_desired_table().columns) == 2

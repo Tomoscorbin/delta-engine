@@ -6,7 +6,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from delta_engine.application.properties import COLUMN_MAPPING_MODE_KEY, DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import (
+    COLUMN_MAPPING_MODE_KEY,
+    DELTA_PROPERTY_REGISTRY,
+    Property,
+)
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column,
@@ -42,6 +46,11 @@ METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
 
 # Delta permits these characters in column names only under column mapping.
 _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
+
+# Column names change data feed reserves for its own output columns.
+_CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
+    {"_change_type", "_commit_version", "_commit_timestamp"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +195,17 @@ class DeltaTable:
                     " permits with column mapping. Declare"
                     f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}}"
                     " or rename the columns."
+                )
+
+        if not metadata_only and user_properties.get(Property.CHANGE_DATA_FEED) == "true":
+            reserved = [
+                column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES
+            ]
+            if reserved:
+                raise ValueError(
+                    f"Column names {reserved} are reserved by change data feed."
+                    " Rename them or do not enable"
+                    f" {Property.CHANGE_DATA_FEED}."
                 )
 
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
