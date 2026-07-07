@@ -85,11 +85,9 @@ inspector = CatalogInspector(CATALOG, SCHEMA)
 # COMMAND ----------
 def show_report(report: SyncReport) -> None:
     """Print a sync report and its diff under labelled section headers."""
-
     print(render_report(report))
     print()
     print(render_diff(report))
-
 
 
 # COMMAND ----------
