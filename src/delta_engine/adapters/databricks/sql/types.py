@@ -109,7 +109,8 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
 
     Returns ``None`` when the type has no domain mapping (e.g. ``VOID``,
     ``INTERVAL``). An unmappable element inside an ``ARRAY``, ``MAP``, or
-    ``STRUCT`` makes the whole type unmappable. An unmappable type is a routine,
+    ``STRUCT`` makes the whole type unmappable, as do struct field names that
+    collide after casefolding. An unmappable type is a routine,
     expected condition -- new Spark types appear over time -- so it is a
     ``None`` return, not an exception. Callers decide what to do with ``None``
     (the reader skips the column and logs a warning).
@@ -164,11 +165,19 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
             return String()
         case StructType():
             fields: list[StructField] = []
+            seen_names: set[str] = set()
             for spark_field in spark_type.fields:
                 field_type = domain_type_from_spark(spark_field.dataType)
                 if field_type is None:
                     return None
-                fields.append(StructField(name=spark_field.name.casefold(), data_type=field_type))
+                name = spark_field.name.casefold()
+                if name in seen_names:
+                    # Field names that collide after casefolding cannot be
+                    # represented in the domain model, so the struct is
+                    # unmappable rather than a constructor error.
+                    return None
+                seen_names.add(name)
+                fields.append(StructField(name=name, data_type=field_type))
             return Struct(tuple(fields))
         case _:
             return None
