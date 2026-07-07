@@ -82,6 +82,34 @@ def test_foreign_key_failure_renders_not_a_key_reason():
     assert "not the primary key" in line
 
 
+def test_failure_headlines_summarize_without_the_detail_message():
+    # Given one failure of each kind
+    # Then headline() drops the detail so the grid can show a compact summary
+    assert (
+        ReadFailure("AnalysisException", "table not found").headline()
+        == "Read error: AnalysisException"
+    )
+    assert (
+        ValidationFailure("NonNullableColumnAdd", "cannot add NOT NULL").headline()
+        == "Validation failed: NonNullableColumnAdd"
+    )
+    assert (
+        ExecutionFailure(
+            action_index=2, exception_type="SparkException", message="boom", statement_preview="SQL"
+        ).headline()
+        == "Execution failed at action 2: SparkException"
+    )
+    assert (
+        ForeignKeyFailure(
+            table=QualifiedName("cat", "sch", "orders"),
+            local_columns=("customer_id",),
+            references=QualifiedName("cat", "sch", "customers"),
+            reason=ForeignKeyFailureReason.CYCLE,
+        ).headline()
+        == "Foreign key (customer_id) → cat.sch.customers not applied"
+    )
+
+
 def test_each_failure_kind_declares_its_producing_phase():
     # Given the four failure kinds
     # Then each declares the phase that produced it, ordered read < validation < fk < execution

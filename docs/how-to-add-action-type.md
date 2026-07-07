@@ -78,7 +78,20 @@ Each handler receives the `backticked_table_name` and renders SQL. A constraint 
 
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).
 
-## 5. Add a validation rule if needed
+## 5. Register a diff rendering arm
+
+In `src/delta_engine/application/rendering.py`, register a `singledispatch` arm on `_action_entries` so the action shows up in `render_diff`. Return one or more `DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys, properties, tags, comments), a `+`/`-`/`~` symbol, and its aligned cells:
+
+```python
+@_action_entries.register
+def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
+    text = f"column {action.column_name}: '{action.new_comment}'"
+    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
+```
+
+An action may emit several entries across categories (`CreateTable` lists its columns and its primary key), and category grouping in the diff is display-only — it never changes execution order. `test_every_action_type_has_registered_diff_entries` fails if an action has no arm.
+
+## 6. Add a validation rule if needed
 
 If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the drift's managed changes and match change types directly:
 
@@ -105,14 +118,17 @@ class NoUnsafeCommentChange:
 
 Add it to `DEFAULT_RULES` in the same file.
 
-## 6. Write tests
+## 7. Write tests
 
 Add tests in:
+
 - `tests/domain/plan/test_diff.py` — does the relevant change's `actions()` produce `UpdateComment`?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
+- `tests/application/test_rendering.py` — does the action render its expected diff entries?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?
 
 Run:
+
 ```bash
 uv run pytest tests/ -v
 ```

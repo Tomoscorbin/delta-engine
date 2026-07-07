@@ -4,16 +4,21 @@ Diff and grid rendering for table and sync run reports.
 The report value types in report.py are pure data; all human-readable
 formatting lives here. The public entry points are render_report (status
 grid plus summary footer) and render_diff (per-table change blocks);
-render_grid, render_diff_block, run_summary_footer, and action_diff_line
+render_grid, render_diff_block, run_summary_footer, and _action_entries
 are the building blocks they compose.
 """
 
+from collections import Counter
+from dataclasses import dataclass
+from enum import IntEnum
 import functools
 
 from delta_engine.application.ports import ReadFailed
 from delta_engine.application.report import SyncReport, TableRunReport
+from delta_engine.domain.model import Column
 from delta_engine.domain.plan import (
     Action,
+    ActionPlan,
     AddColumn,
     CreateTable,
     DropColumn,
@@ -38,98 +43,145 @@ def _type_name(data_type: object) -> str:
     return type(data_type).__name__
 
 
+class DiffCategory(IntEnum):
+    """Diff line groups, in display order (enum value = order)."""
+
+    COLUMNS = 1
+    KEYS = 2
+    PROPERTIES = 3
+    TAGS = 4
+    COMMENTS = 5
+
+
+# (singular, plural) nouns per category: the plural names the diff group heading;
+# the singular is used in the grid's humanized detail count.
+_CATEGORY_NOUN: dict[DiffCategory, tuple[str, str]] = {
+    DiffCategory.COLUMNS: ("column", "columns"),
+    DiffCategory.KEYS: ("key", "keys"),
+    DiffCategory.PROPERTIES: ("property", "properties"),
+    DiffCategory.TAGS: ("tag", "tags"),
+    DiffCategory.COMMENTS: ("comment", "comments"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DiffEntry:
+    """One rendered diff line: its category, +/-/~ symbol, and aligned cells."""
+
+    category: DiffCategory
+    symbol: str
+    cells: tuple[str, ...]
+
+
+def _column_add_entry(column: Column) -> DiffEntry:
+    """Build a '+' columns entry for a created column (name, type, optional NOT NULL)."""
+    cells = [column.name, _type_name(column.data_type)]
+    if not column.nullable:
+        cells.append("NOT NULL")
+    return DiffEntry(DiffCategory.COLUMNS, "+", tuple(cells))
+
+
 @functools.singledispatch
-def action_diff_line(action: Action) -> str:
-    """Render one plan action as a single +/-/~ diff line."""
-    raise NotImplementedError(f"No diff line for action {type(action).__name__}")
+def _action_entries(action: Action) -> tuple[DiffEntry, ...]:
+    """Render one plan action as one or more category-tagged diff entries."""
+    raise NotImplementedError(f"No diff entries for action {type(action).__name__}")
 
 
-@action_diff_line.register
-def _(action: CreateTable) -> str:
-    columns = ", ".join(column.name for column in action.table.columns)
-    return f"+ create table (columns: {columns})"
+@_action_entries.register
+def _(action: CreateTable) -> tuple[DiffEntry, ...]:
+    entries = [_column_add_entry(column) for column in action.table.columns]
+    primary_key_columns = action.table.primary_key_columns
+    if primary_key_columns:
+        entries.append(
+            DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(primary_key_columns)})",))
+        )
+    return tuple(entries)
 
 
-@action_diff_line.register
-def _(action: AddColumn) -> str:
-    nullable = "" if action.column.nullable else " NOT NULL"
-    return f"+ column {action.column.name} {_type_name(action.column.data_type)}{nullable}"
+@_action_entries.register
+def _(action: AddColumn) -> tuple[DiffEntry, ...]:
+    return (_column_add_entry(action.column),)
 
 
-@action_diff_line.register
-def _(action: DropColumn) -> str:
-    return f"- column {action.column_name}"
+@_action_entries.register
+def _(action: DropColumn) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.COLUMNS, "-", (action.column_name,)),)
 
 
-@action_diff_line.register
-def _(action: SetColumnNullability) -> str:
-    direction = "drop" if action.nullable else "set"
-    return f"~ column {action.column_name} {direction} NOT NULL"
+@_action_entries.register
+def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
+    change = "drop NOT NULL (was NOT NULL)" if action.nullable else "set NOT NULL (was nullable)"
+    return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
 
 
-@action_diff_line.register
-def _(action: SetColumnComment) -> str:
-    suffix = "" if action.comment else " (unset)"
-    return f"~ comment on column {action.column_name}{suffix}"
+@_action_entries.register
+def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
+    if action.comment:
+        text = f"column {action.column_name}: '{action.comment}'"
+    else:
+        text = f"column {action.column_name} comment (unset)"
+    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
 
 
-@action_diff_line.register
-def _(action: SetTableComment) -> str:
-    return "~ comment on table"
+@_action_entries.register
+def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
+    text = f"table: '{action.comment}'" if action.comment else "table comment (unset)"
+    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
 
 
-@action_diff_line.register
-def _(action: SetProperty) -> str:
+@_action_entries.register
+def _(action: SetProperty) -> tuple[DiffEntry, ...]:
     if action.observed_value is None:
-        return f"+ property {action.name} = '{action.value}'"
-    return f"~ property {action.name} = '{action.value}' (was '{action.observed_value}')"
+        return (DiffEntry(DiffCategory.PROPERTIES, "+", (f"{action.name} = '{action.value}'",)),)
+    text = f"{action.name} = '{action.value}' (was '{action.observed_value}')"
+    return (DiffEntry(DiffCategory.PROPERTIES, "~", (text,)),)
 
 
-@action_diff_line.register
-def _(action: UnsetProperty) -> str:
-    return f"- property {action.name}"
+@_action_entries.register
+def _(action: UnsetProperty) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.PROPERTIES, "-", (action.name,)),)
 
 
-@action_diff_line.register
-def _(action: SetTableTag) -> str:
-    return f"~ tag {action.name} = '{action.value}'"
+@_action_entries.register
+def _(action: SetTableTag) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.TAGS, "~", (f"{action.name} = '{action.value}'",)),)
 
 
-@action_diff_line.register
-def _(action: UnsetTableTag) -> str:
-    return f"- tag {action.name}"
+@_action_entries.register
+def _(action: UnsetTableTag) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.TAGS, "-", (action.name,)),)
 
 
-@action_diff_line.register
-def _(action: SetColumnTag) -> str:
-    return f"~ column tag {action.column_name}.{action.name} = '{action.value}'"
+@_action_entries.register
+def _(action: SetColumnTag) -> tuple[DiffEntry, ...]:
+    text = f"column {action.column_name}.{action.name} = '{action.value}'"
+    return (DiffEntry(DiffCategory.TAGS, "~", (text,)),)
 
 
-@action_diff_line.register
-def _(action: UnsetColumnTag) -> str:
-    return f"- column tag {action.column_name}.{action.name}"
+@_action_entries.register
+def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.TAGS, "-", (f"column {action.column_name}.{action.name}",)),)
 
 
-@action_diff_line.register
-def _(action: SetPrimaryKey) -> str:
-    columns = ", ".join(action.columns)
-    return f"+ primary key ({columns})"
+@_action_entries.register
+def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(action.columns)})",)),)
 
 
-@action_diff_line.register
-def _(action: DropPrimaryKey) -> str:
-    return "- primary key"
+@_action_entries.register
+def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.KEYS, "-", ("primary key",)),)
 
 
-@action_diff_line.register
-def _(action: SetForeignKey) -> str:
-    columns = ", ".join(action.local_columns)
-    return f"+ foreign key ({columns}) → {action.referenced_table}"
+@_action_entries.register
+def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
+    text = f"foreign key ({', '.join(action.local_columns)}) → {action.referenced_table}"
+    return (DiffEntry(DiffCategory.KEYS, "+", (text,)),)
 
 
-@action_diff_line.register
-def _(action: DropForeignKey) -> str:
-    return f"- foreign key {action.constraint_name}"
+@_action_entries.register
+def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
+    return (DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint_name}",)),)
 
 
 # Shown wherever a report has a readable state but no planned actions. One
@@ -138,8 +190,30 @@ def _(action: DropForeignKey) -> str:
 _NO_CHANGES = "no changes"
 
 
+def _plan_creates_table(plan: ActionPlan) -> bool:
+    return any(isinstance(action, CreateTable) for action in plan)
+
+
+def _render_entry_groups(entries: list[DiffEntry]) -> list[str]:
+    """Group entries by category (display order) and align cells within each group."""
+    lines: list[str] = []
+    for category in DiffCategory:
+        group = [entry for entry in entries if entry.category is category]
+        if not group:
+            continue
+        lines.append(f"  {_CATEGORY_NOUN[category][1]}")
+        widths: dict[int, int] = {}
+        for entry in group:
+            for index, cell in enumerate(entry.cells):
+                widths[index] = max(widths.get(index, 0), len(cell))
+        for entry in group:
+            padded = "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(entry.cells))
+            lines.append(f"    {entry.symbol} {padded}".rstrip())
+    return lines
+
+
 def render_diff_block(report: TableRunReport) -> str:
-    """Render one table's change block: its name then one line per planned action."""
+    """Render one table's change block: its name then its planned changes, grouped."""
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailed):
         return f"{header}\n  (could not read — no diff)"
@@ -147,8 +221,10 @@ def render_diff_block(report: TableRunReport) -> str:
         if report.has_failures:
             return f"{header}\n  ({_NO_CHANGES} — see failures)"
         return f"{header}\n  ({_NO_CHANGES})"
-    lines = [f"  {action_diff_line(action)}" for action in report.plan]
-    return "\n".join([header, *lines])
+    if _plan_creates_table(report.plan):
+        header = f"{header}  (CREATE)"
+    entries = [entry for action in report.plan for entry in _action_entries(action)]
+    return "\n".join([header, *_render_entry_groups(entries)])
 
 
 _DETAIL_MAX_CHARS = 60
@@ -156,14 +232,40 @@ _DETAIL_MAX_CHARS = 60
 _GRID_HEADERS = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
 
 
+def _grid_actions_cell(report: TableRunReport) -> str:
+    """ACTIONS cell: applied/total when execution ran, — on a plan-less failure, else count."""
+    execution = report.execution
+    if execution is not None:
+        applied = len(execution.results) - execution.failed_count
+        return f"{applied}/{len(report.plan)}"
+    if report.has_failures:
+        return "—"
+    return str(len(report.plan))
+
+
+def _humanized_action_summary(plan: ActionPlan) -> str:
+    """Summarise a plan as per-category change counts in display order, e.g. '2 columns, 1 key'."""
+    counts: Counter[DiffCategory] = Counter()
+    for action in plan:
+        for entry in _action_entries(action):
+            counts[entry.category] += 1
+    parts: list[str] = []
+    for category in DiffCategory:
+        count = counts.get(category, 0)
+        if count:
+            singular, plural = _CATEGORY_NOUN[category]
+            parts.append(f"{count} {singular if count == 1 else plural}")
+    return ", ".join(parts) or _NO_CHANGES
+
+
 def _grid_detail(report: TableRunReport) -> str:
-    """Return the DETAIL cell: first failure summary, action names, or 'no changes'."""
+    """Return the DETAIL cell: first failure headline, or a per-category change count."""
     if report.has_failures:
         failures = report.failures
-        first = failures[0].format_lines()[0]
+        first = failures[0].headline()
         extra = len(failures) - 1
         return f"{first} (+{extra} more)" if extra else first
-    return ", ".join(type(action).__name__ for action in report.plan) or _NO_CHANGES
+    return _humanized_action_summary(report.plan)
 
 
 def _truncate(text: str, limit: int = _DETAIL_MAX_CHARS) -> str:
@@ -176,7 +278,7 @@ def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
     return (
         str(report.qualified_name),
         report.status.value,
-        str(len(report.plan)),
+        _grid_actions_cell(report),
         _truncate(_grid_detail(report)),
     )
 
@@ -208,11 +310,43 @@ def run_summary_footer(report: SyncReport) -> str:
     )
 
 
+def _heading(text: str, rule: str = "=") -> str:
+    """Render a section title underlined with a rule the width of the text."""
+    return f"{text}\n{rule * len(text)}"
+
+
+def _dry_run_banner(report: SyncReport) -> str:
+    """Return the dry-run banner, or empty for an applied run."""
+    return "DRY RUN — no changes applied" if report.dry_run else ""
+
+
+def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
+    """Render full per-table failure detail for every failed table; empty when none failed."""
+    failed = [report for report in reports if report.has_failures]
+    if not failed:
+        return ""
+    blocks: list[str] = []
+    for report in failed:
+        lines = [f"  {report.qualified_name}"]
+        for failure in report.failures:
+            lines.extend(f"    {line}" for line in failure.format_lines())
+        blocks.append("\n".join(lines))
+    return "\n".join([_heading("Failures", rule="-"), *blocks])
+
+
 def render_report(report: SyncReport) -> str:
-    """Render a run's aligned status grid followed by its one-line summary footer."""
-    return f"{render_grid(report.table_reports)}\n\n{run_summary_footer(report)}"
+    """Render the run: title, optional dry-run banner, status grid, failures section, footer."""
+    parts = (
+        _heading("SYNC REPORT"),
+        _dry_run_banner(report),
+        render_grid(report.table_reports),
+        render_failures_section(report.table_reports),
+        run_summary_footer(report),
+    )
+    return "\n\n".join(part for part in parts if part)
 
 
 def render_diff(report: SyncReport) -> str:
-    """Render every table's planned changes as +/-/~ blocks, in report order."""
-    return "\n\n".join(render_diff_block(table_report) for table_report in report.table_reports)
+    """Render every table's planned changes as +/-/~ blocks, under a DIFF title."""
+    blocks = [render_diff_block(table_report) for table_report in report.table_reports]
+    return "\n\n".join([_heading("DIFF"), *blocks])
