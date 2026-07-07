@@ -100,6 +100,42 @@ class Variant(DataType):
 
 
 @dataclass(frozen=True, slots=True)
+class StructField:
+    """
+    One named field inside a :class:`Struct`.
+
+    Field nullability and comments are deliberately not modeled: catalog DDL
+    strings do not round-trip them reliably, so both desired and observed
+    structs normalize to name + type. Declared fields are created nullable.
+    """
+
+    name: str
+    data_type: DataType
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError(f"Struct field name must not be blank: {self.name!r}")
+        if self.name != self.name.casefold():
+            raise ValueError(f"Struct field name must be lowercase: {self.name!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class Struct(DataType):
+    """Struct of named fields; identity is the ordered (name, type) tuple."""
+
+    fields: tuple[StructField, ...]
+
+    def __post_init__(self) -> None:
+        if not self.fields:
+            raise ValueError("Struct requires at least one field")
+        seen: set[str] = set()
+        for field in self.fields:
+            if field.name in seen:
+                raise ValueError(f"Duplicate struct field name: {field.name}")
+            seen.add(field.name)
+
+
+@dataclass(frozen=True, slots=True)
 class Array(DataType):
     """Array of homogeneous ``element`` values."""
 
