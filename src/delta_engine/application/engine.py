@@ -51,10 +51,8 @@ from delta_engine.application.report import (
     TableRunReport,
 )
 from delta_engine.application.validation import validate_diff
-from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan
-from delta_engine.domain.plan.diff import TableDiff, diff_table
+from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
 

@@ -16,19 +16,31 @@ _EAGER = {
     "SyncFailedError",
     "Failure",
     "TableRunStatus",
+    "render_diff",
+    "render_report",
 }
 
 
 def test_eager_names_are_importable_and_identical_to_their_source():
     # Given the curated root namespace
     # Then every pyspark-free name resolves to the same object as its source module
-    from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus
+    from delta_engine import (
+        Engine,
+        Failure,
+        SyncFailedError,
+        SyncReport,
+        TableRunStatus,
+        render_diff,
+        render_report,
+    )
     from delta_engine.application import (
         Engine as EngineImpl,
         Failure as FailureImpl,
         SyncFailedError as SyncFailedErrorImpl,
         SyncReport as SyncReportImpl,
         TableRunStatus as TableRunStatusImpl,
+        render_diff as render_diff_impl,
+        render_report as render_report_impl,
     )
 
     assert Engine is EngineImpl
@@ -36,6 +48,8 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
     assert TableRunStatus is TableRunStatusImpl
+    assert render_diff is render_diff_impl
+    assert render_report is render_report_impl
 
 
 def test_all_advertises_eager_and_lazy_names():

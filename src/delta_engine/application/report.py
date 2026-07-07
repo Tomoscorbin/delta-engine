@@ -17,9 +17,8 @@ from delta_engine.application.failures import (
     FailurePhase,
 )
 from delta_engine.application.ports import CatalogState, ExecutionSummary
-from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.plan import ActionPlan
 
 # ---------- Status enums ----------
 
@@ -68,18 +67,6 @@ class TableRunReport:
         """True if the table did not fully succeed."""
         return bool(self.failures)
 
-    def diff(self) -> str:
-        """Render this table's planned changes as a +/-/~ change list."""
-        from delta_engine.application.rendering import render_diff_block
-
-        return render_diff_block(self)
-
-    def __str__(self) -> str:
-        """Render this report as the grid header plus its single row."""
-        from delta_engine.application.rendering import render_grid
-
-        return render_grid((self,))
-
 
 @dataclass(frozen=True, slots=True)
 class SyncReport:
@@ -101,15 +88,3 @@ class SyncReport:
 
     def __iter__(self) -> Iterator[TableRunReport]:
         return iter(self.table_reports)
-
-    def diff(self) -> str:
-        """Render every table's planned changes, in report order."""
-        from delta_engine.application.rendering import render_diff_block
-
-        return "\n\n".join(render_diff_block(report) for report in self.table_reports)
-
-    def __str__(self) -> str:
-        """Render the run as an aligned grid followed by a summary footer."""
-        from delta_engine.application.rendering import render_grid, run_summary_footer
-
-        return f"{render_grid(self.table_reports)}\n\n{run_summary_footer(self)}"

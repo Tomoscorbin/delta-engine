@@ -19,7 +19,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
 )
 from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
 from delta_engine.domain.model import Column, QualifiedName
-from delta_engine.domain.plan.actions import (
+from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
