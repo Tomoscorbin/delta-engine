@@ -62,10 +62,12 @@ def _is_interval(value: str) -> bool:
 
 
 def _is_integer_at_least_minus_one(value: str) -> bool:
-    try:
-        return int(value) >= -1
-    except ValueError:
+    # Canonical digits only: bare int() also accepts "1_000", "+5", or " 5 ",
+    # forms the catalog would not normalize and that can fail Java-side
+    # parsing at execution instead of at declaration.
+    if re.fullmatch(r"-?\d+", value) is None:
         return False
+    return int(value) >= -1
 
 
 def _is_column_mapping_mode(value: str) -> bool:
