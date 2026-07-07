@@ -22,10 +22,11 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
+    referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import ForeignKeyReference, QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 
 # ---------- fakes & helpers ----------
@@ -103,6 +104,7 @@ def routed_spark(
     describe=None,
     pk=(),
     fks=(),
+    referencing_fks=(),
     tags=(),
     column_tags=(),
     probe=(),
@@ -112,6 +114,9 @@ def routed_spark(
         describe_detail_query(qn): describe if describe is not None else [{"properties": {}}],
         primary_key_query(qn): list(pk) if not isinstance(pk, Exception) else pk,
         foreign_keys_query(qn): list(fks) if not isinstance(fks, Exception) else fks,
+        referencing_foreign_keys_query(qn): (
+            list(referencing_fks) if not isinstance(referencing_fks, Exception) else referencing_fks
+        ),
         table_tags_query(qn): list(tags) if not isinstance(tags, Exception) else tags,
         column_tags_query(qn): (
             list(column_tags) if not isinstance(column_tags, Exception) else column_tags
@@ -168,6 +173,21 @@ def fk_row(
         ref_schema=ref_schema,
         ref_table=ref_table,
         ref_column=ref_column,
+    )
+
+
+def referencing_fk_row(
+    *,
+    constraint_name="orders_customer_fk",
+    referencing_catalog="c",
+    referencing_schema="s",
+    referencing_table="orders",
+):
+    return SimpleNamespace(
+        constraint_name=constraint_name,
+        referencing_catalog=referencing_catalog,
+        referencing_schema=referencing_schema,
+        referencing_table=referencing_table,
     )
 
 
@@ -405,6 +425,24 @@ def test_fetch_state_includes_single_column_foreign_key_in_observed_table(qn):
     )
 
 
+# ---------- referencing foreign keys ----------
+
+
+def test_fetch_state_includes_referencing_foreign_key_in_observed_table(qn):
+    spark = routed_spark(
+        qn, catalog=single_column_catalog(qn), referencing_fks=[referencing_fk_row()]
+    )
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    assert isinstance(result, TablePresent)
+    assert result.table.referencing_foreign_keys == (
+        ForeignKeyReference(
+            constraint_name="orders_customer_fk",
+            referencing_table=QualifiedName("c", "s", "orders"),
+        ),
+    )
+
+
 # ---------- tags ----------
 
 
@@ -444,10 +482,12 @@ def test_fetch_state_skips_metadata_queries_when_information_schema_is_absent(qn
     assert isinstance(result, TablePresent)
     assert result.table.primary_key is None
     assert result.table.foreign_keys == ()
+    assert result.table.referencing_foreign_keys == ()
     assert dict(result.table.tags) == {}
     issued = set(spark.queries)
     assert primary_key_query(qn) not in issued
     assert foreign_keys_query(qn) not in issued
+    assert referencing_foreign_keys_query(qn) not in issued
     assert table_tags_query(qn) not in issued
     assert column_tags_query(qn) not in issued
 

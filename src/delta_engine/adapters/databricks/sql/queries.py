@@ -120,6 +120,42 @@ def foreign_keys_query(qualified_name: QualifiedName) -> str:
     )
 
 
+def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema query for foreign keys referencing this table.
+
+    The inbound counterpart of :func:`foreign_keys_query`: it finds FKs owned
+    by *other* tables whose parent key lives on this table, joining
+    table_constraints twice — once to locate the parent key's table (the
+    WHERE filter) and once to name the referencing constraint's own table.
+    Column detail is not needed; validation only names what blocks a
+    primary-key change.
+
+    information_schema is per-catalog, so a foreign key owned by a table in a
+    different catalog is invisible here; such a drop still fails at execution.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT rc.constraint_name,"
+        f" fk_tables.table_catalog AS referencing_catalog,"
+        f" fk_tables.table_schema AS referencing_schema,"
+        f" fk_tables.table_name AS referencing_table"
+        f" FROM {catalog}.information_schema.referential_constraints AS rc"
+        f" JOIN {catalog}.information_schema.table_constraints AS pk_tables"
+        f" ON rc.unique_constraint_catalog = pk_tables.constraint_catalog"
+        f" AND rc.unique_constraint_schema = pk_tables.constraint_schema"
+        f" AND rc.unique_constraint_name = pk_tables.constraint_name"
+        f" JOIN {catalog}.information_schema.table_constraints AS fk_tables"
+        f" ON rc.constraint_catalog = fk_tables.constraint_catalog"
+        f" AND rc.constraint_schema = fk_tables.constraint_schema"
+        f" AND rc.constraint_name = fk_tables.constraint_name"
+        f" WHERE pk_tables.table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND pk_tables.table_name = {quote_literal(qualified_name.name)}"
+        f" ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
+        f" fk_tables.table_name, rc.constraint_name"
+    )
+
+
 def information_schema_probe_query(catalog: str) -> str:
     """
     Render a cheap query that succeeds exactly where information_schema exists.

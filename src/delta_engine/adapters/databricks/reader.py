@@ -19,6 +19,7 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
+    referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.application.failures import ReadFailure
@@ -32,6 +33,7 @@ from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
     Column as DomainColumn,
     ForeignKeyConstraint,
+    ForeignKeyReference,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -146,6 +148,26 @@ def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyC
     )
 
 
+def _referencing_foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyReference, ...]:
+    """
+    Build the inbound foreign key references from information_schema rows.
+
+    Names are casefolded at the adapter boundary, consistent with the rest of
+    this reader.
+    """
+    return tuple(
+        ForeignKeyReference(
+            constraint_name=row.constraint_name.casefold(),
+            referencing_table=QualifiedName(
+                row.referencing_catalog.casefold(),
+                row.referencing_schema.casefold(),
+                row.referencing_table.casefold(),
+            ),
+        )
+        for row in rows
+    )
+
+
 def _table_tags_from_rows(rows: Iterable[Row]) -> MappingProxyType[str, str]:
     """Map table-tag rows to a read-only mapping; tag case is preserved verbatim."""
     return MappingProxyType({row.tag_name: row.tag_value for row in rows})
@@ -243,6 +265,11 @@ class DatabricksReader:
             ),
             foreign_keys=_foreign_keys_from_rows(
                 self._information_schema_rows(catalog, foreign_keys_query(qualified_name))
+            ),
+            referencing_foreign_keys=_referencing_foreign_keys_from_rows(
+                self._information_schema_rows(
+                    catalog, referencing_foreign_keys_query(qualified_name)
+                )
             ),
         )
         return TablePresent(table=observed)

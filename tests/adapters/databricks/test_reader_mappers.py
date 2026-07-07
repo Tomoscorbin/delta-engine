@@ -8,6 +8,7 @@ the real query results are accessed) and return domain values.
 
 from types import SimpleNamespace
 
+from pyspark.sql import Row
 import pytest
 
 from delta_engine.adapters.databricks.reader import (
@@ -15,9 +16,10 @@ from delta_engine.adapters.databricks.reader import (
     _foreign_keys_from_rows,
     _managed_properties_from_row,
     _primary_key_from_rows,
+    _referencing_foreign_keys_from_rows,
     _table_tags_from_rows,
 )
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import ForeignKeyReference, QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 
 
@@ -113,6 +115,33 @@ def test_foreign_keys_mapper_groups_contiguous_rows_per_constraint():
     assert first.local_columns == ("a_id",)
     assert second.constraint_name == "fk_b"
     assert second.local_columns == ("b_id",)
+
+
+# ---------- referencing foreign keys ----------
+
+
+def test_referencing_foreign_keys_rows_map_to_casefolded_references() -> None:
+    rows = [
+        Row(
+            constraint_name="Orders_Customer_FK",
+            referencing_catalog="Dev",
+            referencing_schema="Silver",
+            referencing_table="Orders",
+        ),
+    ]
+
+    result = _referencing_foreign_keys_from_rows(rows)
+
+    assert result == (
+        ForeignKeyReference(
+            constraint_name="orders_customer_fk",
+            referencing_table=QualifiedName("dev", "silver", "orders"),
+        ),
+    )
+
+
+def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
+    assert _referencing_foreign_keys_from_rows([]) == ()
 
 
 # ---------- table tags ----------

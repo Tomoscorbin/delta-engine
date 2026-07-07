@@ -6,11 +6,34 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
+    referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.domain.model import QualifiedName
 
 QN = QualifiedName("cat", "sch", "tbl")
+
+
+def test_referencing_foreign_keys_query_golden():
+    assert referencing_foreign_keys_query(QN) == (
+        "SELECT rc.constraint_name,"
+        " fk_tables.table_catalog AS referencing_catalog,"
+        " fk_tables.table_schema AS referencing_schema,"
+        " fk_tables.table_name AS referencing_table"
+        " FROM `cat`.information_schema.referential_constraints AS rc"
+        " JOIN `cat`.information_schema.table_constraints AS pk_tables"
+        " ON rc.unique_constraint_catalog = pk_tables.constraint_catalog"
+        " AND rc.unique_constraint_schema = pk_tables.constraint_schema"
+        " AND rc.unique_constraint_name = pk_tables.constraint_name"
+        " JOIN `cat`.information_schema.table_constraints AS fk_tables"
+        " ON rc.constraint_catalog = fk_tables.constraint_catalog"
+        " AND rc.constraint_schema = fk_tables.constraint_schema"
+        " AND rc.constraint_name = fk_tables.constraint_name"
+        " WHERE pk_tables.table_schema = 'sch'"
+        " AND pk_tables.table_name = 'tbl'"
+        " ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
+        " fk_tables.table_name, rc.constraint_name"
+    )
 
 
 def test_describe_detail_query_backticks_the_table_name():
