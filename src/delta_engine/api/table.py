@@ -7,8 +7,15 @@ from dataclasses import dataclass
 from typing import Final
 
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
-from delta_engine.domain.model import ALL_ASPECTS, Column, DesiredTable, QualifiedName, TableAspect
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model import (
+    ALL_ASPECTS,
+    Column,
+    DesiredTable,
+    ForeignKeyConstraint,
+    PrimaryKeyConstraint,
+    QualifiedName,
+    TableAspect,
+)
 
 
 class _SelfReference:

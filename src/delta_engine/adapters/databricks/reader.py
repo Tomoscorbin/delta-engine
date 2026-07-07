@@ -31,8 +31,13 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
-from delta_engine.domain.model import Column as DomainColumn, ObservedTable, QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model import (
+    Column as DomainColumn,
+    ForeignKeyConstraint,
+    ObservedTable,
+    PrimaryKeyConstraint,
+    QualifiedName,
+)
 
 logger = logging.getLogger(__name__)
 

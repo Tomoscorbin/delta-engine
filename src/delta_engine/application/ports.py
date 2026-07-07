@@ -14,7 +14,7 @@ from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.domain.model import ObservedTable, QualifiedName
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan import ActionPlan
 
 # ---------- CatalogState ----------
 

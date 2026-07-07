@@ -25,7 +25,7 @@ from delta_engine.application.ports import (
     ExecutionSummary,
 )
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.plan.actions import Action, ActionPlan
+from delta_engine.domain.plan import Action, ActionPlan
 
 logger = logging.getLogger(__name__)
 

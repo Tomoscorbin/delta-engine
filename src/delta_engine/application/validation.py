@@ -11,8 +11,8 @@ from delta_engine.application.properties import (
     DELTA_PROPERTY_REGISTRY,
     PropertyRegistry,
 )
-from delta_engine.domain.model.table_aspect import TableAspect
-from delta_engine.domain.plan.diff import (
+from delta_engine.domain.model import TableAspect
+from delta_engine.domain.plan import (
     ColumnAdded,
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,

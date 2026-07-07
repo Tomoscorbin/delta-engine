@@ -38,9 +38,7 @@ from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
-from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.model.constraints import ForeignKeyConstraint
-from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.model import DesiredTable, ForeignKeyConstraint, QualifiedName
 
 # A table dependency graph is small (tens of tables, shallow chains), so the
 # recursion depth of the SCC traversal below stays far under Python's limit.
