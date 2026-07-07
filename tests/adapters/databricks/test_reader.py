@@ -261,7 +261,7 @@ def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact(qn)
         columns_by_table={
             str(qn): [
                 make_catalog_col("id", dataType="int"),
-                make_catalog_col("nested", dataType="struct<x:int>"),
+                make_catalog_col("nested", dataType="void"),
             ]
         }
     )
@@ -274,9 +274,7 @@ def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact(qn)
 def test_fetch_state_returns_failed_when_all_columns_are_unsupported(qn):
     # An ObservedTable requires at least one column; a table whose every column
     # is unmappable cannot be honestly observed, so the read fails.
-    catalog = FakeCatalog(
-        columns_by_table={str(qn): [make_catalog_col("nested", dataType="struct<x:int>")]}
-    )
+    catalog = FakeCatalog(columns_by_table={str(qn): [make_catalog_col("nested", dataType="void")]})
     result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
