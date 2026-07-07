@@ -414,7 +414,12 @@ def test_table_tag_drift_produces_set_and_unset_changes():
 
 
 def test_partitioning_drift_produces_change_with_both_sides():
-    diff = diff_table(_desired(partitioned_by=("id",)), _observed())
+    # Given identical columns on both sides so partitioning is the only drift
+    columns = (Column("id", Integer()), Column("value", Integer()))
+    diff = diff_table(
+        _desired(columns=columns, partitioned_by=("id",)),
+        _observed(columns=columns),
+    )
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
