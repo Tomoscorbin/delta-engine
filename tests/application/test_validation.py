@@ -363,9 +363,11 @@ def test_rejects_existing_column_type_change():
 
 
 def test_rejects_partitioning_change():
-    # Given a declaration that changes table partitioning
-    desired = _desired_table(partitioned_by=("id",))
-    observed = _observed_table()
+    # Given a declaration that changes table partitioning (identical columns on
+    # both sides so partitioning is the only drift)
+    columns = (Column("id", Integer()), Column("value", Integer()))
+    desired = _desired_table(columns=columns, partitioned_by=("id",))
+    observed = _observed_table(columns=columns)
 
     # When validating the diff
     result = _validate(desired, observed)

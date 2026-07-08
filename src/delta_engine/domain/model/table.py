@@ -5,8 +5,12 @@ from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
+
+# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
+_UNPARTITIONABLE_TYPES = (Array, Map, Struct, Variant)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +123,9 @@ class DesiredTable(TableSnapshot):
         free of column-nullability lookups. Both checks live on DesiredTable,
         not the shared base: an observed table may legitimately carry such a
         layout (a legacy catalog schema) and must stay representable.
+
+        Partition columns must not have complex types (Array, Map, Struct, Variant)
+        and at least one non-partition column must exist.
         """
         TableSnapshot.__post_init__(self)
         if not self.managed_aspects:
@@ -149,6 +156,20 @@ class DesiredTable(TableSnapshot):
                     f" {nullable_key_columns[0]}. Set nullable=False on every"
                     " primary key column."
                 )
+
+        columns_by_name = {column.name: column for column in self.columns}
+        for name in self.partitioned_by:
+            data_type = columns_by_name[name].data_type
+            if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+                raise ValueError(
+                    f"Partition column {name!r} has type"
+                    f" {type(data_type).__name__}, which Delta cannot"
+                    " partition by"
+                )
+        if self.partitioned_by and (len(self.partitioned_by) == len(self.columns)):
+            raise ValueError(
+                "Cannot partition by every column: at least one non-partition column is required"
+            )
 
 
 @dataclass(frozen=True, slots=True)

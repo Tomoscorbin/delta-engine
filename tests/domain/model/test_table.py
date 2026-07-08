@@ -6,6 +6,7 @@ from delta_engine.domain.model import (
     Date,
     DesiredTable,
     Integer,
+    Map,
     ObservedTable,
     QualifiedName,
     String,
@@ -452,3 +453,34 @@ def test_observed_table_properties_carry_values_only():
     )
 
     assert observed.properties == {"delta.enableChangeDataFeed": "true"}
+
+
+def test_desired_table_rejects_complex_typed_partition_column() -> None:
+    with pytest.raises(ValueError, match="partition"):
+        DesiredTable(
+            qualified_name=QualifiedName("dev", "silver", "orders"),
+            columns=(
+                Column("id", Integer()),
+                Column("attrs", Map(String(), String())),
+            ),
+            partitioned_by=("attrs",),
+        )
+
+
+def test_desired_table_rejects_partitioning_by_every_column() -> None:
+    with pytest.raises(ValueError, match="every column"):
+        DesiredTable(
+            qualified_name=QualifiedName("dev", "silver", "orders"),
+            columns=(Column("id", Integer()), Column("day", Date())),
+            partitioned_by=("id", "day"),
+        )
+
+
+def test_observed_table_accepts_layouts_desired_tables_reject() -> None:
+    # Observed state must stay representable even when it is not declarable.
+    observed = ObservedTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()), Column("day", Date())),
+        partitioned_by=("id", "day"),
+    )
+    assert observed.partitioned_by == ("id", "day")
