@@ -39,4 +39,3 @@ engine.sync(customers)  # creates the table, or no-ops if it already matches
 - [Architecture](docs/explanation-architecture.md) — layers, design decisions, why hexagonal
 - [Implement a custom adapter](docs/how-to-implement-adapter.md) — `CatalogStateReader` and `PlanExecutor` protocols
 - [Add a new action type](docs/how-to-add-action-type.md) — extend `Action`, `ActionPhase`, and the compiler
-- [Contributing](CONTRIBUTING.md) — setup, test, lint, PR workflow
