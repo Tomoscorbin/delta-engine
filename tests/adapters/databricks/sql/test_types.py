@@ -106,7 +106,7 @@ def test_domain_type_from_spark_returns_none_when_collection_element_is_unmappab
 
 def test_sql_type_for_struct_renders_fields_in_order() -> None:
     struct = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
-    assert sql_type_for_data_type(struct) == "STRUCT<a: INT, b: ARRAY<STRING>>"
+    assert sql_type_for_data_type(struct) == "STRUCT<`a`: INT, `b`: ARRAY<STRING>>"
 
 
 def test_domain_type_from_spark_maps_struct_and_casefolds_field_names() -> None:
