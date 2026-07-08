@@ -22,13 +22,13 @@ the complete list of the properties you manage on that table.
 
 ## The managed keys
 
-| `Property` member | Delta table property key | Restrictions |
-|---|---|---|
-| `CHANGE_DATA_FEED` | `delta.enableChangeDataFeed` | none |
-| `DELETED_FILE_RETENTION_DURATION` | `delta.deletedFileRetentionDuration` | none |
-| `LOG_RETENTION_DURATION` | `delta.logRetentionDuration` | none |
-| `DATA_SKIPPING_NUM_INDEXED_COLS` | `delta.dataSkippingNumIndexedCols` | none |
-| `COLUMN_MAPPING_MODE` | `delta.columnMapping.mode` | only `none → name`; cannot be removed |
+| `Property` member                 | Delta table property key             | Restrictions                          |
+| --------------------------------- | ------------------------------------ | ------------------------------------- |
+| `CHANGE_DATA_FEED`                | `delta.enableChangeDataFeed`         | none                                  |
+| `DELETED_FILE_RETENTION_DURATION` | `delta.deletedFileRetentionDuration` | none                                  |
+| `LOG_RETENTION_DURATION`          | `delta.logRetentionDuration`         | none                                  |
+| `DATA_SKIPPING_NUM_INDEXED_COLS`  | `delta.dataSkippingNumIndexedCols`   | none                                  |
+| `COLUMN_MAPPING_MODE`             | `delta.columnMapping.mode`           | only `none → name`; cannot be removed |
 
 Passing a key outside this set raises `ValueError` at `DeltaTable`
 construction (for `None` assertions too). This prevents typos from silently
@@ -37,6 +37,33 @@ doing nothing.
 Deletion vectors (`delta.enableDeletionVectors`) are deliberately **not**
 managed: Databricks enables them automatically on new tables, so the engine
 leaves that key entirely to the platform.
+
+## Value validation
+
+Declared values are validated at `DeltaTable` construction, before a first
+write can ever reach the catalog. Each managed key has an expected format:
+
+| `Property` member                 | Expected value                                 |
+| --------------------------------- | ---------------------------------------------- |
+| `CHANGE_DATA_FEED`                | lowercase `true` or `false`                    |
+| `DELETED_FILE_RETENTION_DURATION` | `interval <n> <unit>`, e.g. `interval 7 days`  |
+| `LOG_RETENTION_DURATION`          | `interval <n> <unit>`, e.g. `interval 30 days` |
+| `DATA_SKIPPING_NUM_INDEXED_COLS`  | an integer `>= -1` (`-1` indexes all columns)  |
+| `COLUMN_MAPPING_MODE`             | `none` or `name`                               |
+
+A value outside its key's format raises `ValueError` naming the key, the
+rejected value, and the expected format. Booleans must be lowercase because
+the catalog stores `true`/`false`; any other casing (`"True"`, `"yes"`)
+would re-diff as drift on every sync even though the underlying value never
+changes.
+
+A key declared `None` asserts absence, not a value, so it is exempt from
+this check.
+
+Retention durations accept a single `interval <n> <unit>` term only.
+Compound intervals such as `interval 1 hour 30 minutes` are rejected at
+declaration even though the catalog itself accepts them; declare a
+single-unit equivalent instead (e.g. `interval 90 minutes`).
 
 ## Declaring and removing properties
 

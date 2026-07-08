@@ -25,9 +25,10 @@ DETAIL's properties: if the platform auto-writes the key, do not register
 it. Additions are called out in release notes.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+import re
 from types import MappingProxyType
 from typing import Final
 
@@ -42,34 +43,111 @@ class Property(StrEnum):
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
 
 
-COLUMN_MAPPING_MODE_KEY: Final[str] = Property.COLUMN_MAPPING_MODE.value
+# A single `interval <n> <unit>` term only — deliberately stricter than the
+# catalog, which also accepts compound intervals ("interval 1 hour 30
+# minutes"). One canonical spelling keeps declared and observed values
+# comparable; see docs/how-to-configure-properties.md.
+_INTERVAL_FORMAT = re.compile(
+    r"interval\s+\d+\s+(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?",
+    re.IGNORECASE,
+)
+
+
+def _is_lowercase_boolean(value: str) -> bool:
+    # The catalog stores 'true'/'false'; any other casing would re-diff
+    # as drift on every sync.
+    return value in {"true", "false"}
+
+
+def _is_interval(value: str) -> bool:
+    return _INTERVAL_FORMAT.fullmatch(value.strip()) is not None
+
+
+def _is_integer_at_least_minus_one(value: str) -> bool:
+    # Canonical digits only: bare int() also accepts "1_000", "+5", or " 5 ",
+    # forms the catalog would not normalize and that can fail Java-side
+    # parsing at execution instead of at declaration.
+    if re.fullmatch(r"-?\d+", value) is None:
+        return False
+    return int(value) >= -1
+
+
+def _is_column_mapping_mode(value: str) -> bool:
+    return value in {"none", "name"}
 
 
 @dataclass(frozen=True, slots=True)
 class PropertyDefinition:
     """
-    One manageable property key and its restrictions.
+    One manageable property key, and the judgments the engine needs about it.
 
-    ``permitted_transitions``: the ``(observed_value, desired_value)`` pairs
-    that are legal in-place changes, where a ``desired_value`` of ``None``
-    means removal (the key declared absent). Empty means unrestricted; a
-    non-empty set blocks any pair not in it. A first write (key absent from
-    the catalog) is always legal and is never looked up here.
+    The fields are ingredients; consumers ask the two questions below rather
+    than interpreting the fields themselves, so the semantics — a declared
+    ``None`` asserts absence, a first write is always legal, an empty
+    transition set is unrestricted — live here and nowhere else.
+
+    ``value_description`` is the human phrase for the expected value format,
+    used verbatim in rejection messages; ``permitted_transitions`` holds the
+    ``(observed_value, desired_value)`` pairs that are legal in-place
+    changes, where a ``desired_value`` of ``None`` means removal.
     """
 
-    key: str
+    key: Property
+    value_description: str
+    is_valid_value: Callable[[str], bool]
     permitted_transitions: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
+
+    def reject_declared_value(self, value: str | None) -> str | None:
+        """
+        Return the error message for an unacceptable declared value, or ``None``.
+
+        A declared ``None`` asserts the key's absence, not a value, and is
+        never rejected.
+        """
+        if value is None or self.is_valid_value(value):
+            return None
+        return f"Invalid value for {self.key}: {value!r}. Expected {self.value_description}."
+
+    def permits_transition(self, observed: str | None, desired: str | None) -> bool:
+        """
+        Whether the catalog accepts moving this key from observed to desired.
+
+        A first write (``observed`` is ``None``) is always legal; an empty
+        restriction set permits everything; ``desired`` ``None`` means
+        removal (the key declared absent).
+        """
+        if observed is None or not self.permitted_transitions:
+            return True
+        return (observed, desired) in self.permitted_transitions
 
 
 type PropertyRegistry = Mapping[str, PropertyDefinition]
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
-    PropertyDefinition(key=Property.CHANGE_DATA_FEED),
-    PropertyDefinition(key=Property.DELETED_FILE_RETENTION_DURATION),
-    PropertyDefinition(key=Property.LOG_RETENTION_DURATION),
-    PropertyDefinition(key=Property.DATA_SKIPPING_NUM_INDEXED_COLS),
+    PropertyDefinition(
+        key=Property.CHANGE_DATA_FEED,
+        value_description="'true' or 'false' (lowercase, as the catalog stores it)",
+        is_valid_value=_is_lowercase_boolean,
+    ),
+    PropertyDefinition(
+        key=Property.DELETED_FILE_RETENTION_DURATION,
+        value_description="an interval string such as 'interval 7 days'",
+        is_valid_value=_is_interval,
+    ),
+    PropertyDefinition(
+        key=Property.LOG_RETENTION_DURATION,
+        value_description="an interval string such as 'interval 30 days'",
+        is_valid_value=_is_interval,
+    ),
+    PropertyDefinition(
+        key=Property.DATA_SKIPPING_NUM_INDEXED_COLS,
+        value_description="an integer >= -1 (-1 indexes all columns)",
+        is_valid_value=_is_integer_at_least_minus_one,
+    ),
     PropertyDefinition(
         key=Property.COLUMN_MAPPING_MODE,
+        value_description="'none' or 'name'",
+        is_valid_value=_is_column_mapping_mode,
         # The protocol upgrade (minReader 2 / minWriter 5, physical column
         # names) is permanent: only none -> name is a legal change. The
         # absence of any (value, None) pair blocks removal by the same

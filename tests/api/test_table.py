@@ -446,6 +446,29 @@ def test_rejects_unregistered_key_declared_as_none():
         )
 
 
+def test_delta_table_rejects_invalid_property_value() -> None:
+    with pytest.raises(ValueError, match=r"delta\.enableChangeDataFeed"):
+        DeltaTable(
+            "dev",
+            "silver",
+            "orders",
+            columns=[Column("id", Integer())],
+            properties={"delta.enableChangeDataFeed": "yes"},
+        )
+
+
+def test_delta_table_accepts_none_property_value_without_value_check() -> None:
+    # None asserts absence; it is not a value and must not be validated as one.
+    table = DeltaTable(
+        "dev",
+        "silver",
+        "orders",
+        columns=[Column("id", Integer())],
+        properties={"delta.enableChangeDataFeed": None},
+    )
+    assert table.to_desired_table().properties["delta.enableChangeDataFeed"] is None
+
+
 def test_metadata_only_table_still_lowers_the_full_schema():
     # Given a metadata-only declaration with full schema detail
     table = DeltaTable(
