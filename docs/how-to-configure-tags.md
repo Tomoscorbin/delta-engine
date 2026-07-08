@@ -44,7 +44,7 @@ This means a tag applied outside delta-engine (in the Databricks UI, by another 
 
 Tags require Unity Catalog on Databricks Runtime 13.3 LTS or later, and the `APPLY TAG` privilege on the table (plus `USE SCHEMA` / `USE CATALOG`). On non-Unity-Catalog environments the engine observes no tags and emits no tag changes.
 
-Databricks limits: up to 50 tags per table; keys and values up to 256 characters; tag keys cannot contain `. , - = / :` or leading/trailing spaces.
+Databricks limits: up to 50 tags per table; keys up to 256 characters and values up to 1,000 characters; tag keys cannot contain `. , - = / :` or leading/trailing spaces. Delta-engine enforces the 50-tag limit and the 1,000-character value limit at declaration time; declarations that violate these limits fail immediately with a `ValueError`.
 
 ## Column tags
 
@@ -81,5 +81,7 @@ As with table tags, keys are **case-sensitive** (`PII` and `pii` are distinct).
 
 Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and the
 `APPLY TAG` privilege. Databricks limits: up to 50 tags per column, at most 1,000
-column tags per table across all columns, keys and values up to 256 characters,
-and tag keys cannot contain `. , - = / :` or leading/trailing spaces.
+column tags per table across all columns, keys up to 256 characters and values up
+to 1,000 characters, and tag keys cannot contain `. , - = / :` or leading/trailing
+spaces. Delta-engine enforces the 50-tags-per-column limit and the 1,000-character
+value limit at declaration time; violations fail immediately with a `ValueError`.
