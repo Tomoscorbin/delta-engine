@@ -17,7 +17,7 @@ class SyncFailedError(Exception):
         self.report = report
 
         failed_tables = [
-            table_report for table_report in report.table_reports if table_report.has_failures
+            report for report in report.table_reports if report.has_failures
         ]
         header = f"Sync failed: {len(failed_tables)}/{len(report.table_reports)} tables failed"
 
