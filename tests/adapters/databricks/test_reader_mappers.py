@@ -17,6 +17,7 @@ from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
 from delta_engine.adapters.databricks.reader import (
+    DatabricksReader,
     _column_tags_from_rows,
     _foreign_keys_from_rows,
     _managed_properties_from_row,
@@ -25,6 +26,7 @@ from delta_engine.adapters.databricks.reader import (
     _table_tags_from_rows,
     _to_column_mapping,
 )
+from delta_engine.application.ports import ReadFailed
 from delta_engine.domain.model import ForeignKeyReference, QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 
@@ -244,3 +246,21 @@ def test_unmappable_non_partition_column_is_still_skipped(spark) -> None:
     column = spark_column(name="extra", dataType="void", isPartition=False)
 
     assert _to_column_mapping(column, QualifiedName("dev", "silver", "orders")) is None
+
+
+def test_fetch_state_returns_read_failed_for_unmappable_partition_column(spark) -> None:
+    # Given a catalog whose table has a partition column the engine cannot map
+    bad_column = spark_column(name="part", dataType="void", isPartition=True)
+    stub_spark = SimpleNamespace(
+        catalog=SimpleNamespace(
+            tableExists=lambda name: True,
+            listColumns=lambda name: [bad_column],
+        )
+    )
+
+    # When fetching state through the port
+    state = DatabricksReader(stub_spark).fetch_state(QualifiedName("dev", "silver", "orders"))
+
+    # Then the mapper's refusal surfaces as a typed ReadFailed, not an exception
+    assert isinstance(state, ReadFailed)
+    assert "partition" in state.failure.message.lower()

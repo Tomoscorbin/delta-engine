@@ -459,9 +459,9 @@ def test_rejects_unregistered_key_declared_as_none():
 def test_delta_table_rejects_invalid_property_value() -> None:
     with pytest.raises(ValueError, match=r"delta\.enableChangeDataFeed"):
         DeltaTable(
-            "dev",
-            "silver",
-            "orders",
+            catalog="dev",
+            schema="silver",
+            name="orders",
             columns=[Column("id", Integer())],
             properties={"delta.enableChangeDataFeed": "yes"},
         )
@@ -470,13 +470,39 @@ def test_delta_table_rejects_invalid_property_value() -> None:
 def test_delta_table_accepts_none_property_value_without_value_check() -> None:
     # None asserts absence; it is not a value and must not be validated as one.
     table = DeltaTable(
-        "dev",
-        "silver",
-        "orders",
+        catalog="dev",
+        schema="silver",
+        name="orders",
         columns=[Column("id", Integer())],
         properties={"delta.enableChangeDataFeed": None},
     )
     assert table.to_desired_table().properties["delta.enableChangeDataFeed"] is None
+
+
+def test_metadata_only_table_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
+    # metadata_only declarations do not manage properties, so the declaration
+    # is a mirror of existing state, not an attempt to enable CDF.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer()), Column("_change_type", String())],
+        properties={"delta.enableChangeDataFeed": "true"},
+        metadata_only=True,
+    )
+    assert len(table.to_desired_table().columns) == 2
+
+
+def test_delta_table_accepts_column_tags_at_the_limits() -> None:
+    # A column is its own securable: 50 tags of 1,000 characters are accepted
+    at_limit = {f"tag_{i}": "x" * 1000 for i in range(50)}
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer(), tags=at_limit)],
+    )
+    assert len(table.to_desired_table().columns[0].tags) == 50
 
 
 def test_metadata_only_table_still_lowers_the_full_schema():

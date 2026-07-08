@@ -65,13 +65,15 @@ class Decimal(DataType):
 
     def __post_init__(self) -> None:
         """Validate that 0 < precision <= 38 and 0 <= scale <= precision."""
-        if self.precision <= 0 or not (0 <= self.scale <= self.precision):
-            raise ValueError("invalid decimal(precision, scale)")
+        # The cap is checked first so an over-limit precision always gets the
+        # message naming the limit, even when the scale is also out of range.
         if self.precision > _MAX_DECIMAL_PRECISION:
             raise ValueError(
                 f"decimal precision must be at most {_MAX_DECIMAL_PRECISION}"
                 f" (Delta/Spark limit); got {self.precision}"
             )
+        if self.precision <= 0 or not (0 <= self.scale <= self.precision):
+            raise ValueError("invalid decimal(precision, scale)")
 
 
 @dataclass(frozen=True, slots=True)
