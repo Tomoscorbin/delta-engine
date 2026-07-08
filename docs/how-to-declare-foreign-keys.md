@@ -40,6 +40,8 @@ orders = DeltaTable(
 
 The engine derives the constraint name as `{table_name}_{local_columns}_fk` — `orders_customer_id_fk` above. This name is internal; `constraint_name` is not part of the public API.
 
+Each local column's data type must match its corresponding referenced primary-key column's data type. A mismatch raises `ValueError` when the `DeltaTable` is constructed, before any sync runs.
+
 ## Self-referential foreign keys
 
 Use the `Self` sentinel when a table references itself:
