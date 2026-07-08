@@ -8,7 +8,17 @@ from delta_engine.domain.model import (
     TableAspect,
 )
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
-from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, Property, String
+from delta_engine.schema import (
+    Array,
+    Column,
+    DeltaTable,
+    ForeignKey,
+    Integer,
+    Property,
+    String,
+    Struct,
+    StructField,
+)
 
 
 @pytest.mark.parametrize(
@@ -494,3 +504,79 @@ def test_metadata_aspects_excludes_structure_properties_and_partitioning():
             TableAspect.PARTITIONING,
         }
     )
+
+
+def test_delta_table_rejects_special_character_column_names_without_column_mapping() -> None:
+    with pytest.raises(ValueError, match="columnMapping"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("order id", Integer())],
+        )
+
+
+def test_delta_table_accepts_special_character_column_names_with_column_mapping() -> None:
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("order id", Integer())],
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    assert table.to_desired_table().columns[0].name == "order id"
+
+
+def test_delta_table_rejects_special_character_struct_field_names_without_column_mapping() -> None:
+    with pytest.raises(ValueError, match="columnMapping"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[
+                Column("payload", Struct((StructField("order id", Integer()),))),
+            ],
+        )
+
+
+def test_delta_table_accepts_special_character_struct_field_names_with_column_mapping() -> None:
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[
+            Column("payload", Struct((StructField("order id", Integer()),))),
+        ],
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    [column] = table.to_desired_table().columns
+    assert column.data_type == Struct((StructField("order id", Integer()),))
+
+
+def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_array() -> None:
+    # Proves the gate recurses through container types, not just direct struct columns.
+    with pytest.raises(ValueError, match="columnMapping"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[
+                Column(
+                    "items",
+                    Array(Struct((StructField("order id", Integer()),))),
+                ),
+            ],
+        )
+
+
+def test_metadata_only_table_mirrors_special_character_columns_without_the_property() -> None:
+    # metadata_only never creates or adds columns; the catalog already
+    # accepted this name, so the declaration must be able to mirror it.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("order id", Integer())],
+        metadata_only=True,
+    )
+    assert table.to_desired_table().columns[0].name == "order id"

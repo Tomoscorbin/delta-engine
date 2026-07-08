@@ -6,14 +6,18 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Array,
     Column,
+    DataType,
     DesiredTable,
     ForeignKeyConstraint,
+    Map,
     PrimaryKeyConstraint,
     QualifiedName,
+    Struct,
     TableAspect,
 )
 
@@ -39,6 +43,41 @@ METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
         TableAspect.FOREIGN_KEYS,
     }
 )
+
+# Delta permits these characters in column names only under column mapping.
+_CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
+
+
+def _column_declared_names(column: Column) -> tuple[str, ...]:
+    """
+    Return every name a column declares under Delta's naming rules.
+
+    This is the column's own name, plus every struct field name reachable
+    through nested ``Struct``/``Array``/``Map`` types (struct-in-array,
+    struct-in-struct, and so on). The column's own name is returned bare;
+    nested field names are returned as dotted paths from the column, e.g.
+    ``"payload.order id"`` for a field named ``"order id"`` inside a struct
+    column named ``"payload"``.
+    """
+    return (column.name, *_nested_field_paths(column.name, column.data_type))
+
+
+def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
+    """Recursively collect dotted struct-field paths reachable from `data_type`."""
+    match data_type:
+        case Struct(fields):
+            paths: list[str] = []
+            for field in fields:
+                field_path = f"{path}.{field.name}"
+                paths.append(field_path)
+                paths.extend(_nested_field_paths(field_path, field.data_type))
+            return tuple(paths)
+        case Array(element):
+            return _nested_field_paths(path, element)
+        case Map(key, value):
+            return _nested_field_paths(path, key) + _nested_field_paths(path, value)
+        case _:
+            return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +204,22 @@ class DeltaTable:
                 raise ValueError(rejection)
 
         columns = tuple(columns)
+
+        if not metadata_only and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+            offending = [
+                name
+                for column in columns
+                for name in _column_declared_names(column)
+                if set(name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+            ]
+            if offending:
+                raise ValueError(
+                    f"Column or struct field names {offending} contain characters Delta only"
+                    " permits with column mapping. Declare"
+                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
+                    " or rename the columns."
+                )
+
         primary_key_columns = tuple(column.name for column in columns if column.primary_key)
         primary_key = (
             PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
