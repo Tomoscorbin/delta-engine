@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+_MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
+
 
 class DataType:
     """Base class for all data types."""
@@ -53,7 +55,7 @@ class Decimal(DataType):
     Fixed-precision decimal type.
 
     Attributes:
-        precision: Total number of digits.
+        precision: Total number of digits (1-38, Delta/Spark limit).
         scale: Digits to the right of the decimal point.
 
     """
@@ -62,9 +64,14 @@ class Decimal(DataType):
     scale: int = 0
 
     def __post_init__(self) -> None:
-        """Validate that precision > 0 and 0 <= scale <= precision."""
+        """Validate that 0 < precision <= 38 and 0 <= scale <= precision."""
         if self.precision <= 0 or not (0 <= self.scale <= self.precision):
             raise ValueError("invalid decimal(precision, scale)")
+        if self.precision > _MAX_DECIMAL_PRECISION:
+            raise ValueError(
+                f"decimal precision must be at most {_MAX_DECIMAL_PRECISION}"
+                f" (Delta/Spark limit); got {self.precision}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
