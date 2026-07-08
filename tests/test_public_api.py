@@ -57,6 +57,13 @@ def test_all_advertises_eager_and_lazy_names():
     assert set(delta_engine.__all__) == _EAGER
 
 
+def test_version_is_exposed_as_a_string():
+    # Then the package advertises its version, even though it is metadata
+    # rather than part of the __all__ runtime surface
+    assert isinstance(delta_engine.__version__, str)
+    assert delta_engine.__version__
+
+
 def test_unknown_attribute_raises_attribute_error():
     # Given an attribute the package does not expose
     # When accessing it

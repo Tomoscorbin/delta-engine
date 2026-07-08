@@ -28,13 +28,14 @@ try:
 except PackageNotFoundError:  # running from a source tree that is not installed
     __version__ = "0.0.0"
 
+# `__version__` is package metadata, not part of the runtime API surface, so it
+# is intentionally not advertised in `__all__`; access it as `delta_engine.__version__`.
 __all__ = [
     "Engine",
     "Failure",
     "SyncFailedError",
     "SyncReport",
     "TableRunStatus",
-    "__version__",
     "render_diff",
     "render_report",
 ]
