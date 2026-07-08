@@ -16,7 +16,9 @@ class SyncFailedError(Exception):
         """Build a rich error message from the supplied sync `report`."""
         self.report = report
 
-        failed_tables = [t for t in report.table_reports if t.has_failures]
+        failed_tables = [
+            table_report for table_report in report.table_reports if table_report.has_failures
+        ]
         header = f"Sync failed: {len(failed_tables)}/{len(report.table_reports)} tables failed"
 
         details: list[str] = []

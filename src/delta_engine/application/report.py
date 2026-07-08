@@ -78,12 +78,16 @@ class SyncReport:
     @property
     def any_failures(self) -> bool:
         """Return True if any table failed in the run."""
-        return any(t.has_failures for t in self.table_reports)
+        return any(table_report.has_failures for table_report in self.table_reports)
 
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
         """Mapping of qualified table name to its failures (if any)."""
-        return {t.qualified_name: t.failures for t in self.table_reports if t.has_failures}
+        return {
+            table_report.qualified_name: table_report.failures
+            for table_report in self.table_reports
+            if table_report.has_failures
+        }
 
     def __iter__(self) -> Iterator[TableRunReport]:
         return iter(self.table_reports)
