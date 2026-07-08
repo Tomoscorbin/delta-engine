@@ -117,5 +117,5 @@ def _sql_preview(sql: str, *, max_chars: int = 240) -> str:
     lands in ``statement_preview`` on execution results and in log lines, never
     back in SQL sent to Spark.
     """
-    s = " ".join(sql.split())
-    return s if len(s) <= max_chars else (s[:max_chars] + "…")
+    normalized = " ".join(sql.split())
+    return normalized if len(normalized) <= max_chars else (normalized[:max_chars] + "…")

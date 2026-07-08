@@ -15,7 +15,7 @@ import functools
 
 from delta_engine.application.ports import ReadFailed
 from delta_engine.application.report import SyncReport, TableRunReport
-from delta_engine.domain.model import Column
+from delta_engine.domain.model import Column, DataType
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -38,7 +38,7 @@ from delta_engine.domain.plan import (
 )
 
 
-def _type_name(data_type: object) -> str:
+def _type_name(data_type: DataType) -> str:
     """Backend-agnostic display name for a domain data type (e.g. 'String')."""
     return type(data_type).__name__
 
@@ -298,7 +298,7 @@ def run_summary_footer(report: SyncReport) -> str:
     for table_report in report.table_reports:
         if table_report.has_failures:
             failed += 1
-        elif len(table_report.plan):
+        elif table_report.plan:
             changed += 1
         else:
             unchanged += 1
