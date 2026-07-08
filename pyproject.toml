@@ -17,6 +17,7 @@ classifiers = [
   "Topic :: Database",
   "Typing :: Typed",
 ]
+dynamic = ["version"]
 # Runtime dependencies are intentionally empty: the schema/planning surface is
 # pure Python. pyspark/delta-spark are dev-only (see [dependency-groups]) so the
 # library can be imported to define and plan tables without a Spark install.
@@ -52,8 +53,13 @@ docs = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "v(?P<version>\\d+\\.\\d+\\.\\d+)"
+fallback-version = "0.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/delta_engine"]
