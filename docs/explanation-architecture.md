@@ -145,6 +145,15 @@ enforcing the length. The trade-off is deliberate: a declaration cannot create
 a varchar column, and an out-of-band length change is invisible to drift
 detection.
 
+`Struct` shows the same rule inside a modeled type. Struct fields carry name
+and type only: the catalog reports column types as DDL text, which does not
+reliably round-trip nested field nullability or comments, so declaring either
+would produce a permanent, blocked `ColumnDataTypeChanged` against whatever
+the reader observes. Both sides normalize to name + type instead — declared
+fields are created nullable, nested comments are unmanaged, and modeling
+field nullability waits until the reader observes a real `StructType` rather
+than DDL text.
+
 ## Sync lifecycle
 
 `Engine.sync(...)` is a phase chain. Before the chain begins, user-facing table

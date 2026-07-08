@@ -19,6 +19,8 @@ from delta_engine.domain.model.data_type import (
     Map,
     Short,
     String,
+    Struct,
+    StructField,
     Timestamp,
     TimestampNtz,
     Variant,
@@ -100,3 +102,37 @@ def test_domain_type_from_spark_returns_none_when_collection_element_is_unmappab
     # Then the whole type is unmappable
     assert domain_type_from_spark(T.ArrayType(T.NullType())) is None
     assert domain_type_from_spark(T.MapType(T.StringType(), T.NullType())) is None
+
+
+def test_sql_type_for_struct_renders_fields_in_order() -> None:
+    struct = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
+    assert sql_type_for_data_type(struct) == "STRUCT<`a`: INT, `b`: ARRAY<STRING>>"
+
+
+def test_domain_type_from_spark_maps_struct_and_casefolds_field_names() -> None:
+    spark_struct = T.StructType(
+        [
+            T.StructField("Amount", T.DecimalType(10, 2)),
+            T.StructField("note", T.StringType()),
+        ]
+    )
+    assert domain_type_from_spark(spark_struct) == Struct(
+        (StructField("amount", Decimal(10, 2)), StructField("note", String()))
+    )
+
+
+def test_domain_type_from_spark_returns_none_for_struct_with_unmappable_field() -> None:
+    spark_struct = T.StructType([T.StructField("x", T.NullType())])
+    assert domain_type_from_spark(spark_struct) is None
+
+
+def test_domain_type_from_spark_returns_none_for_struct_with_casefold_colliding_field_names() -> (
+    None
+):
+    spark_struct = T.StructType(
+        [
+            T.StructField("Amount", T.IntegerType()),
+            T.StructField("amount", T.StringType()),
+        ]
+    )
+    assert domain_type_from_spark(spark_struct) is None

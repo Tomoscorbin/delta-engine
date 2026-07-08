@@ -28,12 +28,14 @@ from pyspark.sql.types import (
     MapType,
     ShortType,
     StringType,
+    StructType,
     TimestampNTZType,
     TimestampType,
     VarcharType,
     VariantType,
 )
 
+from delta_engine.adapters.databricks.sql.dialect import backtick
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -49,6 +51,8 @@ from delta_engine.domain.model import (
     Map,
     Short,
     String,
+    Struct,
+    StructField,
     Timestamp,
     TimestampNtz,
     Variant,
@@ -90,6 +94,12 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             return "TIMESTAMP_NTZ"
         case Variant():
             return "VARIANT"
+        case Struct(fields):
+            rendered = ", ".join(
+                f"{backtick(field.name)}: {sql_type_for_data_type(field.data_type)}"
+                for field in fields
+            )
+            return f"STRUCT<{rendered}>"
         case _:
             cls = data_type.__class__.__name__
             raise TypeError(f"Unsupported DataType variant: {cls}")
@@ -100,8 +110,9 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
     Map a ``pyspark`` type instance to a domain type.
 
     Returns ``None`` when the type has no domain mapping (e.g. ``VOID``,
-    ``INTERVAL``, ``STRUCT``). An unmappable element inside an ``ARRAY`` or
-    ``MAP`` makes the whole type unmappable. An unmappable type is a routine,
+    ``INTERVAL``). An unmappable element inside an ``ARRAY``, ``MAP``, or
+    ``STRUCT`` makes the whole type unmappable, as do struct field names that
+    collide after casefolding. An unmappable type is a routine,
     expected condition -- new Spark types appear over time -- so it is a
     ``None`` return, not an exception. Callers decide what to do with ``None``
     (the reader skips the column and logs a warning).
@@ -154,5 +165,21 @@ def domain_type_from_spark(spark_type: SparkType) -> DataType | None:
             # engine sees these as plain strings, plans no change for them,
             # and never emits CHAR/VARCHAR in DDL.
             return String()
+        case StructType():
+            fields: list[StructField] = []
+            seen_names: set[str] = set()
+            for spark_field in spark_type.fields:
+                field_type = domain_type_from_spark(spark_field.dataType)
+                if field_type is None:
+                    return None
+                name = spark_field.name.casefold()
+                if name in seen_names:
+                    # Field names that collide after casefolding cannot be
+                    # represented in the domain model, so the struct is
+                    # unmappable rather than a constructor error.
+                    return None
+                seen_names.add(name)
+                fields.append(StructField(name=name, data_type=field_type))
+            return Struct(tuple(fields))
         case _:
             return None

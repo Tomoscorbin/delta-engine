@@ -3,7 +3,16 @@ import inspect
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName, String
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    QualifiedName,
+    String,
+    Struct,
+    StructField,
+    Variant,
+)
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -248,6 +257,27 @@ def test_create_table_without_primary_key_omits_constraint_clause():
     # Then no constraint clause appears
     assert "PRIMARY KEY" not in statement
     assert "CONSTRAINT" not in statement
+
+
+def test_create_table_backticks_struct_field_names_and_renders_variant():
+    # Given a CREATE TABLE with a struct column whose field name needs column
+    # mapping, and a variant column
+    action = _create_table(
+        Column("payload", Struct((StructField("order id", Integer()),))),
+        Column("attributes", Variant()),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+
+    # When compiling
+    statement = _compile_single(action)
+
+    # Then the struct field name is backtick-quoted and VARIANT is rendered
+    assert statement == (
+        "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
+        " (`payload` STRUCT<`order id`: INT>, `attributes` VARIANT)"
+        " USING delta"
+        " TBLPROPERTIES ('delta.columnMapping.mode'='name')"
+    )
 
 
 @pytest.mark.parametrize(
