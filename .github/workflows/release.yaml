@@ -1,8 +1,27 @@
 name: Release
 
+# Releases are on-demand. Commits accumulate on main between releases; cutting a
+# release rolls up everything since the last one into a single version bump.
+#
+# Run this workflow from the Actions tab:
+#   - "tag" blank        -> cut a NEW release: commitizen bumps from accumulated
+#                           commits, tags, updates the changelog, builds, and
+#                           publishes to PyPI + GitHub Releases.
+#   - "tag" set          -> publish an EXISTING tag as-is (recovery / re-publish),
+#                           with no bump (e.g. tag = v0.1.0).
+#   - "dry_run" checked  -> preview the new-release version without publishing.
+
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish as-is, e.g. v0.1.0. Blank = cut a new release."
+        required: false
+        default: ""
+      dry_run:
+        description: "Preview the new-release version bump without publishing."
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -10,9 +29,8 @@ concurrency:
 
 jobs:
   release:
-    if: "!startsWith(github.event.head_commit.message, 'bump:')"
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: pypi # OIDC binding for Trusted Publishing (approval optional)
     permissions:
       contents: write # push the bump commit + tag
       id-token: write # OIDC for Trusted Publishing
@@ -33,40 +51,65 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --locked --group dev
 
-      - name: Decide whether a release is needed
-        id: gate
+      - name: Determine mode
+        id: mode
         run: |
-          if uv run cz bump --yes --dry-run > /dev/null 2>&1; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "publish=true"  >> "$GITHUB_OUTPUT"   # re-publish an existing tag
+            echo "bump=false"    >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"   # preview only
+            echo "bump=false"    >> "$GITHUB_OUTPUT"
           else
-            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "publish=true"  >> "$GITHUB_OUTPUT"   # cut a new release
+            echo "bump=true"     >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check out the tag to publish
+        # Detach onto the exact tag so hatch-vcs builds that clean version rather
+        # than a dev version derived from later commits on main.
+        if: inputs.tag != ''
+        run: git checkout "refs/tags/${{ inputs.tag }}"
+
+      - name: Preview bump (dry run)
+        if: inputs.tag == '' && inputs.dry_run
+        run: |
+          uv run cz bump --yes --dry-run
+          echo "Dry run only — nothing was published."
+
       - name: Bump version, changelog, tag, and push
-        if: steps.gate.outputs.release == 'true'
+        if: steps.mode.outputs.bump == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run cz bump --yes --changelog
           git push --follow-tags origin HEAD:main
-          echo "VERSION=$(uv run cz version --project)" >> "$GITHUB_ENV"
 
-      - name: Extract release notes for this version
-        if: steps.gate.outputs.release == 'true'
-        run: uv run cz changelog "v${VERSION}" --dry-run > body.md
+      - name: Resolve version and release notes
+        if: steps.mode.outputs.publish == 'true'
+        id: notes
+        run: |
+          VERSION="$(uv run cz version --project)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Slice the newest CHANGELOG.md section (between the first two `## `
+          # headers) for the GitHub Release body. Never fatal.
+          if [ -f CHANGELOG.md ]; then
+            awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md > body.md || true
+          fi
+          [ -s body.md ] || echo "Release $VERSION" > body.md
 
       - name: Build sdist and wheel
-        if: steps.gate.outputs.release == 'true'
+        if: steps.mode.outputs.publish == 'true'
         run: uv build
 
       - name: Publish to PyPI
-        if: steps.gate.outputs.release == 'true'
+        if: steps.mode.outputs.publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create GitHub Release
-        if: steps.gate.outputs.release == 'true'
+        if: steps.mode.outputs.publish == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ env.VERSION }}
+          tag: v${{ steps.notes.outputs.version }}
           bodyFile: body.md
           skipIfReleaseExists: true
