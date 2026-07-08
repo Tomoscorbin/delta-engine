@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -120,8 +120,13 @@ class ForeignKey:
     reference is an object rather than a name.
     """
 
-    local_columns: tuple[str, ...]
+    local_columns: Sequence[str]
     references: DeltaTable | _SelfReference
+
+    def __post_init__(self) -> None:
+        # Accept any sequence at the public boundary (users naturally pass
+        # lists); store a tuple so the declaration stays immutable.
+        object.__setattr__(self, "local_columns", tuple(self.local_columns))
 
     def _to_constraint(
         self,
@@ -223,7 +228,7 @@ class DeltaTable:
         columns: Iterable[Column],
         comment: str = "",
         properties: Mapping[str, str | None] | None = None,
-        tags: dict[str, str] | None = None,
+        tags: Mapping[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
         metadata_only: bool = False,
