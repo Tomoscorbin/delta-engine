@@ -2,7 +2,7 @@ from types import MappingProxyType
 
 import pytest
 
-from delta_engine.api.table import METADATA_ASPECTS
+from delta_engine.api.delta_table import METADATA_ASPECTS
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column as DomainColumn,
