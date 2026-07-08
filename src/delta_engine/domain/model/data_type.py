@@ -75,6 +75,31 @@ class Decimal(DataType):
 
 
 @dataclass(frozen=True, slots=True)
+class Byte(DataType):
+    """8-bit signed integer type (TINYINT)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Short(DataType):
+    """16-bit signed integer type (SMALLINT)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Binary(DataType):
+    """Sequence-of-bytes type."""
+
+
+@dataclass(frozen=True, slots=True)
+class TimestampNtz(DataType):
+    """Timestamp with date and time, no timezone."""
+
+
+@dataclass(frozen=True, slots=True)
+class Variant(DataType):
+    """Semi-structured value type (Databricks VARIANT)."""
+
+
+@dataclass(frozen=True, slots=True)
 class Array(DataType):
     """Array of homogeneous ``element`` values."""
 

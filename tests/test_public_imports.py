@@ -12,7 +12,9 @@ from delta_engine.application.properties import Property as PropertyImpl
 import delta_engine.databricks as databricks
 from delta_engine.domain.model import (
     Array,
+    Binary,
     Boolean,
+    Byte,
     Column,
     Date,
     Decimal,
@@ -21,14 +23,19 @@ from delta_engine.domain.model import (
     Integer,
     Long,
     Map,
+    Short,
     String,
     Timestamp,
+    TimestampNtz,
+    Variant,
 )
 import delta_engine.schema as schema
 
 _SCHEMA_EXPORTS = {
     "Array",
+    "Binary",
     "Boolean",
+    "Byte",
     "Column",
     "Date",
     "Decimal",
@@ -41,8 +48,11 @@ _SCHEMA_EXPORTS = {
     "Map",
     "Property",
     "Self",
+    "Short",
     "String",
     "Timestamp",
+    "TimestampNtz",
+    "Variant",
 }
 
 
@@ -54,7 +64,9 @@ def test_schema_import_path_matches_implementation_objects():
     # Given the preferred user-facing schema import path
     implementations = {
         "Array": Array,
+        "Binary": Binary,
         "Boolean": Boolean,
+        "Byte": Byte,
         "Column": Column,
         "Date": Date,
         "Decimal": Decimal,
@@ -67,8 +79,11 @@ def test_schema_import_path_matches_implementation_objects():
         "Map": Map,
         "Property": PropertyImpl,
         "Self": SelfImpl,
+        "Short": Short,
         "String": String,
         "Timestamp": Timestamp,
+        "TimestampNtz": TimestampNtz,
+        "Variant": Variant,
     }
 
     # Then it exposes exactly the supported declaration names

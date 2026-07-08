@@ -121,6 +121,30 @@ domain data types, reads Unity Catalog constraints and tags, quotes SQL
 identifiers, and turns Spark/Py4J exceptions into `ReadFailure` or
 `ExecutionFailure` values.
 
+### Type-model fidelity
+
+The differ compares a declared table with an observed one, so every fact the
+domain type model carries must survive the round trip
+declaration → catalog → observation exactly. A fact that only one side can
+carry is worse than an unmodeled one. Declarable but not observable: every
+sync reports drift that is not there, and when the false drift is a blocked
+change (a column type change, say) the table fails validation forever.
+Observable but not declarable: the catalog permanently disagrees with the only
+spelling a declaration can use. Facts that cannot round-trip are therefore
+normalized out on both sides rather than modeled halfway.
+
+`CHAR(n)` and `VARCHAR(n)` are the worked example. Delta stores both as
+`STRING` and enforces the length bound as a write-time check, and Databricks
+recommends `STRING` for new tables. Mapping them to their own domain types on
+the read side only would make every observed varchar column drift against the
+only declarable spelling (`String`) and fail validation permanently; modeling
+them fully would mean owning length-transition safety rules for a type the
+platform steers users away from. The reader instead observes both as `String`:
+no drift, no `CHAR`/`VARCHAR` DDL is ever emitted, and the catalog keeps
+enforcing the length. The trade-off is deliberate: a declaration cannot create
+a varchar column, and an out-of-band length change is invisible to drift
+detection.
+
 ## Sync lifecycle
 
 `Engine.sync(...)` is a phase chain. Before the chain begins, user-facing table
