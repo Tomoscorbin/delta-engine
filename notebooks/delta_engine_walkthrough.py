@@ -641,6 +641,58 @@ print("Step 5e verified: unresolved foreign key blocked, no table created.")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### 5f. Dropping a primary key that other tables reference
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Stop declaring the `customers` primary key while the live `orders` table
+# MAGIC still holds a foreign key to it. `orders` is deliberately **not** passed to
+# MAGIC the sync: the engine must protect the key from referencing tables it was
+# MAGIC never told about.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Blocked: `DROP PRIMARY KEY` is RESTRICT by default in Unity Catalog — it
+# MAGIC fails while any foreign key references the key. The engine reads the
+# MAGIC inbound references from `information_schema` when it observes the table,
+# MAGIC so validation refuses before any SQL runs, and the failure message names
+# MAGIC the blocking constraint (`orders_customer_id_fk`) and the tables to sync
+# MAGIC first.
+
+# COMMAND ----------
+
+# Same declaration as the live table, except id is no longer a primary key.
+customers_without_pk = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="customers",
+    columns=[
+        Column("id", Long(), nullable=False),  # <-- primary_key=True removed
+        Column("name", String(), comment="Full legal name"),
+        Column("email", String()),
+        Column("status", String()),
+    ],
+    comment="Customer master table (with contact details)",
+    tags={"domain": "sales"},
+    properties={
+        Property.COLUMN_MAPPING_MODE: "name",
+        Property.CHANGE_DATA_FEED: "true",
+    },
+)
+
+report = sync_expecting_failure(customers_without_pk)  # <-- orders not passed
+
+# COMMAND ----------
+
+[customers_report] = report.table_reports
+assert customers_report.status is TableRunStatus.VALIDATION_FAILED
+assert inspector.has_primary_key("customers")
+assert inspector.has_foreign_key("orders")
+print("Step 5f verified: primary key drop blocked while orders' foreign key references it.")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 6. Construction-time guards
 # MAGIC
 # MAGIC **Goal**
