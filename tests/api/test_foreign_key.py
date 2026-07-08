@@ -196,6 +196,39 @@ def test_self_referential_foreign_key_rejects_type_mismatch():
         )
 
 
+def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
+    # Given a composite referenced primary key where only the second local
+    # column's type differs
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False, primary_key=True),
+            Column("id", Long(), nullable=False, primary_key=True),
+        ],
+    )
+
+    # When / Then construction fails naming the mismatched pair
+    with pytest.raises(ValueError, match=r"orders\.customer_id"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[
+                Column("id", Long(), nullable=False, primary_key=True),
+                Column("customer_tenant_id", Integer()),
+                Column("customer_id", String()),
+            ],
+            foreign_keys=[
+                ForeignKey(
+                    local_columns=("customer_tenant_id", "customer_id"),
+                    references=customers,
+                )
+            ],
+        )
+
+
 def test_foreign_key_with_matching_types_still_lowers():
     # Given a referenced primary key and local column that share the same type
     customers = DeltaTable(

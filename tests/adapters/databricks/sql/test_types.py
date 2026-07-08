@@ -126,9 +126,7 @@ def test_domain_type_from_spark_returns_none_for_struct_with_unmappable_field() 
     assert domain_type_from_spark(spark_struct) is None
 
 
-def test_domain_type_from_spark_returns_none_for_struct_with_casefold_colliding_field_names() -> (
-    None
-):
+def test_struct_with_casefold_colliding_field_names_is_unmappable() -> None:
     spark_struct = T.StructType(
         [
             T.StructField("Amount", T.IntegerType()),
@@ -136,3 +134,30 @@ def test_domain_type_from_spark_returns_none_for_struct_with_casefold_colliding_
         ]
     )
     assert domain_type_from_spark(spark_struct) is None
+
+
+def test_leaf_types_round_trip_inside_collections() -> None:
+    # Given leaf types nested in Array/Map, both mapping directions agree
+    assert domain_type_from_spark(T.ArrayType(T.BinaryType())) == Array(Binary())
+    assert domain_type_from_spark(T.MapType(T.ShortType(), T.TimestampNTZType())) == Map(
+        Short(), TimestampNtz()
+    )
+    assert sql_type_for_data_type(Array(Binary())) == "ARRAY<BINARY>"
+    assert sql_type_for_data_type(Map(Short(), TimestampNtz())) == "MAP<SMALLINT,TIMESTAMP_NTZ>"
+
+
+def test_struct_maps_when_nested_in_structs_and_maps() -> None:
+    # Given struct-in-struct and struct-in-map-value shapes
+    inner = T.StructType([T.StructField("x", T.IntegerType())])
+    spark_nested = T.StructType([T.StructField("inner", inner)])
+    spark_in_map = T.MapType(T.StringType(), inner)
+
+    domain_inner = Struct((StructField("x", Integer()),))
+
+    # Then the mapping recurses in both directions
+    assert domain_type_from_spark(spark_nested) == Struct((StructField("inner", domain_inner),))
+    assert domain_type_from_spark(spark_in_map) == Map(String(), domain_inner)
+    assert (
+        sql_type_for_data_type(Struct((StructField("inner", domain_inner),)))
+        == "STRUCT<`inner`: STRUCT<`x`: INT>>"
+    )

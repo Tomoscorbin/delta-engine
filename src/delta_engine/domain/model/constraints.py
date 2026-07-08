@@ -116,6 +116,13 @@ class ForeignKeyReference:
     The inbound counterpart of :class:`ForeignKeyConstraint`: it identifies
     the referencing constraint and its owner without carrying column detail —
     enough for validation to name what blocks a primary-key change.
+
+    Attributes:
+        constraint_name: The referencing constraint's name, as read from the
+            catalog.
+        referencing_table: Fully qualified name of the table that owns the
+            referencing constraint.
+
     """
 
     constraint_name: str

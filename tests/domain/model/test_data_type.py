@@ -31,6 +31,10 @@ def test_decimal_rejects_precision_above_delta_maximum() -> None:
     with pytest.raises(ValueError, match="38"):
         Decimal(39, 0)
 
+    # The limit message wins even when the scale is also out of range
+    with pytest.raises(ValueError, match="38"):
+        Decimal(40, 45)
+
 
 def test_decimal_accepts_maximum_precision_and_scale() -> None:
     assert Decimal(38, 38).precision == 38
