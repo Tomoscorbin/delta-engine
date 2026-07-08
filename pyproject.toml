@@ -1,10 +1,22 @@
 [project]
 name = "delta-engine"
-version = "0.1.0"
 description = "Framework for defining, validating, and evolving tables in a consistent, safe, and controlled way."
-authors = [{ name = "Tomos Corbin", email = "tom_corbin1@hotmail.com" }]
+authors = [{ name = "Tomos Corbin", email = "tomoscorbin@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["delta-lake", "databricks", "schema", "migrations", "ddl", "data-engineering"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+  "Typing :: Typed",
+]
 # Runtime dependencies are intentionally empty: the schema/planning surface is
 # pure Python. pyspark/delta-spark are dev-only (see [dependency-groups]) so the
 # library can be imported to define and plan tables without a Spark install.
@@ -12,6 +24,12 @@ dependencies = []
 
 [project.optional-dependencies]
 databricks = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/Tomoscorbin/delta-engine"
+Repository = "https://github.com/Tomoscorbin/delta-engine"
+Documentation = "https://github.com/Tomoscorbin/delta-engine/tree/main/docs"
+Issues = "https://github.com/Tomoscorbin/delta-engine/issues"
 
 [dependency-groups]
 dev = [
