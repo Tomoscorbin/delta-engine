@@ -93,7 +93,7 @@ def resolve(
 
     cycle_partners = _cycle_partners_by_table(components)
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(tables, registered_names, cycle_partners, set(blocked))
+    failures_by_table = _classify_failures(tables, registered_names, cycle_partners, blocked)
 
     ordered_names = tuple(table.qualified_name for table in ordered)
     return ResolveResult(ordered_names=ordered_names, fk_failures=failures_by_table)
@@ -126,7 +126,7 @@ def blocking_failures(
 
 def _build_dependency_graph(
     tables: tuple[DesiredTable, ...],
-    registered_names: set[QualifiedName],
+    registered_names: AbstractSet[QualifiedName],
 ) -> dict[QualifiedName, set[QualifiedName]]:
     """
     Build an adjacency map from table name to the set of table names it depends on.
@@ -258,9 +258,9 @@ def _order_tables(
 
 def _classify_failures(
     tables: tuple[DesiredTable, ...],
-    registered_names: set[QualifiedName],
+    registered_names: AbstractSet[QualifiedName],
     cycle_partners_by_table: dict[QualifiedName, frozenset[QualifiedName]],
-    already_failed: set[QualifiedName],
+    already_failed: AbstractSet[QualifiedName],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
     Classify every table as buildable or failed because of a foreign key.
@@ -320,7 +320,9 @@ def _classify_failures(
 
     # Pass 2 — propagate to dependents until no new table is blocked.
     # Seed with both FK direct failures and any externally supplied failed names.
-    failed_names = set(failures) | already_failed
+    # Materialize a builtin set: the fixpoint loop below mutates it, and
+    # already_failed may be any read-only AbstractSet.
+    failed_names = set(failures) | set(already_failed)
     changed = True
     while changed:
         changed = False

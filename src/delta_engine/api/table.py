@@ -259,12 +259,11 @@ class DeltaTable:
         # Fast-fail on property keys this engine does not manage (e.g. typos).
         # None-valued assertions are validated too: asserting absence of an
         # unmanaged key is as meaningless as declaring it.
-        if user_properties:
-            unmanaged = [k for k in user_properties if k not in DELTA_PROPERTY_REGISTRY]
-            if unmanaged:
-                raise ValueError(
-                    f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
-                )
+        unmanaged = [key for key in user_properties if key not in DELTA_PROPERTY_REGISTRY]
+        if unmanaged:
+            raise ValueError(
+                f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
+            )
 
         # Fast-fail on malformed values; the definition owns the judgment
         # (including the exemption for None, which asserts absence).

@@ -70,9 +70,9 @@ class TableSnapshot:
             if name != name.casefold():
                 raise ValueError(f"Partition column name must be lowercase: {name!r}")
 
-        missing = [name for name in self.partitioned_by if name not in seen_names]
-        if missing:
-            raise ValueError(f"Partition column not found: {missing[0]}")
+        missing_partitions = [name for name in self.partitioned_by if name not in seen_names]
+        if missing_partitions:
+            raise ValueError(f"Partition column not found: {missing_partitions[0]}")
 
         seen_partitions: set[str] = set()
         for name in self.partitioned_by:
@@ -86,9 +86,13 @@ class TableSnapshot:
                 raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
         for foreign_key in self.foreign_keys:
-            missing = [col for col in foreign_key.local_columns if col not in seen_names]
-            if missing:
-                raise ValueError(f"Foreign key local column not found in columns: {missing[0]}")
+            missing_fk_columns = [
+                name for name in foreign_key.local_columns if name not in seen_names
+            ]
+            if missing_fk_columns:
+                raise ValueError(
+                    f"Foreign key local column not found in columns: {missing_fk_columns[0]}"
+                )
 
         for tag_key in self.tags:
             if not tag_key.strip():
