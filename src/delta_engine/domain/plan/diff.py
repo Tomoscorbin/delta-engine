@@ -102,7 +102,7 @@ class ColumnRemoved:
 
     def actions(self) -> tuple[Action, ...]:
         """DropColumn for the removed column."""
-        return (DropColumn(self.column.name),)
+        return (DropColumn(column_name=self.column.name),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +163,7 @@ class ColumnCommentChanged:
 
     def actions(self) -> tuple[Action, ...]:
         """SetColumnComment to the desired value."""
-        return (SetColumnComment(self.column_name, self.desired_comment),)
+        return (SetColumnComment(column_name=self.column_name, comment=self.desired_comment),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,9 +579,9 @@ def _diff_column_structure(desired: DesiredTable, observed: ObservedTable) -> li
             changes.append(ColumnRemoved(column=column))
 
     for name, desired_column in desired_by_name.items():
-        if name not in observed_by_name:
+        observed_column = observed_by_name.get(name)
+        if observed_column is None:
             continue
-        observed_column = observed_by_name[name]
         if desired_column.data_type != observed_column.data_type:
             changes.append(
                 ColumnDataTypeChanged(
@@ -636,7 +636,7 @@ def _diff_column_tags(desired: DesiredTable, observed: ObservedTable) -> list[Ch
         )
 
         for tag_name, tag_value in column.tags.items():
-            if tag_name not in observed_tags or observed_tags[tag_name] != tag_value:
+            if observed_tags.get(tag_name) != tag_value:
                 changes.append(
                     ColumnTagSet(column_name=column.name, tag_name=tag_name, tag_value=tag_value)
                 )
@@ -699,7 +699,7 @@ def _diff_table_tags(desired: DesiredTable, observed: ObservedTable) -> list[Cha
     changes: list[Change] = []
 
     for name, value in desired.tags.items():
-        if name not in observed.tags or observed.tags[name] != value:
+        if observed.tags.get(name) != value:
             changes.append(TableTagSet(name=name, value=value))
 
     for name in observed.tags:
