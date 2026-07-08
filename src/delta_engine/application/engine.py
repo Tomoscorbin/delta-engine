@@ -1,7 +1,7 @@
 """
 High-level orchestration of planning, validation, and execution.
 
-`Engine.sync` runs a chain of phases, each a pure transform over the per-table
+`Engine.sync` runs a chain of phases, each a pass over the per-table
 runs — one `TableRunReport` is born per table in the read phase and accretes
 its plan, failures, and execution as the chain proceeds. On a real run, if any
 table fails, `SyncFailedError` is raised with a formatted summary.
@@ -29,6 +29,7 @@ is skipped by execution, so all tables are attempted and the report is always
 complete.
 """
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
 
@@ -55,6 +56,7 @@ from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
 class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
@@ -65,19 +67,13 @@ class _TableRun:
     published report stays immutable while the phases mutate in place.
     """
 
-    def __init__(
-        self,
-        qualified_name: QualifiedName,
-        desired: DesiredTable,
-        read: CatalogState,
-    ) -> None:
-        self.qualified_name = qualified_name
-        self.desired = desired
-        self.read = read
-        self.plan = ActionPlan()
-        self.diff: TableDiff | None = None
-        self.failures: list[Failure] = []
-        self.execution: ExecutionSummary | None = None
+    qualified_name: QualifiedName
+    desired: DesiredTable
+    read: CatalogState
+    plan: ActionPlan = field(default_factory=ActionPlan)
+    diff: TableDiff | None = None
+    failures: list[Failure] = field(default_factory=list)
+    execution: ExecutionSummary | None = None
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
