@@ -24,18 +24,26 @@ engine.sync(customers)  # creates the table, or no-ops if it already matches
 
 ## How-to guides
 
-- [Getting started](docs/tutorial-getting-started.md) — define a table and run your first sync
-- [Handle sync failures](docs/how-to-handle-sync-failures.md) — inspect `SyncReport` and act on each status
-- [Configure table properties](docs/how-to-configure-properties.md) — `Property` enum, defaults, overrides
+- [Getting started](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/tutorial-getting-started.md) — define a table and run your first sync
+- [Handle sync failures](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-handle-sync-failures.md) — inspect `SyncReport` and act on each status
+- [Configure table properties](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-configure-properties.md) — `Property` enum, defaults, overrides
 
 ## Reference
 
-- [Data types](docs/reference-data-types.md) — supported types and Spark SQL equivalents
-- [Safe-change rules](docs/reference-safe-change-rules.md) — changes the engine blocks at validation
-- [API reference](docs/reference-api.md) — full public API
+- [Data types](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-data-types.md) — supported types and Spark SQL equivalents
+- [Safe-change rules](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-safe-change-rules.md) — changes the engine blocks at validation
+- [API reference](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-api.md) — full public API
 
 ## Developer
 
-- [Architecture](docs/explanation-architecture.md) — layers, design decisions, why hexagonal
-- [Implement a custom adapter](docs/how-to-implement-adapter.md) — `CatalogStateReader` and `PlanExecutor` protocols
-- [Add a new action type](docs/how-to-add-action-type.md) — extend `Action`, `ActionPhase`, and the compiler
+- [Architecture](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-architecture.md) — layers, design decisions, why hexagonal
+- [Implement a custom adapter](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-implement-adapter.md) — `CatalogStateReader` and `PlanExecutor` protocols
+- [Add a new action type](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-add-action-type.md) — extend `Action`, `ActionPhase`, and the compiler
+
+## Contributing
+
+Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/); the PR title drives the automated version bump and changelog. To lint your commit messages locally, run this once after cloning:
+
+```bash
+uv run pre-commit install --hook-type commit-msg
+```
