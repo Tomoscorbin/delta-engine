@@ -73,9 +73,13 @@ def _to_column_mapping(
     parsing that into a ``SparkType`` is this adapter's job, so the domain-type
     mapper receives a parsed instance.
     """
+    # Catalog column objects are duck-typed: some catalog implementations omit
+    # the nullable/isPartition flags, so a missing flag means "nullable" /
+    # "not a partition" rather than an error.
+    is_partition = bool(getattr(spark_column, "isPartition", False))
     domain_data_type = domain_type_from_spark(SparkType.fromDDL(spark_column.dataType))
     if domain_data_type is None:
-        if bool(getattr(spark_column, "isPartition", False)):
+        if is_partition:
             raise RuntimeError(
                 f"Partition column {spark_column.name!r} in {qualified_name} has"
                 f" type {spark_column.dataType!r}, which this version of"
@@ -96,7 +100,7 @@ def _to_column_mapping(
         return None
 
     nullable = bool(getattr(spark_column, "nullable", True))
-    comment = spark_column.description if spark_column.description else ""
+    comment = spark_column.description or ""
 
     return _ColumnMapping(
         column=DomainColumn(
@@ -105,7 +109,7 @@ def _to_column_mapping(
             nullable=nullable,
             comment=comment,
         ),
-        is_partition=bool(getattr(spark_column, "isPartition", False)),
+        is_partition=is_partition,
     )
 
 
@@ -253,17 +257,20 @@ class DatabricksReader:
             return TableAbsent()
         catalog = qualified_name.catalog
 
-        all_mappings = (
-            _to_column_mapping(c, qualified_name)
-            for c in self.spark.catalog.listColumns(str(qualified_name))
+        candidate_mappings = (
+            _to_column_mapping(spark_column, qualified_name)
+            for spark_column in self.spark.catalog.listColumns(str(qualified_name))
         )
-        mappings = tuple(m for m in all_mappings if m is not None)
+        mappings = tuple(mapping for mapping in candidate_mappings if mapping is not None)
         column_tags = _column_tags_from_rows(
             self._information_schema_rows(catalog, column_tags_query(qualified_name))
         )
         columns = tuple(
-            replace(m.column, tags=column_tags.get(m.column.name, MappingProxyType({})))
-            for m in mappings
+            replace(
+                mapping.column,
+                tags=column_tags.get(mapping.column.name, MappingProxyType({})),
+            )
+            for mapping in mappings
         )
         observed = ObservedTable(
             qualified_name=qualified_name,
@@ -273,7 +280,9 @@ class DatabricksReader:
             tags=_table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
-            partitioned_by=tuple(m.column.name for m in mappings if m.is_partition),
+            partitioned_by=tuple(
+                mapping.column.name for mapping in mappings if mapping.is_partition
+            ),
             primary_key=_primary_key_from_rows(
                 self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),
