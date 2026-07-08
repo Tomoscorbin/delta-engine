@@ -1,0 +1,354 @@
+## v0.1.0 (2026-07-08)
+
+### Feat
+
+- **api**: accept any sequence or mapping in public declarations, store tuples internally
+- **validation**: block primary key drops while foreign keys reference the key
+- **diff**: carry inbound foreign key references on primary key changes
+- **reader**: observe foreign keys referencing each table
+- **domain**: model inbound foreign key references on observed tables
+- **api**: reject foreign keys whose column types do not match the referenced primary key
+- **api**: enforce Unity Catalog tag count and value-length limits at declaration time
+- **api**: reject CDF-reserved column names when change data feed is declared
+- **api**: gate nested struct field names behind column mapping
+- **api**: require column mapping for special-character column names
+- **properties**: validate declared property values at declaration time
+- **domain**: reject unpartitionable column types and all-column partitioning on desired tables
+- **sql**: backtick struct field names in compiled DDL
+- **types**: add Struct type with name+type fields
+- **types**: map TINYINT, SMALLINT, BINARY, TIMESTAMP_NTZ, VARIANT; normalise CHAR/VARCHAR to String on read
+- **domain**: cap Decimal precision at the Delta/Spark limit of 38
+- shorten grid DETAIL to failure headline; underline failures section header
+- title report and diff output (SYNC REPORT / DIFF headings)
+- add failures section and dry-run banner to report
+- show execution progress and humanized detail in report grid
+- group diff output by category with richer action lines
+- record dry_run on SyncReport
+- **adapter**: probe information_schema availability; fail reads loudly on UC
+- exact property declarations — None assertions, no default injection, metadata-only fast-fail
+- property guards — transition, must-declare, unset-forbidden rules and drop precondition
+- exact-declaration properties diff with registry parameter and PROPERTIES gate
+- UnsetProperty action; SetProperty observed_value; None-filtered CREATE properties
+- DesiredTable properties accept None absence assertions
+- property registry — domain mechanism, application catalogue
+- add metadata_only mode to DeltaTable
+- add UnmanagedDimensionDrift rule and wire desired into validate_diff
+- add managed_aspects scope field to DesiredTable
+- add TableAspect enum for per-aspect table management
+- add remaining five dimension types to diff.py
+- add ColumnsDimension to diff.py
+- add UnhandledFact, Dimension protocol, and Changed guard to diff.py
+- lower table diffs into action plans
+- compute typed table diffs from desired and observed state
+- add typed diff vocabulary for table planning
+- declare foreign keys by table reference
+- add QualifiedName.parse boundary constructor
+- add desired definition to TableRunReport as the pipeline record
+- **notebooks**: add display tables for schema, tags, and properties
+- **notebooks**: add column_tags_of accessor to CatalogInspector
+- **results**: render column tag changes in the plan diff
+- **reader**: observe column tags from information_schema to close the round-trip
+- **sql**: compile SetColumnTag/UnsetColumnTag to ALTER COLUMN SET/UNSET TAGS
+- **plan**: reconcile column tags with full-state ownership
+- **plan**: add SetColumnTag/UnsetColumnTag actions and ordering
+- **domain**: add case-sensitive tags field to Column
+- **notebooks**: add teardown, README, and finalize walkthrough
+- **notebooks**: add foreign-key failure and dry-run acts
+- **notebooks**: add validation-block acts
+- **notebooks**: add safe evolution and drift-management acts
+- **notebooks**: add define, first sync, and idempotent resync acts
+- **notebooks**: scaffold walkthrough notebook with setup and helpers
+- **results**: render table tag changes in the plan diff
+- **api**: accept free-form tags on DeltaTable
+- **reader**: observe table tags from information_schema to close the round-trip
+- **plan**: reconcile table tags with full-state ownership
+- **plan**: add SetTableTag/UnsetTableTag actions and their SQL compilation
+- **domain**: add tags field to TableSnapshot
+- move constraint-name derivation into the SQL compiler
+- add diff_by_key match-by-identity matcher
+- reject foreign keys that do not reference the parent's primary key
+- add human-readable __str__ and diff() to report types
+- add dry_run flag to Engine.sync
+- extend resolve() to accept external_failures for cross-failure-type propagation
+- foreign keys are all-or-nothing with a narrow resolver interface
+- add foreign-key failure result types (fail-closed vocabulary)
+- wire FK planning into Engine.sync() via phased architecture
+- add SkipReason, SkippedForeignKey, ForeignKeyValidationReport to results
+- add foreign_key_planning module (resolve FK dependencies)
+- expose foreign_keys parameter on DeltaTable; export ForeignKey alias
+- read foreign key constraints from Unity Catalog information_schema
+- compile DropForeignKey and SetForeignKey to SQL
+- add FK differ — compute DropForeignKey/SetForeignKey actions
+- add DropForeignKey and SetForeignKey action types
+- add foreign_keys field to TableSnapshot
+- add ForeignKeyConstraint domain value object
+- add primary_key field to Column and primary_key/primary_key_constraint_name to DeltaTable
+- add _fetch_primary_key to DatabricksReader; populate ObservedTable.primary_key
+- add DropPrimaryKey and SetPrimaryKey SQL compiler handlers; inline PK in CreateTable
+- add PrimaryKeyColumnsNullable validation rule
+- add _diff_primary_key to differ — emits DropPrimaryKey/SetPrimaryKey on PK drift
+- add DropPrimaryKey and SetPrimaryKey action types with DROP_PRIMARY_KEY and SET_PRIMARY_KEY phases
+- add primary_key field and primary_key_constraint_name to TableSnapshot/DesiredTable
+- export Property from public API so users can discover managed keys
+- add curated top-level delta_engine namespace (lazy Databricks factory)
+- close consumer import-surface gaps and fix test package collision (C3)
+- declare application public API (C2 Q1a)
+
+### Fix
+
+- keep __version__ out of __all__ runtime surface
+- **reader**: fail reads when a partition column type is unmappable
+- **properties**: restrict integer property values to canonical digits
+- **types**: treat casefold-colliding struct field names as unmappable
+- lint
+- walkthrough notebook updated
+- classify CYCLE only for FKs inside the table's own cycle
+- block FK dependents when a parent fails during execution
+- notebook fix
+- lint
+- walkthrough notebook update
+- e2e tests updated
+- pytest fail under 70%
+- dependency resolution tests updated
+- validation tests updated
+- lint
+- updated plan domain tests
+- deleted old test file
+- removed runtime_checkable from protocols
+- address review findings — doc staleness, test gaps
+- address review findings — rename PropertySet, close test gaps, fix stale docs
+- resolve ruff line-length and docstring violations
+- lint
+- add missing docstrings and fix line lengths to satisfy ruff
+- skip planning validation-failed runs; fix message prefix; update stale docs
+- suppress column actions when data_type change is present in ColumnsDimension
+- remove _log_output and inline log
+- fail loud when DESCRIBE DETAIL returns no rows for a present table
+- line spaces added to engine sync()
+- Clean up properties by removing commented lines
+- reference self.references in FK type error, not unbound name
+- lint
+- match case to use _
+- walkthrough notebook updated + logging improved
+- **notebooks**: wrap long lines in display_tags and display_properties
+- create schema statement dropped
+- resolve PK constraint name via the value object in the compiler
+- lowercase observed foreign-key constraint names in reader
+- align composite foreign-key columns in reader query
+- pass None instead of {} to FakeSpark in no-fk reader test
+- propagate read failures to FK dependents; fix FakeSpark; update stale docstring
+- casefold references string from catalog metadata in _fetch_foreign_keys
+- widen _classify_failures return type and add FakeSpark safety fallback
+- use specific tuple[Failure, ...] type hint in test_errors helper
+- correct FK sync docstring, type the record closure, add diamond propagation test
+- treat self-referential foreign keys as applicable, not cycles
+- reject foreign keys that resolve to a duplicate constraint name
+- validate references is lowercase, non-blank, and constraint_name is non-blank
+- match foreign keys by content so external constraint names stay idempotent
+- never strip DropForeignKey when suppressing skipped constraints
+- only skip FKs of true cycle members, not tables blocked by a cycle
+- drop foreign keys before the columns and keys they reference
+- remove unused import and rename fk abbreviations in test_engine
+- make FK differ idempotent across catalog round-trips; validate references format
+- guard FK query in FakeSpark test helpers
+- remove unused imports in test_actions.py
+- replace qn abbreviation with qualified_name in sync() comprehensions
+- handle missing information_schema in _fetch_primary_key
+- todo added
+- address final review findings — backtick constraint names, duplicate PK validation, SQL injection, abbreviations
+- correct DropPrimaryKey SQL (add IF EXISTS) and remove backtick from constraint name
+- tidy reader import order and document supported column types
+- skip unmappable columns rather than failing the whole table
+- break long line in SetColumnComment compiler (E501)
+- validate DeltaTable at construction time rather than deferring to to_desired_table()
+- lint
+- move statement_preview into ExecutionFailure so format_lines is self-contained
+- lint
+- validation rules report all violations in a single pass
+- remove logging.raiseExceptions = False from configure_logging
+- use exc_type_name in executor to surface Java class for Py4J errors
+- enforce lowercase validation on partition column names
+- lint
+- lint
+- write tests isolated
+- lint
+- decouple engine from registry
+- reject blank names and duplicate partition columns in the domain
+- render column comments in CREATE TABLE (lost on first sync)
+- lint
+- lint
+- make logging opt-in instead of a factory side effect (B6)
+- flag column type changes as a validation failure (B1)
+- guard nullability tightening and stop execution at first failure (B3)
+- contain all reader failures so one bad table can't abort the sync (B2)
+- add missing docstrings to __post_init__ methods to satisfy ruff D105
+- enforce case-insensitivity in Column and QualifiedName at construction time
+- lint
+- lint
+- lint
+- partition columns once in diff_columns to eliminate redundant actions for added columns
+
+### Refactor
+
+- **errors**: avoid shadowing report in the failed-tables comprehension
+- **api**: rename table module to delta_table
+- honest AbstractSet annotations and drop redundant guards
+- replace single-letter variables and tighten rendering types
+- **reader**: name loop variables and hoist the partition flag
+- **engine**: make _TableRun a dataclass and fix phase-chain docstring
+- **diff**: use dict.get lookups and keyword action construction
+- **diff**: require referencing_foreign_keys on primary key changes; pin the exemption's phase-order dependency
+- **api**: resolve the FK reference in one place and drop the dead referenced-side skip
+- **properties**: deepen PropertyDefinition with declaration and transition judgments
+- keep `from __future__ import annotations` only where needed
+- **report**: make reports pure data behind a render seam
+- route internal imports through domain package facades
+- **adapter**: fold sql_preview into the executor
+- **adapter**: rename clause helpers; honest warnings and logging docs
+- **adapter**: single lazy layer on the public Databricks path
+- **adapter**: move exception summarizing out of the sql package
+- **adapter**: compile_plan returns action-statement pairs
+- **adapter**: single information_schema seam; exact-query test fakes
+- **adapter**: extract pure row mappers from the reader
+- **adapter**: extract pure information_schema query builders
+- consolidate PK/FK domain constraints into constraints.py
+- group FK rows with itertools.groupby in reader
+- extract blocking_failures helper in dependency resolution
+- Refactor parse method in QualifiedName class
+- dissolve api/properties.py — import Property and the registry directly
+- extract MissingTableUnmanaged into a named invariant class
+- rename PropertyUndeclared; uniform (desired, observed) diff-helper signatures
+- scope check becomes UnmanagedAspectDrift with the Rule interface
+- Rule.evaluate(drift); column-drop precondition becomes a Rule; single-source Property enum
+- TableDrift carries desired; fold column-drop precondition into validate_diff
+- metadata-only carries properties; reader filters observed keys; transitions-to-absence
+- rename DriftFact to Change; facts to changes
+- uniform _diff_* helpers in diff_table; readability spacing
+- make unmanaged-aspect drift a scope invariant; scope rules to managed facts
+- replace dimension containers with a flat aspect-tagged DriftFact model
+- remove stale ColumnsDimension reference in comment
+- split ColumnsDimension into structure, comments, and tags dimensions
+- move blocking policy from domain to validation; delete unhandled()
+- replace ColumnChanged with specific column entry types; unify ColumnsDimension interface
+- move diff() construction into each dimension type; simplify diff_table
+- push plan() onto TableDiff types; remove engine._plan_missing
+- fix abbreviations, collapse duplicate SetColumnTag arm, remove redundant dict copies
+- delete lower.py; move TableMissing planning into engine; update __init__ exports
+- update validation to use dimension protocol; remove DisallowPartitioningChange and UnsupportedColumnTypeChange
+- rewrite TableDrift and diff_table to use dimension objects; remove match_by_key
+- delete sentinel actions dissolved by diff-first planning
+- replace differ with diff-then-lower composition
+- validate the table diff instead of the action plan
+- fold empty-plan display branches in rendering, drop zero-table sentinel
+- drop empty-collection guards in TableSnapshot.__post_init__
+- model Tarjan's on-stack membership as a set, not a dict
+- add TableSnapshot.primary_key_columns, remove repeated PK unwrap
+- collapse the shallow domain_type_from_ddl wrapper
+- split Spark type mapping by input shape
+- eliminate dead optional-widening and unused parameters
+- require a named constraint and delete the is-named guards
+- generate constraint names when lowering the public API
+- read the primary key's catalog constraint name
+- add constraint generate() factory and tolerate-named shim
+- replace public Registry with variadic engine.sync
+- dispatch FK reference lowering with a match statement
+- merge FK declaration into table module and simplify lowering
+- make SetForeignKey carry compiler-ready fields
+- structure foreign key references as QualifiedName
+- replace _TableRun dataclass with plain accumulator class
+- rename trimmed results.py to report.py
+- move ValidationResult into application/validation.py
+- move adapter boundary vocabularies into application/ports.py
+- move the failure family into application/failures.py
+- thread a mutable _TableRun through sync phases; log FK resolution failures
+- chain Engine.sync over TableRunReport records; resolve returns ResolveResult
+- use plain set for never-mutated local failure sets
+- move report rendering into its own module
+- collapse TableRunReport to one phase-ordered failures stream
+- single failure accumulator in sync; resolve takes blocked names, returns FK failures only
+- drop redundant action_index from ExecutionFailed carrier
+- tag failures with a FailurePhase and fold FK reason detail into its enum
+- **notebooks**: extract CatalogInspector to a sibling module
+- **api**: drop redundant effective_tags accessor
+- derive observed FKs in the branch, not via a second None test
+- simplify the differ — structural matcher, deep column reconciler, PK invariant in the domain
+- split UnsupportedChange into descriptive ColumnTypeChange + PartitioningChange
+- generate constraint names on DesiredTable, not in the compiler
+- merge sentinel actions into a single UnsupportedChange
+- reframe duplicate-FK guard as a desired-only content invariant
+- remove constraint naming from the domain and public API
+- drop derived names from FK/PK actions and narrow the differ helpers
+- describe foreign-key failures by content, not derived name
+- express column and property diffs via diff_by_key
+- unify foreign-key planning across create and migrate paths
+- make SyncCandidate a frozen value object with a tuple of failures
+- model primary key as a domain value object
+- clarify FK-check priority and tighten Phase B tests
+- expose planned actions on TableRunReport for dry runs
+- rename foreign_key_planning to dependency_resolution
+- use plain set for membership-only primary key comparisons
+- match FKs by a signature property, aligning the differ with _diff_columns
+- drop DesiredTable.resolve_foreign_key_constraint_name wrapper, call FK directly
+- expand fk to foreign_key outside comprehensions; rename SetForeignKey.fk field
+- make TableRunReport.execution Optional to distinguish never-executed from empty run
+- inline datetime.now(UTC), removing the _utc_now wrapper
+- rename type-suffixed variables to intent-revealing names
+- expose qualified_name on SyncCandidate, replacing candidate.table.qualified_name
+- move resolve() after validate so validation failures propagate to FK dependents
+- lift inline imports to module level in FK planning tests
+- replace _validate with _apply_validation, surfacing all pre-execution failures together
+- replace validation/foreign_key_failures with pre_execution_failures on TableRunReport
+- widen SyncCandidate.failures to list[Failure] and rename blocked to can_execute
+- update engine to iterate SyncCandidate, removing ForeignKeyResolution queries
+- replace ForeignKeyResolution with SyncCandidate in foreign_key_planning
+- remove unused soft-skip foreign-key result types
+- validate all plans and skip executing empty ones
+- rename noun-named FK methods to verbs
+- simplify Engine phase methods and TableRunReport
+- restructure Engine.sync() into four explicit phases
+- rename schema package to api
+- state the all-unmappable-columns failure in the reader
+- collapse type mapping to one Optional-returning function
+- push unrecognised-type skip logic into _to_column_mapping
+- move type-mapping knowledge out of reader into types module
+- apply Priority 2 APoSD quick wins (no behaviour change except UNSET COMMENT)
+- apply R2-R6 APoSD review polish (no behaviour change)
+- replace double-pass column scan in reader with single _ColumnMapping pass
+- push type-change and partition-change detection into the differ
+- simplify the databricks SQL layer (catalog.tableExists, package surface)
+- reshape adapters/ -- promote schema, dissolve catalog, home log_config
+- rename diff_tables to compute_plan
+- delete the plan_table wrapper; engine calls diff_tables directly
+- dissolve domain/services into domain/plan
+- one name for the qualified-name concept; thread the object, stringify at edges
+- model read as CatalogState sum; give execution an ExecutionSummary
+- dissolve PlanValidator class into validate_plan function
+- PlanValidator.validate returns ValidationResult, not raw failures
+- replace PlanContext with plan_table; validator takes explicit args
+- ActionPlan orders its own actions on construction
+- remove ActionPlan.target; pass table identity through execute(target, plan)
+- split ExecutionResult into ExecutionSucceeded | ExecutionFailed (C2 Q1b)
+- small correctness and consistency fixes (A6)
+- fold format_failure_detail into errors.py as a private helper
+- drop _AppliedStep, build ExecutionResult directly in executor
+- fold ordering.py into plan.py and drop the sort_key injection seam
+- collapse column_diff and table_diff into differ.py as private helpers
+- give failure types a format_line() method
+- model ReadResult as a ReadSucceeded | ReadFailed sum type
+- inline Engine pass-through methods into _sync_table
+- move DesiredTableSource from ports.py to registry.py
+- consolidate per-table logging in _sync_table; drop FQN parameter from phase helpers
+- delete TableFormat one-member enum; render USING delta literally
+- delete PartitionBy action; rewrite DisallowPartitioningChange to use field comparison
+- remove stale TODO comments and fix misleading diff_partition_columns docstring
+- drop pass-through schema Column wrapper; re-export the domain type
+- extract shared failure-rendering helper; delete dead format_sync_report
+- adopt declared-subset property diff; delete UnsetProperty and read-time allowlist
+- define property allowlist once in properties.py; derive both consumers from it
+- call listColumns once in fetch_state; remove _fetch_columns and _fetch_partition_columns
+- validate rather than silently normalise case in Column and QualifiedName
+- name intermediate action tuples in diff_columns for readability
+- move action ordering onto the actions themselves
+- return SyncReport from sync; stop configuring logging at import
+- build TableRunReport once in _sync_table
+- push table conversion into DeltaTable, narrow registry port
