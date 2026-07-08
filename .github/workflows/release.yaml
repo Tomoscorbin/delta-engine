@@ -1,52 +1,43 @@
 name: Release
 
-# On push to main: commitizen decides the bump from conventional commits, tags,
-# builds, and (after approval of the `pypi` environment) publishes to PyPI.
+# Releases are on-demand. Commits accumulate on main between releases; cutting a
+# release rolls up everything since the last one into a single version bump.
 #
-# Manual run (workflow_dispatch): skip the bump and publish whatever version the
-# current commit's tag resolves to. Use this to recover/re-publish a version that
-# was tagged but not published.
-#
-# build and publish are split into two jobs on purpose: GitHub environment
-# protection gates a whole job, so only `publish` carries `environment: pypi`.
-# That lets the bump + build run automatically while the PyPI upload waits for
-# approval.
+# Run this workflow from the Actions tab:
+#   - "tag" blank        -> cut a NEW release: commitizen bumps from accumulated
+#                           commits, tags, updates the changelog, builds, and
+#                           publishes to PyPI + GitHub Releases.
+#   - "tag" set          -> publish an EXISTING tag as-is (recovery / re-publish),
+#                           with no bump (e.g. tag = v0.1.0).
+#   - "dry_run" checked  -> preview the new-release version without publishing.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish, e.g. v0.1.0 (manual recovery/re-publish)"
-        required: true
-        type: string
+        description: "Existing tag to publish as-is, e.g. v0.1.0. Blank = cut a new release."
+        required: false
+        default: ""
+      dry_run:
+        description: "Preview the new-release version bump without publishing."
+        type: boolean
+        default: false
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  build:
-    # On push, skip commitizen's own bump commit to avoid re-triggering.
-    # Manual runs always proceed.
-    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'bump:') }}
+  release:
     runs-on: ubuntu-latest
+    environment: pypi # OIDC binding for Trusted Publishing (approval optional)
     permissions:
       contents: write # push the bump commit + tag
-    outputs:
-      released: ${{ steps.decide.outputs.released }}
-      version: ${{ steps.notes.outputs.version }}
+      id-token: write # OIDC for Trusted Publishing
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # full history + tags for commitizen and hatch-vcs
-
-      - name: Check out the tag to publish (manual run)
-        # Detach onto the exact tag so hatch-vcs builds that clean version rather
-        # than a dev version derived from later commits on main.
-        if: github.event_name == 'workflow_dispatch'
-        run: git checkout "refs/tags/${{ inputs.tag }}"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
@@ -60,23 +51,34 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --locked --group dev
 
-      - name: Decide what to do
-        id: decide
+      - name: Determine mode
+        id: mode
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Publish the current tag as-is, no bump.
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "bump=false" >> "$GITHUB_OUTPUT"
-          elif uv run cz bump --yes --dry-run > /dev/null 2>&1; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "bump=true" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "publish=true"  >> "$GITHUB_OUTPUT"   # re-publish an existing tag
+            echo "bump=false"    >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"   # preview only
+            echo "bump=false"    >> "$GITHUB_OUTPUT"
           else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            echo "bump=false" >> "$GITHUB_OUTPUT"
+            echo "publish=true"  >> "$GITHUB_OUTPUT"   # cut a new release
+            echo "bump=true"     >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check out the tag to publish
+        # Detach onto the exact tag so hatch-vcs builds that clean version rather
+        # than a dev version derived from later commits on main.
+        if: inputs.tag != ''
+        run: git checkout "refs/tags/${{ inputs.tag }}"
+
+      - name: Preview bump (dry run)
+        if: inputs.tag == '' && inputs.dry_run
+        run: |
+          uv run cz bump --yes --dry-run
+          echo "Dry run only — nothing was published."
+
       - name: Bump version, changelog, tag, and push
-        if: steps.decide.outputs.bump == 'true'
+        if: steps.mode.outputs.bump == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -84,53 +86,30 @@ jobs:
           git push --follow-tags origin HEAD:main
 
       - name: Resolve version and release notes
-        if: steps.decide.outputs.released == 'true'
+        if: steps.mode.outputs.publish == 'true'
         id: notes
         run: |
           VERSION="$(uv run cz version --project)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Slice the newest CHANGELOG.md section (between the first two `## `
-          # headers) for the GitHub Release body. Never fatal — the publish must
-          # not depend on release-note formatting.
+          # headers) for the GitHub Release body. Never fatal.
           if [ -f CHANGELOG.md ]; then
             awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md > body.md || true
           fi
           [ -s body.md ] || echo "Release $VERSION" > body.md
 
       - name: Build sdist and wheel
-        if: steps.decide.outputs.released == 'true'
+        if: steps.mode.outputs.publish == 'true'
         run: uv build
 
-      - name: Upload build artifacts
-        if: steps.decide.outputs.released == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-dist
-          path: |
-            dist/
-            body.md
-          if-no-files-found: error
-
-  publish:
-    needs: build
-    if: needs.build.outputs.released == 'true'
-    runs-on: ubuntu-latest
-    environment: pypi # deployment approval gate applies to this job only
-    permissions:
-      id-token: write # OIDC for Trusted Publishing
-      contents: write # create the GitHub Release
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-dist
-
       - name: Publish to PyPI
+        if: steps.mode.outputs.publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create GitHub Release
+        if: steps.mode.outputs.publish == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ needs.build.outputs.version }}
+          tag: v${{ steps.notes.outputs.version }}
           bodyFile: body.md
           skipIfReleaseExists: true
