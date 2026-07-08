@@ -42,6 +42,7 @@ dev = [
   "delta-spark>=4.0.0",
   "hypothesis>=6.155.5",
   "import-linter>=2.13",
+  "commitizen>=4.0",
 ]
 docs = [
   "sphinx>=8.0",
@@ -60,6 +61,14 @@ build-backend = "hatchling.build"
 source = "vcs"
 tag-pattern = "v(?P<version>\\d+\\.\\d+\\.\\d+)"
 fallback-version = "0.0.0"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "scm"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true
+changelog_incremental = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/delta_engine"]
