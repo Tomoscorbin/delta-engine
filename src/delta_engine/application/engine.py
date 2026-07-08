@@ -102,7 +102,6 @@ class Engine:
         reader: CatalogStateReader,
         executor: PlanExecutor,
     ) -> None:
-        """Initialize the engine with the catalog adapters it orchestrates."""
         self.reader = reader
         self.executor = executor
 

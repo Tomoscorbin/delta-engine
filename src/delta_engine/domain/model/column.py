@@ -32,7 +32,6 @@ class Column:
     tags: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Raise if the name is blank/uppercase, or a tag key is blank."""
         if not self.name.strip():
             raise ValueError(f"Column name must not be blank: {self.name!r}")
         if self.name != self.name.casefold():
