@@ -20,6 +20,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
+    referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.types import (
@@ -39,6 +40,7 @@ __all__ = [
     "information_schema_probe_query",
     "primary_key_query",
     "quote_literal",
+    "referencing_foreign_keys_query",
     "sql_type_for_data_type",
     "table_tags_query",
 ]

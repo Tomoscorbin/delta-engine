@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    PrimaryKeyConstraint,
+)
 from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
@@ -174,6 +178,14 @@ class DesiredTable(TableSnapshot):
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
-    """Observed definition derived from the catalog (current state)."""
+    """
+    Observed definition derived from the catalog (current state).
+
+    ``referencing_foreign_keys`` is the one field that is not about this
+    table's own schema: it lists inbound foreign keys owned by other tables,
+    read so primary-key changes can be judged for safety. Empty where
+    information_schema is unavailable (e.g. plain Spark).
+    """
 
     properties: Mapping[str, str] = field(default_factory=dict)
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()

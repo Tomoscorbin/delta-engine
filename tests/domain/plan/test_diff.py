@@ -4,6 +4,7 @@ from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column,
     DesiredTable,
+    ForeignKeyReference,
     Integer,
     Long,
     ObservedTable,
@@ -513,7 +514,9 @@ def test_primary_key_changed_rejects_equal_column_sets():
     pk_b = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="y")
 
     with pytest.raises(ValueError, match="no difference"):
-        PrimaryKeyChanged(desired_primary_key=pk_a, observed_primary_key=pk_b)
+        PrimaryKeyChanged(
+            desired_primary_key=pk_a, observed_primary_key=pk_b, referencing_foreign_keys=()
+        )
 
 
 # ---------- change lowering: actions()
@@ -624,14 +627,20 @@ def test_primary_key_added_produces_set_primary_key():
 def test_primary_key_removed_produces_drop_primary_key():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
 
-    assert PrimaryKeyRemoved(observed_primary_key=pk).actions() == (DropPrimaryKey(),)
+    assert PrimaryKeyRemoved(observed_primary_key=pk, referencing_foreign_keys=()).actions() == (
+        DropPrimaryKey(),
+    )
 
 
 def test_primary_key_changed_produces_drop_then_set():
     # Given a changed primary key (column set differs)
     desired_pk = PrimaryKeyConstraint(columns=("a",), constraint_name="test_pk")
     observed_pk = PrimaryKeyConstraint(columns=("b",), constraint_name="test_pk")
-    change = PrimaryKeyChanged(desired_primary_key=desired_pk, observed_primary_key=observed_pk)
+    change = PrimaryKeyChanged(
+        desired_primary_key=desired_pk,
+        observed_primary_key=observed_pk,
+        referencing_foreign_keys=(),
+    )
 
     # When the actions are sorted by ActionPlan (drop runs before set)
     plan = ActionPlan(change.actions())
@@ -742,7 +751,30 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (PrimaryKeyRemoved(observed_primary_key=primary_key),)
+    assert diff.changes == (
+        PrimaryKeyRemoved(observed_primary_key=primary_key, referencing_foreign_keys=()),
+    )
+
+
+def test_primary_key_removal_carries_observed_referencing_foreign_keys():
+    # Given a catalog primary key that other tables reference by foreign key
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="customers_pk")
+
+    # When diffing a declaration that drops the primary key
+    diff = diff_table(
+        _desired(),
+        _observed(primary_key=primary_key, referencing_foreign_keys=(reference,)),
+    )
+
+    # Then the removal change carries the inbound reference for validation to judge
+    assert isinstance(diff, TableDrift)
+    (change,) = diff.changes
+    assert isinstance(change, PrimaryKeyRemoved)
+    assert change.referencing_foreign_keys == (reference,)
 
 
 def test_changed_primary_key_produces_changed_change():
@@ -766,8 +798,40 @@ def test_changed_primary_key_produces_changed_change():
         PrimaryKeyChanged(
             desired_primary_key=desired_primary_key,
             observed_primary_key=observed_primary_key,
+            referencing_foreign_keys=(),
         ),
     )
+
+
+def test_primary_key_change_carries_observed_referencing_foreign_keys():
+    # Given desired and observed primary keys over different column sets, where
+    # another table references the observed key by foreign key
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
+    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
+    columns = (
+        Column("id", Integer(), nullable=False),
+        Column("other_id", Integer(), nullable=False),
+    )
+
+    # When diffing a declaration that changes the primary key
+    diff = diff_table(
+        _desired(columns=columns, primary_key=desired_primary_key),
+        _observed(
+            columns=columns,
+            primary_key=observed_primary_key,
+            referencing_foreign_keys=(reference,),
+        ),
+    )
+
+    # Then the changed fact carries the inbound reference for validation to judge
+    assert isinstance(diff, TableDrift)
+    (change,) = diff.changes
+    assert isinstance(change, PrimaryKeyChanged)
+    assert change.referencing_foreign_keys == (reference,)
 
 
 def test_observed_only_foreign_key_produces_removed_change():

@@ -1,5 +1,9 @@
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    PrimaryKeyConstraint,
+)
 from delta_engine.domain.model.data_type import (
     Array,
     Binary,
@@ -39,6 +43,7 @@ __all__ = [
     "Double",
     "Float",
     "ForeignKeyConstraint",
+    "ForeignKeyReference",
     "Integer",
     "Long",
     "Map",

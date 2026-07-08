@@ -4,6 +4,7 @@ import pytest
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
+    ActionPhase,
     ActionPlan,
     AddColumn,
     CreateTable,
@@ -268,3 +269,11 @@ def test_set_property_observed_value_defaults_to_none():
     action = SetProperty(name="delta.enableChangeDataFeed", value="true")
 
     assert action.observed_value is None
+
+
+def test_drop_foreign_key_phases_before_drop_primary_key():
+    # PrimaryKeyReferencedByForeignKeys exempts a same-table FK dropped in the
+    # same sync ONLY because the plan drops foreign keys before primary keys.
+    # Reordering these phases would make that exemption approve plans that
+    # fail at execution.
+    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
