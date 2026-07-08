@@ -688,6 +688,7 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
 def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
     change = PrimaryKeyRemoved(
         observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+        referencing_foreign_keys=(),
     )
 
     result = validate_diff(_drift(change))

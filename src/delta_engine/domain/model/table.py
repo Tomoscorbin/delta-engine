@@ -178,7 +178,14 @@ class DesiredTable(TableSnapshot):
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
-    """Observed definition derived from the catalog (current state)."""
+    """
+    Observed definition derived from the catalog (current state).
+
+    ``referencing_foreign_keys`` is the one field that is not about this
+    table's own schema: it lists inbound foreign keys owned by other tables,
+    read so primary-key changes can be judged for safety. Empty where
+    information_schema is unavailable (e.g. plain Spark).
+    """
 
     properties: Mapping[str, str] = field(default_factory=dict)
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()

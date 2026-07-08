@@ -514,7 +514,9 @@ def test_primary_key_changed_rejects_equal_column_sets():
     pk_b = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="y")
 
     with pytest.raises(ValueError, match="no difference"):
-        PrimaryKeyChanged(desired_primary_key=pk_a, observed_primary_key=pk_b)
+        PrimaryKeyChanged(
+            desired_primary_key=pk_a, observed_primary_key=pk_b, referencing_foreign_keys=()
+        )
 
 
 # ---------- change lowering: actions()
@@ -625,14 +627,20 @@ def test_primary_key_added_produces_set_primary_key():
 def test_primary_key_removed_produces_drop_primary_key():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
 
-    assert PrimaryKeyRemoved(observed_primary_key=pk).actions() == (DropPrimaryKey(),)
+    assert PrimaryKeyRemoved(observed_primary_key=pk, referencing_foreign_keys=()).actions() == (
+        DropPrimaryKey(),
+    )
 
 
 def test_primary_key_changed_produces_drop_then_set():
     # Given a changed primary key (column set differs)
     desired_pk = PrimaryKeyConstraint(columns=("a",), constraint_name="test_pk")
     observed_pk = PrimaryKeyConstraint(columns=("b",), constraint_name="test_pk")
-    change = PrimaryKeyChanged(desired_primary_key=desired_pk, observed_primary_key=observed_pk)
+    change = PrimaryKeyChanged(
+        desired_primary_key=desired_pk,
+        observed_primary_key=observed_pk,
+        referencing_foreign_keys=(),
+    )
 
     # When the actions are sorted by ActionPlan (drop runs before set)
     plan = ActionPlan(change.actions())
@@ -743,7 +751,9 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (PrimaryKeyRemoved(observed_primary_key=primary_key),)
+    assert diff.changes == (
+        PrimaryKeyRemoved(observed_primary_key=primary_key, referencing_foreign_keys=()),
+    )
 
 
 def test_primary_key_removal_carries_observed_referencing_foreign_keys():
@@ -788,6 +798,7 @@ def test_changed_primary_key_produces_changed_change():
         PrimaryKeyChanged(
             desired_primary_key=desired_primary_key,
             observed_primary_key=observed_primary_key,
+            referencing_foreign_keys=(),
         ),
     )
 

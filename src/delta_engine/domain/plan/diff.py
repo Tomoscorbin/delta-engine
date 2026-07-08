@@ -349,11 +349,13 @@ class PrimaryKeyRemoved:
     A primary key present in the catalog but absent from the declaration.
 
     ``referencing_foreign_keys`` rides along so validation can judge whether
-    the key can be dropped; it does not affect ``actions()``.
+    the key can be dropped; it does not affect ``actions()``. Required, not
+    defaulted: a producer must state what references the key, so the
+    protection cannot be disabled by omission.
     """
 
     observed_primary_key: PrimaryKeyConstraint
-    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...]
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
@@ -372,12 +374,14 @@ class PrimaryKeyChanged:
     added/removed changes would make an orphaned half representable.
 
     ``referencing_foreign_keys`` rides along so validation can judge whether
-    the key can be dropped; it does not affect ``actions()``.
+    the key can be dropped; it does not affect ``actions()``. Required, not
+    defaulted: a producer must state what references the key, so the
+    protection cannot be disabled by omission.
     """
 
     desired_primary_key: PrimaryKeyConstraint
     observed_primary_key: PrimaryKeyConstraint
-    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...]
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
