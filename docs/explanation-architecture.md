@@ -154,6 +154,18 @@ fields are created nullable, nested comments are unmanaged, and modeling
 field nullability waits until the reader observes a real `StructType` rather
 than DDL text.
 
+The model is also a pinned vocabulary while the catalog's keeps growing:
+`TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column
+types within the life of running tools, and the next addition will reach
+tables before it reaches engines that pin a type model. An observed type
+outside the model is therefore a routine lifecycle condition, not a defect,
+and the reader handles it by how much the omission would distort the
+snapshot: an ordinary unmappable column is skipped and left unmanaged (the
+snapshot stays honest about everything else), but an unmappable partition
+column fails the whole read — an incomplete `partitioned_by` would fabricate
+partitioning drift, and a false blocked change is worse than an honest
+`READ_FAILED`.
+
 ## Sync lifecycle
 
 `Engine.sync(...)` is a phase chain. Before the chain begins, user-facing table

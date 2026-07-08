@@ -56,6 +56,11 @@ def _to_column_mapping(
 
     Returns ``None`` for columns whose Spark type has no domain mapping yet,
     logging a warning so operators can track gaps as new Spark types are released.
+    A partition column with no domain mapping instead raises: skipping it would
+    leave ``ObservedTable.partitioned_by`` silently incomplete, and the differ
+    would fabricate a false ``PartitioningChanged`` from the gap. Raising here
+    lets ``fetch_state``'s exception boundary turn it into ``ReadFailed`` — the
+    honest "could not determine state" — rather than a wrong diff.
 
     The column name is lowercased here: the domain model requires lowercase
     identifiers, and case-preserving catalogs (e.g. Hive Metastore) can return
@@ -70,6 +75,15 @@ def _to_column_mapping(
     """
     domain_data_type = domain_type_from_spark(SparkType.fromDDL(spark_column.dataType))
     if domain_data_type is None:
+        if bool(getattr(spark_column, "isPartition", False)):
+            raise RuntimeError(
+                f"Partition column {spark_column.name!r} in {qualified_name} has"
+                f" type {spark_column.dataType!r}, which this version of"
+                " delta-engine has no mapping for (catalogs gain new types"
+                " before engines that pin a type model); the observed"
+                " partitioning cannot be determined, so the table cannot be"
+                " read safely."
+            )
         logger.warning(
             "Skipping column %r in %s: unrecognised Spark type %r"
             " — the column is invisible to this sync; if a declaration includes"
