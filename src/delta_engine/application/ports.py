@@ -72,7 +72,13 @@ class CatalogStateReader(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionSucceeded:
-    """A single plan action that executed without error."""
+    """
+    A single plan action that executed without error.
+
+    ``action_index`` and ``statement_preview`` are not rendered by the
+    engine's own reports; they are carried for callers that inspect
+    ``ExecutionSummary.results`` directly.
+    """
 
     action: str
     action_index: int

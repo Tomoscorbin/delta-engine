@@ -21,7 +21,6 @@ class QualifiedName:
     name: str
 
     def __post_init__(self) -> None:
-        """Raise if any part is blank or contains uppercase characters."""
         for field_name, value in (
             ("catalog", self.catalog),
             ("schema", self.schema),

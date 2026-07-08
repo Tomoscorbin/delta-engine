@@ -32,7 +32,6 @@ class DatabricksExecutor:
     """Plan executor that runs compiled statements via a Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:
-        """Initialize the executor with the Spark session it runs statements on."""
         self.spark = spark
 
     def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:

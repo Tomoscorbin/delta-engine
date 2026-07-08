@@ -227,7 +227,6 @@ class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:
-        """Initialize the reader with a `SparkSession`."""
         self.spark = spark
         self._information_schema_availability: dict[str, bool] = {}
 

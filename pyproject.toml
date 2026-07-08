@@ -91,19 +91,21 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
   "N803", # allow non-PEP8 argument names
   "N806", # allow non-PEP8 variable names
   "D101", # don't require docstring in public classes
-  "D102", # don't require docstrings in public methods 
+  "D102", # don't require docstrings in public methods
   "D103", # don't require docstrings in public
-  "D105", # don't require docstrings in magig methods 
+  "D105", # don't require docstrings in magic methods
   "D100", # don't require module docstrings
   "D205", # don't require 1 blank line between summary line and description
   "N815", # allow variables in class scope to be mixedCase
   "N812", # allow uppercase variable names
 ]
 # Value-object modules: each class is documented and the contract lives on the
-# abstract method (Action.subject, Failure.format_lines). Concrete overrides
-# only restate it, so we don't require a docstring on every override.
+# abstract method (Action.subject, Failure.format_lines) or, for diff changes,
+# on the module docstring's description of actions(). Concrete overrides only
+# restate it, so we don't require a docstring on every override.
 "src/delta_engine/domain/plan/actions.py" = ["D102"]
 "src/delta_engine/application/failures.py" = ["D102"]
+"src/delta_engine/domain/plan/diff.py" = ["D102"]
 # Example notebooks in Databricks source format. Databricks injects `spark`,
 # `dbutils`, and `display` at runtime; the first line must be the notebook
 # header (so no module docstring); imports follow cell markers, not the file top.

@@ -101,7 +101,6 @@ class ColumnRemoved:
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
     def actions(self) -> tuple[Action, ...]:
-        """DropColumn for the removed column."""
         return (DropColumn(column_name=self.column.name),)
 
 
@@ -141,7 +140,6 @@ class ColumnNullabilityChanged:
             )
 
     def actions(self) -> tuple[Action, ...]:
-        """SetColumnNullability to the desired value."""
         return (SetColumnNullability(column_name=self.column_name, nullable=self.desired_nullable),)
 
 
@@ -162,7 +160,6 @@ class ColumnCommentChanged:
             )
 
     def actions(self) -> tuple[Action, ...]:
-        """SetColumnComment to the desired value."""
         return (SetColumnComment(column_name=self.column_name, comment=self.desired_comment),)
 
 
@@ -177,7 +174,6 @@ class ColumnTagSet:
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
 
     def actions(self) -> tuple[Action, ...]:
-        """SetColumnTag with the desired value."""
         return (
             SetColumnTag(column_name=self.column_name, name=self.tag_name, value=self.tag_value),
         )
@@ -193,7 +189,6 @@ class ColumnTagUnset:
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
 
     def actions(self) -> tuple[Action, ...]:
-        """UnsetColumnTag for the undeclared tag."""
         return (UnsetColumnTag(column_name=self.column_name, name=self.tag_name),)
 
 
@@ -211,7 +206,6 @@ class TableCommentChanged:
             raise ValueError(f"TableCommentChanged carries no difference: {self.desired_comment!r}")
 
     def actions(self) -> tuple[Action, ...]:
-        """SetTableComment to the desired value."""
         return (SetTableComment(comment=self.desired_comment),)
 
 
@@ -255,7 +249,6 @@ class PropertyUnset:
     aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
 
     def actions(self) -> tuple[Action, ...]:
-        """UnsetProperty for the asserted-absent key."""
         return (UnsetProperty(name=self.name),)
 
 
@@ -288,7 +281,6 @@ class TableTagSet:
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
 
     def actions(self) -> tuple[Action, ...]:
-        """SetTableTag with the desired value."""
         return (SetTableTag(name=self.name, value=self.value),)
 
 
@@ -301,7 +293,6 @@ class TableTagUnset:
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
 
     def actions(self) -> tuple[Action, ...]:
-        """UnsetTableTag for the undeclared tag."""
         return (UnsetTableTag(name=self.name),)
 
 
@@ -334,7 +325,6 @@ class PrimaryKeyAdded:
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
     def actions(self) -> tuple[Action, ...]:
-        """SetPrimaryKey for the declared key."""
         return (
             SetPrimaryKey(
                 columns=self.primary_key.columns,
@@ -360,7 +350,6 @@ class PrimaryKeyRemoved:
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
 
     def actions(self) -> tuple[Action, ...]:
-        """DropPrimaryKey for the undeclared key."""
         return (DropPrimaryKey(),)
 
 
@@ -411,7 +400,6 @@ class ForeignKeyAdded:
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
 
     def actions(self) -> tuple[Action, ...]:
-        """SetForeignKey for the declared constraint."""
         return (
             SetForeignKey(
                 local_columns=self.constraint.local_columns,
