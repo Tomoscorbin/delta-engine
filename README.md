@@ -39,3 +39,11 @@ engine.sync(customers)  # creates the table, or no-ops if it already matches
 - [Architecture](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-architecture.md) — layers, design decisions, why hexagonal
 - [Implement a custom adapter](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-implement-adapter.md) — `CatalogStateReader` and `PlanExecutor` protocols
 - [Add a new action type](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-add-action-type.md) — extend `Action`, `ActionPhase`, and the compiler
+
+## Contributing
+
+Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/); the PR title drives the automated version bump and changelog. To lint your commit messages locally, run this once after cloning:
+
+```bash
+uv run pre-commit install --hook-type commit-msg
+```
