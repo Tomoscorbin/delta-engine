@@ -1,6 +1,7 @@
 # Open questions and decisions
 
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
+- [ ] Model struct field nullability. Gated on a richer observation source: the reader parses catalog DDL type strings, which do not carry nested NOT NULL; observing the real `StructType` (e.g. `spark.table(...).schema`) would round-trip it faithfully. Then decide whether nested-field changes stay blocked (accurately reported) or become actionable. See the type-model fidelity section of explanation-architecture.md.
 - [ ] Declarable `Char(n)`/`Varchar(n)` types, if length-bounded columns become a real need. Additive on the type-model side, but flipping the read-side normalisation (observed varchar currently maps to `String`) changes drift behaviour for every existing table with such columns — needs its own migration story. See the type-model fidelity section of explanation-architecture.md.
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering
