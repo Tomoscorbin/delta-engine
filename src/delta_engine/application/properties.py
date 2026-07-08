@@ -43,8 +43,10 @@ class Property(StrEnum):
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
 
 
-COLUMN_MAPPING_MODE_KEY: Final[str] = Property.COLUMN_MAPPING_MODE.value
-
+# A single `interval <n> <unit>` term only — deliberately stricter than the
+# catalog, which also accepts compound intervals ("interval 1 hour 30
+# minutes"). One canonical spelling keeps declared and observed values
+# comparable; see docs/how-to-configure-properties.md.
 _INTERVAL_FORMAT = re.compile(
     r"interval\s+\d+\s+(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?",
     re.IGNORECASE,
@@ -77,27 +79,46 @@ def _is_column_mapping_mode(value: str) -> bool:
 @dataclass(frozen=True, slots=True)
 class PropertyDefinition:
     """
-    One manageable property key, its value constraints, and its restrictions.
+    One manageable property key, and the judgments the engine needs about it.
 
-    ``value_description``: a human phrase describing the expected value
-    format, used in error messages when a declared value fails
-    ``is_valid_value``.
+    The fields are ingredients; consumers ask the two questions below rather
+    than interpreting the fields themselves, so the semantics — a declared
+    ``None`` asserts absence, a first write is always legal, an empty
+    transition set is unrestricted — live here and nowhere else.
 
-    ``is_valid_value``: the predicate a declared value must satisfy. Declared
-    ``None`` asserts absence rather than a value, so it is exempt from this
-    check — the caller must not invoke it for ``None``.
-
-    ``permitted_transitions``: the ``(observed_value, desired_value)`` pairs
-    that are legal in-place changes, where a ``desired_value`` of ``None``
-    means removal (the key declared absent). Empty means unrestricted; a
-    non-empty set blocks any pair not in it. A first write (key absent from
-    the catalog) is always legal and is never looked up here.
+    ``value_description`` is the human phrase for the expected value format,
+    used verbatim in rejection messages; ``permitted_transitions`` holds the
+    ``(observed_value, desired_value)`` pairs that are legal in-place
+    changes, where a ``desired_value`` of ``None`` means removal.
     """
 
-    key: str
+    key: Property
     value_description: str
     is_valid_value: Callable[[str], bool]
     permitted_transitions: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
+
+    def reject_declared_value(self, value: str | None) -> str | None:
+        """
+        Return the error message for an unacceptable declared value, or ``None``.
+
+        A declared ``None`` asserts the key's absence, not a value, and is
+        never rejected.
+        """
+        if value is None or self.is_valid_value(value):
+            return None
+        return f"Invalid value for {self.key}: {value!r}. Expected {self.value_description}."
+
+    def permits_transition(self, observed: str | None, desired: str | None) -> bool:
+        """
+        Whether the catalog accepts moving this key from observed to desired.
+
+        A first write (``observed`` is ``None``) is always legal; an empty
+        restriction set permits everything; ``desired`` ``None`` means
+        removal (the key declared absent).
+        """
+        if observed is None or not self.permitted_transitions:
+            return True
+        return (observed, desired) in self.permitted_transitions
 
 
 type PropertyRegistry = Mapping[str, PropertyDefinition]

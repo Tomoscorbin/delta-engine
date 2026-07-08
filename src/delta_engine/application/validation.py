@@ -5,8 +5,8 @@ from typing import ClassVar, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import (
-    COLUMN_MAPPING_MODE_KEY,
     DELTA_PROPERTY_REGISTRY,
+    Property,
     PropertyRegistry,
 )
 from delta_engine.domain.model import TableAspect
@@ -194,9 +194,9 @@ class PropertyTransitionNotSupported:
 
     def _is_blocked(self, name: str, observed_value: str, desired_value: str | None) -> bool:
         definition = self.property_registry.get(name)
-        if definition is None or not definition.permitted_transitions:
+        if definition is None:
             return False
-        return (observed_value, desired_value) not in definition.permitted_transitions
+        return not definition.permits_transition(observed_value, desired_value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,9 +231,7 @@ class PropertyMustBeDeclared:
 
     def _removal_permitted(self, name: str, observed_value: str) -> bool:
         definition = self.property_registry.get(name)
-        if definition is None or not definition.permitted_transitions:
-            return True
-        return (observed_value, None) in definition.permitted_transitions
+        return definition is None or definition.permits_transition(observed_value, None)
 
 
 class ColumnMappingRequiredForDrop:
@@ -257,15 +255,15 @@ class ColumnMappingRequiredForDrop:
         drops_a_column = any(isinstance(change, ColumnRemoved) for change in drift.managed_changes)
         if not drops_a_column:
             return ()
-        if drift.desired.properties.get(COLUMN_MAPPING_MODE_KEY) == "name":
+        if drift.desired.properties.get(Property.COLUMN_MAPPING_MODE) == "name":
             return ()
         return (
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: dropping a column requires"
-                    f" {COLUMN_MAPPING_MODE_KEY}='name'. Declare"
-                    f" properties={{'{COLUMN_MAPPING_MODE_KEY}': 'name'}} on this table."
+                    f" {Property.COLUMN_MAPPING_MODE}='name'. Declare"
+                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}} on this table."
                 ),
             ),
         )

@@ -27,26 +27,35 @@ def test_registry_covers_the_five_managed_keys():
 def test_column_mapping_mode_permits_only_the_upgrade_transition():
     definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
 
-    assert definition.permitted_transitions == frozenset({("none", "name")})
+    # The protocol upgrade is one-way
+    assert definition.permits_transition("none", "name")
+    assert not definition.permits_transition("name", "none")
 
 
 def test_column_mapping_mode_permits_no_removal():
     # Given the protocol upgrade is permanent — removal is a transition to
-    # absence, and no (value, None) pair is permitted
-    transitions = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"].permitted_transitions
+    # absence, and no absence transition is permitted
+    definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
 
-    assert not any(desired is None for _, desired in transitions)
+    assert not definition.permits_transition("name", None)
+    assert not definition.permits_transition("none", None)
 
 
-def test_every_other_key_is_unrestricted():
+def test_first_write_is_always_permitted():
+    # Given a key absent from the catalog, any declared value may be written,
+    # even for the most restricted key
+    definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
+
+    assert definition.permits_transition(None, "name")
+
+
+def test_every_other_key_permits_any_transition_and_removal():
     # Given the four pure-configuration keys
-    unrestricted = {
-        key
-        for key, definition in DELTA_PROPERTY_REGISTRY.items()
-        if definition.permitted_transitions == frozenset()
-    }
-
-    assert unrestricted == set(DELTA_PROPERTY_REGISTRY) - {"delta.columnMapping.mode"}
+    for key, definition in DELTA_PROPERTY_REGISTRY.items():
+        if key == "delta.columnMapping.mode":
+            continue
+        assert definition.permits_transition("anything", "else"), key
+        assert definition.permits_transition("anything", None), key
 
 
 @pytest.mark.parametrize(
@@ -64,7 +73,7 @@ def test_every_other_key_is_unrestricted():
     ],
 )
 def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
-    assert DELTA_PROPERTY_REGISTRY[key].is_valid_value(value)
+    assert DELTA_PROPERTY_REGISTRY[key].reject_declared_value(value) is None
 
 
 @pytest.mark.parametrize(
@@ -83,4 +92,15 @@ def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
     ],
 )
 def test_registry_rejects_invalid_property_values(key: str, value: str) -> None:
-    assert not DELTA_PROPERTY_REGISTRY[key].is_valid_value(value)
+    rejection = DELTA_PROPERTY_REGISTRY[key].reject_declared_value(value)
+
+    # The message names the key and the expected format
+    assert rejection is not None
+    assert str(key) in rejection
+    assert "Expected" in rejection
+
+
+def test_declared_none_is_never_rejected():
+    # Given None asserts a key's absence, not a value
+    for definition in DELTA_PROPERTY_REGISTRY.values():
+        assert definition.reject_declared_value(None) is None
