@@ -166,7 +166,7 @@ class DesiredTable(TableSnapshot):
                     f" {type(data_type).__name__}, which Delta cannot"
                     " partition by"
                 )
-        if self.partitioned_by and len(self.partitioned_by) == len(self.columns):
+        if self.partitioned_by and (len(self.partitioned_by) == len(self.columns)):
             raise ValueError(
                 "Cannot partition by every column: at least one non-partition column is required"
             )
