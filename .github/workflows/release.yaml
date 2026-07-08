@@ -83,7 +83,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run cz bump --yes --changelog
-          git push --follow-tags origin HEAD:main
+          # Push the branch, then the new tag explicitly. `--follow-tags` only
+          # pushes annotated tags and silently drops lightweight ones, which
+          # previously left the tag off the remote.
+          git push origin HEAD:main
+          git push origin "v$(uv run cz version --project)"
 
       - name: Resolve version and release notes
         if: steps.mode.outputs.publish == 'true'
