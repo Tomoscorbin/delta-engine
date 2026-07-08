@@ -133,10 +133,13 @@ class ForeignKey:
         Lower this declaration into a domain constraint.
 
         Resolves ``references`` to a concrete table and infers the referenced
-        columns from that table's primary key. ``owner_name``, ``owner_columns``,
-        and ``owner_primary_key`` describe the enclosing table, used when
-        ``references`` is :data:`Self`. Each local column's data type must match
-        its corresponding referenced primary-key column's data type.
+        columns from that table's primary key. ``owner_name`` and
+        ``owner_columns`` describe the enclosing table and are used
+        unconditionally, for error messages and local column types;
+        ``owner_primary_key`` is used only when ``references`` is
+        :data:`Self`, to supply the enclosing table's own primary key as the
+        referenced columns. Each local column's data type must match its
+        corresponding referenced primary-key column's data type.
         """
         match self.references:
             case _SelfReference():
