@@ -28,6 +28,6 @@ tags:
 
 A column whose Spark type is outside this table (`STRUCT`, etc.) is skipped with a logged warning. The engine leaves it unmanaged — it neither creates, alters, nor drops it. All other columns on the table are still managed normally.
 
-Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length bound is not modeled, produces no drift, and is never altered.
+Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length bound is not modeled, produces no drift, and is never altered. The reasoning — facts that cannot round-trip declaration → catalog → observation are normalized out on both sides — is explained in [explanation-architecture.md](explanation-architecture.md).
 
 A table where every column is unsupported surfaces as a `READ_FAILED` for that table alone.

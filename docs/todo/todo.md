@@ -1,6 +1,7 @@
 # Open questions and decisions
 
 - [ ] Decide whether to create an enum for `Property` values as well as keys (currently only keys are enumerated)
+- [ ] Declarable `Char(n)`/`Varchar(n)` types, if length-bounded columns become a real need. Additive on the type-model side, but flipping the read-side normalisation (observed varchar currently maps to `String`) changes drift behaviour for every existing table with such columns — needs its own migration story. See the type-model fidelity section of explanation-architecture.md.
 - [ ] Figure out how to add existing tables (tables that already exist in the catalog but are not yet passed to `sync`)
 - [ ] Add support for clustering
 - [ ] make partitioned_by a Column-level thing on api DeltaTable
