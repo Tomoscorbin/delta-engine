@@ -69,8 +69,7 @@ def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -
     """
     root = logging.getLogger()
 
-    if root.handlers:
-        root.handlers.clear()
+    root.handlers.clear()
     root.setLevel(level)
 
     handler = SafeStreamHandler(stream=stream if stream is not None else sys.__stderr__)
