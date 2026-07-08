@@ -3,7 +3,7 @@
 import subprocess
 import sys
 
-from delta_engine.api.table import (
+from delta_engine.api.delta_table import (
     DeltaTable as DeltaTableImpl,
     ForeignKey as ForeignKeyImpl,
     Self as SelfImpl,
