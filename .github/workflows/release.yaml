@@ -1,21 +1,37 @@
 name: Release
 
+# On push to main: commitizen decides the bump from conventional commits, tags,
+# builds, and (after approval of the `pypi` environment) publishes to PyPI.
+#
+# Manual run (workflow_dispatch): skip the bump and publish whatever version the
+# current commit's tag resolves to. Use this to recover/re-publish a version that
+# was tagged but not published.
+#
+# build and publish are split into two jobs on purpose: GitHub environment
+# protection gates a whole job, so only `publish` carries `environment: pypi`.
+# That lets the bump + build run automatically while the PyPI upload waits for
+# approval.
+
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
-    if: "!startsWith(github.event.head_commit.message, 'bump:')"
+  build:
+    # On push, skip commitizen's own bump commit to avoid re-triggering.
+    # Manual runs always proceed.
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'bump:') }}
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: write # push the bump commit + tag
-      id-token: write # OIDC for Trusted Publishing
+    outputs:
+      released: ${{ steps.decide.outputs.released }}
+      version: ${{ steps.notes.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -33,40 +49,77 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --locked --group dev
 
-      - name: Decide whether a release is needed
-        id: gate
+      - name: Decide what to do
+        id: decide
         run: |
-          if uv run cz bump --yes --dry-run > /dev/null 2>&1; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Publish the current tag as-is, no bump.
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          elif uv run cz bump --yes --dry-run > /dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "bump=true" >> "$GITHUB_OUTPUT"
           else
-            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Bump version, changelog, tag, and push
-        if: steps.gate.outputs.release == 'true'
+        if: steps.decide.outputs.bump == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run cz bump --yes --changelog
           git push --follow-tags origin HEAD:main
-          echo "VERSION=$(uv run cz version --project)" >> "$GITHUB_ENV"
 
-      - name: Extract release notes for this version
-        if: steps.gate.outputs.release == 'true'
-        run: uv run cz changelog "v${VERSION}" --dry-run > body.md
+      - name: Resolve version and release notes
+        if: steps.decide.outputs.released == 'true'
+        id: notes
+        run: |
+          VERSION="$(uv run cz version --project)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Slice the newest CHANGELOG.md section (between the first two `## `
+          # headers) for the GitHub Release body. Never fatal — the publish must
+          # not depend on release-note formatting.
+          if [ -f CHANGELOG.md ]; then
+            awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md > body.md || true
+          fi
+          [ -s body.md ] || echo "Release $VERSION" > body.md
 
       - name: Build sdist and wheel
-        if: steps.gate.outputs.release == 'true'
+        if: steps.decide.outputs.released == 'true'
         run: uv build
 
+      - name: Upload build artifacts
+        if: steps.decide.outputs.released == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: |
+            dist/
+            body.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi # deployment approval gate applies to this job only
+    permissions:
+      id-token: write # OIDC for Trusted Publishing
+      contents: write # create the GitHub Release
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+
       - name: Publish to PyPI
-        if: steps.gate.outputs.release == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create GitHub Release
-        if: steps.gate.outputs.release == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ env.VERSION }}
+          tag: v${{ needs.build.outputs.version }}
           bodyFile: body.md
           skipIfReleaseExists: true
