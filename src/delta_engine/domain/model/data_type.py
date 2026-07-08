@@ -1,5 +1,6 @@
 """Domain data type variants used to describe table schemas."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
@@ -125,9 +126,12 @@ class StructField:
 class Struct(DataType):
     """Struct of named fields; identity is the ordered (name, type) tuple."""
 
-    fields: tuple[StructField, ...]
+    fields: Sequence[StructField]
 
     def __post_init__(self) -> None:
+        # Accept any sequence at the public boundary; store a tuple so
+        # equality and hashing stay structural.
+        object.__setattr__(self, "fields", tuple(self.fields))
         if not self.fields:
             raise ValueError("Struct requires at least one field")
         seen: set[str] = set()

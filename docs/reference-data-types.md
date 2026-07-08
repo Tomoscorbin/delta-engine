@@ -23,7 +23,7 @@ tags:
 | `Binary()`                               | `BINARY`               |                                                                     |
 | `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | No timezone; the table feature is enabled automatically on creation |
 | `Variant()`                              | `VARIANT`              | Requires a runtime with variant support                             |
-| `Struct((StructField(name, type), ...))` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable |
+| `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable |
 
 Any change to a struct's fields (adding, removing, renaming, or retyping a
 field) surfaces as a column type change on the owning column and is blocked

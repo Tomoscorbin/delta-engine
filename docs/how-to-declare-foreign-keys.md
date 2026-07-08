@@ -31,7 +31,7 @@ orders = DeltaTable(
     ],
     foreign_keys=[
         ForeignKey(
-            local_columns=("customer_id",),
+            local_columns=["customer_id"],
             references=customers,
         ),
     ],
@@ -58,7 +58,7 @@ employees = DeltaTable(
         Column("manager_id", Long()),
     ],
     foreign_keys=[
-        ForeignKey(local_columns=("manager_id",), references=Self),
+        ForeignKey(local_columns=["manager_id"], references=Self),
     ],
 )
 ```
@@ -89,7 +89,7 @@ order_lines = DeltaTable(
     ],
     foreign_keys=[
         ForeignKey(
-            local_columns=("tenant_id", "customer_id"),  # aligns with customer_accounts PK (tenant_id, id)
+            local_columns=["tenant_id", "customer_id"],  # aligns with customer_accounts PK (tenant_id, id)
             references=customer_accounts,
         ),
     ],

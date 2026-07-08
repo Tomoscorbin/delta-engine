@@ -250,3 +250,21 @@ def test_foreign_key_with_matching_types_still_lowers():
 
     # Then the foreign key lowers normally
     assert orders.foreign_keys[0].local_columns == ("customer_id",)
+
+
+def test_foreign_key_accepts_local_columns_as_a_list():
+    # Given a foreign key declared with a plain list (the natural call style)
+    customers = _customers()
+    declaration = ForeignKey(local_columns=["customer_id"], references=customers)
+    orders = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("id", Integer()), Column("customer_id", Integer())],
+        foreign_keys=[declaration],
+    )
+
+    # Then the declaration and the lowered constraint both hold immutable tuples
+    assert declaration.local_columns == ("customer_id",)
+    [constraint] = orders.foreign_keys
+    assert constraint.local_columns == ("customer_id",)

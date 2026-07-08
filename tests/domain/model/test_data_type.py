@@ -58,3 +58,11 @@ def test_struct_equality_is_structural() -> None:
     left = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
     right = Struct((StructField("a", Integer()), StructField("b", Array(String()))))
     assert left == right
+
+
+def test_struct_accepts_fields_as_a_list_and_compares_equal_to_tuple_form() -> None:
+    from_list = Struct([StructField("a", Integer())])
+    from_tuple = Struct((StructField("a", Integer()),))
+
+    assert from_list == from_tuple
+    assert from_list.fields == (StructField("a", Integer()),)

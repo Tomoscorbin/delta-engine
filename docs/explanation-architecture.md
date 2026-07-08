@@ -467,7 +467,7 @@ orders = DeltaTable(
     name="orders",
     columns=[...],
     foreign_keys=[
-        ForeignKey(local_columns=("customer_id",), references=customers),
+        ForeignKey(local_columns=["customer_id"], references=customers),
     ],
 )
 ```

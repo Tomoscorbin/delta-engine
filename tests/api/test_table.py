@@ -1,3 +1,5 @@
+from types import MappingProxyType
+
 import pytest
 
 from delta_engine.api.table import METADATA_ASPECTS
@@ -315,6 +317,20 @@ def test_delta_table_passes_tags_through_to_desired_table():
 
     # Then the tags carry through unchanged
     assert dict(desired.tags) == {"env": "prod", "domain": "sales"}
+
+
+def test_delta_table_accepts_tags_as_any_mapping():
+    # Given tags supplied as a read-only mapping rather than a dict
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags=MappingProxyType({"owner": "data"}),
+    )
+
+    # Then the declaration copies them into the desired table
+    assert dict(table.to_desired_table().tags) == {"owner": "data"}
 
 
 def test_delta_table_defaults_to_no_tags():
