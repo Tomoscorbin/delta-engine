@@ -38,4 +38,4 @@ Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length boun
 
 A table where every column is unsupported surfaces as a `READ_FAILED` for that table alone.
 
-A table whose partition column has an unsupported type also surfaces as `READ_FAILED`, rather than being skipped: silently dropping a partition column would leave the observed partitioning incomplete, and the engine would report a false partitioning change instead of an honest "could not determine state".
+A table whose partition column has an unsupported type also surfaces as `READ_FAILED`, rather than being skipped: silently dropping a partition column would leave the observed partitioning incomplete, and the engine would report a false partitioning change instead of an honest "could not determine state". Hitting this usually means the catalog's type vocabulary is ahead of this engine version — new Spark types (recent precedents: `TIMESTAMP_NTZ`, `VARIANT`) reach tables before tools that pin a type model — or the name resolves to a non-Delta relation (a federated or legacy Hive table) with a broader partitioning vocabulary.

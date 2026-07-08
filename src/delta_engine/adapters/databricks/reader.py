@@ -78,7 +78,9 @@ def _to_column_mapping(
         if bool(getattr(spark_column, "isPartition", False)):
             raise RuntimeError(
                 f"Partition column {spark_column.name!r} in {qualified_name} has"
-                f" unsupported type {spark_column.dataType!r}; the observed"
+                f" type {spark_column.dataType!r}, which this version of"
+                " delta-engine has no mapping for (catalogs gain new types"
+                " before engines that pin a type model); the observed"
                 " partitioning cannot be determined, so the table cannot be"
                 " read safely."
             )
