@@ -16,6 +16,7 @@ from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryK
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -33,6 +34,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
+    ClusteringChanged,
     ColumnAdded,
     ColumnCommentChanged,
     ColumnDataTypeChanged,
@@ -426,6 +428,53 @@ def test_partitioning_drift_produces_change_with_both_sides():
     assert diff.changes == (
         PartitioningChanged(desired_partitioning=("id",), observed_partitioning=()),
     )
+
+
+# ---------- clustering change
+
+
+def test_clustering_drift_produces_change_with_both_sides():
+    # Given identical columns so clustering is the only drift
+    columns = (Column("id", Integer()), Column("region", String()))
+    diff = diff_table(
+        _desired(columns=columns, clustered_by=("region",)),
+        _observed(columns=columns, clustered_by=()),
+    )
+    assert diff.changes == (
+        ClusteringChanged(desired_clustering=("region",), observed_clustering=()),
+    )
+
+
+def test_reordered_clustering_keys_are_not_a_change():
+    # Given the same clustering key set in a different order on each side
+    columns = (Column("id", Integer()), Column("region", String()))
+    diff = diff_table(
+        _desired(columns=columns, clustered_by=("region", "id")),
+        _observed(columns=columns, clustered_by=("id", "region")),
+    )
+    # Then no clustering change is produced — key order is immaterial
+    assert diff.changes == ()
+
+
+def test_clustering_removal_produces_cluster_by_none_action():
+    # Given a table clustered in the catalog but declared unclustered
+    columns = (Column("id", Integer()), Column("region", String()))
+    diff = diff_table(
+        _desired(columns=columns, clustered_by=()),
+        _observed(columns=columns, clustered_by=("region",)),
+    )
+    (change,) = diff.changes
+    assert change.actions() == (AlterClustering(columns=()),)
+
+
+def test_clustering_change_produces_alter_clustering_action():
+    change = ClusteringChanged(desired_clustering=("region",), observed_clustering=("id",))
+    assert change.actions() == (AlterClustering(columns=("region",)),)
+
+
+def test_clustering_changed_rejects_equal_key_sets():
+    with pytest.raises(ValueError, match="no difference"):
+        ClusteringChanged(desired_clustering=("a", "b"), observed_clustering=("b", "a"))
 
 
 # ---------- primary key changes

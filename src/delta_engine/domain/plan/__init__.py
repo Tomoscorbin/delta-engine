@@ -22,6 +22,7 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.diff import (
     Change,
+    ClusteringChanged,
     ColumnAdded,
     ColumnCommentChanged,
     ColumnDataTypeChanged,
@@ -54,6 +55,7 @@ __all__ = [
     "AddColumn",
     "AlterClustering",
     "Change",
+    "ClusteringChanged",
     "ColumnAdded",
     "ColumnCommentChanged",
     "ColumnDataTypeChanged",
