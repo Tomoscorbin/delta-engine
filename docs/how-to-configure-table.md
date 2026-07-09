@@ -471,6 +471,12 @@ tables that reference it, so you can declare tables in any order. A foreign key
 into the table's own primary key is allowed — the engine creates the table,
 then adds the constraint.
 
+The referenced table must live in the same catalog as the table declaring the
+key. Unity Catalog's information_schema is per-catalog, so the engine could
+create a cross-catalog constraint but never observe it afterwards — every
+later sync would re-plan and fail. A cross-catalog `references` is therefore
+rejected when the `DeltaTable` is constructed.
+
 The same dependency logic propagates failure: a referenced table that won't
 reach its desired state this sync blocks every table downstream of it, which
 report `FOREIGN_KEY_FAILED`. That cross-table blocking is part of the safety
