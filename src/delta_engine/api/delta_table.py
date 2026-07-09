@@ -312,6 +312,8 @@ class DeltaTable:
             else None
         )
 
+        clustered_by = tuple(column.name for column in columns if column.cluster_key)
+
         qualified_name = QualifiedName(catalog, schema, name)
         lowered_foreign_keys = tuple(
             declaration._to_constraint(qualified_name, columns, primary_key_columns)
@@ -329,6 +331,7 @@ class DeltaTable:
             properties=user_properties,
             tags=table_tags,
             partitioned_by=tuple(partitioned_by),
+            clustered_by=clustered_by,
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
             managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
@@ -377,6 +380,11 @@ class DeltaTable:
     def partitioned_by(self) -> tuple[str, ...]:
         """Partition column names, in declaration order."""
         return self._desired_table.partitioned_by
+
+    @property
+    def clustered_by(self) -> tuple[str, ...]:
+        """Clustering key column names, in declaration order."""
+        return self._desired_table.clustered_by
 
     @property
     def primary_key(self) -> tuple[str, ...]:

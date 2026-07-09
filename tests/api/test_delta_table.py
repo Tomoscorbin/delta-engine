@@ -13,6 +13,7 @@ from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import (
     Array,
     Column,
+    Date,
     DeltaTable,
     ForeignKey,
     Integer,
@@ -127,6 +128,43 @@ def test_delta_table_exposes_declared_partitioning():
 
     # Then partitioned_by reads it back
     assert table.partitioned_by == ("ds",)
+
+
+def test_delta_table_derives_clustering_from_cluster_key_flags():
+    # Given columns flagged as clustering keys
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[
+            Column("id", Integer()),
+            Column("region", String(), cluster_key=True),
+            Column("day", Date(), cluster_key=True),
+        ],
+    )
+    # Then clustered_by reads back the flagged columns in declaration order
+    assert table.clustered_by == ("region", "day")
+
+
+def test_delta_table_clustering_defaults_to_empty_tuple():
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+    assert table.clustered_by == ()
+
+
+def test_delta_table_rejects_partitioning_and_clustering_together():
+    with pytest.raises(ValueError, match="both partition"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("id", Integer()), Column("region", String(), cluster_key=True)],
+            partitioned_by=["id"],
+        )
 
 
 @pytest.mark.parametrize(
