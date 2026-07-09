@@ -80,6 +80,28 @@ def test_rejects_mismatched_column_counts():
         )
 
 
+def test_rejects_duplicate_local_columns():
+    # Given / When / Then a repeated local column is rejected
+    with pytest.raises(ValueError, match="Duplicate foreign key local column"):
+        ForeignKeyConstraint(
+            local_columns=("customer_id", "customer_id"),
+            referenced_table=_customers(),
+            referenced_columns=("tenant_id", "id"),
+            constraint_name="x_fk",
+        )
+
+
+def test_rejects_duplicate_referenced_columns():
+    # Given / When / Then a repeated referenced column is rejected
+    with pytest.raises(ValueError, match="Duplicate foreign key referenced column"):
+        ForeignKeyConstraint(
+            local_columns=("customer_id", "tenant_id"),
+            referenced_table=_customers(),
+            referenced_columns=("id", "id"),
+            constraint_name="x_fk",
+        )
+
+
 def test_rejects_blank_explicit_constraint_name():
     # Given / When / Then a blank explicit constraint name is rejected
     with pytest.raises(ValueError, match="constraint_name must not be blank"):
