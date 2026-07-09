@@ -127,8 +127,9 @@ def _primary_key_from_rows(rows: Sequence[Row]) -> PrimaryKeyConstraint | None:
     """
     Build the primary key from its information_schema rows, or ``None``.
 
-    Constraint and column names are normalised to lowercase at the adapter
-    boundary.
+    The query orders rows by ordinal_position, so the columns tuple is in
+    key order. Constraint and column names are normalised to lowercase at
+    the adapter boundary.
     """
     columns = tuple(row["column_name"].casefold() for row in rows)
     if not columns:
