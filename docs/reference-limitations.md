@@ -5,8 +5,8 @@ tags:
 
 # Capabilities and limitations
 
-The quick answer to "can delta-engine do X?". Each row links to the page with
-the detail.
+This page summarises what delta-engine can and cannot manage. Each row links to
+the page with the detail.
 
 ## Platform
 
