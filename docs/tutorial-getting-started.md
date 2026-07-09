@@ -5,7 +5,9 @@ tags:
 
 # Getting started with delta-engine
 
-This tutorial walks you through defining your first Delta table, registering it, and syncing it to Databricks. By the end you will have a table created in your Unity Catalog and a sync report confirming success.
+This tutorial walks you through defining your first Delta table and syncing it
+to Databricks. By the end you will have created a table in Unity Catalog and
+seen the sync report that confirms it.
 
 ## Prerequisites
 
@@ -33,37 +35,6 @@ customers = DeltaTable(
 
 `DeltaTable` describes what you want. No SQL runs yet.
 
-### Declare partitioning
-
-Pass `partitioned_by` to `DeltaTable` to set partition columns when the table is
-created:
-
-```python
-from delta_engine.schema import Column, Date, DeltaTable, String
-
-events = DeltaTable(
-    catalog="dev",
-    schema="silver",
-    name="events",
-    columns=[
-        Column("event_date", Date()),
-        Column("event_type", String()),
-        Column("payload", String()),
-    ],
-    partitioned_by=["event_date"],
-)
-```
-
-Every name in `partitioned_by` must also appear in `columns`. Partition columns
-are still regular columns: `partitioned_by` names them, and `columns` defines
-their types and other column metadata.
-
-Partitioning is fixed after table creation. Declaring a different
-`partitioned_by` for an existing table fails validation before any SQL runs. To
-change partitioning, drop and recreate the table out of band, then re-sync. See
-[reference-safe-change-rules.md](reference-safe-change-rules.md) for the full
-list of changes the engine rejects at validation.
-
 ## Sync
 
 Build an engine and pass your table definitions straight to `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:
@@ -76,6 +47,22 @@ engine.sync(customers)
 ```
 
 If the table does not exist, the engine creates it. If it already matches your declaration, `sync` is a no-op.
+
+## Check the result
+
+`sync` returns a `SyncReport` describing what happened to each table. Render it
+to see the outcome:
+
+```python
+from delta_engine import render_report
+
+report = engine.sync(customers)
+print(render_report(report))
+```
+
+On the first run the report shows the `customers` table being created. Run it
+again and the report shows no changes — the declaration and the catalog now
+agree.
 
 ## Enable logging (optional)
 
@@ -90,4 +77,10 @@ engine.sync(customers)
 
 ## What to do when sync fails
 
-If any table fails validation or execution, `sync` raises `SyncFailedError`. The exception message shows which tables failed and why. See [how-to-handle-sync-failures.md](how-to-handle-sync-failures.md) for how to inspect the report programmatically.
+If any table fails validation or execution, `sync` raises `SyncFailedError`. The exception message shows which tables failed and why. See [how to handle sync failures](how-to-handle-sync-failures.md) for how to inspect the report programmatically.
+
+## Next steps
+
+- [How a sync works](explanation-sync-lifecycle.md) — what happens between calling `sync` and getting a report back.
+- [How to configure a table](how-to-configure-table.md) — properties, tags, comments, keys, and partitioning.
+- [Preview changes with a dry run](how-to-preview-changes.md) — see what a sync would do before it touches anything.

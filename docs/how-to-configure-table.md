@@ -17,10 +17,11 @@ partitioned. This page is the practical reference for configuring each aspect.
 | Comments          | Table and column documentation                        | [Comments](#comments), below                                                          |
 | Primary keys      | The table's primary key                               | [Primary keys](how-to-declare-primary-keys.md)                                        |
 | Foreign keys      | Cross-table references and sync ordering              | [Foreign keys](how-to-declare-foreign-keys.md)                                        |
-| Partitioning      | Partition columns, fixed at creation                  | [Getting started](tutorial-getting-started.md)                                        |
+| Partitioning      | Partition columns, fixed at creation                  | [Partitioning](#partitioning), below                                                  |
 
-Tags and comments are covered here in full. The other aspects have their own
-pages for now and will move into this one as the documentation grows.
+Tags, comments, and partitioning are covered here in full. Properties and keys
+have their own pages for now and will move into this one as the documentation
+grows.
 
 ## Tags
 
@@ -138,3 +139,39 @@ without a comment (the default is the empty string) asserts that the column has
 no comment — so removing a comment from the declaration clears it on the table
 at the next sync, and a comment added to the table outside the declaration is
 drift that the sync overwrites.
+
+## Partitioning
+
+Pass `partitioned_by` to set the columns a table is partitioned by when it is
+created:
+
+```python
+from delta_engine.schema import Column, Date, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("event_date", Date()),
+        Column("event_type", String()),
+        Column("payload", String()),
+    ],
+    partitioned_by=["event_date"],
+)
+```
+
+Every name in `partitioned_by` must also appear in `columns`. Partition columns
+are still regular columns: `partitioned_by` names them, and `columns` defines
+their types and other metadata.
+
+### Partitioning is fixed at creation
+
+Partitioning can only be set when the table is created. Declaring a different
+`partitioned_by` for an existing table fails validation before any SQL runs — to
+change it, drop and recreate the table out of band, then re-sync. Partition
+columns also cannot be of complex type (`Array`, `Map`, `Struct`, `Variant`),
+and a table cannot be partitioned by every column; both are rejected when the
+`DeltaTable` is constructed. See
+[safe-change rules](reference-safe-change-rules.md) for the full set of changes
+the engine rejects.
