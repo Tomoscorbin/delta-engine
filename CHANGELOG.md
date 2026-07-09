@@ -1,3 +1,31 @@
+## v0.2.0 (2026-07-09)
+
+### Feat
+
+- expand walkthrough notebook with live checks and construction-time guards
+- expose DeltaTable declaration as read-only accessors
+- build wheel in CI
+
+### Fix
+
+- restore test body dropped in merge conflict resolution
+- lint
+- spacing in validation for primary and foreign key constraints
+- reject duplicate foreign key columns at construction
+- read primary key columns in key order
+- only treat a missing information_schema as unavailable in the probe
+- reject colliding generated foreign key constraint names at declaration
+- exclude unique-backed foreign keys from the inbound PK-reference query
+- reject cross-catalog foreign keys at declaration
+
+### Refactor
+
+- **application**: tighten constants and aliases
+- **plan**: extract change vocabulary
+- **domain**: tighten table model boundaries
+- drop metadata_only accessor from DeltaTable
+- store metadata_only flag instead of deriving it
+
 ## v0.1.0 (2026-07-08)
 
 ### Feat
