@@ -494,8 +494,8 @@ per-column flag (`primary_key=True`), and a composite key simply takes the
 flagged columns in declaration order. Partitioning cannot reuse that shape,
 because partition order is significant _and_ independent of column order: the
 order of names in `partitioned_by` sets the physical directory nesting Delta
-writes, and that nesting is frequently different from the order columns appear
-in the table. A per-column flag has nowhere to express an ordering distinct from
+writes, and that nesting can be different from the order columns appear in the
+table. A per-column flag has nowhere to express an ordering distinct from
 column declaration order, so partition columns are named in one ordered,
 table-level list instead. The differ compares that list positionally, which is
 why reordering it is drift, not a no-op.
