@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Final
 
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
@@ -162,8 +163,10 @@ class ForeignKey:
                 " {local column: referenced column};"
                 f" got {type(self.columns).__name__}"
             )
-        # Copy at the public boundary so the declaration stays immutable.
-        object.__setattr__(self, "columns", dict(self.columns))
+        # Copy behind a read-only view at the public boundary so the frozen
+        # declaration is immutable in fact, not just by convention (matching
+        # Column.tags).
+        object.__setattr__(self, "columns", MappingProxyType(dict(self.columns)))
 
     def _to_constraint(
         self,
@@ -195,7 +198,7 @@ class ForeignKey:
 
         if not referenced_key_columns:
             raise ValueError(
-                f"cannot infer referenced columns: {referenced_table} declares no primary key"
+                f"foreign key references {referenced_table}, which declares no primary key"
             )
 
         local_columns = tuple(self.columns.keys())
