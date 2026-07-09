@@ -266,6 +266,36 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         )
 
 
+def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
+    # Given two FKs over different local columns whose generated names collide:
+    # ('a', 'b_c') and ('a_b', 'c') both derive t_a_b_c_fk
+    first = ForeignKeyConstraint.generate(
+        owner_table_name="t",
+        local_columns=("a", "b_c"),
+        referenced_table=QualifiedName("cat", "sch", "p1"),
+        referenced_columns=("x", "y"),
+    )
+    second = ForeignKeyConstraint.generate(
+        owner_table_name="t",
+        local_columns=("a_b", "c"),
+        referenced_table=QualifiedName("cat", "sch", "p2"),
+        referenced_columns=("x", "y"),
+    )
+
+    # When / Then the collision is rejected, naming both column tuples
+    with pytest.raises(ValueError, match="same constraint name"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "t"),
+            columns=(
+                Column("a", Integer()),
+                Column("b_c", Integer()),
+                Column("a_b", Integer()),
+                Column("c", Integer()),
+            ),
+            foreign_keys=(first, second),
+        )
+
+
 def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
     # Given two FKs over the same columns in a different order (the reorder case
     # the old name-based guard missed); each carries a distinct name so construction succeeds

@@ -18,7 +18,7 @@
 - [ ] Think of whether to make DeltaTable automatically make columns unique if they are PK cols
 - [ ] make the nested if else statments in engine more readable
 - [ ] do we need backticked things in sql compiler or can we do without?
-- [ ] allow a way for existing constraint names (PK/FK) to be passed to DeltaTable
+- [ ] Allow explicit constraint names (PK/FK) on DeltaTable — both for adopting existing catalog names and as the escape hatch when two FKs' generated names collide (currently rejected at declaration with no override).
 - [ ] consider replacing typle comps in validation with regular loops for readability
 - [ ] Test hygiene sweep (low-risk, deferred from FK PR review): (1) rename ~60 abbreviated test locals — `reg`→registry, `fq`→fully_qualified_name, the `qn` fixture in test_reader.py→qualified_name, `tr`→table_run, `vf`/`sr`/`col`/`t`/`d`, module consts `_QN`/`_COL`; (2) fill in ~25 bare wordless Given/When/Then markers; (3) rename 4 meta-label/stale-class test names (`_happy_path` suffixes, `test_table_snapshot_...` that actually tests DesiredTable); (4) add GWT structure to ~12 tests in test_preview/test_dialect/test_types that lack it. (Themes 3/4/5 — private-method coupling, IntEnum-value asserts, implementation-string asserts — already fixed in the FK PR.)
 - [ ] Review AnalysisException catches in executor and reader
