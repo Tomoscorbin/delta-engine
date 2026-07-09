@@ -521,9 +521,9 @@ resolver topologically orders them by FK dependency before execution.
 
 References by dotted name are intentionally not supported in this iteration. If
 that becomes necessary, the API can be widened to accept a `QualifiedName` as an
-additional branch. That would be backward-compatible, but it would also need
-explicit referenced columns because a bare name carries no primary key object to
-inspect.
+additional branch. That would be backward-compatible: the referenced columns are
+already explicit in the `columns` mapping, so a bare name would only lose the
+primary-key object the engine validates the mapping against.
 
 Partitioning is shaped by a related decision. `primary_key` and
 `partitioned_by` are both table-level lists of column names, but "order"

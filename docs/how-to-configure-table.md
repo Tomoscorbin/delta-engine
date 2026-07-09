@@ -392,7 +392,7 @@ orders = DeltaTable(
 ```
 
 Referencing the target `DeltaTable` object — rather than a dotted table name —
-is what lets the engine infer the referenced columns from that table's primary
+is what lets the engine validate the mapping against that table's actual primary
 key, and keeps the reference valid if the target is renamed. The constraint
 name is generated at lowering as `{table}_{local_columns}_fk`
 (`orders_customer_id_fk` above). The name cannot be chosen, and drift matching
