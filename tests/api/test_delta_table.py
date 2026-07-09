@@ -290,20 +290,76 @@ def test_to_desired_table_defaults_partitioning_to_empty_tuple():
     assert desired.partitioned_by == ()
 
 
-def test_column_with_primary_key_flag():
-    # Given a Column with primary_key=True
-    col = Column("id", Integer(), nullable=False, primary_key=True)
+def test_primary_key_parameter_lowers_into_table_level_constraint():
+    # Given a composite key declared at table level
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="accounts",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False),
+            Column("id", Integer(), nullable=False),
+        ],
+        primary_key=["tenant_id", "id"],
+    )
 
-    # Then the flag is readable
-    assert col.primary_key is True
+    # Then the constraint carries the declared columns and generated name
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert desired.primary_key.columns == ("tenant_id", "id")
+    assert desired.primary_key.constraint_name == "accounts_pk"
 
 
-def test_column_primary_key_defaults_to_false():
-    # Given a Column without the primary_key flag
-    col = Column("id", Integer())
+def test_no_primary_key_parameter_means_no_key():
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="events",
+        columns=[Column("id", Integer())],
+    )
 
-    # Then it defaults to False
-    assert col.primary_key is False
+    assert table.to_desired_table().primary_key is None
+    assert table.primary_key == ()
+
+
+def test_empty_primary_key_sequence_is_rejected():
+    # Given an empty sequence — a meaningless assertion, distinct from None
+    with pytest.raises(ValueError, match="must not be empty"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer())],
+            primary_key=[],
+        )
+
+
+def test_primary_key_naming_unknown_column_is_rejected():
+    with pytest.raises(ValueError, match="missing_col"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer(), nullable=False)],
+            primary_key=["missing_col"],
+        )
+
+
+def test_primary_key_over_nullable_column_is_rejected():
+    with pytest.raises(ValueError, match="NOT NULL"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer(), nullable=True)],
+            primary_key=["id"],
+        )
+
+
+def test_column_no_longer_accepts_a_primary_key_flag():
+    # The per-column flag is deleted; the fact lives at table level now
+    with pytest.raises(TypeError):
+        Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
 
 
 def test_delta_table_primary_key_returns_pk_column_names():
@@ -313,9 +369,10 @@ def test_delta_table_primary_key_returns_pk_column_names():
         schema="s",
         name="orders",
         columns=[
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False),
             Column("name", String()),
         ],
+        primary_key=["id"],
     )
 
     # Then primary_key returns the PK column names in declaration order
@@ -342,9 +399,10 @@ def test_delta_table_passes_pk_to_desired_table():
         schema="s",
         name="orders",
         columns=[
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False),
             Column("ds", String()),
         ],
+        primary_key=["id"],
     )
 
     # When converting to domain
@@ -361,10 +419,11 @@ def test_delta_table_pk_column_order_matches_declaration_order():
         schema="s",
         name="orders",
         columns=[
-            Column("tenant_id", Integer(), nullable=False, primary_key=True),
-            Column("order_id", Integer(), nullable=False, primary_key=True),
+            Column("tenant_id", Integer(), nullable=False),
+            Column("order_id", Integer(), nullable=False),
             Column("ds", String()),
         ],
+        primary_key=["tenant_id", "order_id"],
     )
 
     # Then the order in primary_key matches declaration order
@@ -377,7 +436,8 @@ def test_delta_table_accepts_foreign_keys_parameter():
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When constructing a table with a FK to it
@@ -416,7 +476,8 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When / Then domain validation fires at construction time

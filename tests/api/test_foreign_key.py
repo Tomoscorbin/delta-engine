@@ -9,7 +9,8 @@ def _customers() -> DeltaTable:
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
 
@@ -54,9 +55,10 @@ def test_delta_table_stores_composite_foreign_key_canonically():
         schema="sch",
         name="customers",
         columns=[
-            Column("tenant_id", Integer(), nullable=False, primary_key=True),
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("tenant_id", Integer(), nullable=False),
+            Column("id", Integer(), nullable=False),
         ],
+        primary_key=["tenant_id", "id"],
     )
     orders = DeltaTable(
         catalog="cat",
@@ -82,9 +84,10 @@ def test_delta_table_supports_self_referential_foreign_key():
         schema="sch",
         name="employee",
         columns=[
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False),
             Column("manager_id", Integer()),
         ],
+        primary_key=["id"],
         foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
     )
 
@@ -148,7 +151,8 @@ def test_delta_table_rejects_cross_catalog_foreign_key():
         catalog="other",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When / Then the declaration is rejected: information_schema is
@@ -171,9 +175,10 @@ def test_delta_table_rejects_duplicate_foreign_key_local_columns():
         schema="sch",
         name="customers",
         columns=[
-            Column("tenant_id", Integer(), nullable=False, primary_key=True),
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("tenant_id", Integer(), nullable=False),
+            Column("id", Integer(), nullable=False),
         ],
+        primary_key=["tenant_id", "id"],
     )
 
     # When / Then the repeated local column is rejected at declaration time
@@ -197,9 +202,10 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
         schema="sch",
         name="parts",
         columns=[
-            Column("x", Integer(), nullable=False, primary_key=True),
-            Column("y", Integer(), nullable=False, primary_key=True),
+            Column("x", Integer(), nullable=False),
+            Column("y", Integer(), nullable=False),
         ],
+        primary_key=["x", "y"],
     )
 
     # When / Then the collision is rejected at declaration time
@@ -242,7 +248,8 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Long(), nullable=False, primary_key=True)],
+        columns=[Column("id", Long(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When / Then construction fails because the local column type does not match
@@ -252,9 +259,10 @@ def test_foreign_key_rejects_local_column_type_mismatch_with_target_primary_key(
             schema="sch",
             name="orders",
             columns=[
-                Column("id", Long(), nullable=False, primary_key=True),
+                Column("id", Long(), nullable=False),
                 Column("customer_id", String()),
             ],
+            primary_key=["id"],
             foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
         )
 
@@ -268,9 +276,10 @@ def test_self_referential_foreign_key_rejects_type_mismatch():
             schema="sch",
             name="employees",
             columns=[
-                Column("id", Long(), nullable=False, primary_key=True),
+                Column("id", Long(), nullable=False),
                 Column("manager_id", Integer()),
             ],
+            primary_key=["id"],
             foreign_keys=[ForeignKey(local_columns=("manager_id",), references=Self)],
         )
 
@@ -283,9 +292,10 @@ def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
         schema="sch",
         name="customers",
         columns=[
-            Column("tenant_id", Integer(), nullable=False, primary_key=True),
-            Column("id", Long(), nullable=False, primary_key=True),
+            Column("tenant_id", Integer(), nullable=False),
+            Column("id", Long(), nullable=False),
         ],
+        primary_key=["tenant_id", "id"],
     )
 
     # When / Then construction fails naming the mismatched pair
@@ -295,10 +305,11 @@ def test_composite_foreign_key_rejects_a_single_mismatched_column_pair():
             schema="sch",
             name="orders",
             columns=[
-                Column("id", Long(), nullable=False, primary_key=True),
+                Column("id", Long(), nullable=False),
                 Column("customer_tenant_id", Integer()),
                 Column("customer_id", String()),
             ],
+            primary_key=["id"],
             foreign_keys=[
                 ForeignKey(
                     local_columns=("customer_tenant_id", "customer_id"),
@@ -314,16 +325,18 @@ def test_foreign_key_with_matching_types_still_lowers():
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Long(), nullable=False, primary_key=True)],
+        columns=[Column("id", Long(), nullable=False)],
+        primary_key=["id"],
     )
     orders = DeltaTable(
         catalog="cat",
         schema="sch",
         name="orders",
         columns=[
-            Column("id", Long(), nullable=False, primary_key=True),
+            Column("id", Long(), nullable=False),
             Column("customer_id", Long()),
         ],
+        primary_key=["id"],
         foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
     )
 
