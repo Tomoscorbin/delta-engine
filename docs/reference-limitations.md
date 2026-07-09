@@ -41,14 +41,15 @@ the page with the detail.
 These features are not modeled at all: the engine never reads, creates,
 changes, or drops them, and they produce no drift.
 
-| Not modeled                       | Meaning                                                             |
-| --------------------------------- | ------------------------------------------------------------------- |
-| CHECK constraints                 | Existing ones are left untouched and cannot be declared             |
-| Identity and generated columns    | A column's generation expression is invisible to the engine         |
-| Liquid clustering                 | Only Hive-style `PARTITIONED BY` is modeled                         |
-| Views and materialized views      | Only Delta tables are managed                                       |
-| Grants, row filters, column masks | Governance beyond comments and tags is out of scope                 |
-| Data                              | The engine runs DDL only; it never reads, writes, or backfills rows |
+| Not modeled                                                       | Meaning                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CHECK constraints                                                 | Existing ones are left untouched and cannot be declared                                                                                                                             |
+| Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key |
+| Identity and generated columns                                    | A column's generation expression is invisible to the engine                                                                                                                         |
+| Liquid clustering                                                 | Only Hive-style `PARTITIONED BY` is modeled                                                                                                                                         |
+| Views and materialized views                                      | Only Delta tables are managed                                                                                                                                                       |
+| Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                 |
+| Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                 |
 
 ## Type support
 
