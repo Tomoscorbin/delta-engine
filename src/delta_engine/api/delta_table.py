@@ -117,7 +117,10 @@ class ForeignKey:
 
     ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
     for a self-referential key. See the architecture explanation doc for why the
-    reference is an object rather than a name.
+    reference is an object rather than a name. The referenced table must live
+    in the same catalog as the declaring table — information_schema is
+    per-catalog, so a cross-catalog constraint could be created but never
+    observed afterwards.
     """
 
     local_columns: Sequence[str]
@@ -137,15 +140,24 @@ class ForeignKey:
         """
         Lower this declaration into a domain constraint.
 
-        Applies the lowering rules in order: the referenced table must declare
-        a primary key, the local column count must match it, and each local
-        column's data type must match its referenced column's. Local column
-        existence is not checked here — the ``DesiredTable`` built right
-        after enforces it.
+        Applies the lowering rules in order: the referenced table must live in
+        the owner's catalog, must declare a primary key, the local column
+        count must match it, and each local column's data type must match its
+        referenced column's. Local column existence is not checked here — the
+        ``DesiredTable`` built right after enforces it.
         """
         referenced_table, referenced_columns, referenced_types = self._resolve_reference(
             owner_name, owner_columns, owner_primary_key
         )
+
+        if referenced_table.catalog != owner_name.catalog:
+            raise ValueError(
+                f"cross-catalog foreign key not supported: {owner_name} cannot"
+                f" reference {referenced_table}. information_schema is"
+                " per-catalog, so the engine could create the constraint but"
+                " never observe it afterwards; declare both tables in the same"
+                " catalog."
+            )
 
         if not referenced_columns:
             raise ValueError(
