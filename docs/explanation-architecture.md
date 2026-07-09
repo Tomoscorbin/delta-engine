@@ -53,20 +53,20 @@ flowchart TB
 The architecture is easiest to follow if you start with the data that moves
 through a sync.
 
-| Concept | Role |
-|---|---|
-| `DeltaTable` | Public user declaration. It is the object users write in notebooks, scripts, and Python modules. |
-| `DesiredTable` | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape. |
-| `ObservedTable` | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details. |
-| `CatalogState` | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`. |
-| `TableDiff` | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`. |
-| `Dimension` | One aspect of drift, such as columns, table comment, properties, tags, partitioning, primary key, or foreign keys. |
-| `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run. |
-| `ActionPlan` | The ordered, table-local actions that should be executed if the table is allowed to run. |
-| `ResolveResult` | The foreign-key dependency order plus any FK-specific failures. |
-| `ExecutionSummary` | The result of attempting a table's plan. It records successful actions and the first failed action, if execution failed. |
-| `TableRunReport` | The complete per-table outcome, including read state, plan, failures, and execution. |
-| `SyncReport` | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure. |
+| Concept            | Role                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                    |
+| `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape. |
+| `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.             |
+| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                    |
+| `TableDiff`        | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`.                          |
+| `Dimension`        | One aspect of drift, such as columns, table comment, properties, tags, partitioning, primary key, or foreign keys.                  |
+| `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                     |
+| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                            |
+| `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                     |
+| `ExecutionSummary` | The result of attempting a table's plan. It records successful actions and the first failed action, if execution failed.            |
+| `TableRunReport`   | The complete per-table outcome, including read state, plan, failures, and execution.                                                |
+| `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.           |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
 For example, the domain has `Column`, `QualifiedName`, `PrimaryKeyConstraint`,
@@ -225,28 +225,28 @@ Execution is gated by accumulated failures. A table that failed read,
 validation, or foreign-key resolution keeps its failure in the report and is
 skipped during execution. The engine still processes other tables.
 
-| Shape | Produced by | Consumed by | Purpose |
-|---|---|---|---|
-| `DeltaTable` | User code | Application preparation | Public declaration object |
-| `DesiredTable` | API lowering | Domain planner, resolver, report | Target schema snapshot |
-| `ObservedTable` | Reader adapter | Domain planner, report | Catalog schema snapshot |
-| `TableDiff` | `diff_table` | Validation, Engine (changes) | Typed changes separating observed from desired |
-| `ActionPlan` | Engine (from changes) | Executor, report | Ordered table-local changes |
-| `CatalogState` | Reader port | Engine | Present, absent, or read-failed state |
-| `ExecutionSummary` | Executor port | Engine, report | Attempted action outcomes |
-| `SyncReport` | Engine | User code | Immutable run result |
+| Shape              | Produced by           | Consumed by                      | Purpose                                        |
+| ------------------ | --------------------- | -------------------------------- | ---------------------------------------------- |
+| `DeltaTable`       | User code             | Application preparation          | Public declaration object                      |
+| `DesiredTable`     | API lowering          | Domain planner, resolver, report | Target schema snapshot                         |
+| `ObservedTable`    | Reader adapter        | Domain planner, report           | Catalog schema snapshot                        |
+| `TableDiff`        | `diff_table`          | Validation, Engine (changes)     | Typed changes separating observed from desired |
+| `ActionPlan`       | Engine (from changes) | Executor, report                 | Ordered table-local changes                    |
+| `CatalogState`     | Reader port           | Engine                           | Present, absent, or read-failed state          |
+| `ExecutionSummary` | Executor port         | Engine, report                   | Attempted action outcomes                      |
+| `SyncReport`       | Engine                | User code                        | Immutable run result                           |
 
 ## Package map
 
 An `ActionPlan` is produced by iterating each change's `.actions()`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
-| Package | Responsibility | Examples |
-|---|---|---|
-| `delta_engine.schema` | User-facing declaration import surface | `DeltaTable`, `ForeignKey`, `Property` |
-| `delta_engine.api` | Declaration implementation package | `DeltaTable`, `ForeignKey`, `Property` |
+| Package                    | Responsibility                                                                      | Examples                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `delta_engine.schema`      | User-facing declaration import surface                                              | `DeltaTable`, `ForeignKey`, `Property`                                                   |
+| `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
-| `delta_engine.domain` | Backend-free snapshots, diffs, actions, and deterministic planning | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan` |
-| `delta_engine.adapters` | Backend integration and translation | `DatabricksReader`, `DatabricksExecutor`, SQL compiler |
+| `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                               |
+| `delta_engine.adapters`    | Backend integration and translation                                                 | `DatabricksReader`, `DatabricksExecutor`, SQL compiler                                   |
 
 ```mermaid
 flowchart TB
@@ -304,12 +304,12 @@ no hidden dependency between lowering and validation.
 
 Two aspects deliberately diff under different semantics. Properties are
 exact-declaration: the declaration is the complete list of managed keys — a
-declared value is reconciled, a declared ``None`` asserts absence (unset
+declared value is reconciled, a declared `None` asserts absence (unset
 when present), a managed key observed without a declaration is a blocking
 change, and unmanaged keys (platform-written) are invisible. The reader
 adapter filters unmanaged keys out of the observed state before the domain
 sees them, and the properties diff runs only when the declaration manages
-``PROPERTIES``. Tags are full-state (an observed-only tag is drift and is
+`PROPERTIES`. Tags are full-state (an observed-only tag is drift and is
 unset).
 
 ## Managed aspects
@@ -441,8 +441,8 @@ dependency's report, but it is not retroactively converted into
 `DeltaTable` is the public declaration object, but the engine plans with
 `DesiredTable`. The lowering boundary does several important things up front:
 
-- rejects property keys the engine does not manage (valued or ``None``),
-  and rejects ``metadata_only=True`` combined with ``properties``
+- rejects property keys the engine does not manage (valued or `None`),
+  and rejects `metadata_only=True` combined with `properties`
 - generates a primary-key constraint from columns marked `primary_key=True`
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values
@@ -488,6 +488,17 @@ that becomes necessary, the API can be widened to accept a `QualifiedName` as an
 additional branch. That would be backward-compatible, but it would also need
 explicit referenced columns because a bare name carries no primary key object to
 inspect.
+
+Partitioning is shaped by a related decision. Primary-key membership is a
+per-column flag (`primary_key=True`), and a composite key simply takes the
+flagged columns in declaration order. Partitioning cannot reuse that shape,
+because partition order is significant _and_ independent of column order: the
+order of names in `partitioned_by` sets the physical directory nesting Delta
+writes, and that nesting is frequently different from the order columns appear
+in the table. A per-column flag has nowhere to express an ordering distinct from
+column declaration order, so partition columns are named in one ordered,
+table-level list instead. The differ compares that list positionally, which is
+why reordering it is drift, not a no-op.
 
 ## Constraint names
 
@@ -557,17 +568,17 @@ dependency cost.
 
 ## Where to make changes
 
-| Change | Main location | Notes |
-|---|---|---|
-| Add a new backend | `delta_engine.adapters` | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter. |
-| Add a new change type | `delta_engine.domain.plan.diff` | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `Change` union and emit it from the relevant `_diff_*` helper. If the change is currently unsupported, add a rule to `validation.py`. No other files change. |
-| Add a new action type | `delta_engine.domain.plan` and adapter compiler | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter. |
-| Add a safety rule | `delta_engine.application.validation` | Rules inspect the `TableDrift` changes and return `ValidationFailure` values. |
-| Add a data type | `delta_engine.domain.model.data_type` and adapter type mapping | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter. |
-| Change public declarations | `delta_engine.api`, surfaced only through `delta_engine.schema` | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin. |
-| Change FK ordering or blocking | `delta_engine.application.dependency_resolution` | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler. |
-| Change report output | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects. |
-| Change Databricks SQL | `delta_engine.adapters.databricks.sql` | Compile domain actions to backend statements at the adapter boundary. |
+| Change                         | Main location                                                              | Notes                                                                                                                                                                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new backend              | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                                                        |
+| Add a new change type          | `delta_engine.domain.plan.diff`                                            | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `Change` union and emit it from the relevant `_diff_*` helper. If the change is currently unsupported, add a rule to `validation.py`. No other files change. |
+| Add a new action type          | `delta_engine.domain.plan` and adapter compiler                            | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter.                                                                                                                           |
+| Add a safety rule              | `delta_engine.application.validation`                                      | Rules inspect the `TableDrift` changes and return `ValidationFailure` values.                                                                                                                                                                                         |
+| Add a data type                | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                                          |
+| Change public declarations     | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                                               |
+| Change FK ordering or blocking | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                                                 |
+| Change report output           | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                                                        |
+| Change Databricks SQL          | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                                                 |
 
 ## Architectural rules
 
