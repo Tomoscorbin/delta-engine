@@ -5,25 +5,29 @@ tags:
 
 # Data types
 
-| `delta_engine` type                      | Spark SQL type         | Notes                                                               |
-| ---------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
-| `Integer()`                              | `INT`                  |                                                                     |
-| `Long()`                                 | `BIGINT`               |                                                                     |
-| `Float()`                                | `FLOAT`                |                                                                     |
-| `Double()`                               | `DOUBLE`               |                                                                     |
-| `Boolean()`                              | `BOOLEAN`              |                                                                     |
-| `String()`                               | `STRING`               |                                                                     |
-| `Date()`                                 | `DATE`                 |                                                                     |
-| `Timestamp()`                            | `TIMESTAMP`            |                                                                     |
-| `Decimal(precision, scale)`              | `DECIMAL(p, s)`        | Both arguments required                                             |
-| `Array(element_type)`                    | `ARRAY<T>`             | `element_type` must be a supported type                             |
-| `Map(key_type, value_type)`              | `MAP<K, V>`            | Both arguments must be supported types                              |
-| `Byte()`                                 | `TINYINT`              |                                                                     |
-| `Short()`                                | `SMALLINT`             |                                                                     |
-| `Binary()`                               | `BINARY`               |                                                                     |
-| `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | No timezone; the table feature is enabled automatically on creation |
-| `Variant()`                              | `VARIANT`              | Requires a runtime with variant support                             |
-| `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable |
+The types you can declare on a `Column`, and the Spark SQL type each compiles
+to. A column whose catalog type falls outside this set is handled as described
+under [Unsupported types](#unsupported-types).
+
+| `delta_engine` type                      | Spark SQL type         | Notes                                                                |
+| ---------------------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `Integer()`                              | `INT`                  |                                                                      |
+| `Long()`                                 | `BIGINT`               |                                                                      |
+| `Float()`                                | `FLOAT`                |                                                                      |
+| `Double()`                               | `DOUBLE`               |                                                                      |
+| `Boolean()`                              | `BOOLEAN`              |                                                                      |
+| `String()`                               | `STRING`               |                                                                      |
+| `Date()`                                 | `DATE`                 |                                                                      |
+| `Timestamp()`                            | `TIMESTAMP`            |                                                                      |
+| `Decimal(precision, scale)`              | `DECIMAL(p, s)`        | Both required; precision 1–38, scale 0–precision (Delta/Spark limit) |
+| `Array(element_type)`                    | `ARRAY<T>`             | `element_type` must be a supported type                              |
+| `Map(key_type, value_type)`              | `MAP<K, V>`            | Both arguments must be supported types                               |
+| `Byte()`                                 | `TINYINT`              |                                                                      |
+| `Short()`                                | `SMALLINT`             |                                                                      |
+| `Binary()`                               | `BINARY`               |                                                                      |
+| `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | No timezone; the table feature is enabled automatically on creation  |
+| `Variant()`                              | `VARIANT`              | Requires a runtime with variant support                              |
+| `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable  |
 
 Any change to a struct's fields (adding, removing, renaming, or retyping a
 field) surfaces as a column type change on the owning column and is blocked
