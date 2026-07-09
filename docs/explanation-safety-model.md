@@ -52,17 +52,17 @@ unmanaged aspect has drifted. It never silently reconciles something a
 declaration didn't claim responsibility for, and it never silently ignores
 drift it isn't allowed to fix — the sync fails and tells you.
 
-There are three public scopes:
+There are three public scopes, selected by `DeltaTable`'s `scope` parameter:
 
-| Scope                | Manages                                                                                 | Use for                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Full (the default)   | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                 |
-| `metadata_only=True` | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in |
-| `StreamingTable`     | Table and column tags only                                                              | Tag governance for streaming-pipeline-owned tables                                      |
+| Scope                  | Manages                                                                                 | Use for                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                 |
+| `"metadata"`           | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in |
+| `"tags"`               | Table and column tags only                                                              | Tag governance for tables owned elsewhere, e.g. by a streaming pipeline                 |
 
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
-metadata scope in practice, and [tags](how-to-configure-table.md#streaming-tables-manage-tags-only)
-for tag-only streaming table declarations.
+metadata scope in practice, and [tags](how-to-configure-table.md#manage-tags-only)
+for tag-only declarations.
 
 ## Cross-table dependency blocking
 

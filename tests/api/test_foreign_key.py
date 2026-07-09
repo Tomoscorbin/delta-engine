@@ -222,9 +222,9 @@ def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
 
 
 def test_delta_table_rejects_non_table_reference():
-    # Given a reference that is neither a table declaration nor Self
+    # Given a reference that is neither a DeltaTable nor Self
     # When / Then a TypeError names the accepted types
-    with pytest.raises(TypeError, match="DeltaTable, StreamingTable, or Self"):
+    with pytest.raises(TypeError, match="DeltaTable or Self"):
         DeltaTable(
             catalog="cat",
             schema="sch",

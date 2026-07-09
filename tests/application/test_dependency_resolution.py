@@ -12,7 +12,7 @@ from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, StreamingTable, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
 
 
 def _qualified_name(fqn: str) -> QualifiedName:
@@ -137,10 +137,11 @@ def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
     ).to_desired_table()
 
 
-def _streaming_table_with_fk(fqn: str, references: str) -> DesiredTable:
+def _tag_scoped_table_with_fk(fqn: str, references: str) -> DesiredTable:
+    """Build a tag-scoped table that carries an FK it does not manage."""
     catalog, schema, table_name = _split_fqn(fqn)
 
-    return StreamingTable(
+    return DeltaTable(
         catalog,
         schema,
         table_name,
@@ -154,6 +155,7 @@ def _streaming_table_with_fk(fqn: str, references: str) -> DesiredTable:
                 references=_referenced_table(references),
             )
         ],
+        scope="tags",
     ).to_desired_table()
 
 
@@ -230,9 +232,9 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
     assert not result.fk_failures
 
 
-def test_resolve_ignores_foreign_keys_on_tag_only_declarations():
-    # Given a streaming-table declaration that carries an FK but does not manage FKs
-    tables = (_streaming_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
+def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
+    # Given a tag-scoped declaration that carries an FK but does not manage FKs
+    tables = (_tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
 
     # When resolving dependencies
     result = resolve(tables)
@@ -243,9 +245,9 @@ def test_resolve_ignores_foreign_keys_on_tag_only_declarations():
 
 
 def test_resolve_does_not_order_by_unmanaged_foreign_keys():
-    # Given a streaming-table declaration listed before the table it references
+    # Given a tag-scoped declaration listed before the table it references
     tables = (
-        _streaming_table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),
         _table("cat.sch.customers"),
     )
 
@@ -272,13 +274,14 @@ def test_resolve_orders_referenced_table_before_dependent():
     assert not result.fk_failures
 
 
-def test_resolve_orders_referenced_streaming_table_before_dependent():
-    # Given a managed table whose foreign key targets a tag-only streaming table
-    customers = StreamingTable(
+def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
+    # Given a managed table whose foreign key targets a tag-scoped table
+    customers = DeltaTable(
         "cat",
         "sch",
         "customers",
         columns=(Column("id", String(), nullable=False, primary_key=True),),
+        scope="tags",
     )
     orders = DeltaTable(
         "cat",
@@ -295,7 +298,7 @@ def test_resolve_orders_referenced_streaming_table_before_dependent():
     # When resolving dependencies
     result = resolve(tables)
 
-    # Then the referenced streaming table is ordered before its managed dependent
+    # Then the referenced tag-scoped table is ordered before its managed dependent
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
     assert not result.fk_failures
 

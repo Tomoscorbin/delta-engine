@@ -364,10 +364,10 @@ every change in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.
 
-The public API exposes named scopes only: `DeltaTable(metadata_only=True)` maps
-to the metadata aspects (comments, tags, key constraints), and
-`StreamingTable` maps to table and column tags only. The `TableAspect` enum
-stays internal.
+The public API exposes named scopes only: `DeltaTable`'s `scope` parameter
+maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
+and `"tags"` to table and column tags only. The `TableAspect` enum stays
+internal.
 
 `diff_table(desired, observed)` produces a `TableDiff`:
 
@@ -475,9 +475,8 @@ dependency's report, but it is not retroactively converted into
 
 ## Public declarations and lowering
 
-`DeltaTable` and `StreamingTable` are the public declaration objects, but the
-engine plans with `DesiredTable`. The lowering boundary does several important
-things up front:
+`DeltaTable` is the public declaration object, but the engine plans with
+`DesiredTable`. The lowering boundary does several important things up front:
 
 - rejects property keys the engine does not manage (valued or `None`) and
   rejects invalid declared property values
@@ -488,8 +487,8 @@ things up front:
   names, valid partition columns, valid FK local columns, and non-nullable
   primary-key columns
 
-A `ForeignKey` declares its target by passing the referenced table declaration
-object directly, or the `Self` sentinel for a self-reference:
+A `ForeignKey` declares its target by passing the referenced `DeltaTable` object
+directly, or the `Self` sentinel for a self-reference:
 
 ```python
 customers = DeltaTable(
@@ -606,17 +605,17 @@ dependency cost.
 
 ## Where to make changes
 
-| Change                         | Main location                                                              | Notes                                                                                                                                                                                                                                                                 |
-| ------------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new backend              | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                                                        |
+| Change                         | Main location                                                              | Notes                                                                                                                                                                                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new backend              | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                                                                      |
 | Add a new change type          | `delta_engine.domain.plan.changes`                                         | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `Change` union, then emit it from the relevant `_diff_*` helper in `delta_engine.domain.plan.diff`. If the change is currently unsupported, add a rule to `validation.py`. |
-| Add a new action type          | `delta_engine.domain.plan` and adapter compiler                            | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter.                                                                                                                           |
-| Add a safety rule              | `delta_engine.application.validation`                                      | Rules inspect the `TableDrift` changes and return `ValidationFailure` values.                                                                                                                                                                                         |
-| Add a data type                | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                                          |
-| Change public declarations     | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                                               |
-| Change FK ordering or blocking | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                                                 |
-| Change report output           | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                                                        |
-| Change Databricks SQL          | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                                                 |
+| Add a new action type          | `delta_engine.domain.plan` and adapter compiler                            | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter.                                                                                                                                         |
+| Add a safety rule              | `delta_engine.application.validation`                                      | Rules inspect the `TableDrift` changes and return `ValidationFailure` values.                                                                                                                                                                                                       |
+| Add a data type                | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                                                        |
+| Change public declarations     | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                                                             |
+| Change FK ordering or blocking | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                                                               |
+| Change report output           | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                                                                      |
+| Change Databricks SQL          | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                                                               |
 
 ## Architectural rules
 

@@ -337,7 +337,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_sche
     assert "age" not in bad_cols
 
 
-def test_engine_metadata_only_applies_comments_when_schema_matches(spark, temp_schema):
+def test_engine_metadata_scope_applies_comments_when_schema_matches(spark, temp_schema):
     # Given an existing table whose schema exactly matches the declaration
     table_name = f"e2e_meta_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
@@ -353,7 +353,7 @@ def test_engine_metadata_only_applies_comments_when_schema_matches(spark, temp_s
             table_name,
             columns=(Column("id", Integer(), comment="surrogate key"),),
             comment="metadata-only table",
-            metadata_only=True,
+            scope="metadata",
         )
     )
 
@@ -366,7 +366,7 @@ def test_engine_metadata_only_applies_comments_when_schema_matches(spark, temp_s
     assert details["description"] == "metadata-only table"
 
 
-def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, temp_schema):
+def test_engine_metadata_scope_fails_when_column_type_has_drifted(spark, temp_schema):
     # Given an existing table whose column type differs from the declaration
     table_name = f"e2e_meta_drift_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
@@ -382,7 +382,7 @@ def test_engine_metadata_only_fails_when_column_type_has_drifted(spark, temp_sch
                 temp_schema,
                 table_name,
                 columns=(Column("id", Integer()),),
-                metadata_only=True,
+                scope="metadata",
             )
         )
 

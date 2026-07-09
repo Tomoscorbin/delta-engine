@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
 from delta_engine.domain.model import (
@@ -51,6 +51,15 @@ TAG_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
         TableAspect.TABLE_TAGS,
     }
 )
+
+# The public API exposes named scopes only, each mapping to an aspect set.
+# The TableAspect enum stays internal so a declaration can only manage
+# combinations the engine's safety rules are written against.
+_ASPECTS_BY_SCOPE: Final[Mapping[str, frozenset[TableAspect]]] = {
+    "full": ALL_ASPECTS,
+    "metadata": METADATA_ASPECTS,
+    "tags": TAG_ASPECTS,
+}
 
 # Delta permits these characters in column names only under column mapping.
 _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
@@ -140,176 +149,6 @@ def _validate_delta_partitioning(
         )
 
 
-class _TableDeclaration:
-    """Shared read-only surface for public table declaration classes."""
-
-    def __init__(self, desired_table: DesiredTable) -> None:
-        self._desired_table = desired_table
-
-    @property
-    def catalog(self) -> str:
-        """Unity Catalog catalog name."""
-        return self._desired_table.qualified_name.catalog
-
-    @property
-    def schema(self) -> str:
-        """Schema (database) name within the catalog."""
-        return self._desired_table.qualified_name.schema
-
-    @property
-    def name(self) -> str:
-        """Table name."""
-        return self._desired_table.qualified_name.name
-
-    @property
-    def columns(self) -> tuple[Column, ...]:
-        """Declared columns, in declaration order."""
-        return self._desired_table.columns
-
-    @property
-    def comment(self) -> str:
-        """Table-level comment (empty string when unset)."""
-        return self._desired_table.comment
-
-    @property
-    def properties(self) -> Mapping[str, str | None]:
-        """
-        Declared table properties.
-
-        A ``None`` value asserts the property must be absent from the table.
-        """
-        return self._desired_table.properties
-
-    @property
-    def tags(self) -> Mapping[str, str]:
-        """Declared table tags."""
-        return self._desired_table.tags
-
-    @property
-    def partitioned_by(self) -> tuple[str, ...]:
-        """Partition column names, in declaration order."""
-        return self._desired_table.partitioned_by
-
-    @property
-    def primary_key(self) -> tuple[str, ...]:
-        """Column names declared as the primary key, in declaration order."""
-        return self._desired_table.primary_key_columns
-
-    @property
-    def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
-        """Foreign key constraints declared on this table."""
-        return self._desired_table.foreign_keys
-
-    def to_desired_table(self) -> DesiredTable:
-        """Return the domain :class:`DesiredTable` for this table definition."""
-        return self._desired_table
-
-
-def _build_desired_table(
-    *,
-    catalog: str,
-    schema: str,
-    name: str,
-    columns: Iterable[Column],
-    comment: str,
-    properties: Mapping[str, str | None] | None,
-    tags: Mapping[str, str] | None,
-    partitioned_by: Iterable[str],
-    foreign_keys: Iterable[ForeignKey] | None,
-    managed_aspects: frozenset[TableAspect],
-) -> DesiredTable:
-    user_properties = dict(properties or {})
-
-    # Fast-fail on property keys this engine does not manage (e.g. typos).
-    # None-valued assertions are validated too: asserting absence of an
-    # unmanaged key is as meaningless as declaring it.
-    unmanaged = [key for key in user_properties if key not in DELTA_PROPERTY_REGISTRY]
-    if unmanaged:
-        raise ValueError(f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}")
-
-    # Fast-fail on malformed values; the definition owns the judgment
-    # (including the exemption for None, which asserts absence).
-    for key, declared_value in user_properties.items():
-        rejection = DELTA_PROPERTY_REGISTRY[key].reject_declared_value(declared_value)
-        if rejection is not None:
-            raise ValueError(rejection)
-
-    columns = tuple(columns)
-    partitioned_by = tuple(partitioned_by)
-    _validate_delta_partitioning(columns, partitioned_by)
-
-    # Only the column-structure guardrails below are gated on the managed
-    # aspects. A tag-only or metadata-only declaration mirrors the live table's
-    # existing columns, so it must accept names this engine would otherwise
-    # reject when it owns column structure (column-mapping characters,
-    # change-data-feed-reserved names). The partition, property, and tag
-    # validation around them stays unconditional: those check the declaration
-    # itself, not a structural change this declaration is about to apply.
-    if (
-        TableAspect.COLUMN_STRUCTURE in managed_aspects
-        and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name"
-    ):
-        offending = [
-            declared_name
-            for column in columns
-            for declared_name in _column_declared_names(column)
-            if set(declared_name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
-        ]
-        if offending:
-            raise ValueError(
-                f"Column or struct field names {offending} contain characters Delta only"
-                " permits with column mapping. Declare"
-                f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
-                " or rename the columns."
-            )
-
-    if (
-        TableAspect.COLUMN_STRUCTURE in managed_aspects
-        and user_properties.get(Property.CHANGE_DATA_FEED) == "true"
-    ):
-        reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
-        if reserved:
-            raise ValueError(
-                f"Column names {reserved} are reserved by change data feed."
-                " Rename them or do not enable"
-                f" {Property.CHANGE_DATA_FEED}."
-            )
-
-    table_tags = dict(tags or {})
-    _validate_tags(f"table '{name}'", table_tags)
-    for column in columns:
-        _validate_tags(f"column '{column.name}'", column.tags)
-
-    primary_key_columns = tuple(column.name for column in columns if column.primary_key)
-    primary_key = (
-        PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
-        if primary_key_columns
-        else None
-    )
-
-    qualified_name = QualifiedName(catalog, schema, name)
-    lowered_foreign_keys = tuple(
-        declaration._to_constraint(qualified_name, columns, primary_key_columns)
-        for declaration in (foreign_keys or ())
-    )
-
-    # Building DesiredTable here enforces all domain invariants (non-empty
-    # columns, unique names, partition columns must exist, FK local columns
-    # must exist) at construction time rather than deferring them to
-    # to_desired_table().
-    return DesiredTable(
-        qualified_name=qualified_name,
-        columns=columns,
-        comment=comment,
-        properties=user_properties,
-        tags=table_tags,
-        partitioned_by=partitioned_by,
-        primary_key=primary_key,
-        foreign_keys=lowered_foreign_keys,
-        managed_aspects=managed_aspects,
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class ForeignKey:
     """
@@ -321,16 +160,16 @@ class ForeignKey:
     order. The physical constraint name is generated by the engine and is not
     part of this declaration.
 
-    ``references`` is another table declaration, or the :data:`Self` sentinel
-    for a self-referential key. See the architecture explanation doc for why
-    the reference is an object rather than a name. The referenced table must
-    live in the same catalog as the declaring table — information_schema is
+    ``references`` is another :class:`DeltaTable`, or the :data:`Self` sentinel
+    for a self-referential key. See the architecture explanation doc for why the
+    reference is an object rather than a name. The referenced table must live
+    in the same catalog as the declaring table — information_schema is
     per-catalog, so a cross-catalog constraint could be created but never
     observed afterwards.
     """
 
     local_columns: Sequence[str]
-    references: DeltaTable | StreamingTable | _SelfReference
+    references: DeltaTable | _SelfReference
 
     def __post_init__(self) -> None:
         # Accept any sequence at the public boundary (users naturally pass
@@ -418,20 +257,22 @@ class ForeignKey:
             case _SelfReference():
                 types = {column.name: column.data_type for column in owner_columns}
                 return owner_name, owner_primary_key, types
-            case _TableDeclaration() as target:
+            case DeltaTable() as target:
                 desired = target.to_desired_table()
                 types = {column.name: column.data_type for column in desired.columns}
                 return desired.qualified_name, desired.primary_key_columns, types
             case _:
                 raise TypeError(
-                    "foreign key references must be a DeltaTable, StreamingTable,"
-                    f" or Self; got {self.references!r}"
+                    f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
                 )
 
 
-class DeltaTable(_TableDeclaration):
+class DeltaTable:
     """
     Defines a Delta table schema.
+
+    ``scope`` selects how much of the table the declaration manages: the whole
+    table (default), catalog metadata only, or tags only.
 
     Note on dropping columns: Delta only permits ``ALTER TABLE ... DROP COLUMN``
     when ``delta.columnMapping.mode`` is ``name``. Declare it in ``properties``
@@ -450,7 +291,7 @@ class DeltaTable(_TableDeclaration):
         tags: Mapping[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
-        metadata_only: bool = False,
+        scope: Literal["full", "metadata", "tags"] = "full",
     ) -> None:
         """
         Initialise a DeltaTable definition.
@@ -465,78 +306,172 @@ class DeltaTable(_TableDeclaration):
             tags: Key/value tags to apply to the table.
             partitioned_by: Column names to partition by.
             foreign_keys: Foreign key relationships declared on this table.
-            metadata_only: When ``True``, restricts the sync to catalog metadata:
-                comments, tags, and key constraints. The full table is still
-                declared — columns, properties, partitioning — but only
-                metadata is deployed; the rest is never compared or changed,
-                except that the live schema must match the declared columns
-                exactly (structural drift fails validation).
+            scope: What this declaration manages. ``"full"`` (the default)
+                manages the whole table. ``"metadata"`` restricts the sync to
+                catalog metadata: comments, tags, and primary/foreign key
+                constraints. ``"tags"`` restricts it to table and column tags
+                — for tables owned elsewhere (e.g. by a streaming pipeline)
+                whose Unity Catalog tags this engine should still govern. A
+                restricted scope still declares the full table shape; aspects
+                outside the scope are never changed, and the live table must
+                match them exactly (drift fails validation).
 
         """
-        super().__init__(
-            _build_desired_table(
-                catalog=catalog,
-                schema=schema,
-                name=name,
-                columns=columns,
-                comment=comment,
-                properties=properties,
-                tags=tags,
-                partitioned_by=partitioned_by,
-                foreign_keys=foreign_keys,
-                managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
+        managed_aspects = _ASPECTS_BY_SCOPE.get(scope)
+        if managed_aspects is None:
+            expected = ", ".join(repr(known_scope) for known_scope in _ASPECTS_BY_SCOPE)
+            raise ValueError(f"Unknown scope {scope!r}; expected one of: {expected}")
+
+        user_properties = dict(properties or {})
+
+        # Fast-fail on property keys this engine does not manage (e.g. typos).
+        # None-valued assertions are validated too: asserting absence of an
+        # unmanaged key is as meaningless as declaring it.
+        unmanaged = [key for key in user_properties if key not in DELTA_PROPERTY_REGISTRY]
+        if unmanaged:
+            raise ValueError(
+                f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
             )
+
+        # Fast-fail on malformed values; the definition owns the judgment
+        # (including the exemption for None, which asserts absence).
+        for key, declared_value in user_properties.items():
+            rejection = DELTA_PROPERTY_REGISTRY[key].reject_declared_value(declared_value)
+            if rejection is not None:
+                raise ValueError(rejection)
+
+        columns = tuple(columns)
+        partitioned_by = tuple(partitioned_by)
+        _validate_delta_partitioning(columns, partitioned_by)
+
+        # Only the column-structure guardrails below are gated on the managed
+        # aspects. A restricted scope mirrors the live table's existing
+        # columns, so it must accept names this engine would otherwise reject
+        # when it owns column structure (column-mapping characters,
+        # change-data-feed-reserved names). The partition, property, and tag
+        # validation around them stays unconditional: those check the
+        # declaration itself, not a structural change this declaration is
+        # about to apply.
+        if (
+            TableAspect.COLUMN_STRUCTURE in managed_aspects
+            and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name"
+        ):
+            offending = [
+                declared_name
+                for column in columns
+                for declared_name in _column_declared_names(column)
+                if set(declared_name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+            ]
+            if offending:
+                raise ValueError(
+                    f"Column or struct field names {offending} contain characters Delta only"
+                    " permits with column mapping. Declare"
+                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
+                    " or rename the columns."
+                )
+
+        if (
+            TableAspect.COLUMN_STRUCTURE in managed_aspects
+            and user_properties.get(Property.CHANGE_DATA_FEED) == "true"
+        ):
+            reserved = [
+                column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES
+            ]
+            if reserved:
+                raise ValueError(
+                    f"Column names {reserved} are reserved by change data feed."
+                    " Rename them or do not enable"
+                    f" {Property.CHANGE_DATA_FEED}."
+                )
+
+        table_tags = dict(tags or {})
+        _validate_tags(f"table '{name}'", table_tags)
+        for column in columns:
+            _validate_tags(f"column '{column.name}'", column.tags)
+
+        primary_key_columns = tuple(column.name for column in columns if column.primary_key)
+        primary_key = (
+            PrimaryKeyConstraint.generate(table_name=name, columns=primary_key_columns)
+            if primary_key_columns
+            else None
         )
 
-
-class StreamingTable(_TableDeclaration):
-    """
-    Defines a streaming table for tag-only governance.
-
-    The declaration carries the same table shape as :class:`DeltaTable` so the
-    engine can identify the live table and its columns, but syncs manage only
-    table tags and column tags. Columns, comments, properties, partitioning,
-    primary keys, and foreign keys are never changed by this declaration.
-    """
-
-    def __init__(
-        self,
-        catalog: str,
-        schema: str,
-        name: str,
-        columns: Iterable[Column],
-        comment: str = "",
-        properties: Mapping[str, str | None] | None = None,
-        tags: Mapping[str, str] | None = None,
-        partitioned_by: Iterable[str] = (),
-        foreign_keys: Iterable[ForeignKey] | None = None,
-    ) -> None:
-        """
-        Initialise a StreamingTable definition.
-
-        Args:
-            catalog: Unity Catalog catalog name.
-            schema: Schema (database) name within the catalog.
-            name: Table name.
-            columns: Ordered column declarations.
-            comment: Table-level comment, carried for comparison but not managed.
-            properties: Delta/Spark table properties, carried for comparison but not managed.
-            tags: Key/value tags to apply to the table.
-            partitioned_by: Column names the live table is expected to be partitioned by.
-            foreign_keys: Foreign key relationships, carried for comparison but not managed.
-
-        """
-        super().__init__(
-            _build_desired_table(
-                catalog=catalog,
-                schema=schema,
-                name=name,
-                columns=columns,
-                comment=comment,
-                properties=properties,
-                tags=tags,
-                partitioned_by=partitioned_by,
-                foreign_keys=foreign_keys,
-                managed_aspects=TAG_ASPECTS,
-            )
+        qualified_name = QualifiedName(catalog, schema, name)
+        lowered_foreign_keys = tuple(
+            declaration._to_constraint(qualified_name, columns, primary_key_columns)
+            for declaration in (foreign_keys or ())
         )
+
+        # Building DesiredTable here enforces all domain invariants (non-empty
+        # columns, unique names, partition columns must exist, FK local columns
+        # must exist) at construction time rather than deferring them to
+        # to_desired_table().
+        self._desired_table = DesiredTable(
+            qualified_name=qualified_name,
+            columns=columns,
+            comment=comment,
+            properties=user_properties,
+            tags=table_tags,
+            partitioned_by=partitioned_by,
+            primary_key=primary_key,
+            foreign_keys=lowered_foreign_keys,
+            managed_aspects=managed_aspects,
+        )
+
+    @property
+    def catalog(self) -> str:
+        """Unity Catalog catalog name."""
+        return self._desired_table.qualified_name.catalog
+
+    @property
+    def schema(self) -> str:
+        """Schema (database) name within the catalog."""
+        return self._desired_table.qualified_name.schema
+
+    @property
+    def name(self) -> str:
+        """Table name."""
+        return self._desired_table.qualified_name.name
+
+    @property
+    def columns(self) -> tuple[Column, ...]:
+        """Declared columns, in declaration order."""
+        return self._desired_table.columns
+
+    @property
+    def comment(self) -> str:
+        """Table-level comment (empty string when unset)."""
+        return self._desired_table.comment
+
+    @property
+    def properties(self) -> Mapping[str, str | None]:
+        """
+        Declared table properties.
+
+        A ``None`` value asserts the property must be absent from the table.
+        """
+        return self._desired_table.properties
+
+    @property
+    def tags(self) -> Mapping[str, str]:
+        """Declared table tags."""
+        return self._desired_table.tags
+
+    @property
+    def partitioned_by(self) -> tuple[str, ...]:
+        """Partition column names, in declaration order."""
+        return self._desired_table.partitioned_by
+
+    @property
+    def primary_key(self) -> tuple[str, ...]:
+        """Column names declared as the primary key, in declaration order."""
+        return self._desired_table.primary_key_columns
+
+    @property
+    def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
+        """Foreign key constraints declared on this table."""
+        return self._desired_table.foreign_keys
+
+    def to_desired_table(self) -> DesiredTable:
+        """Return the domain :class:`DesiredTable` for this table definition."""
+        return self._desired_table

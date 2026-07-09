@@ -5,14 +5,14 @@ tags:
 
 # How to deploy metadata only
 
-`DeltaTable(metadata_only=True)` restricts a sync to catalog metadata: table
+`DeltaTable(scope="metadata")` restricts a sync to catalog metadata: table
 and column comments, table and column tags, and primary/foreign key constraints.
 Column structure, table properties, and partitioning are read for context but
 never changed — a metadata-only sync can never add, drop, or alter a column.
 
 Use it to roll out governance metadata with a hard guarantee that no schema
 change can slip in — for example, applying tags and comments across tables
-whose schemas are owned by another team. `metadata_only=True` is a
+whose schemas are owned by another team. `scope="metadata"` is a
 managed-aspects scope: see
 [the safety model](explanation-safety-model.md#managed-aspects-what-a-declaration-is-responsible-for)
 for how managed aspects decide what a declaration is responsible for.
@@ -34,7 +34,7 @@ table = DeltaTable(
     ],
     comment="Customer orders",
     tags={"domain": "sales"},
-    metadata_only=True,
+    scope="metadata",
 )
 ```
 
@@ -60,7 +60,7 @@ metadata is applied.
 Both failures are scope invariants, listed in
 [safe-change rules](reference-safe-change-rules.md).
 
-## Mixing modes in one sync
+## Mixing scopes in one sync
 
-`metadata_only` is per-table, not per-sync. A single `engine.sync(...)` call
-can include both fully managed and metadata-only tables.
+`scope` is per-table, not per-sync. A single `engine.sync(...)` call
+can include fully managed, metadata-scoped, and tag-scoped tables.

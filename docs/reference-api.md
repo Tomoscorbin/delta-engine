@@ -18,29 +18,16 @@ from the top-level `delta_engine` package.
 .. autoclass:: delta_engine.schema.DeltaTable
    :members:
    :undoc-members:
-   :inherited-members:
 ```
 
-#### `metadata_only` (bool, default `False`)
+#### `scope` (str, default `"full"`)
 
-When `True`, restricts the sync to catalog metadata: comments, tags, and
-primary/foreign key constraints. Column structure, properties, and
-partitioning are never changed. The live schema must match the declaration
-exactly — any structural drift causes validation to fail.
-
-### StreamingTable
-
-```{eval-rst}
-.. autoclass:: delta_engine.schema.StreamingTable
-   :members:
-   :undoc-members:
-   :inherited-members:
-```
-
-`StreamingTable` declares the same table shape as `DeltaTable`, but syncs only
-table tags and column tags. Columns, comments, properties, partitioning,
-primary keys, and foreign keys are read for drift context but never changed by
-this declaration.
+Selects what the declaration manages. `"full"` manages the whole table.
+`"metadata"` restricts the sync to catalog metadata: comments, tags, and
+primary/foreign key constraints. `"tags"` restricts it to table and column
+tags. A restricted scope still declares the full table shape; aspects outside
+the scope are never changed, and the live table must match them exactly — any
+unmanaged drift causes validation to fail.
 
 ### Column
 

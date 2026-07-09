@@ -35,7 +35,7 @@ from delta_engine.domain.plan.actions import (
     UnsetColumnTag,
     UnsetTableTag,
 )
-from delta_engine.schema import Column, DeltaTable, ForeignKey, StreamingTable, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, String
 
 # ---------------------------------------------------------------------------
 # Helpers and fakes
@@ -169,8 +169,8 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
     )
 
 
-def _metadata_only_spec(fqn: str) -> DeltaTable:
-    """Build a metadata-only declaration with table and column comments."""
+def _metadata_scoped_spec(fqn: str) -> DeltaTable:
+    """Build a metadata-scoped declaration with table and column comments."""
     catalog, schema, table_name = _split_fqn(fqn)
 
     return DeltaTable(
@@ -179,25 +179,26 @@ def _metadata_only_spec(fqn: str) -> DeltaTable:
         table_name,
         columns=(Column("id", String(), comment="surrogate key"),),
         comment="orders table",
-        metadata_only=True,
+        scope="metadata",
     )
 
 
-def _streaming_tag_spec(fqn: str) -> StreamingTable:
-    """Build a streaming-table declaration that manages only tags."""
+def _tag_scoped_spec(fqn: str) -> DeltaTable:
+    """Build a tag-scoped declaration that manages only tags."""
     catalog, schema, table_name = _split_fqn(fqn)
 
-    return StreamingTable(
+    return DeltaTable(
         catalog,
         schema,
         table_name,
         columns=(Column("id", String(), tags={"pii": "false"}),),
         tags={"domain": "events"},
+        scope="tags",
     )
 
 
 def _existing_matching_table(fqn: str) -> TablePresent:
-    """Build an observed table whose schema matches _metadata_only_spec."""
+    """Build an observed table whose schema matches _metadata_scoped_spec."""
     catalog, schema, table_name = _split_fqn(fqn)
 
     return TablePresent(
@@ -208,8 +209,8 @@ def _existing_matching_table(fqn: str) -> TablePresent:
     )
 
 
-def _existing_streaming_tag_table(fqn: str) -> TablePresent:
-    """Build an observed table with tag drift against _streaming_tag_spec."""
+def _existing_tag_drifted_table(fqn: str) -> TablePresent:
+    """Build an observed table with tag drift against _tag_scoped_spec."""
     catalog, schema, table_name = _split_fqn(fqn)
 
     return TablePresent(
@@ -428,15 +429,15 @@ def test_real_run_records_the_applied_plan_on_the_report():
     assert executor.executed_names == [fqn]
 
 
-def test_streaming_table_dry_run_plans_only_tag_actions():
-    # Given a streaming-table declaration over an existing table with tag drift
+def test_tag_scoped_dry_run_plans_only_tag_actions():
+    # Given a tag-scoped declaration over an existing table with tag drift
     fqn = "c.s.streaming_events"
-    reader = _RecordingReader({fqn: _existing_streaming_tag_table(fqn)})
+    reader = _RecordingReader({fqn: _existing_tag_drifted_table(fqn)})
     executor = _RecordingExecutor(per_call_results=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing as a dry run
-    report = engine.sync(_streaming_tag_spec(fqn), dry_run=True)
+    report = engine.sync(_tag_scoped_spec(fqn), dry_run=True)
 
     # Then the plan reconciles table and column tags, and nothing else
     [table_report] = list(report)
@@ -1143,7 +1144,7 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
 # ---------------------------------------------------------------------------
 
 
-def test_metadata_only_sync_applies_metadata_when_schema_matches():
+def test_metadata_scoped_sync_applies_metadata_when_schema_matches():
     # Given a live table whose schema matches the declaration
     fqn = "cat.sch.orders"
     reader = _RecordingReader({fqn: _existing_matching_table(fqn)})
@@ -1151,7 +1152,7 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing a metadata-only declaration
-    report = engine.sync(_metadata_only_spec(fqn))
+    report = engine.sync(_metadata_scoped_spec(fqn))
 
     # Then the sync succeeds and metadata actions are planned
     [table_report] = list(report)
@@ -1162,7 +1163,7 @@ def test_metadata_only_sync_applies_metadata_when_schema_matches():
     assert executor.executed_names == [fqn]
 
 
-def test_metadata_only_sync_fails_when_table_is_missing():
+def test_metadata_scoped_sync_fails_when_table_is_missing():
     # Given a metadata-only declaration for a missing table
     fqn = "cat.sch.orders"
     reader = _RecordingReader({fqn: TableAbsent()})
@@ -1171,7 +1172,7 @@ def test_metadata_only_sync_fails_when_table_is_missing():
 
     # When syncing
     with pytest.raises(SyncFailedError) as exc_info:
-        engine.sync(_metadata_only_spec(fqn))
+        engine.sync(_metadata_scoped_spec(fqn))
 
     # Then validation fails and nothing executes
     [table_report] = list(exc_info.value.report)
@@ -1234,7 +1235,7 @@ def test_sync_fails_loud_on_undeclared_registered_property():
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
-def test_metadata_only_column_removal_fails_scope_only_without_drop_precondition():
+def test_metadata_scoped_column_removal_fails_without_drop_precondition():
     # Given a metadata-only spec over a table with an extra column (an
     # unmanaged ColumnRemoved drift) — the user never asked to drop anything
     fqn = "cat.sch.orders"
@@ -1253,7 +1254,7 @@ def test_metadata_only_column_removal_fails_scope_only_without_drop_precondition
 
     # When syncing
     with pytest.raises(SyncFailedError) as excinfo:
-        engine.sync(_metadata_only_spec(fqn))
+        engine.sync(_metadata_scoped_spec(fqn))
 
     # Then the single failure is the scope violation — the drop-column
     # precondition is guarded out for unmanaged column structure
