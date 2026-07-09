@@ -3,19 +3,24 @@ tags:
   - how-to
 ---
 
-# How to configure tags and comments
+# How to configure a table
 
-Tags and comments are the two pieces of pure catalog metadata delta-engine
-manages. Neither changes table data or Delta behaviour, both live in the
-catalog, and for both the declaration is the complete source of truth. Because
-they are metadata only, they are exactly what a
-[metadata-only sync](how-to-deploy-metadata-only.md) manages — use that mode to
-roll out governance and documentation across tables whose schemas are owned
-elsewhere.
+`DeltaTable` is the single declaration for everything about a table — its
+columns, the metadata that documents and governs it, its keys, and how it is
+partitioned. This page is the practical reference for configuring each aspect.
 
-To change table behaviour instead (deletion vectors, change data feed,
-retention), use [table properties](how-to-configure-properties.md), which are
-`TBLPROPERTIES` with different, exact-declaration semantics.
+| Aspect            | What it configures                                    | Where                                                                                 |
+| ----------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Columns and types | The table's shape and column data types               | [Getting started](tutorial-getting-started.md), [data types](reference-data-types.md) |
+| Properties        | Delta/Spark table behaviour (retention, CDF, mapping) | [Table properties](how-to-configure-properties.md)                                    |
+| Tags              | Unity Catalog governance tags                         | [Tags](#tags), below                                                                  |
+| Comments          | Table and column documentation                        | [Comments](#comments), below                                                          |
+| Primary keys      | The table's primary key                               | [Primary keys](how-to-declare-primary-keys.md)                                        |
+| Foreign keys      | Cross-table references and sync ordering              | [Foreign keys](how-to-declare-foreign-keys.md)                                        |
+| Partitioning      | Partition columns, fixed at creation                  | [Getting started](tutorial-getting-started.md)                                        |
+
+Tags and comments are covered here in full. The other aspects have their own
+pages for now and will move into this one as the documentation grows.
 
 ## Tags
 

@@ -78,10 +78,10 @@ explanation-safety-model
 :hidden:
 :caption: How-to guides
 
+how-to-configure-table
 how-to-declare-primary-keys
 how-to-declare-foreign-keys
 how-to-configure-properties
-how-to-configure-tags
 how-to-deploy-metadata-only
 how-to-preview-changes
 how-to-handle-sync-failures
