@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from delta_engine.domain.model.data_type import DataType
 
@@ -32,10 +33,14 @@ class Column:
     tags: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
+
         if not self.name.strip():
             raise ValueError(f"Column name must not be blank: {self.name!r}")
+
         if self.name != self.name.casefold():
             raise ValueError(f"Column name must be lowercase: {self.name!r}")
+
         for tag_key in self.tags:
             if not tag_key.strip():
                 raise ValueError(f"Tag key must not be blank: {tag_key!r}")

@@ -26,8 +26,13 @@ from delta_engine.domain.model.data_type import (
     Variant,
 )
 from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table import DesiredTable, ObservedTable, TableSnapshot
-from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
+from delta_engine.domain.model.table import (
+    ALL_ASPECTS,
+    DesiredTable,
+    ObservedTable,
+    TableAspect,
+    TableSnapshot,
+)
 
 __all__ = [
     "ALL_ASPECTS",

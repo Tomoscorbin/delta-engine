@@ -26,6 +26,8 @@ class PrimaryKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+
         if not self.columns:
             raise ValueError("columns must not be empty")
 
@@ -85,6 +87,9 @@ class ForeignKeyConstraint:
         )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "local_columns", tuple(self.local_columns))
+        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
+
         if not self.local_columns:
             raise ValueError("local_columns must not be empty")
 

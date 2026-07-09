@@ -19,7 +19,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.diff import (
+from delta_engine.domain.plan.changes import (
     Change,
     ColumnAdded,
     ColumnCommentChanged,
@@ -38,11 +38,13 @@ from delta_engine.domain.plan.diff import (
     PropertyUndeclared,
     PropertyUnset,
     TableCommentChanged,
+    TableTagSet,
+    TableTagUnset,
+)
+from delta_engine.domain.plan.diff import (
     TableDiff,
     TableDrift,
     TableMissing,
-    TableTagSet,
-    TableTagUnset,
     diff_table,
 )
 
