@@ -47,7 +47,7 @@ def test_delta_table_infers_referenced_columns_from_referenced_primary_key():
     assert foreign_key.constraint_name == "orders_customer_id_fk"
 
 
-def test_delta_table_infers_composite_primary_key_in_declaration_order():
+def test_delta_table_stores_composite_foreign_key_canonically():
     # Given a referenced table with a composite primary key (tenant_id, id)
     customers = DeltaTable(
         catalog="cat",
@@ -69,10 +69,10 @@ def test_delta_table_infers_composite_primary_key_in_declaration_order():
         foreign_keys=[ForeignKey(local_columns=("tenant_id", "customer_id"), references=customers)],
     )
 
-    # Then referenced columns follow the referenced PK's declaration order
+    # Then pairs are stored canonically (sorted by local column), pairing intact
     [foreign_key] = orders.foreign_keys
-    assert foreign_key.local_columns == ("tenant_id", "customer_id")
-    assert foreign_key.referenced_columns == ("tenant_id", "id")
+    assert foreign_key.local_columns == ("customer_id", "tenant_id")
+    assert foreign_key.referenced_columns == ("id", "tenant_id")
 
 
 def test_delta_table_supports_self_referential_foreign_key():

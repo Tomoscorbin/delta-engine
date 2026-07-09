@@ -107,8 +107,11 @@ def test_foreign_keys_mapper_aligns_composite_columns_positionally():
         fk_row(local_column="customer_id", ordinal_position=2, ref_column="id"),
     ]
     (fk,) = _foreign_keys_from_rows(rows)
-    assert fk.local_columns == ("tenant_id", "customer_id")
-    assert fk.referenced_columns == ("tenant_id", "id")
+
+    # The constraint stores pairs canonically (sorted by local column), so
+    # customer_id sorts before tenant_id even though rows arrived tenant-first.
+    assert fk.local_columns == ("customer_id", "tenant_id")
+    assert fk.referenced_columns == ("id", "tenant_id")
 
 
 def test_foreign_keys_mapper_groups_contiguous_rows_per_constraint():
