@@ -364,9 +364,10 @@ every change in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.
 
-The public API exposes named modes only: `DeltaTable(metadata_only=True)` maps
-to the metadata aspects (comments, tags, key constraints). The `TableAspect`
-enum stays internal.
+The public API exposes named scopes only: `DeltaTable(metadata_only=True)` maps
+to the metadata aspects (comments, tags, key constraints), and
+`StreamingTable` maps to table and column tags only. The `TableAspect` enum
+stays internal.
 
 `diff_table(desired, observed)` produces a `TableDiff`:
 
@@ -474,11 +475,12 @@ dependency's report, but it is not retroactively converted into
 
 ## Public declarations and lowering
 
-`DeltaTable` is the public declaration object, but the engine plans with
-`DesiredTable`. The lowering boundary does several important things up front:
+`DeltaTable` and `StreamingTable` are the public declaration objects, but the
+engine plans with `DesiredTable`. The lowering boundary does several important
+things up front:
 
-- rejects property keys the engine does not manage (valued or `None`),
-  and rejects `metadata_only=True` combined with `properties`
+- rejects property keys the engine does not manage (valued or `None`) and
+  rejects invalid declared property values
 - generates a primary-key constraint from columns marked `primary_key=True`
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values
@@ -486,8 +488,8 @@ dependency's report, but it is not retroactively converted into
   names, valid partition columns, valid FK local columns, and non-nullable
   primary-key columns
 
-A `ForeignKey` declares its target by passing the referenced `DeltaTable` object
-directly, or the `Self` sentinel for a self-reference:
+A `ForeignKey` declares its target by passing the referenced table declaration
+object directly, or the `Self` sentinel for a self-reference:
 
 ```python
 customers = DeltaTable(

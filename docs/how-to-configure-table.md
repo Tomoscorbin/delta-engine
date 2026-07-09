@@ -223,6 +223,33 @@ the next sync unless it is also declared.
 
 As with table tags, keys are **case-sensitive** (`PII` and `pii` are distinct).
 
+### Streaming tables: manage tags only
+
+Use `StreamingTable` when the table is owned by a streaming pipeline but you
+still want delta-engine to reconcile Unity Catalog tags. It accepts the same
+shape as `DeltaTable`, but only table tags and column tags are managed:
+columns, comments, properties, partitioning, primary keys, and foreign keys are
+never changed by this declaration.
+
+```python
+from delta_engine.schema import Column, String, StreamingTable
+
+events = StreamingTable(
+    catalog="dev",
+    schema="silver",
+    name="streaming_events",
+    columns=[
+        Column("id", String()),
+        Column("email", String(), tags={"pii": "true"}),
+    ],
+    tags={"domain": "events"},
+)
+```
+
+The live table must already exist. If a non-tag aspect drifts from the
+declaration, validation fails before any tag SQL runs; update the declaration
+to match the live table or use a fully managed `DeltaTable`.
+
 ### Requirements and limits
 
 Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and the

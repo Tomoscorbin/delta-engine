@@ -34,6 +34,7 @@ the page with the detail.
 | Foreign keys              |      ✓      | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys)) |
 | Partitioning              | Create only | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                       |
 | Metadata-only scope       |      ✓      | `metadata_only=True` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                               |
+| Streaming table tag scope |      ✓      | `StreamingTable` restricts a sync to table and column tags ([tags](how-to-configure-table.md#streaming-tables-manage-tags-only))                                          |
 | Dry run                   |      ✓      | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                                                                             |
 
 ## Outside the model

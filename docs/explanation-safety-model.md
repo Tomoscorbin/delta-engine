@@ -52,15 +52,17 @@ unmanaged aspect has drifted. It never silently reconciles something a
 declaration didn't claim responsibility for, and it never silently ignores
 drift it isn't allowed to fix — the sync fails and tells you.
 
-There are two scopes:
+There are three public scopes:
 
 | Scope                | Manages                                                                                 | Use for                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Full (the default)   | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                 |
 | `metadata_only=True` | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in |
+| `StreamingTable`     | Table and column tags only                                                              | Tag governance for streaming-pipeline-owned tables                                      |
 
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
-restricted scope in practice.
+metadata scope in practice, and [tags](how-to-configure-table.md#streaming-tables-manage-tags-only)
+for tag-only streaming table declarations.
 
 ## Cross-table dependency blocking
 

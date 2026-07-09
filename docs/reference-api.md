@@ -18,7 +18,6 @@ from the top-level `delta_engine` package.
 .. autoclass:: delta_engine.schema.DeltaTable
    :members:
    :undoc-members:
-   :show-inheritance:
 ```
 
 #### `metadata_only` (bool, default `False`)
@@ -27,6 +26,19 @@ When `True`, restricts the sync to catalog metadata: comments, tags, and
 primary/foreign key constraints. Column structure, properties, and
 partitioning are never changed. The live schema must match the declaration
 exactly — any structural drift causes validation to fail.
+
+### StreamingTable
+
+```{eval-rst}
+.. autoclass:: delta_engine.schema.StreamingTable
+   :members:
+   :undoc-members:
+```
+
+`StreamingTable` declares the same table shape as `DeltaTable`, but syncs only
+table tags and column tags. Columns, comments, properties, partitioning,
+primary keys, and foreign keys are read for drift context but never changed by
+this declaration.
 
 ### Column
 

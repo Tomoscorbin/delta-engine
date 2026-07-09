@@ -12,7 +12,7 @@ from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, StreamingTable, String
 
 
 def _qualified_name(fqn: str) -> QualifiedName:
@@ -137,6 +137,26 @@ def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
     ).to_desired_table()
 
 
+def _streaming_table_with_fk(fqn: str, references: str) -> DesiredTable:
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return StreamingTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("ref_id", String()),
+        ),
+        foreign_keys=[
+            ForeignKey(
+                local_columns=("ref_id",),
+                references=_referenced_table(references),
+            )
+        ],
+    ).to_desired_table()
+
+
 def _names(result: ResolveResult) -> list[str]:
     return [str(name) for name in result.ordered_names]
 
@@ -207,6 +227,33 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
 
     # Then the independent tables stay in prepared input order
     assert _names(result) == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
+    assert not result.fk_failures
+
+
+def test_resolve_ignores_foreign_keys_on_tag_only_declarations():
+    # Given a streaming-table declaration that carries an FK but does not manage FKs
+    tables = (_streaming_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the carried FK does not produce an unresolvable-reference failure
+    assert _names(result) == ["cat.sch.orders"]
+    assert not result.fk_failures
+
+
+def test_resolve_does_not_order_by_unmanaged_foreign_keys():
+    # Given a streaming-table declaration listed before the table it references
+    tables = (
+        _streaming_table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _table("cat.sch.customers"),
+    )
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the unmanaged FK does not impose parent-before-child ordering
+    assert _names(result) == ["cat.sch.orders", "cat.sch.customers"]
     assert not result.fk_failures
 
 

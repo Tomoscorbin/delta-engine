@@ -7,6 +7,7 @@ from delta_engine.api.delta_table import (
     DeltaTable as DeltaTableImpl,
     ForeignKey as ForeignKeyImpl,
     Self as SelfImpl,
+    StreamingTable as StreamingTableImpl,
 )
 from delta_engine.application.properties import Property as PropertyImpl
 import delta_engine.databricks as databricks
@@ -54,6 +55,7 @@ _SCHEMA_EXPORTS = {
     "String",
     "Struct",
     "StructField",
+    "StreamingTable",
     "Timestamp",
     "TimestampNtz",
     "Variant",
@@ -87,6 +89,7 @@ def test_schema_import_path_matches_implementation_objects():
         "String": String,
         "Struct": Struct,
         "StructField": StructField,
+        "StreamingTable": StreamingTableImpl,
         "Timestamp": Timestamp,
         "TimestampNtz": TimestampNtz,
         "Variant": Variant,
@@ -125,7 +128,7 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     # Given an interpreter where pyspark cannot be imported
     program = (
         "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine.schema import Column, DeltaTable, Integer\n"
+        "from delta_engine.schema import Column, DeltaTable, Integer, StreamingTable\n"
         "from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus\n"
         "from delta_engine.databricks import (\n"
         "    build_engine, configure_logging,\n"

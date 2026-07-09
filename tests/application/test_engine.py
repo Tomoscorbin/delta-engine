@@ -26,8 +26,16 @@ from delta_engine.application.report import (
 from delta_engine.domain.model import ObservedTable, QualifiedName
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
-from delta_engine.domain.plan.actions import CreateTable, SetColumnComment, SetTableComment
-from delta_engine.schema import Column, DeltaTable, ForeignKey, String
+from delta_engine.domain.plan.actions import (
+    CreateTable,
+    SetColumnComment,
+    SetColumnTag,
+    SetTableComment,
+    SetTableTag,
+    UnsetColumnTag,
+    UnsetTableTag,
+)
+from delta_engine.schema import Column, DeltaTable, ForeignKey, StreamingTable, String
 
 # ---------------------------------------------------------------------------
 # Helpers and fakes
@@ -175,6 +183,19 @@ def _metadata_only_spec(fqn: str) -> DeltaTable:
     )
 
 
+def _streaming_tag_spec(fqn: str) -> StreamingTable:
+    """Build a streaming-table declaration that manages only tags."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return StreamingTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("id", String(), tags={"pii": "false"}),),
+        tags={"domain": "events"},
+    )
+
+
 def _existing_matching_table(fqn: str) -> TablePresent:
     """Build an observed table whose schema matches _metadata_only_spec."""
     catalog, schema, table_name = _split_fqn(fqn)
@@ -183,6 +204,19 @@ def _existing_matching_table(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(Column("id", String()),),
+        )
+    )
+
+
+def _existing_streaming_tag_table(fqn: str) -> TablePresent:
+    """Build an observed table with tag drift against _streaming_tag_spec."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, table_name),
+            columns=(Column("id", String(), tags={"stale": "true"}),),
+            tags={"legacy": "yes"},
         )
     )
 
@@ -392,6 +426,28 @@ def test_real_run_records_the_applied_plan_on_the_report():
     assert [type(action) for action in table_report.plan] == [CreateTable]
     assert table_report.status is TableRunStatus.SUCCESS
     assert executor.executed_names == [fqn]
+
+
+def test_streaming_table_dry_run_plans_only_tag_actions():
+    # Given a streaming-table declaration over an existing table with tag drift
+    fqn = "c.s.streaming_events"
+    reader = _RecordingReader({fqn: _existing_streaming_tag_table(fqn)})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing as a dry run
+    report = engine.sync(_streaming_tag_spec(fqn), dry_run=True)
+
+    # Then the plan reconciles table and column tags, and nothing else
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.SUCCESS
+    assert [type(action) for action in table_report.plan] == [
+        SetTableTag,
+        UnsetTableTag,
+        SetColumnTag,
+        UnsetColumnTag,
+    ]
+    assert executor.executed_names == []
 
 
 def test_dry_run_is_recorded_on_the_report():
