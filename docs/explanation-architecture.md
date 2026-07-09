@@ -543,14 +543,17 @@ column declaration order, so partition columns are named in one ordered,
 table-level list instead. The differ compares that list positionally, which is
 why reordering it is drift, not a no-op.
 
-Clustering keys are the other case of this same principle, on the other side
-of it: liquid clustering has no physical directory nesting, so key order
-carries no meaning — Delta clusters by the key _set_. That makes clustering
-shaped like a primary key rather than like partitioning: `cluster_key=True` is
-a per-column flag, `DeltaTable` derives the `clustered_by` tuple from the
-flagged columns, and the differ compares that tuple as a set. The general
-rule: an ordered physical layout is a table-level tuple (`partitioned_by`),
-an unordered key set is a per-column flag (`primary_key`, `cluster_key`).
+Clustering is the other physical layout, and it is declared the same way —
+`clustered_by` is a table-level list on `DeltaTable`, the sibling of
+`partitioned_by` (the two are mutually exclusive; a table has one layout
+strategy). What differs is not the declaration shape but the _comparison_:
+liquid clustering has no physical directory nesting, so key order carries no
+meaning — Delta clusters by the key _set_. So the differ compares
+`partitioned_by` positionally (reordering it is drift) but compares
+`clustered_by` as a set (reordering the keys is a no-op). The general rule: a
+physical layout is a table-level list (`partitioned_by`, `clustered_by`), and
+whether order is significant is a property of the differ, not of the
+declaration shape.
 
 ## Constraint names
 

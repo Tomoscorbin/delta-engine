@@ -554,9 +554,8 @@ the engine rejects.
 
 ## Clustering
 
-Declare a Delta liquid clustering key by setting `cluster_key=True` on one or
-more columns — a per-column flag, the same shape as `primary_key`, rather than
-a table-level list:
+Declare Delta liquid clustering keys with the `clustered_by` argument — a
+table-level list of column names, the same shape as `partitioned_by`:
 
 ```python
 from delta_engine.schema import Column, DeltaTable, String
@@ -566,16 +565,18 @@ events = DeltaTable(
     schema="silver",
     name="events",
     columns=[
-        Column("region", String(), cluster_key=True),
+        Column("region", String()),
         Column("event_type", String()),
     ],
+    clustered_by=["region"],
 )
 ```
 
-`DeltaTable.clustered_by` exposes the derived tuple of clustering column
-names, in declaration order.
+`DeltaTable.clustered_by` exposes the declared tuple of clustering column
+names, in declaration order. Key order does not matter — Delta clusters by the
+key set — so reordering the keys is never treated as drift.
 
-A table cannot declare both `partitioned_by` and clustering keys — Delta
+A table cannot declare both `partitioned_by` and `clustered_by` — Delta
 supports one physical layout strategy per table — and a declaration is
 limited to four clustering keys. Both are rejected when the `DeltaTable` is
 constructed. See

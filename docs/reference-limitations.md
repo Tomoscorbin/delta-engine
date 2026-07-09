@@ -70,10 +70,10 @@ partitioning:
 
 | Limitation               | Behaviour                                                                                                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Key count                | At most four `cluster_key=True` columns per table, rejected at declaration                                                                                     |
-| Mutual exclusivity       | A table cannot declare both `partitioned_by` and clustering keys, rejected at declaration                                                                      |
+| Key count                | At most four `clustered_by` keys per table, rejected at declaration                                                                                            |
+| Mutual exclusivity       | A table cannot declare both `partitioned_by` and `clustered_by`, rejected at declaration                                                                       |
 | Unsupported key types    | `Array`, `Map`, `Struct`, and `Variant` columns cannot be clustering keys, rejected at declaration                                                             |
-| Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be marked `cluster_key=True`                   |
+| Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be named in `clustered_by`                     |
 | Stats and column order   | Databricks only collects the file statistics clustering relies on for a table's first 32 columns; a clustering key outside that range gets no skipping benefit |
 | Runtime compatibility    | Liquid clustering requires Databricks Runtime 14.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features)              |
 

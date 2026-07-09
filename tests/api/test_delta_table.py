@@ -130,19 +130,20 @@ def test_delta_table_exposes_declared_partitioning():
     assert table.partitioned_by == ("ds",)
 
 
-def test_delta_table_derives_clustering_from_cluster_key_flags():
-    # Given columns flagged as clustering keys
+def test_delta_table_exposes_declared_clustering():
+    # Given a table declared with clustering keys
     table = DeltaTable(
         catalog="main",
         schema="sales",
         name="orders",
         columns=[
             Column("id", Integer()),
-            Column("region", String(), cluster_key=True),
-            Column("day", Date(), cluster_key=True),
+            Column("region", String()),
+            Column("day", Date()),
         ],
+        clustered_by=["region", "day"],
     )
-    # Then clustered_by reads back the flagged columns in declaration order
+    # Then clustered_by reads them back in declaration order
     assert table.clustered_by == ("region", "day")
 
 
@@ -162,8 +163,9 @@ def test_delta_table_rejects_partitioning_and_clustering_together():
             catalog="main",
             schema="sales",
             name="orders",
-            columns=[Column("id", Integer()), Column("region", String(), cluster_key=True)],
+            columns=[Column("id", Integer()), Column("region", String())],
             partitioned_by=["id"],
+            clustered_by=["region"],
         )
 
 

@@ -230,6 +230,7 @@ class DeltaTable:
         properties: Mapping[str, str | None] | None = None,
         tags: Mapping[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
+        clustered_by: Iterable[str] = (),
         foreign_keys: Iterable[ForeignKey] | None = None,
         metadata_only: bool = False,
     ) -> None:
@@ -244,7 +245,11 @@ class DeltaTable:
             comment: Table-level comment.
             properties: Delta/Spark table properties to manage.
             tags: Key/value tags to apply to the table.
-            partitioned_by: Column names to partition by.
+            partitioned_by: Column names to partition by. Mutually exclusive with
+                ``clustered_by``.
+            clustered_by: Column names to use as Delta liquid-clustering keys
+                (at most four). Key order is immaterial. Mutually exclusive with
+                ``partitioned_by``.
             foreign_keys: Foreign key relationships declared on this table.
             metadata_only: When ``True``, restricts the sync to catalog metadata:
                 comments, tags, and key constraints. The full table is still
@@ -312,8 +317,6 @@ class DeltaTable:
             else None
         )
 
-        clustered_by = tuple(column.name for column in columns if column.cluster_key)
-
         qualified_name = QualifiedName(catalog, schema, name)
         lowered_foreign_keys = tuple(
             declaration._to_constraint(qualified_name, columns, primary_key_columns)
@@ -331,7 +334,7 @@ class DeltaTable:
             properties=user_properties,
             tags=table_tags,
             partitioned_by=tuple(partitioned_by),
-            clustered_by=clustered_by,
+            clustered_by=tuple(clustered_by),
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
             managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,

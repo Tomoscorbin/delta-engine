@@ -518,8 +518,9 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
             table_name,
             columns=(
                 Column("id", Integer(), nullable=False),
-                Column("region", String(), cluster_key=True),
+                Column("region", String()),
             ),
+            clustered_by=("region",),
             comment="clustered table",
         )
     )
@@ -534,9 +535,10 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
         temp_schema,
         table_name,
         columns=(
-            Column("id", Integer(), nullable=False, cluster_key=True),
+            Column("id", Integer(), nullable=False),
             Column("region", String()),
         ),
+        clustered_by=("id",),
         comment="clustered table",
     )
     second = engine.sync(reclustered)

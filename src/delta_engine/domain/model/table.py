@@ -13,7 +13,8 @@ from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
 
-# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
+# Complex types Delta accepts as neither a partition column
+# (DELTA_INVALID_PARTITION_COLUMN_TYPE) nor a clustering key.
 _UNPARTITIONABLE_TYPES = (Array, Map, Struct, Variant)
 
 
@@ -150,6 +151,10 @@ class DesiredTable(TableSnapshot):
 
         Partition columns must not have complex types (Array, Map, Struct, Variant)
         and at least one non-partition column must exist.
+
+        Clustering has the same complex-type restriction, is capped at four keys,
+        and is mutually exclusive with partitioning (Delta allows one physical
+        layout strategy per table).
         """
         TableSnapshot.__post_init__(self)
         if not self.managed_aspects:

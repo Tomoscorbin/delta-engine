@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model.column import Column
-from delta_engine.domain.model.data_type import Integer, String
+from delta_engine.domain.model.data_type import Integer
 
 
 def test_defaults_to_nullable_true() -> None:
@@ -57,17 +57,3 @@ def test_raises_when_tag_key_is_blank(blank: str) -> None:
     # When/Then: constructing a Column fails
     with pytest.raises(ValueError, match="Tag key must not be blank"):
         Column("id", Integer(), tags={blank: "v"})
-
-
-def test_column_cluster_key_defaults_to_false():
-    # Given a column declared without a clustering flag
-    column = Column("id", Integer())
-    # Then it is not a clustering key
-    assert column.cluster_key is False
-
-
-def test_column_with_cluster_key_flag():
-    # Given a column declared as a clustering key
-    column = Column("region", String(), cluster_key=True)
-    # Then the flag is carried
-    assert column.cluster_key is True
