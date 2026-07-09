@@ -209,9 +209,11 @@ _OPTIMIZE_FULL_HINT: Final[str] = "run OPTIMIZE FULL to recluster existing data"
 
 @_action_entries.register
 def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
+    # No hint on removal: OPTIMIZE FULL errors on a table without clustering
+    # columns (DELTA_OPTIMIZE_FULL_NOT_SUPPORTED); existing files simply keep
+    # their old layout after CLUSTER BY NONE.
     if not action.columns:
-        text = f"clustering — {_OPTIMIZE_FULL_HINT}"
-        return (DiffEntry(DiffCategory.CLUSTERING, "-", (text,)),)
+        return (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),)
     columns = ", ".join(action.columns)
     text = f"clustering ({columns}) — {_OPTIMIZE_FULL_HINT}"
     return (DiffEntry(DiffCategory.CLUSTERING, "~", (text,)),)

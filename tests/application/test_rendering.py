@@ -163,15 +163,11 @@ from delta_engine.domain.plan.actions import (
                 ),
             ),
         ),
+        # Removal carries no OPTIMIZE hint: OPTIMIZE FULL errors on a table
+        # without clustering columns.
         (
             AlterClustering(columns=()),
-            (
-                DiffEntry(
-                    DiffCategory.CLUSTERING,
-                    "-",
-                    ("clustering — run OPTIMIZE FULL to recluster existing data",),
-                ),
-            ),
+            (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),),
         ),
     ],
 )

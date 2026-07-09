@@ -7,8 +7,9 @@ tags:
 
 `DeltaTable(metadata_only=True)` restricts a sync to catalog metadata: table
 and column comments, table and column tags, and primary/foreign key constraints.
-Column structure, table properties, and partitioning are read for context but
-never changed — a metadata-only sync can never add, drop, or alter a column.
+Column structure, table properties, partitioning, and clustering are read for
+context but never changed — a metadata-only sync can never add, drop, or alter
+a column.
 
 Use it to roll out governance metadata with a hard guarantee that no schema
 change can slip in — for example, applying tags and comments across tables
@@ -47,8 +48,8 @@ metadata is applied.
 - **Reconciles** table comment, column comments, table tags, column tags, and
   PK/FK constraints, exactly as a fully managed sync would.
 - **Requires** the live schema to match the declaration exactly. Any unmanaged
-  aspect (column structure or partitioning) that has drifted fails the sync at
-  validation (`UnmanagedAspectDrift`) before any SQL executes. Catalog
+  aspect (column structure, partitioning, or clustering) that has drifted fails
+  the sync at validation (`UnmanagedAspectDrift`) before any SQL executes. Catalog
   properties are never compared for a metadata-only table — it declares none,
   and undeclared properties (for example those written by a previous fully
   managed sync) are not drift.

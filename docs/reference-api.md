@@ -24,8 +24,8 @@ from the top-level `delta_engine` package.
 #### `metadata_only` (bool, default `False`)
 
 When `True`, restricts the sync to catalog metadata: comments, tags, and
-primary/foreign key constraints. Column structure, properties, and
-partitioning are never changed. The live schema must match the declaration
+primary/foreign key constraints. Column structure, properties, partitioning,
+and clustering are never changed. The live schema must match the declaration
 exactly — any structural drift causes validation to fail.
 
 #### `clustered_by` (read-only accessor)

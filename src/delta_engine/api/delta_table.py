@@ -322,7 +322,7 @@ class DeltaTable:
             foreign_keys: Foreign key relationships declared on this table.
             metadata_only: When ``True``, restricts the sync to catalog metadata:
                 comments, tags, and key constraints. The full table is still
-                declared — columns, properties, partitioning — but only
+                declared — columns, properties, partitioning, clustering — but only
                 metadata is deployed; the rest is never compared or changed,
                 except that the live schema must match the declared columns
                 exactly (structural drift fails validation).
