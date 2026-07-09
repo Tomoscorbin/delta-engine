@@ -131,6 +131,11 @@ def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
     Column detail is not needed; validation only names what blocks a
     primary-key change.
 
+    The parent constraint is filtered to the primary key: a foreign key may
+    also reference a UNIQUE constraint (DBR 18.2+), and such a key does not
+    block ``DROP PRIMARY KEY`` — RESTRICT only rejects the drop for keys that
+    depend on the primary key itself.
+
     information_schema is per-catalog, so a foreign key owned by a table in a
     different catalog is invisible here; such a drop still fails at execution.
     """
@@ -151,6 +156,7 @@ def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
         f" AND rc.constraint_name = fk_tables.constraint_name"
         f" WHERE pk_tables.table_schema = {quote_literal(qualified_name.schema)}"
         f" AND pk_tables.table_name = {quote_literal(qualified_name.name)}"
+        f" AND pk_tables.constraint_type = 'PRIMARY KEY'"
         f" ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
         f" fk_tables.table_name, rc.constraint_name"
     )

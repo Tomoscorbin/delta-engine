@@ -298,10 +298,12 @@ def _classify_failures(
         )
 
     # Primary-key columns of every registered table, keyed by qualified name.
-    # A foreign key is only valid if its referenced columns are exactly the
-    # referenced table's primary key (Databricks rejects other targets at DDL
-    # time). Compared as sets: a primary key's declaration order is not part of
-    # its identity, and referenced_columns is aligned to local_columns, not PK order.
+    # A foreign key declared through this engine always references the
+    # referenced table's primary key — the API infers the columns from it.
+    # (Databricks itself also accepts UNIQUE-constraint targets on DBR 18.2+,
+    # which this engine does not model.) Compared as sets: a primary key's
+    # declaration order is not part of its identity, and referenced_columns is
+    # aligned to local_columns, not PK order.
     primary_key_by_name = {table.qualified_name: set(table.primary_key_columns) for table in tables}
 
     # Pass 1 — direct failures.
