@@ -18,6 +18,24 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `ColumnMappingRequiredForDrop`          | A plan drops a column but the declaration lacks `delta.columnMapping.mode='name'`                                                                       | Declare the property (it may be set in the same sync as the drop)                 |
 | `PrimaryKeyReferencedByForeignKeys`     | Dropping or changing a primary key while foreign keys reference it (same-table FKs dropped in the same sync are exempt)                                 | Sync the referencing tables without those foreign keys first, then change the key |
 
+## Clustering is not a blocked change
+
+Unlike `partitioned_by`, changing a table's liquid clustering keys has no
+validation rule blocking it, because there is nothing unsafe about it: Delta
+reconciles clustering keys with `ALTER TABLE ... CLUSTER BY (...)` (or
+`CLUSTER BY NONE` to remove them), so the engine plans this in place instead
+of failing validation. `PartitioningChangeNotSupported` blocks
+`partitioned_by` because Delta has no equivalent in-place `ALTER TABLE` for
+partition columns — changing them means physically rewriting every data
+file — while a re-cluster is a metadata change that later `OPTIMIZE` runs
+apply lazily.
+
+Re-clustering only affects data written after the change: existing files
+keep their old clustering layout until they are rewritten by a subsequent
+`OPTIMIZE` (optionally `OPTIMIZE FULL` to rewrite the whole table
+immediately). The engine issues the `ALTER TABLE` but does not run
+`OPTIMIZE`; query performance on old data improves only once you optimize.
+
 Two further checks are scope invariants rather than rules — they define what a
 declaration is allowed to govern and always run, regardless of the rule set:
 
@@ -44,5 +62,6 @@ them succeed:
 | Tag limits                                           | More than 50 tags on the table or a column, or a tag value over 1000 characters                                                                                                                                                                                  |
 | Decimal precision                                    | `Decimal` precision above 38                                                                                                                                                                                                                                     |
 | Partitioning                                         | Partition columns of complex type (`Array`, `Map`, `Struct`, `Variant`), or partitioning by every column                                                                                                                                                         |
+| Clustering                                           | More than four `cluster_key=True` columns, a clustering column of complex type (`Array`, `Map`, `Struct`, `Variant`), or declaring both `partitioned_by` and clustering keys on the same table — see [limitations](reference-limitations.md)                     |
 
 Validation runs before any SQL executes. A failed validation means the table is unchanged.

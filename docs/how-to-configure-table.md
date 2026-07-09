@@ -18,6 +18,7 @@ partitioned. This page is the practical reference for configuring each aspect.
 | Primary keys      | The table's primary key                               | [Primary keys](#primary-keys), below                                                  |
 | Foreign keys      | Cross-table references and sync ordering              | [Foreign keys](#foreign-keys), below                                                  |
 | Partitioning      | Partition columns, fixed at creation                  | [Partitioning](#partitioning), below                                                  |
+| Clustering        | Liquid clustering keys, reconciled in place           | [Clustering](#clustering), below                                                      |
 
 ## Properties
 
@@ -550,3 +551,49 @@ Partition columns also cannot be of complex type (`Array`, `Map`, `Struct`,
 rejected when the `DeltaTable` is constructed. See
 [safe-change rules](reference-safe-change-rules.md) for the full set of changes
 the engine rejects.
+
+## Clustering
+
+Declare a Delta liquid clustering key by setting `cluster_key=True` on one or
+more columns — a per-column flag, the same shape as `primary_key`, rather than
+a table-level list:
+
+```python
+from delta_engine.schema import Column, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("region", String(), cluster_key=True),
+        Column("event_type", String()),
+    ],
+)
+```
+
+`DeltaTable.clustered_by` exposes the derived tuple of clustering column
+names, in declaration order.
+
+A table cannot declare both `partitioned_by` and clustering keys — Delta
+supports one physical layout strategy per table — and a declaration is
+limited to four clustering keys. Both are rejected when the `DeltaTable` is
+constructed. See
+[limitations](reference-limitations.md) for the unsupported key types.
+
+### Clustering is reconciled in place
+
+Unlike partitioning, clustering keys are not fixed at creation. Liquid
+clustering has no physical directory layout to rewrite, so the engine changes
+the key set with `ALTER TABLE ... CLUSTER BY (...)` (or `CLUSTER BY NONE` to
+remove clustering) whenever the declaration changes — no table recreation
+required. See
+[safe-change rules](reference-safe-change-rules.md) for how this contrasts
+with partitioning.
+
+### Drift
+
+The engine compares clustering keys by _set_, not by order: declaring the
+same keys in a different order is not drift and plans nothing. This mirrors
+primary keys, and is unlike partitioning, where order is a physical layout
+decision.

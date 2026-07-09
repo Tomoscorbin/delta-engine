@@ -28,6 +28,14 @@ primary/foreign key constraints. Column structure, properties, and
 partitioning are never changed. The live schema must match the declaration
 exactly — any structural drift causes validation to fail.
 
+#### `clustered_by` (read-only accessor)
+
+The tuple of liquid clustering key column names, in declaration order,
+derived from the columns declared with `cluster_key=True`. There is no
+`clustered_by` constructor argument — unlike `partitioned_by`, clustering is
+declared per column. See
+[clustering](how-to-configure-table.md#clustering).
+
 ### Column
 
 ```{eval-rst}
@@ -35,6 +43,14 @@ exactly — any structural drift causes validation to fail.
    :members:
    :undoc-members:
 ```
+
+#### `cluster_key` (bool, default `False`)
+
+Marks the column as a Delta liquid clustering key. `DeltaTable` derives its
+`clustered_by` tuple from the columns with this flag set, in declaration
+order. A declaration may set it on at most four columns, and cannot combine
+it with `partitioned_by` on the same table — see
+[clustering](how-to-configure-table.md#clustering).
 
 ### ForeignKey
 
