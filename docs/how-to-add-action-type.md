@@ -58,14 +58,14 @@ class ActionPhase(IntEnum):
 
 ## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `ColumnCommentChanged`:
+In `src/delta_engine/domain/plan/changes.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `ColumnCommentChanged`:
 
 ```python
 def actions(self) -> tuple[Action, ...]:
     return (UpdateComment(column_name=self.column_name, new_comment=self.desired_comment),)
 ```
 
-If the action belongs to a new kind of difference, add a new change dataclass (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `Change` union, and emit it from the relevant `_diff_*` helper in `diff_table`.
+If the action belongs to a new kind of difference, add a new change dataclass in `changes.py` (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `Change` union there, and emit it from the relevant `_diff_*` helper in `src/delta_engine/domain/plan/diff.py`.
 
 ## 4. Register a SQL compiler
 
@@ -98,25 +98,25 @@ An action may emit several entries across categories (`CreateTable` lists its co
 
 ## 6. Add a validation rule if needed
 
-If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the drift's managed changes and match change types directly:
+If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the self-contained drift and usually match concrete change types from `drift.managed_changes`:
 
 ```python
 from typing import ClassVar
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.domain.model.table_aspect import TableAspect
-from delta_engine.domain.plan.diff import Change, TableCommentChanged
+from delta_engine.domain.plan.changes import TableCommentChanged
+from delta_engine.domain.plan.diff import TableDrift
 
 
 class NoUnsafeCommentChange:
     name: ClassVar[str] = "NoUnsafeCommentChange"
 
-    def evaluate(self, changes: tuple[Change, ...]) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=f"Operation not allowed: ...",
             )
-            for change in changes
+            for change in drift.managed_changes
             if isinstance(change, TableCommentChanged) and <condition>
         )
 ```
