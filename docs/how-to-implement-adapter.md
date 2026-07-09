@@ -5,7 +5,9 @@ tags:
 
 # How to implement a custom adapter
 
-delta-engine ships with a Databricks adapter. To target a different backend, implement the two port protocols: `CatalogStateReader` and `PlanExecutor`. These are the ports of the hexagonal architecture — see [the hexagonal boundary](explanation-architecture.md#the-hexagonal-boundary) for how they fit — and implementing them is all a new backend needs; the planning core is untouched.
+delta-engine ships with a single backend today: Delta Lake on Databricks. A backend is defined by two port protocols — `CatalogStateReader` and `PlanExecutor`, in `delta_engine.application.ports` — and this guide shows how to implement them. See [the hexagonal boundary](explanation-architecture.md#the-hexagonal-boundary) for how the ports fit.
+
+Implementing the two ports is enough for a backend that shares Delta's semantics. A genuinely different table format needs more — see [Adding a genuinely different backend](#adding-a-genuinely-different-backend) below before you start.
 
 ## The two protocols
 
@@ -100,3 +102,14 @@ for action in plan.actions:
 ```
 
 See `delta_engine/adapters/databricks/sql/compile.py` for a complete example using `functools.singledispatch`.
+
+## Adding a genuinely different backend
+
+The two ports are import-clean: the `domain` and `application` layers never import `pyspark` or `delta`, and your adapter adds no backend imports to them. But import purity is not the whole story. The application layer still encodes Delta-specific policy in ordinary Python — the Delta table-property registry in `application/properties.py`, and validation rules such as `ColumnMappingRequiredForDrop` that exist only because of how Delta handles column drops.
+
+The consequence for a new backend:
+
+- **A Delta-compatible backend** — another Delta-on-Spark or Unity Catalog surface with the same property and safety semantics — can be added with the two ports alone.
+- **A different table format**, such as Iceberg, would first need that Delta-specific policy lifted out of the application layer (or made selectable per backend) so its own property model and safety rules could take its place. Implementing the ports is necessary but not sufficient.
+
+See [Import purity versus semantic coupling](explanation-architecture.md#import-purity-versus-semantic-coupling) for the full picture.
