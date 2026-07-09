@@ -37,10 +37,15 @@ If the action belongs to a new execution phase, add it to the `ActionPhase` enum
 class ActionPhase(IntEnum):
     CREATE_TABLE = auto()
     SET_PROPERTY = auto()
+    UNSET_PROPERTY = auto()
+    SET_TABLE_TAG = auto()
+    UNSET_TABLE_TAG = auto()
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
     DROP_COLUMN = auto()
+    SET_COLUMN_TAG = auto()
+    UNSET_COLUMN_TAG = auto()
     SET_COLUMN_COMMENT = auto()
     SET_TABLE_COMMENT = auto()
     SET_COLUMN_NULLABILITY = auto()
@@ -53,11 +58,11 @@ class ActionPhase(IntEnum):
 
 ## 3. Add a lowering case
 
-In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `TableCommentChanged`:
+In `src/delta_engine/domain/plan/diff.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `ColumnCommentChanged`:
 
 ```python
 def actions(self) -> tuple[Action, ...]:
-    return (UpdateComment(new_comment=self.desired_comment),)
+    return (UpdateComment(column_name=self.column_name, new_comment=self.desired_comment),)
 ```
 
 If the action belongs to a new kind of difference, add a new change dataclass (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `Change` union, and emit it from the relevant `_diff_*` helper in `diff_table`.
@@ -133,4 +138,4 @@ Run:
 uv run pytest tests/ -v
 ```
 
-Expected: all tests pass, coverage above 90%.
+Expected: all tests pass and coverage stays above the configured threshold.
