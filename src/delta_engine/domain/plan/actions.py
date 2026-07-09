@@ -37,6 +37,7 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
+    SET_CLUSTERING = auto()
 
 
 class Action(ABC):
@@ -302,6 +303,25 @@ class SetForeignKey(Action):
     @property
     def subject(self) -> str:
         return ",".join(self.local_columns)
+
+
+@dataclass(frozen=True, slots=True)
+class AlterClustering(Action):
+    """
+    Set or clear a table's liquid-clustering keys in place.
+
+    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering). Runs in its
+    own final phase: a clustering key may be a column this same sync adds, so it
+    must follow ADD_COLUMN, and nothing depends on it.
+    """
+
+    columns: tuple[str, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
+
+    @property
+    def subject(self) -> str:
+        return ""
 
 
 def _execution_order(action: Action) -> tuple[int, str]:
