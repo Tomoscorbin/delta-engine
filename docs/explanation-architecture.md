@@ -22,8 +22,12 @@ The important separation is this:
 - The **public API** gives users a convenient way to describe desired tables
   without exposing the internal planning model directly.
 
-That split keeps the planning code backend-free. Databricks is the first
-adapter, not the center of the design.
+That split keeps the planning code free of backend _imports_. It does not yet
+make it free of backend _knowledge_: Delta and Databricks semantics are still
+encoded in the application layer, so Databricks is the first adapter but, today,
+also the only one the rest of the engine is written for. See
+[Import purity versus semantic coupling](#import-purity-versus-semantic-coupling)
+for what that means for adding a new backend.
 
 ```mermaid
 flowchart TB
@@ -166,6 +170,36 @@ snapshot stays honest about everything else), but an unmappable partition
 column fails the whole read — an incomplete `partitioned_by` would fabricate
 partitioning drift, and a false blocked change is worse than an honest
 `READ_FAILED`.
+
+### Import purity versus semantic coupling
+
+The layering is enforced by import-linter: `domain` and `application` cannot
+import `pyspark` or `delta`, and a new adapter adds no backend imports to them.
+That is the _hard_ form of the hexagonal boundary, and it holds.
+
+The _soft_ form — that the domain and application layers know nothing about any
+particular backend — does not fully hold today. Delta and Databricks semantics
+are encoded as ordinary Python in the application layer:
+
+- `application/properties.py` is a registry of Delta table properties
+  (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
+  durations, …), with Delta-specific value formats and transition rules.
+- Several rules in `application/validation.py` encode Delta behaviour directly.
+  `ColumnMappingRequiredForDrop` exists only because Delta permits
+  `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;
+  `PropertyTransitionNotSupported` and `PropertyMustBeDeclared` operate on that
+  Delta property registry.
+
+import-linter cannot catch this, because it is backend _knowledge_ expressed in
+ordinary types, not a forbidden import.
+
+The practical consequence is about what a new backend costs. A backend that
+shares Delta's semantics — another Delta-on-Spark or Unity Catalog surface — can
+be added by implementing the two ports alone. A genuinely different table
+format, such as Iceberg, would first need this Delta-specific policy lifted out
+of the application layer (or made selectable per backend) so its own property
+model and safety rules could take its place. Until then, delta-engine is a
+Delta/Databricks engine with a clean adapter seam, not a format-neutral one.
 
 ## Sync lifecycle
 
