@@ -31,9 +31,17 @@ def test_referencing_foreign_keys_query_golden():
         " AND rc.constraint_name = fk_tables.constraint_name"
         " WHERE pk_tables.table_schema = 'sch'"
         " AND pk_tables.table_name = 'tbl'"
+        " AND pk_tables.constraint_type = 'PRIMARY KEY'"
         " ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
         " fk_tables.table_name, rc.constraint_name"
     )
+
+
+def test_referencing_foreign_keys_query_matches_primary_key_parents_only():
+    # A foreign key may reference a UNIQUE constraint (DBR 18.2+); such a key
+    # does not block a primary-key drop, so the inbound query must filter the
+    # parent constraint to the primary key.
+    assert "pk_tables.constraint_type = 'PRIMARY KEY'" in referencing_foreign_keys_query(QN)
 
 
 def test_describe_detail_query_backticks_the_table_name():

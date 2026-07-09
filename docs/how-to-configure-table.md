@@ -390,7 +390,17 @@ Referencing the target `DeltaTable` object — rather than a dotted table name �
 is what lets the engine infer the referenced columns from that table's primary
 key, and keeps the reference valid if the target is renamed. The constraint
 name is generated at lowering as `{table}_{local_columns}_fk`
-(`orders_customer_id_fk` above); it is internal and not part of the public API.
+(`orders_customer_id_fk` above). The name cannot be chosen, and drift matching
+never depends on it — a foreign key created outside the engine under a
+different name still matches by content.
+
+Generated names join local columns with underscores, so two foreign keys over
+different columns can derive the same name — `("a", "b_c")` and `("a_b", "c")`
+both derive `orders_a_b_c_fk`. A within-table collision is rejected when the
+`DeltaTable` is constructed; rename a local column so the names differ.
+Databricks scopes constraint names to the schema, so a generated name can also
+collide with a constraint on _another_ table — that case is not checked and
+fails at execution.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
