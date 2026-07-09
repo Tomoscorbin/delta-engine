@@ -200,17 +200,22 @@ holds; the engine does not, and cannot, make Databricks validate it.
 
 ### Drift
 
-The engine reconciles primary key drift on existing tables:
+The engine detects primary key drift by comparing the _column set_, not the
+constraint name. The generated `{table}_pk` name is used only to emit the DDL;
+it never participates in the comparison. So a primary key already on the table
+with the same columns under a different name — one created by hand or by another
+tool — is not drift and produces no action, which keeps repeated syncs
+idempotent.
 
-| Change                      | Actions emitted                       |
-| --------------------------- | ------------------------------------- |
-| Primary key added           | `SetPrimaryKey`                       |
-| Primary key removed         | `DropPrimaryKey`                      |
-| Primary key columns changed | `DropPrimaryKey` then `SetPrimaryKey` |
-| No change                   | nothing                               |
+| Change                       | Actions emitted                       |
+| ---------------------------- | ------------------------------------- |
+| Primary key added            | `SetPrimaryKey`                       |
+| Primary key removed          | `DropPrimaryKey`                      |
+| Primary key columns changed  | `DropPrimaryKey` then `SetPrimaryKey` |
+| Same columns, any name/order | nothing                               |
 
-Column order within the key is ignored when detecting drift — `(a, b)` and
-`(b, a)` are treated as equal.
+Column order within the key is ignored too — `(a, b)` and `(b, a)` are treated
+as equal.
 
 Key-constraint support depends on your Databricks environment. The engine does
 not preflight Databricks Runtime or Delta table protocol compatibility; if
