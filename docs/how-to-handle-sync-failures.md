@@ -96,7 +96,7 @@ for table_report in report:
             print(failure.format_lines()[0])
 ```
 
-See [how-to-declare-foreign-keys.md](how-to-declare-foreign-keys.md) for how dependency ordering and all-or-nothing blocking work.
+See [Foreign keys](how-to-configure-table.md#foreign-keys) for how dependency ordering and all-or-nothing blocking work.
 
 ## Act on execution failures
 

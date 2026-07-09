@@ -80,7 +80,7 @@ including mid-execution — every table whose foreign keys depend on it is
 blocked rather than executed, reporting `FOREIGN_KEY_FAILED`. The rule is
 uniform: if a dependency won't reach its desired state this sync, its
 dependents don't run either. Fix the upstream table and re-sync.
-[How to declare foreign keys](how-to-declare-foreign-keys.md) covers the
+[Foreign keys](how-to-configure-table.md#foreign-keys) covers the
 declaration side.
 
 ## Dry runs stop before execution

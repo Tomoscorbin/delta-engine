@@ -89,7 +89,7 @@ The rule is uniform: if a dependency won't reach its desired state this sync,
 its dependents don't run either. Fix the upstream table and re-sync.
 [How a sync works](explanation-sync-lifecycle.md) covers where resolution sits
 in the phase chain;
-[how to declare foreign keys](how-to-declare-foreign-keys.md) covers the
+[foreign keys](how-to-configure-table.md#foreign-keys) covers the
 declaration side.
 
 ## Declared, observed, or both: aspect semantics
