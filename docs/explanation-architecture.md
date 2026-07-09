@@ -53,20 +53,21 @@ flowchart TB
 The architecture is easiest to follow if you start with the data that moves
 through a sync.
 
-| Concept            | Role                                                                                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                    |
-| `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape. |
-| `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.             |
-| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                    |
-| `TableDiff`        | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`.                          |
-| `Dimension`        | One aspect of drift, such as columns, table comment, properties, tags, partitioning, primary key, or foreign keys.                  |
-| `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                     |
-| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                            |
-| `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                     |
-| `ExecutionSummary` | The result of attempting a table's plan. It records successful actions and the first failed action, if execution failed.            |
-| `TableRunReport`   | The complete per-table outcome, including read state, plan, failures, and execution.                                                |
-| `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.           |
+| Concept            | Role                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                                             |
+| `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape.                          |
+| `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                      |
+| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                             |
+| `TableDiff`        | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`.                                                   |
+| `Change`           | One atomic difference inside a `TableDrift` (`ColumnAdded`, `TableTagUnset`, …). Each names the `TableAspect` it belongs to and can lower itself to actions. |
+| `TableAspect`      | One managed aspect of a table: columns, table comment, properties, tags, partitioning, primary key, or foreign keys. Internal enum.                          |
+| `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                                              |
+| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                     |
+| `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                                              |
+| `ExecutionSummary` | The result of attempting a table's plan. It records successful actions and the first failed action, if execution failed.                                     |
+| `TableRunReport`   | The complete per-table outcome, including read state, plan, failures, and execution.                                                                         |
+| `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                    |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
 For example, the domain has `Column`, `QualifiedName`, `PrimaryKeyConstraint`,
@@ -194,12 +195,12 @@ sequenceDiagram
     Engine->>Engine: prepare_desired_tables()
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
-    Engine->>Differ: diff_table(desired, observed_or_none, registry)
+    Engine->>Differ: diff_table(desired, observed_or_none)
     Differ-->>Engine: TableMissing / TableDrift
     Engine->>Validator: validate_diff(diff)
     Validator-->>Engine: ValidationResult
-    Engine->>Domain: plan from diff.changes
-    Domain-->>Engine: ActionPlan
+    Engine->>Planner: plan from diff.changes
+    Planner-->>Engine: ActionPlan
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
     Engine->>Executor: execute(qualified_name, plan)
@@ -207,10 +208,11 @@ sequenceDiagram
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
-The phases are:
+The full run, with preparation first and reporting last bracketing the six
+phases:
 
-1. **Prepare**: lower user-facing table declarations to `DesiredTable` values and
-   reject duplicate qualified names.
+1. **Prepare** (before the chain): lower user-facing table declarations to
+   `DesiredTable` values and reject duplicate qualified names.
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Diff**: compute the typed `TableDiff` with `diff_table`.
 4. **Validate**: judge the diff with `validate_diff`.
@@ -218,8 +220,8 @@ The phases are:
 6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
 7. **Execute**: execute non-empty plans for tables that have no failures.
-8. **Report**: return `SyncReport`, or raise `SyncFailedError` with the report on
-   real runs that failed.
+8. **Report** (after the chain): return `SyncReport`, or raise
+   `SyncFailedError` with the report on real runs that failed.
 
 Execution is gated by accumulated failures. A table that failed read,
 validation, or foreign-key resolution keeps its failure in the report and is
@@ -237,8 +239,6 @@ skipped during execution. The engine still processes other tables.
 | `SyncReport`       | Engine                | User code                        | Immutable run result                           |
 
 ## Package map
-
-An `ActionPlan` is produced by iterating each change's `.actions()`; actions are sorted by `ActionPhase` (an `IntEnum`) then alphabetically by subject, producing a stable, predictable sequence regardless of declaration order.
 
 | Package                    | Responsibility                                                                      | Examples                                                                                 |
 | -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -283,7 +283,7 @@ for users. Their implementations still live in `delta_engine.api` and
 ## Diff-first planning
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
-observed, property_registry)` produces a `TableDiff` — `TableMissing` when the table does not
+observed)` produces a `TableDiff` — `TableMissing` when the table does not
 exist, else a `TableDrift` holding a flat tuple of changes. Each change is a
 frozen dataclass recording one atomic difference (`ColumnAdded`,
 `TableTagUnset`, `ColumnDataTypeChanged`, …) and carries two things: an
@@ -334,13 +334,14 @@ The public API exposes named modes only: `DeltaTable(metadata_only=True)` maps
 to the metadata aspects (comments, tags, key constraints). The `TableAspect`
 enum stays internal.
 
-`diff_table(desired, observed, property_registry)` produces a `TableDiff`:
+`diff_table(desired, observed)` produces a `TableDiff`:
 
 - `TableMissing` means the catalog has no table at that name.
-- `TableDrift` means the table exists and carries a tuple of drift dimensions.
+- `TableDrift` means the table exists and carries a tuple of changes.
 
 The diff states facts only. It does not decide whether the facts are safe, and
-it does not talk to the backend. For an existing table, dimensions cover:
+it does not talk to the backend. For an existing table, the changes span these
+aspects:
 
 - columns
 - table comment
@@ -374,13 +375,14 @@ An `ActionPlan` owns action ordering. Callers do not sort actions manually.
 
 Every action declares two ordering fields:
 
-- `phase`: an `ActionPhase` value that encodes dependency order between kinds of
-  DDL.
+- `phase`: an `ActionPhase` value (an `IntEnum`) that encodes dependency order
+  between kinds of DDL.
 - `subject`: the table-local name targeted by that action, such as a column,
   property, tag, or constraint name.
 
-`ActionPlan` sorts actions by phase and then by subject. This makes plans
-stable even when declarations or dictionaries arrive in different orders.
+`ActionPlan` sorts actions by phase and then lexicographically by subject. This
+makes plans stable even when declarations or dictionaries arrive in different
+orders.
 
 The phase ordering exists because backend DDL has dependencies:
 

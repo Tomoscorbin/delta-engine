@@ -5,7 +5,7 @@ tags:
 
 # How to implement a custom adapter
 
-delta-engine ships with a Databricks adapter. To target a different backend, implement the two port protocols: `CatalogStateReader` and `PlanExecutor`.
+delta-engine ships with a Databricks adapter. To target a different backend, implement the two port protocols: `CatalogStateReader` and `PlanExecutor`. These are the ports of the hexagonal architecture — see [the hexagonal boundary](explanation-architecture.md#the-hexagonal-boundary) for how they fit — and implementing them is all a new backend needs; the planning core is untouched.
 
 ## The two protocols
 
