@@ -607,13 +607,20 @@ constructed. See
 
 ### Clustering is reconciled in place
 
-Unlike partitioning, clustering keys are not fixed at creation. Liquid
-clustering has no physical directory layout to rewrite, so the engine changes
-the key set with `ALTER TABLE ... CLUSTER BY (...)` (or `CLUSTER BY NONE` to
-remove clustering) whenever the declaration changes — no table recreation
-required. See
-[safe-change rules](reference-safe-change-rules.md) for how this contrasts
-with partitioning.
+Unlike partitioning, clustering keys are not fixed at creation. The engine
+changes the key set with `ALTER TABLE ... CLUSTER BY (...)` (or `CLUSTER BY
+NONE` to remove clustering) whenever the declaration changes — no table
+recreation required.
+
+The `ALTER` is a metadata change: it sets the _target_ clustering keys but
+does not rewrite existing data, so it stays cheap regardless of table size.
+Liquid clustering still lays data out physically — it co-locates rows within
+files rather than in partition directories — but existing files keep their
+old clustering until a later `OPTIMIZE` (or `OPTIMIZE FULL` to recluster the
+whole table) rewrites them. This is why partitioning is blocked while
+clustering is not: changing partition columns would mean physically rewriting
+every data file up front. See
+[safe-change rules](reference-safe-change-rules.md) for the full contrast.
 
 ### Drift
 
