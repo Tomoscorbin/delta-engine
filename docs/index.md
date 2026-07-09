@@ -26,6 +26,16 @@ engine.sync(customers)  # creates the table, or no-ops if it already matches
 There is no migration script to write and no DDL to hand-order. The declaration
 is the source of truth; `sync` reconciles the catalog to it, every run.
 
+## Install
+
+```bash
+pip install delta-engine
+```
+
+Declaring and planning schemas is pure Python; running a sync needs a Databricks
+environment, which provides Spark and Delta. See [Installation](installation.md)
+for the `[databricks]` extra used for local development.
+
 ## What a sync does
 
 The engine reads the current catalog state, diffs it against your declaration,
@@ -39,13 +49,15 @@ blocked and why.
 
 ## Backend support
 
-delta-engine currently targets one backend: Delta Lake tables on Databricks
-with Unity Catalog. The planning core is deliberately backend-free — backends
-plug in as adapters that read catalog state and execute plans — so additional
-backends, such as open-source Unity Catalog, can be added without changing the
-model. See [Architecture](explanation-architecture.md) for the design and
-[how to implement an adapter](how-to-implement-adapter.md) for the extension
-points.
+delta-engine targets Delta Lake tables on Databricks with Unity Catalog today.
+Backends plug in as adapters that read catalog state and execute plans, and the
+planning core takes no backend imports — so a Delta-compatible backend, such as
+open-source Unity Catalog, can be added by implementing those adapters. A
+genuinely different table format, such as Iceberg, would also need Delta-specific
+policy lifted out of the application layer first. See
+[Architecture](explanation-architecture.md#import-purity-versus-semantic-coupling)
+for what is and isn't backend-neutral, and
+[how to implement an adapter](how-to-implement-adapter.md) for the ports.
 
 ## Where to go next
 
