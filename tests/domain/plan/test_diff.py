@@ -481,6 +481,36 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
     assert diff.changes == ()
 
 
+def test_observed_duplicate_equivalent_foreign_keys_remove_extras_only():
+    # Given one desired FK and two observed FKs with the same signature under
+    # different names (current Databricks DDL rejects the duplicate, but a
+    # legacy catalog or another backend may hold it)
+    diff = diff_table(
+        _desired(foreign_keys=(_foreign_key("engine_name"),)),
+        _observed(foreign_keys=(_foreign_key("b_fk"), _foreign_key("a_fk"))),
+    )
+
+    # Then one constraint keeps satisfying the declaration (lowest name, for
+    # determinism) and the duplicate is dropped by its catalog name
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (ForeignKeyRemoved(constraint=_foreign_key("b_fk")),)
+
+
+def test_observed_duplicate_equivalent_foreign_keys_are_all_removed_when_undeclared():
+    # Given no desired FK and two observed FKs with the same signature
+    diff = diff_table(
+        _desired(),
+        _observed(foreign_keys=(_foreign_key("b_fk"), _foreign_key("a_fk"))),
+    )
+
+    # Then both catalog constraints are removed by their observed names
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == (
+        ForeignKeyRemoved(constraint=_foreign_key("a_fk")),
+        ForeignKeyRemoved(constraint=_foreign_key("b_fk")),
+    )
+
+
 # ---------- no-difference changes are unrepresentable
 
 

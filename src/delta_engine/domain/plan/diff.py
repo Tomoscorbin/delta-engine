@@ -45,7 +45,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable, ObservedTable
+from delta_engine.domain.model import Column, DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -753,17 +753,33 @@ def _diff_foreign_keys(desired: DesiredTable, observed: ObservedTable) -> list[C
     Identity is content (local columns, referenced table, referenced columns):
     an FK present on both sides under different constraint names produces
     nothing, so a sync over an unchanged catalog stays idempotent.
+
+    The observed side is grouped rather than dict-keyed: current Databricks
+    DDL rejects two FKs over the same column set, but a legacy catalog or
+    another backend may hold equivalent constraints under different names,
+    and ``ObservedTable`` deliberately keeps such states representable. A
+    signature the declaration matches keeps exactly one constraint — the
+    lowest name, for determinism — and removes the rest by their catalog
+    names; an unmatched signature removes them all. The desired side needs
+    no grouping: ``DesiredTable`` rejects duplicate local-column sets.
     """
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+    observed_by_signature: dict[
+        tuple[tuple[str, ...], QualifiedName, tuple[str, ...]], list[ForeignKeyConstraint]
+    ] = {}
+    for fk in observed.foreign_keys:
+        observed_by_signature.setdefault(fk.signature, []).append(fk)
+
     changes: list[Change] = []
 
     for signature, fk in desired_by_signature.items():
         if signature not in observed_by_signature:
             changes.append(ForeignKeyAdded(constraint=fk))
 
-    for signature, fk in observed_by_signature.items():
-        if signature not in desired_by_signature:
+    for signature, group in observed_by_signature.items():
+        keep = 1 if signature in desired_by_signature else 0
+        ordered = sorted(group, key=lambda constraint: constraint.constraint_name)
+        for fk in ordered[keep:]:
             changes.append(ForeignKeyRemoved(constraint=fk))
 
     return changes
