@@ -318,8 +318,6 @@ class DeltaTable:
             for declaration in (foreign_keys or ())
         )
 
-        self._metadata_only = metadata_only
-
         # Building DesiredTable here enforces all domain invariants (non-empty
         # columns, unique names, partition columns must exist, FK local columns
         # must exist) at construction time rather than deferring them to
@@ -379,11 +377,6 @@ class DeltaTable:
     def partitioned_by(self) -> tuple[str, ...]:
         """Partition column names, in declaration order."""
         return self._desired_table.partitioned_by
-
-    @property
-    def metadata_only(self) -> bool:
-        """Whether the sync is restricted to catalog metadata."""
-        return self._metadata_only
 
     @property
     def primary_key(self) -> tuple[str, ...]:

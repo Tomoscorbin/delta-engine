@@ -129,33 +129,6 @@ def test_delta_table_exposes_declared_partitioning():
     assert table.partitioned_by == ("ds",)
 
 
-def test_delta_table_metadata_only_reads_true_when_declared():
-    # Given a metadata-only declaration
-    table = DeltaTable(
-        catalog="cat",
-        schema="sales",
-        name="orders",
-        columns=[Column("id", Integer())],
-        metadata_only=True,
-    )
-
-    # Then metadata_only reads back True
-    assert table.metadata_only is True
-
-
-def test_delta_table_metadata_only_defaults_to_false():
-    # Given a table declared without metadata_only
-    table = DeltaTable(
-        catalog="cat",
-        schema="sales",
-        name="orders",
-        columns=[Column("id", Integer())],
-    )
-
-    # Then metadata_only reads back False
-    assert table.metadata_only is False
-
-
 @pytest.mark.parametrize(
     "bad_keys",
     [
