@@ -28,12 +28,6 @@ is the source of truth; `sync` reconciles the catalog to it, every run.
 
 ## What a sync does
 
-Every `sync` runs the same phase chain for each table:
-
-```text
-read → diff → validate → plan → resolve → execute → report
-```
-
 The engine reads the current catalog state, diffs it against your declaration,
 validates that the drift is safe to fix in place, plans deterministic DDL
 actions, orders tables so foreign-key dependencies are created first, executes,

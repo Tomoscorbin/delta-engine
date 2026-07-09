@@ -16,6 +16,10 @@ one table's failure does not take down the rest of the run.
 
 Every sync runs the same chain of phases over every table in the call:
 
+```text
+read → diff → validate → plan → resolve → execute → report
+```
+
 | Phase        | Question it answers                          | Outcome                                                        |
 | ------------ | -------------------------------------------- | -------------------------------------------------------------- |
 | **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure   |
