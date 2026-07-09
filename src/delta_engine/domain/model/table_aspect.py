@@ -16,6 +16,7 @@ class TableAspect(Enum):
     PARTITIONING = auto()
     PRIMARY_KEY = auto()
     FOREIGN_KEYS = auto()
+    CLUSTERING = auto()
 
     @property
     def label(self) -> str:

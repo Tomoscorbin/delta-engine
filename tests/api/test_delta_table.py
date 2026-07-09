@@ -642,7 +642,7 @@ def test_metadata_only_table_still_lowers_the_full_schema():
     assert tuple(c.name for c in desired.columns) == ("id", "name")
 
 
-def test_metadata_aspects_excludes_structure_properties_and_partitioning():
+def test_metadata_aspects_excludes_structure_properties_partitioning_and_clustering():
     # Given the metadata-only named mode
     # Then physical-behaviour aspects are excluded by design
     assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
@@ -650,6 +650,7 @@ def test_metadata_aspects_excludes_structure_properties_and_partitioning():
             TableAspect.COLUMN_STRUCTURE,
             TableAspect.PROPERTIES,
             TableAspect.PARTITIONING,
+            TableAspect.CLUSTERING,
         }
     )
 

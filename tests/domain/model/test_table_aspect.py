@@ -29,4 +29,12 @@ def test_aspect_declaration_order_is_canonical():
         "PARTITIONING",
         "PRIMARY_KEY",
         "FOREIGN_KEYS",
+        "CLUSTERING",
     ]
+
+
+def test_clustering_is_a_managed_aspect():
+    # Given the clustering aspect
+    # Then it is part of the full managed-aspect set and has a readable label
+    assert TableAspect.CLUSTERING in ALL_ASPECTS
+    assert TableAspect.CLUSTERING.label == "clustering"
