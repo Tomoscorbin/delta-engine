@@ -79,7 +79,6 @@ explanation-safety-model
 :caption: How-to guides
 
 how-to-configure-table
-how-to-configure-properties
 how-to-deploy-metadata-only
 how-to-preview-changes
 how-to-handle-sync-failures

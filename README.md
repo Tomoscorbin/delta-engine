@@ -26,7 +26,7 @@ engine.sync(customers)  # creates the table, or no-ops if it already matches
 
 - [Getting started](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/tutorial-getting-started.md) — define a table and run your first sync
 - [Handle sync failures](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-handle-sync-failures.md) — inspect `SyncReport` and act on each status
-- [Configure table properties](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-configure-properties.md) — `Property` enum, defaults, overrides
+- [Configure a table](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-configure-table.md) — properties, tags, comments, keys, and partitioning
 
 ## Reference
 
