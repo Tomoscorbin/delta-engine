@@ -27,11 +27,11 @@ table = DeltaTable(
     schema="silver",
     name="orders",
     columns=[
-        Column("id", Integer(), nullable=False, primary_key=True,
-               comment="surrogate key"),
+        Column("id", Integer(), nullable=False, comment="surrogate key"),
         Column("customer_email", String(), comment="PII",
                tags={"pii": "true"}),
     ],
+    primary_key=["id"],
     comment="Customer orders",
     tags={"domain": "sales"},
     metadata_only=True,
