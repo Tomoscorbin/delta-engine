@@ -301,12 +301,7 @@ class PartitioningChanged:
 
 @dataclass(frozen=True, slots=True)
 class ClusteringChanged:
-    """
-    Clustering keys that differ from the declaration — reconciled in place.
-
-    Unlike ``PartitioningChanged``, this emits an action: Delta liquid clustering
-    keys can be changed with ``ALTER TABLE ... CLUSTER BY``.
-    """
+    """Clustering keys that differ from the declaration — reconciled in place."""
 
     desired_clustering: tuple[str, ...]
     observed_clustering: tuple[str, ...]

@@ -112,8 +112,6 @@ def _validate_delta_partitioning(
     columns: tuple[Column, ...], partitioned_by: tuple[str, ...]
 ) -> None:
     columns_by_name = {column.name: column for column in columns}
-    if any(name != name.casefold() for name in partitioned_by):
-        return
     if len(set(partitioned_by)) != len(partitioned_by):
         return
     if any(name not in columns_by_name for name in partitioned_by):
@@ -149,8 +147,6 @@ def _validate_delta_clustering(
         )
 
     columns_by_name = {column.name: column for column in columns}
-    if any(name != name.casefold() for name in clustered_by):
-        return
     if len(set(clustered_by)) != len(clustered_by):
         return
     if any(name not in columns_by_name for name in clustered_by):

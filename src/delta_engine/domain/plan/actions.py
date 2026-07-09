@@ -310,12 +310,7 @@ class AlterClustering(Action):
     """
     Set or clear a table's liquid-clustering keys in place.
 
-    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering). Ordered
-    after ADD_COLUMN (a new clustering key may be a column this same sync adds)
-    and before DROP_COLUMN, so a table is reclustered off a column before that
-    column is dropped — otherwise a sync that both drops the live clustering-key
-    column and reclusters elsewhere would drop it while it is still the active
-    key.
+    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering).
     """
 
     columns: tuple[str, ...]
