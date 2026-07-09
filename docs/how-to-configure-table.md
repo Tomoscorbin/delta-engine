@@ -167,11 +167,21 @@ their types and other metadata.
 
 ### Partitioning is fixed at creation
 
-Partitioning can only be set when the table is created. Declaring a different
-`partitioned_by` for an existing table fails validation before any SQL runs — to
-change it, drop and recreate the table out of band, then re-sync. Partition
-columns also cannot be of complex type (`Array`, `Map`, `Struct`, `Variant`),
-and a table cannot be partitioned by every column; both are rejected when the
-`DeltaTable` is constructed. See
+Partitioning can only be set when the table is created. Partition columns
+determine how the table's data files are physically laid out on storage, and
+Delta Lake has no `ALTER TABLE` that repartitions an existing table in place.
+Changing the partition columns means rewriting every data file into the new
+layout — a full table rewrite (for example `REPLACE TABLE ... PARTITIONED BY`,
+or an overwrite with a new partitioning), not the in-place DDL delta-engine
+issues.
+
+Because that rewrite is a data operation outside the engine's remit, declaring
+a different `partitioned_by` for an existing table fails validation before any
+SQL runs. To change partitioning, rewrite the table out of band, then re-sync
+against the new layout.
+
+Partition columns also cannot be of complex type (`Array`, `Map`, `Struct`,
+`Variant`), and a table cannot be partitioned by every column; both are
+rejected when the `DeltaTable` is constructed. See
 [safe-change rules](reference-safe-change-rules.md) for the full set of changes
 the engine rejects.
