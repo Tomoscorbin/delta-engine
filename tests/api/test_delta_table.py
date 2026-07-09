@@ -22,6 +22,112 @@ from delta_engine.schema import (
     StructField,
 )
 
+# ---------- introspection accessors ----------
+
+
+def test_delta_table_exposes_declared_name_parts():
+    # Given a table declared with distinct catalog, schema, and name parts
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then each name part is readable back as its own string
+    assert table.catalog == "cat"
+    assert table.schema == "sales"
+    assert table.name == "orders"
+
+
+def test_delta_table_exposes_declared_columns():
+    # Given a table declared with ordered columns
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer(), nullable=False), Column("name", String())],
+    )
+
+    # Then columns reads back the declared columns in order
+    assert tuple(column.name for column in table.columns) == ("id", "name")
+    assert all(isinstance(column, DomainColumn) for column in table.columns)
+
+
+def test_delta_table_exposes_declared_comment():
+    # Given a table declared with a comment
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        comment="Daily orders",
+    )
+
+    # Then comment reads it back
+    assert table.comment == "Daily orders"
+
+
+def test_delta_table_comment_defaults_to_empty_string():
+    # Given a table declared without a comment
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+
+    # Then comment is an empty string, never None
+    assert table.comment == ""
+
+
+def test_delta_table_exposes_declared_properties_including_absence_assertions():
+    # Given a table declaring one property value and one absence assertion
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        properties={
+            Property.CHANGE_DATA_FEED.value: "true",
+            Property.COLUMN_MAPPING_MODE.value: None,
+        },
+    )
+
+    # Then properties reads them back, preserving the None absence assertion
+    assert dict(table.properties) == {
+        Property.CHANGE_DATA_FEED.value: "true",
+        Property.COLUMN_MAPPING_MODE.value: None,
+    }
+
+
+def test_delta_table_exposes_declared_tags():
+    # Given a table declared with tags
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+        tags={"env": "prod"},
+    )
+
+    # Then tags reads them back
+    assert dict(table.tags) == {"env": "prod"}
+
+
+def test_delta_table_exposes_declared_partitioning():
+    # Given a table partitioned by a column
+    table = DeltaTable(
+        catalog="cat",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer()), Column("ds", String())],
+        partitioned_by=["ds"],
+    )
+
+    # Then partitioned_by reads it back
+    assert table.partitioned_by == ("ds",)
+
 
 @pytest.mark.parametrize(
     "bad_keys",

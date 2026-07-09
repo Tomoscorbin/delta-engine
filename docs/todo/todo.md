@@ -18,7 +18,6 @@
 - [ ] should report.any_failures be report.has_any_failures?
 - [ ] Decide whether to emit `RELY` on FK/PK constraints. Without `RELY`, Databricks treats informational constraints as documentation only and the optimizer cannot use them for join elimination / query rewrite. If the point of declaring keys is optimization, they are currently inert. Weigh against the risk of `RELY` on unverified data (the optimizer trusts it). Would add a `rely: bool` to `ForeignKeyConstraint`/`PrimaryKeyConstraint` and a ` NOT ENFORCED RELY` / ` NOT ENFORCED` suffix in the compiler.
 - [ ] investigate TableSnapshot.**post_init**(self) on DesiredTable. Should all validation be in DesiredTable?
-- [ ] Add tags, comment, schema, etc as properties to DeltaTable
 - [ ] Review if any classes/functions/methods/modules etc should be made private
 - [ ] restructure files so that important things come first
 - [ ] `ignored_properties` escape hatch for coexistence with other tooling writing managed keys (deferred from the property-ownership design; see spec Known Limitations)
