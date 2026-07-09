@@ -391,7 +391,17 @@ Referencing the target `DeltaTable` object — rather than a dotted table name �
 is what lets the engine infer the referenced columns from that table's primary
 key, and keeps the reference valid if the target is renamed. The constraint
 name is generated at lowering as `{table}_{local_columns}_fk`
-(`orders_customer_id_fk` above); it is internal and not part of the public API.
+(`orders_customer_id_fk` above). The name cannot be chosen, and drift matching
+never depends on it — a foreign key created outside the engine under a
+different name still matches by content.
+
+Generated names join local columns with underscores, so two foreign keys over
+different columns can derive the same name — `("a", "b_c")` and `("a_b", "c")`
+both derive `orders_a_b_c_fk`. A within-table collision is rejected when the
+`DeltaTable` is constructed; rename a local column so the names differ.
+Databricks scopes constraint names to the schema, so a generated name can also
+collide with a constraint on _another_ table — that case is not checked and
+fails at execution.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
@@ -462,6 +472,12 @@ tables that reference it, so you can declare tables in any order. A foreign key
 into the table's own primary key is allowed — the engine creates the table,
 then adds the constraint.
 
+The referenced table must live in the same catalog as the table declaring the
+key. Unity Catalog's information_schema is per-catalog, so the engine could
+create a cross-catalog constraint but never observe it afterwards — every
+later sync would re-plan and fail. A cross-catalog `references` is therefore
+rejected when the `DeltaTable` is constructed.
+
 The same dependency logic propagates failure: a referenced table that won't
 reach its desired state this sync blocks every table downstream of it, which
 report `FOREIGN_KEY_FAILED`. That cross-table blocking is part of the safety
@@ -469,6 +485,13 @@ model — see
 [the safety model](explanation-safety-model.md#cross-table-dependency-blocking)
 for the failure reasons and [how to handle sync failures](how-to-handle-sync-failures.md)
 for reading the report.
+
+Every table a foreign key references must be registered in the same
+`sync(...)` call — including a parent that already exists in the catalog with
+no drift. A foreign key to an unregistered table fails resolution with
+`UNRESOLVABLE_REFERENCE`: the engine only trusts a parent it is also
+reconciling, so a stale or drifted parent blocks its dependents rather than
+being silently assumed correct.
 
 ### Drift
 

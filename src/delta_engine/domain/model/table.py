@@ -2,6 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum, auto
+from types import MappingProxyType
+from typing import Final
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.constraints import (
@@ -9,13 +12,30 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
-from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
 
-# Complex types Delta accepts as neither a partition column
-# (DELTA_INVALID_PARTITION_COLUMN_TYPE) nor a clustering key.
-_UNPARTITIONABLE_TYPES = (Array, Map, Struct, Variant)
+
+class TableAspect(Enum):
+    """One independently manageable dimension of a table's state."""
+
+    COLUMN_STRUCTURE = auto()
+    COLUMN_COMMENTS = auto()
+    COLUMN_TAGS = auto()
+    TABLE_COMMENT = auto()
+    TABLE_TAGS = auto()
+    PROPERTIES = auto()
+    PARTITIONING = auto()
+    PRIMARY_KEY = auto()
+    FOREIGN_KEYS = auto()
+    CLUSTERING = auto()
+
+    @property
+    def label(self) -> str:
+        """Human-readable label (e.g. COLUMN_STRUCTURE -> 'column structure')."""
+        return self.name.lower().replace("_", " ")
+
+
+ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +80,11 @@ class TableSnapshot:
         must be lowercase, must each exist in ``columns``, and must be unique.
         Primary key columns must each exist in ``columns``.
         """
+        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
+
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
@@ -142,6 +167,12 @@ class DesiredTable(TableSnapshot):
         Checking the column *set* (order-insensitive) also rejects a reordered
         duplicate.
 
+        No two foreign keys may carry the same constraint name. Generated
+        names join local columns with underscores, so distinct tuples can
+        still collide — ``('a', 'b_c')`` and ``('a_b', 'c')`` both derive
+        ``{table}_a_b_c_fk`` — and the second ``ADD CONSTRAINT`` would fail at
+        execution with an error that points nowhere near the cause.
+
         A primary key column must be NOT NULL — a nullable primary key is not a
         well-formed desired schema, independent of any migration. Enforcing it
         here (rather than as a plan-validation rule) keeps the planning layer
@@ -149,20 +180,18 @@ class DesiredTable(TableSnapshot):
         not the shared base: an observed table may legitimately carry such a
         layout (a legacy catalog schema) and must stay representable.
 
-        Partition columns must not have complex types (Array, Map, Struct, Variant)
-        and at least one non-partition column must exist.
-
-        Clustering has the same complex-type restriction, is capped at four keys,
-        and is mutually exclusive with partitioning (Delta allows one physical
-        layout strategy per table).
         """
         TableSnapshot.__post_init__(self)
+        object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
+
         if not self.managed_aspects:
             raise ValueError(
                 "managed_aspects must not be empty: a table that manages no aspect"
                 " declares nothing for the engine to do"
             )
         seen: set[frozenset[str]] = set()
+        local_columns_by_constraint_name: dict[str, tuple[str, ...]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -171,6 +200,19 @@ class DesiredTable(TableSnapshot):
                     f" {sorted(local_column_set)}"
                 )
             seen.add(local_column_set)
+            collided = local_columns_by_constraint_name.get(foreign_key.constraint_name)
+            if collided is not None:
+                raise ValueError(
+                    "Two foreign keys carry the same constraint name"
+                    f" '{foreign_key.constraint_name}': local columns {collided}"
+                    f" and {foreign_key.local_columns}. Generated names join"
+                    " local columns with underscores, so underscore-adjacent"
+                    " tuples can collide; rename a local column so the names"
+                    " differ."
+                )
+            local_columns_by_constraint_name[foreign_key.constraint_name] = (
+                foreign_key.local_columns
+            )
 
         if self.primary_key is not None:
             key_columns = set(self.primary_key.columns)
@@ -184,37 +226,6 @@ class DesiredTable(TableSnapshot):
                     "Primary key column must be NOT NULL:"
                     f" {nullable_key_columns[0]}. Set nullable=False on every"
                     " primary key column."
-                )
-
-        columns_by_name = {column.name: column for column in self.columns}
-        for name in self.partitioned_by:
-            data_type = columns_by_name[name].data_type
-            if isinstance(data_type, _UNPARTITIONABLE_TYPES):
-                raise ValueError(
-                    f"Partition column {name!r} has type"
-                    f" {type(data_type).__name__}, which Delta cannot"
-                    " partition by"
-                )
-        if self.partitioned_by and (len(self.partitioned_by) == len(self.columns)):
-            raise ValueError(
-                "Cannot partition by every column: at least one non-partition column is required"
-            )
-
-        if self.partitioned_by and self.clustered_by:
-            raise ValueError(
-                "A table cannot both partition and cluster: declare partitioned_by"
-                " or clustering columns, not both."
-            )
-        if len(self.clustered_by) > 4:
-            raise ValueError(
-                f"A table may declare at most four clustering keys; got {len(self.clustered_by)}."
-            )
-        for name in self.clustered_by:
-            data_type = columns_by_name[name].data_type
-            if isinstance(data_type, _UNPARTITIONABLE_TYPES):
-                raise ValueError(
-                    f"Clustering column {name!r} has type"
-                    f" {type(data_type).__name__}, which cannot be a clustering key"
                 )
 
 
@@ -231,3 +242,12 @@ class ObservedTable(TableSnapshot):
 
     properties: Mapping[str, str] = field(default_factory=dict)
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+
+    def __post_init__(self) -> None:
+        TableSnapshot.__post_init__(self)
+        object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(
+            self,
+            "referencing_foreign_keys",
+            tuple(self.referencing_foreign_keys),
+        )

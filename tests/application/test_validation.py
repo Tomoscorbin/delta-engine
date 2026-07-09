@@ -20,7 +20,7 @@ from delta_engine.domain.model import (
     String,
     TableAspect,
 )
-from delta_engine.domain.plan.diff import (
+from delta_engine.domain.plan.changes import (
     Change,
     ColumnAdded,
     ColumnDataTypeChanged,
@@ -29,6 +29,8 @@ from delta_engine.domain.plan.diff import (
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
     TableCommentChanged,
+)
+from delta_engine.domain.plan.diff import (
     TableDrift,
     TableMissing,
     diff_table,

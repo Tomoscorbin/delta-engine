@@ -493,7 +493,11 @@ def test_fetch_state_skips_metadata_queries_when_information_schema_is_absent(qn
     spark = routed_spark(
         qn,
         catalog=single_column_catalog(qn),
-        probe=AnalysisException("no information_schema"),
+        probe=AnalysisException(
+            message="no information_schema",
+            errorClass="TABLE_OR_VIEW_NOT_FOUND",
+            messageParameters={},
+        ),
     )
     result = DatabricksReader(spark).fetch_state(qn)
 
@@ -508,6 +512,50 @@ def test_fetch_state_skips_metadata_queries_when_information_schema_is_absent(qn
     assert referencing_foreign_keys_query(qn) not in issued
     assert table_tags_query(qn) not in issued
     assert column_tags_query(qn) not in issued
+
+
+@pytest.mark.parametrize(
+    "probe_error",
+    [
+        AnalysisException(
+            message="permission denied",
+            errorClass="INSUFFICIENT_PERMISSIONS",
+            messageParameters={},
+        ),
+        AnalysisException("boom"),
+    ],
+    ids=["permission-error", "no-error-condition"],
+)
+def test_fetch_state_fails_when_the_probe_raises_an_unexpected_error(qn, probe_error):
+    # Only the missing-view conditions mean "no information_schema". Anything
+    # else (a permission error, an exception with no condition at all) must
+    # surface as ReadFailed rather than silently reading the whole catalog as
+    # constraint- and tag-free.
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), probe=probe_error)
+    result = DatabricksReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "AnalysisException"
+
+
+def test_probe_availability_is_not_cached_when_the_probe_fails_unexpectedly(qn):
+    # A transient probe failure must not poison the catalog for the reader's
+    # lifetime: the next read probes again instead of trusting a failed answer.
+    spark = routed_spark(
+        qn,
+        catalog=single_column_catalog(qn),
+        probe=AnalysisException(
+            message="permission denied",
+            errorClass="INSUFFICIENT_PERMISSIONS",
+            messageParameters={},
+        ),
+    )
+    reader = DatabricksReader(spark)
+    assert isinstance(reader.fetch_state(qn), ReadFailed)
+    assert isinstance(reader.fetch_state(qn), ReadFailed)
+
+    probe = information_schema_probe_query(qn.catalog)
+    assert spark.queries.count(probe) == 2
 
 
 def test_fetch_state_fails_when_a_metadata_query_fails_on_unity_catalog(qn):

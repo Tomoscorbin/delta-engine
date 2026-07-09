@@ -142,6 +142,85 @@ def test_delta_table_rejects_local_column_count_mismatch():
         )
 
 
+def test_delta_table_rejects_cross_catalog_foreign_key():
+    # Given a referenced table that lives in a different catalog
+    customers = DeltaTable(
+        catalog="other",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
+
+    # When / Then the declaration is rejected: information_schema is
+    # per-catalog, so the engine could create the constraint but never
+    # observe it, and every later sync would re-plan and fail.
+    with pytest.raises(ValueError, match="cross-catalog"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("customer_id", Integer())],
+            foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        )
+
+
+def test_delta_table_rejects_duplicate_foreign_key_local_columns():
+    # Given a composite referenced PK and the same local column listed twice
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False, primary_key=True),
+        ],
+    )
+
+    # When / Then the repeated local column is rejected at declaration time
+    with pytest.raises(ValueError, match="Duplicate foreign key local column"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("customer_id", Integer())],
+            foreign_keys=[
+                ForeignKey(local_columns=("customer_id", "customer_id"), references=customers)
+            ],
+        )
+
+
+def test_delta_table_rejects_foreign_keys_whose_generated_names_collide():
+    # Given two FKs over different local columns whose generated constraint
+    # names collide: ('a', 'b_c') and ('a_b', 'c') both derive orders_a_b_c_fk
+    parts = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="parts",
+        columns=[
+            Column("x", Integer(), nullable=False, primary_key=True),
+            Column("y", Integer(), nullable=False, primary_key=True),
+        ],
+    )
+
+    # When / Then the collision is rejected at declaration time
+    with pytest.raises(ValueError, match="same constraint name"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[
+                Column("a", Integer()),
+                Column("b_c", Integer()),
+                Column("a_b", Integer()),
+                Column("c", Integer()),
+            ],
+            foreign_keys=[
+                ForeignKey(local_columns=("a", "b_c"), references=parts),
+                ForeignKey(local_columns=("a_b", "c"), references=parts),
+            ],
+        )
+
+
 def test_delta_table_rejects_non_table_reference():
     # Given a reference that is neither a DeltaTable nor Self
     # When / Then a TypeError names the accepted types

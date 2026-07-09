@@ -18,37 +18,38 @@ the page with the detail.
 
 ## What a sync manages
 
-| Aspect                    |   Managed   | Notes                                                                                                                    |
-| ------------------------- | :---------: | ------------------------------------------------------------------------------------------------------------------------ |
-| Create table              |      ✓      | Missing tables are created from the declaration                                                                          |
-| Add column                |      ✓      | Must be nullable on an existing table ([rules](reference-safe-change-rules.md))                                          |
-| Drop column               |      ✓      | Requires `delta.columnMapping.mode='name'` declared ([properties](how-to-configure-table.md#properties))                 |
-| Loosen nullability        |      ✓      | `NOT NULL` → nullable is applied                                                                                         |
-| Tighten nullability       |      ✗      | Blocked — backfill first, then tighten ([rules](reference-safe-change-rules.md))                                         |
-| Change column type        |      ✗      | Blocked — recreate the table out of band ([rules](reference-safe-change-rules.md))                                       |
-| Rename column             |      ✗      | Not detected: a rename in the declaration is planned as a drop plus an add of an empty column                            |
-| Table and column comments |      ✓      | Always managed; an empty declaration clears the comment ([comments](how-to-configure-table.md#comments))                 |
-| Table properties          |      ✓      | Five managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties)) |
-| Table and column tags     |      ✓      | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                         |
-| Primary keys              |      ✓      | Declared per column ([primary keys](how-to-configure-table.md#primary-keys))                                             |
-| Foreign keys              |      ✓      | Must target the referenced table's primary key; orders the sync ([foreign keys](how-to-configure-table.md#foreign-keys)) |
-| Partitioning              | Create only | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                      |
-| Clustering                |      ✓      | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering)) |
-| Metadata-only scope       |      ✓      | `metadata_only=True` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))              |
-| Dry run                   |      ✓      | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                            |
+| Aspect                    |   Managed   | Notes                                                                                                                                                                     |
+| ------------------------- | :---------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create table              |      ✓      | Missing tables are created from the declaration                                                                                                                           |
+| Add column                |      ✓      | Must be nullable on an existing table ([rules](reference-safe-change-rules.md))                                                                                           |
+| Drop column               |      ✓      | Requires `delta.columnMapping.mode='name'` declared ([properties](how-to-configure-table.md#properties))                                                                  |
+| Loosen nullability        |      ✓      | `NOT NULL` → nullable is applied                                                                                                                                          |
+| Tighten nullability       |      ✗      | Blocked — backfill first, then tighten ([rules](reference-safe-change-rules.md))                                                                                          |
+| Change column type        |      ✗      | Blocked — recreate the table out of band ([rules](reference-safe-change-rules.md))                                                                                        |
+| Rename column             |      ✗      | Not detected: a rename in the declaration is planned as a drop plus an add of an empty column                                                                             |
+| Table and column comments |      ✓      | Always managed; an empty declaration clears the comment ([comments](how-to-configure-table.md#comments))                                                                  |
+| Table properties          |      ✓      | Five managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties))                                                  |
+| Table and column tags     |      ✓      | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                                                                          |
+| Primary keys              |      ✓      | Declared per column ([primary keys](how-to-configure-table.md#primary-keys))                                                                                              |
+| Foreign keys              |      ✓      | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys)) |
+| Partitioning              | Create only | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                       |
+| Clustering                |      ✓      | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                  |
+| Metadata-only scope       |      ✓      | `metadata_only=True` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                               |
+| Dry run                   |      ✓      | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                                                                             |
 
 ## Outside the model
 
 These features are not modeled at all: the engine never reads, creates,
 changes, or drops them, and they produce no drift.
 
-| Not modeled                       | Meaning                                                             |
-| --------------------------------- | ------------------------------------------------------------------- |
-| CHECK constraints                 | Existing ones are left untouched and cannot be declared             |
-| Identity and generated columns    | A column's generation expression is invisible to the engine         |
-| Views and materialized views      | Only Delta tables are managed                                       |
-| Grants, row filters, column masks | Governance beyond comments and tags is out of scope                 |
-| Data                              | The engine runs DDL only; it never reads, writes, or backfills rows |
+| Not modeled                                                       | Meaning                                                                                                                                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CHECK constraints                                                 | Existing ones are left untouched and cannot be declared                                                                                                                             |
+| Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key |
+| Identity and generated columns                                    | A column's generation expression is invisible to the engine                                                                                                                         |
+| Views and materialized views                                      | Only Delta tables are managed                                                                                                                                                       |
+| Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                 |
+| Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                 |
 
 ## Type support
 

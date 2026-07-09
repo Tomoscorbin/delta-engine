@@ -36,8 +36,8 @@ on a new table but unsafe on an existing one with rows. These rules run on
 every sync, after the engine has read the live table and diffed it against the
 declaration. Each rule blocks a specific transition and its failure message
 names the rule, the affected column or table, and the way out — usually either
-a staged migration (backfill, then tighten) or recreating the table out of
-band. The full rule table is in
+a staged migration (backfill, then tighten outside the engine) or recreating
+the table out of band. The full rule table is in
 [safe-change rules](reference-safe-change-rules.md).
 
 A validation failure means that table is untouched: no SQL ran, and re-syncing
@@ -117,7 +117,10 @@ A refused change is not a dead end; the failure message and
 [safe-change rules](reference-safe-change-rules.md) name the resolution for
 each rule. The patterns are:
 
-- **Stage the migration.** Add the column nullable, backfill, then tighten.
+- **Stage the migration.** Add the column nullable and backfill. The tighten
+  itself is an out-of-band step (`ALTER TABLE ... SET NOT NULL` — the engine
+  refuses to run it); once applied, declare `nullable=False` and the next sync
+  sees no drift.
 - **Recreate out of band.** Type and partitioning changes require a rebuild;
   do it deliberately, then re-sync.
 - **Fix the declaration.** If the catalog is right and the declaration is

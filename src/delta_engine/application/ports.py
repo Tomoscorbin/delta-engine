@@ -38,7 +38,7 @@ class ReadFailed:
 
 # The three answers a catalog can give about a table: it is there, it is not
 # there, or it could not be read.
-CatalogState = TablePresent | TableAbsent | ReadFailed
+type CatalogState = TablePresent | TableAbsent | ReadFailed
 
 
 class CatalogStateReader(Protocol):
@@ -96,7 +96,7 @@ class ExecutionFailed:
 # An executed action either succeeds or fails. The split makes "succeeded but
 # carries a failure" (and "failed but carries none") unrepresentable, so no
 # runtime invariant guard is needed.
-ExecutionResult = ExecutionSucceeded | ExecutionFailed
+type ExecutionResult = ExecutionSucceeded | ExecutionFailed
 
 
 @dataclass(frozen=True, slots=True)

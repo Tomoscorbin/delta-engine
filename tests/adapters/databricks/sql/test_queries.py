@@ -31,9 +31,17 @@ def test_referencing_foreign_keys_query_golden():
         " AND rc.constraint_name = fk_tables.constraint_name"
         " WHERE pk_tables.table_schema = 'sch'"
         " AND pk_tables.table_name = 'tbl'"
+        " AND pk_tables.constraint_type = 'PRIMARY KEY'"
         " ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
         " fk_tables.table_name, rc.constraint_name"
     )
+
+
+def test_referencing_foreign_keys_query_matches_primary_key_parents_only():
+    # A foreign key may reference a UNIQUE constraint (DBR 18.2+); such a key
+    # does not block a primary-key drop, so the inbound query must filter the
+    # parent constraint to the primary key.
+    assert "pk_tables.constraint_type = 'PRIMARY KEY'" in referencing_foreign_keys_query(QN)
 
 
 def test_describe_detail_query_backticks_the_table_name():
@@ -43,16 +51,26 @@ def test_describe_detail_query_backticks_the_table_name():
 def test_primary_key_query_golden():
     assert primary_key_query(QN) == (
         "SELECT table_constraints_info.constraint_name,"
-        " constraint_columns.column_name"
-        " FROM `cat`.information_schema.constraint_column_usage"
-        " AS constraint_columns"
+        " key_columns.column_name"
+        " FROM `cat`.information_schema.key_column_usage"
+        " AS key_columns"
         " JOIN `cat`.information_schema.table_constraints"
         " AS table_constraints_info"
         " USING (constraint_catalog, constraint_schema, constraint_name)"
-        " WHERE constraint_columns.table_schema = 'sch'"
-        " AND constraint_columns.table_name = 'tbl'"
+        " WHERE key_columns.table_schema = 'sch'"
+        " AND key_columns.table_name = 'tbl'"
         " AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
+        " ORDER BY key_columns.ordinal_position"
     )
+
+
+def test_primary_key_query_orders_columns_by_key_position():
+    # A composite primary key's columns must come back in key order;
+    # constraint_column_usage has no ordinal, so the query reads
+    # key_column_usage instead.
+    query = primary_key_query(QN)
+    assert "ORDER BY key_columns.ordinal_position" in query
+    assert "constraint_column_usage" not in query
 
 
 def test_table_tags_query_golden():

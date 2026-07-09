@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from itertools import groupby
 import logging
 from types import MappingProxyType
+from typing import Final
 
 from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row, SparkSession
@@ -40,6 +41,15 @@ from delta_engine.domain.model import (
 )
 
 logger = logging.getLogger(__name__)
+
+# AnalysisException conditions that mean a catalog has no information_schema
+# (plain Spark, Hive metastore). TABLE_OR_VIEW_NOT_FOUND is what Spark raises
+# for the probe; SCHEMA_NOT_FOUND covers resolvers that report the missing
+# schema instead. Anything else — a permission error, a transient failure — is
+# not evidence of absence and must propagate.
+_INFORMATION_SCHEMA_MISSING_CONDITIONS: Final[frozenset[str]] = frozenset(
+    {"TABLE_OR_VIEW_NOT_FOUND", "SCHEMA_NOT_FOUND"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,8 +127,9 @@ def _primary_key_from_rows(rows: Sequence[Row]) -> PrimaryKeyConstraint | None:
     """
     Build the primary key from its information_schema rows, or ``None``.
 
-    Constraint and column names are normalised to lowercase at the adapter
-    boundary.
+    The query orders rows by ordinal_position, so the columns tuple is in
+    key order. Constraint and column names are normalised to lowercase at
+    the adapter boundary.
     """
     columns = tuple(row["column_name"].casefold() for row in rows)
     if not columns:
@@ -366,11 +377,22 @@ class DatabricksReader:
         return self.spark.sql(query).collect()
 
     def _information_schema_available(self, catalog: str) -> bool:
-        """Probe (once per catalog) whether information_schema is queryable."""
+        """
+        Probe (once per catalog) whether information_schema is queryable.
+
+        Only the missing-view conditions may conclude "unavailable" — a
+        permission error or transient failure on the probe propagates to
+        ``fetch_state``'s boundary as ``ReadFailed`` rather than reading the
+        whole catalog as constraint- and tag-free (the same policy
+        ``_information_schema_rows`` applies to the metadata queries). An
+        unexpected failure is not cached, so the next read probes again.
+        """
         if catalog not in self._information_schema_availability:
             try:
                 self.spark.sql(information_schema_probe_query(catalog)).collect()
-            except AnalysisException:
+            except AnalysisException as exception:
+                if exception.getCondition() not in _INFORMATION_SCHEMA_MISSING_CONDITIONS:
+                    raise
                 self._information_schema_availability[catalog] = False
             else:
                 self._information_schema_availability[catalog] = True

@@ -26,13 +26,17 @@ class PrimaryKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+
         if not self.columns:
             raise ValueError("columns must not be empty")
+
         seen: set[str] = set()
         for column in self.columns:
             if column in seen:
                 raise ValueError(f"Duplicate primary key column: {column}")
             seen.add(column)
+
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
 
@@ -83,16 +87,34 @@ class ForeignKeyConstraint:
         )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "local_columns", tuple(self.local_columns))
+        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
+
         if not self.local_columns:
             raise ValueError("local_columns must not be empty")
+
         if not self.referenced_columns:
             raise ValueError("referenced_columns must not be empty")
+
         if len(self.local_columns) != len(self.referenced_columns):
             raise ValueError(
                 "local_columns and referenced_columns must have the same number of entries;"
                 f" got {len(self.local_columns)} local and"
                 f" {len(self.referenced_columns)} referenced"
             )
+
+        seen_local: set[str] = set()
+        for column in self.local_columns:
+            if column in seen_local:
+                raise ValueError(f"Duplicate foreign key local column: {column}")
+            seen_local.add(column)
+
+        seen_referenced: set[str] = set()
+        for column in self.referenced_columns:
+            if column in seen_referenced:
+                raise ValueError(f"Duplicate foreign key referenced column: {column}")
+            seen_referenced.add(column)
+
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
 

@@ -17,6 +17,7 @@ from delta_engine.schema import (
     DeltaTable,
     ForeignKey,
     Integer,
+    Map,
     Property,
     String,
     Struct,
@@ -169,6 +170,28 @@ def test_delta_table_rejects_partitioning_and_clustering_together():
         )
 
 
+def test_delta_table_rejects_more_than_four_clustering_keys():
+    with pytest.raises(ValueError, match="four"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column(name, Integer()) for name in ("a", "b", "c", "d", "e")],
+            clustered_by=["a", "b", "c", "d", "e"],
+        )
+
+
+def test_delta_table_rejects_complex_typed_clustering_column():
+    with pytest.raises(ValueError, match="clustering key"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("id", Integer()), Column("attrs", Map(String(), String()))],
+            clustered_by=["attrs"],
+        )
+
+
 @pytest.mark.parametrize(
     "bad_keys",
     [
@@ -259,6 +282,31 @@ def test_missing_partition_column_raises_error():
             name="responses",
             columns=[Column("id", Integer()), Column("event_date", String())],
             partitioned_by=["store_id"],  # not present
+        )
+
+
+def test_delta_table_rejects_complex_typed_partition_column() -> None:
+    with pytest.raises(ValueError, match="Delta cannot partition"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[
+                Column("id", Integer()),
+                Column("items", Array(String())),
+            ],
+            partitioned_by=["items"],
+        )
+
+
+def test_delta_table_rejects_partitioning_by_every_column() -> None:
+    with pytest.raises(ValueError, match="every column"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer()), Column("day", String())],
+            partitioned_by=["id", "day"],
         )
 
 

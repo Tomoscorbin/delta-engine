@@ -9,9 +9,12 @@ are the building blocks they compose.
 """
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 import functools
+from types import MappingProxyType
+from typing import Final
 
 from delta_engine.application.ports import ReadFailed
 from delta_engine.application.report import SyncReport, TableRunReport
@@ -57,14 +60,25 @@ class DiffCategory(IntEnum):
 
 # (singular, plural) nouns per category: the plural names the diff group heading;
 # the singular is used in the grid's humanized detail count.
-_CATEGORY_NOUN: dict[DiffCategory, tuple[str, str]] = {
-    DiffCategory.COLUMNS: ("column", "columns"),
-    DiffCategory.KEYS: ("key", "keys"),
-    DiffCategory.CLUSTERING: ("clustering", "clustering"),
-    DiffCategory.PROPERTIES: ("property", "properties"),
-    DiffCategory.TAGS: ("tag", "tags"),
-    DiffCategory.COMMENTS: ("comment", "comments"),
-}
+_CATEGORY_NOUN: Final[Mapping[DiffCategory, tuple[str, str]]] = MappingProxyType(
+    {
+        DiffCategory.COLUMNS: ("column", "columns"),
+        DiffCategory.KEYS: ("key", "keys"),
+        DiffCategory.CLUSTERING: ("clustering", "clustering"),
+        DiffCategory.PROPERTIES: ("property", "properties"),
+        DiffCategory.TAGS: ("tag", "tags"),
+        DiffCategory.COMMENTS: ("comment", "comments"),
+    }
+)
+
+# Shown wherever a report has a readable state but no planned actions. One
+# spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
+# a standalone line in the diff block.
+_NO_CHANGES: Final[str] = "no changes"
+
+_DETAIL_MAX_CHARS: Final[int] = 60
+
+_GRID_HEADERS: Final[tuple[str, str, str, str]] = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,7 +204,7 @@ def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint_name}",)),)
 
 
-_OPTIMIZE_FULL_HINT = "run OPTIMIZE FULL to recluster existing data"
+_OPTIMIZE_FULL_HINT: Final[str] = "run OPTIMIZE FULL to recluster existing data"
 
 
 @_action_entries.register
@@ -201,12 +215,6 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     columns = ", ".join(action.columns)
     text = f"clustering ({columns}) — {_OPTIMIZE_FULL_HINT}"
     return (DiffEntry(DiffCategory.CLUSTERING, "~", (text,)),)
-
-
-# Shown wherever a report has a readable state but no planned actions. One
-# spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
-# a standalone line in the diff block.
-_NO_CHANGES = "no changes"
 
 
 def _plan_creates_table(plan: ActionPlan) -> bool:
@@ -244,11 +252,6 @@ def render_diff_block(report: TableRunReport) -> str:
         header = f"{header}  (CREATE)"
     entries = [entry for action in report.plan for entry in _action_entries(action)]
     return "\n".join([header, *_render_entry_groups(entries)])
-
-
-_DETAIL_MAX_CHARS = 60
-
-_GRID_HEADERS = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
 
 
 def _grid_actions_cell(report: TableRunReport) -> str:

@@ -35,6 +35,8 @@ from delta_engine.schema import (
     Long,
     Property,
     String,
+    Struct,
+    StructField,
     Timestamp,
 )
 
@@ -697,7 +699,7 @@ print("Step 5f verified: primary key drop blocked while orders' foreign key refe
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Try to *define* three malformed tables. Everything above failed at **sync**
+# MAGIC Try to *define* five malformed tables. Everything above failed at **sync**
 # MAGIC time, inside the engine; these fail earlier, at **construction** time, when
 # MAGIC the `DeltaTable` is built. Each example is the smallest table that trips one
 # MAGIC guard.
@@ -723,16 +725,12 @@ print("Step 5f verified: primary key drop blocked while orders' foreign key refe
 
 # COMMAND ----------
 
-try:
-    DeltaTable(
-        catalog=CATALOG,
-        schema=SCHEMA,
-        name="bad_pk",
-        columns=[Column("id", Long(), primary_key=True)],  # <-- nullable primary key
-    )
-    raise AssertionError("expected ValueError")
-except ValueError as error:
-    print(error)
+DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="bad_pk",
+    columns=[Column("id", Long(), primary_key=True)],  # <-- nullable primary key
+)
 
 # COMMAND ----------
 
@@ -749,22 +747,18 @@ except ValueError as error:
 
 # COMMAND ----------
 
-try:
-    DeltaTable(
-        catalog=CATALOG,
-        schema=SCHEMA,
-        name="bad_fk_column",
-        columns=[Column("id", Long(), nullable=False, primary_key=True)],
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("missing_id",),  # <-- no such column on this table
-                references=customers,
-            )
-        ],
-    )
-    raise AssertionError("expected ValueError")
-except ValueError as error:
-    print(error)
+DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="bad_fk_column",
+    columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("missing_id",),  # <-- no such column on this table
+            references=customers,
+        )
+    ],
+)
 
 # COMMAND ----------
 
@@ -784,28 +778,86 @@ except ValueError as error:
 
 # COMMAND ----------
 
-try:
-    no_pk_table = DeltaTable(
-        catalog=CATALOG,
-        schema=SCHEMA,
-        name="no_pk",
-        columns=[Column("id", Long())],  # <-- no primary_key=True
-    )
-    DeltaTable(
-        catalog=CATALOG,
-        schema=SCHEMA,
-        name="bad_fk_no_pk",
-        columns=[Column("id", Long(), nullable=False, primary_key=True)],
-        foreign_keys=[
-            ForeignKey(
-                local_columns=("id",),
-                references=no_pk_table,  # <-- no primary key to infer from
-            )
-        ],
-    )
-    raise AssertionError("expected ValueError")
-except ValueError as error:
-    print(error)
+no_pk_table = DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="no_pk",
+    columns=[Column("id", Long())],  # <-- no primary_key=True
+)
+DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="bad_fk_no_pk",
+    columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    foreign_keys=[
+        ForeignKey(
+            local_columns=("id",),
+            references=no_pk_table,  # <-- no primary key to infer from
+        )
+    ],
+)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 6d. CDF enabled with a reserved column name
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Declare a table with `delta.enableChangeDataFeed = "true"` that also has a
+# MAGIC column named `_change_type` — one of the three column names that Change Data
+# MAGIC Feed reserves for its own output (`_change_type`, `_commit_version`,
+# MAGIC `_commit_timestamp`).
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Rejected: the engine refuses to build the declaration because the column name
+# MAGIC conflicts with a CDF reserved name. Rename the column or omit CDF.
+
+# COMMAND ----------
+
+DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="bad_cdf_reserved_col",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column("_change_type", String()),  # <-- reserved by CDF
+    ],
+    properties={Property.CHANGE_DATA_FEED: "true"},
+)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 6e. Special characters in a struct field name without column mapping
+# MAGIC
+# MAGIC **Goal**
+# MAGIC
+# MAGIC Declare a table with a `Struct` column whose field name contains a space —
+# MAGIC one of the characters Delta only permits when column mapping is enabled.
+# MAGIC Column mapping is not declared here.
+# MAGIC
+# MAGIC **Outcome**
+# MAGIC
+# MAGIC Rejected: the engine detects that the nested field path (`payload.order id`)
+# MAGIC contains a character that requires `delta.columnMapping.mode = "name"`.
+# MAGIC Either rename the field or add the column-mapping property.
+
+# COMMAND ----------
+
+DeltaTable(
+    catalog=CATALOG,
+    schema=SCHEMA,
+    name="bad_struct_field_name",
+    columns=[
+        Column("id", Long(), nullable=False, primary_key=True),
+        Column(
+            "payload",
+            Struct([StructField("order id", String())]),  # <-- space in field name
+        ),
+    ],
+)
 
 # COMMAND ----------
 

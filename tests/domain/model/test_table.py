@@ -7,7 +7,6 @@ from delta_engine.domain.model import (
     DesiredTable,
     ForeignKeyReference,
     Integer,
-    Map,
     ObservedTable,
     QualifiedName,
     String,
@@ -266,6 +265,36 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
         )
 
 
+def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
+    # Given two FKs over different local columns whose generated names collide:
+    # ('a', 'b_c') and ('a_b', 'c') both derive t_a_b_c_fk
+    first = ForeignKeyConstraint.generate(
+        owner_table_name="t",
+        local_columns=("a", "b_c"),
+        referenced_table=QualifiedName("cat", "sch", "p1"),
+        referenced_columns=("x", "y"),
+    )
+    second = ForeignKeyConstraint.generate(
+        owner_table_name="t",
+        local_columns=("a_b", "c"),
+        referenced_table=QualifiedName("cat", "sch", "p2"),
+        referenced_columns=("x", "y"),
+    )
+
+    # When / Then the collision is rejected, naming both column tuples
+    with pytest.raises(ValueError, match="same constraint name"):
+        DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "t"),
+            columns=(
+                Column("a", Integer()),
+                Column("b_c", Integer()),
+                Column("a_b", Integer()),
+                Column("c", Integer()),
+            ),
+            foreign_keys=(first, second),
+        )
+
+
 def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_order():
     # Given two FKs over the same columns in a different order (the reorder case
     # the old name-based guard missed); each carries a distinct name so construction succeeds
@@ -456,34 +485,20 @@ def test_observed_table_properties_carry_values_only():
     assert observed.properties == {"delta.enableChangeDataFeed": "true"}
 
 
-def test_desired_table_rejects_complex_typed_partition_column() -> None:
-    with pytest.raises(ValueError, match="partition"):
-        DesiredTable(
-            qualified_name=QualifiedName("dev", "silver", "orders"),
-            columns=(
-                Column("id", Integer()),
-                Column("attrs", Map(String(), String())),
-            ),
-            partitioned_by=("attrs",),
-        )
-
-
-def test_desired_table_rejects_partitioning_by_every_column() -> None:
-    with pytest.raises(ValueError, match="every column"):
-        DesiredTable(
-            qualified_name=QualifiedName("dev", "silver", "orders"),
-            columns=(Column("id", Integer()), Column("day", Date())),
-            partitioned_by=("id", "day"),
-        )
-
-
-def test_observed_table_accepts_layouts_desired_tables_reject() -> None:
-    # Observed state must stay representable even when it is not declarable.
+def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
+    # Desired and observed state stay representable even when a backend-specific
+    # API would reject the layout as undeployable.
+    desired = DesiredTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()), Column("day", Date())),
+        partitioned_by=("id", "day"),
+    )
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "orders"),
         columns=(Column("id", Integer()), Column("day", Date())),
         partitioned_by=("id", "day"),
     )
+    assert desired.partitioned_by == ("id", "day")
     assert observed.partitioned_by == ("id", "day")
 
 
@@ -521,39 +536,6 @@ def test_table_snapshot_rejects_duplicate_clustering_column():
     columns = (Column("id", Integer()), Column("region", String()))
     with pytest.raises(ValueError, match=r"[Cc]luster"):
         TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
-
-
-def test_desired_table_rejects_partitioning_and_clustering_together():
-    # Given a table that both partitions and clusters
-    columns = (Column("id", Integer()), Column("region", String()), Column("day", Date()))
-    # Then construction fails — Delta forbids the combination
-    with pytest.raises(ValueError, match="both partition"):
-        DesiredTable(
-            qualified_name=_QUALIFIED_NAME,
-            columns=columns,
-            partitioned_by=("day",),
-            clustered_by=("region",),
-        )
-
-
-def test_desired_table_rejects_more_than_four_clustering_keys():
-    columns = tuple(Column(name, Integer()) for name in ("a", "b", "c", "d", "e"))
-    with pytest.raises(ValueError, match="four"):
-        DesiredTable(
-            qualified_name=_QUALIFIED_NAME,
-            columns=columns,
-            clustered_by=("a", "b", "c", "d", "e"),
-        )
-
-
-def test_desired_table_rejects_complex_typed_clustering_column():
-    columns = (Column("id", Integer()), Column("attrs", Map(String(), String())))
-    with pytest.raises(ValueError, match=r"[Cc]luster"):
-        DesiredTable(
-            qualified_name=_QUALIFIED_NAME,
-            columns=columns,
-            clustered_by=("attrs",),
-        )
 
 
 def test_observed_table_accepts_clustering():
