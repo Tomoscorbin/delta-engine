@@ -73,7 +73,8 @@ def test_message_renders_read_failure_detail():
     message = _message_for(report)
 
     # Then the table headline and the read error line are present
-    assert "❌ cat.sch.tbl [READ_FAILED]" in message
+    assert "cat.sch.tbl [READ_FAILED]" in message
+    assert "❌" not in message
     assert "Read error: AnalysisException - table not found" in message
 
 
@@ -88,7 +89,7 @@ def test_message_renders_validation_failure_detail():
     message = _message_for(report)
 
     # Then the validation failure line is present
-    assert "❌ cat.sch.tbl [VALIDATION_FAILED]" in message
+    assert "cat.sch.tbl [VALIDATION_FAILED]" in message
     assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 
@@ -138,7 +139,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
     message = _message_for(report)
 
     # Then both the failure line and the SQL preview are present
-    assert "❌ cat.sch.tbl [EXECUTION_FAILED]" in message
+    assert "cat.sch.tbl [EXECUTION_FAILED]" in message
     assert "Execution failed at action 2: SparkException - boom" in message
     assert "ALTER TABLE cat.sch.tbl ADD COLUMN x INT" in message
 
@@ -161,6 +162,6 @@ def test_message_renders_fk_failure_detail():
     message = _message_for(report)
 
     # Then the FK failure line is present with content-based description
-    assert "❌ cat.sch.tbl [FOREIGN_KEY_FAILED]" in message
+    assert "cat.sch.tbl [FOREIGN_KEY_FAILED]" in message
     assert "(ref_id)" in message
     assert "not registered" in message

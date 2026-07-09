@@ -5,10 +5,12 @@ Run reports: per-table and run-level outcome aggregates.
 its status from the earliest failing phase; `SyncReport` aggregates a run.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
+from typing import Final
 
 from delta_engine.application.failures import (
     Failure,
@@ -34,12 +36,14 @@ class TableRunStatus(StrEnum):
 # ---------- Reports ----------
 
 
-_STATUS_FOR_PHASE: dict[FailurePhase, TableRunStatus] = {
-    FailurePhase.READ: TableRunStatus.READ_FAILED,
-    FailurePhase.VALIDATION: TableRunStatus.VALIDATION_FAILED,
-    FailurePhase.FOREIGN_KEY: TableRunStatus.FOREIGN_KEY_FAILED,
-    FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
-}
+_STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyType(
+    {
+        FailurePhase.READ: TableRunStatus.READ_FAILED,
+        FailurePhase.VALIDATION: TableRunStatus.VALIDATION_FAILED,
+        FailurePhase.FOREIGN_KEY: TableRunStatus.FOREIGN_KEY_FAILED,
+        FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
