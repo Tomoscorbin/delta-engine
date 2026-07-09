@@ -79,8 +79,6 @@ explanation-safety-model
 :caption: How-to guides
 
 how-to-configure-table
-how-to-declare-primary-keys
-how-to-declare-foreign-keys
 how-to-configure-properties
 how-to-deploy-metadata-only
 how-to-preview-changes
