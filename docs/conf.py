@@ -1,5 +1,5 @@
-import sys
 from pathlib import Path
+import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -17,6 +17,7 @@ extensions = [
 ]
 
 myst_enable_extensions = ["colon_fence"]
+myst_heading_anchors = 3
 myst_fence_as_directive = ["mermaid"]
 
 html_theme = "furo"
