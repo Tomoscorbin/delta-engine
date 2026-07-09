@@ -5,7 +5,9 @@ tags:
 
 # How to handle sync failures
 
-`engine.sync(...)` raises `SyncFailedError` when one or more tables fail. This guide shows how to catch it and act on the structured report it carries.
+On a real run, `engine.sync(...)` raises `SyncFailedError` when one or more tables fail; the exception carries the full `SyncReport`. (A [dry run](how-to-preview-changes.md) never raises — it returns the same report for you to inspect.) This guide shows how to catch it and act on the report.
+
+A table's status names the [phase](explanation-sync-lifecycle.md) at which it failed, so handling a failure is mostly a matter of mapping status to cause.
 
 ## Catch the error
 
