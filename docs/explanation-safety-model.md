@@ -107,7 +107,7 @@ The property semantics are the most conservative because properties change
 engine behaviour — retention, change data feed, column mapping — where an
 unintended unset can be destructive. Tags and comments are pure metadata, so
 converging on the declaration is always safe. Details and examples:
-[properties](how-to-configure-properties.md),
+[properties](how-to-configure-table.md#properties),
 [tags](how-to-configure-table.md#tags),
 [comments](how-to-configure-table.md#comments).
 
