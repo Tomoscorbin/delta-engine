@@ -83,7 +83,7 @@ for the model, or jump to what you need:
 - [Safe-change rules](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-safe-change-rules.md) — changes the engine blocks at validation
 - [API reference](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-api.md)
 
-**Architecture** (for contributors)
+**Architecture**
 
 - [Architecture](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-architecture.md) — layers, ports and adapters, design decisions
 - [Implement a custom adapter](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-implement-adapter.md) — the `CatalogStateReader` and `PlanExecutor` ports
