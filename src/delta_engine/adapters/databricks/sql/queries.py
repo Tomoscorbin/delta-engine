@@ -38,21 +38,29 @@ def describe_detail_query(qualified_name: QualifiedName) -> str:
 
 
 def primary_key_query(qualified_name: QualifiedName) -> str:
-    """Render the information_schema query for a table's primary key columns."""
+    """
+    Render the information_schema query for a table's primary key columns.
+
+    Reads from key_column_usage, whose ordinal_position puts a composite
+    key's columns in key order — constraint_column_usage has no ordinal and
+    returns rows in arbitrary order, which would scramble the observed
+    ``PrimaryKeyConstraint.columns`` tuple.
+    """
     catalog = backtick(qualified_name.catalog)
     return (
         f"SELECT table_constraints_info.constraint_name,"
-        f" constraint_columns.column_name"
-        f" FROM {catalog}.information_schema.constraint_column_usage"
-        f" AS constraint_columns"
+        f" key_columns.column_name"
+        f" FROM {catalog}.information_schema.key_column_usage"
+        f" AS key_columns"
         f" JOIN {catalog}.information_schema.table_constraints"
         f" AS table_constraints_info"
         f" USING (constraint_catalog, constraint_schema, constraint_name)"
-        f" WHERE constraint_columns.table_schema ="
+        f" WHERE key_columns.table_schema ="
         f" {quote_literal(qualified_name.schema)}"
-        f" AND constraint_columns.table_name ="
+        f" AND key_columns.table_name ="
         f" {quote_literal(qualified_name.name)}"
         f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
+        f" ORDER BY key_columns.ordinal_position"
     )
 
 
@@ -131,6 +139,11 @@ def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
     Column detail is not needed; validation only names what blocks a
     primary-key change.
 
+    The parent constraint is filtered to the primary key: a foreign key may
+    also reference a UNIQUE constraint (DBR 18.2+), and such a key does not
+    block ``DROP PRIMARY KEY`` — RESTRICT only rejects the drop for keys that
+    depend on the primary key itself.
+
     information_schema is per-catalog, so a foreign key owned by a table in a
     different catalog is invisible here; such a drop still fails at execution.
     """
@@ -151,6 +164,7 @@ def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
         f" AND rc.constraint_name = fk_tables.constraint_name"
         f" WHERE pk_tables.table_schema = {quote_literal(qualified_name.schema)}"
         f" AND pk_tables.table_name = {quote_literal(qualified_name.name)}"
+        f" AND pk_tables.constraint_type = 'PRIMARY KEY'"
         f" ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
         f" fk_tables.table_name, rc.constraint_name"
     )
