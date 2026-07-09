@@ -225,9 +225,7 @@ def _build_desired_table(
     # unmanaged key is as meaningless as declaring it.
     unmanaged = [key for key in user_properties if key not in DELTA_PROPERTY_REGISTRY]
     if unmanaged:
-        raise ValueError(
-            f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
-        )
+        raise ValueError(f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}")
 
     # Fast-fail on malformed values; the definition owns the judgment
     # (including the exemption for None, which asserts absence).
@@ -240,6 +238,13 @@ def _build_desired_table(
     partitioned_by = tuple(partitioned_by)
     _validate_delta_partitioning(columns, partitioned_by)
 
+    # Only the column-structure guardrails below are gated on the managed
+    # aspects. A tag-only or metadata-only declaration mirrors the live table's
+    # existing columns, so it must accept names this engine would otherwise
+    # reject when it owns column structure (column-mapping characters,
+    # change-data-feed-reserved names). The partition, property, and tag
+    # validation around them stays unconditional: those check the declaration
+    # itself, not a structural change this declaration is about to apply.
     if (
         TableAspect.COLUMN_STRUCTURE in managed_aspects
         and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name"
@@ -262,9 +267,7 @@ def _build_desired_table(
         TableAspect.COLUMN_STRUCTURE in managed_aspects
         and user_properties.get(Property.CHANGE_DATA_FEED) == "true"
     ):
-        reserved = [
-            column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES
-        ]
+        reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
         if reserved:
             raise ValueError(
                 f"Column names {reserved} are reserved by change data feed."

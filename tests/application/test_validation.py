@@ -573,6 +573,22 @@ def test_tag_only_scope_fails_when_column_comment_drifts():
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
 
 
+def test_tag_only_scope_fails_when_column_structure_drifts():
+    # Given a tag-only declaration whose live table has an extra, undeclared column
+    desired = _desired_table(
+        columns=(Column("id", Integer()),),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+    observed = _observed_table(columns=(Column("id", Integer()), Column("extra", String())))
+
+    # When validating the diff
+    result = _validate(desired, observed)
+
+    # Then unmanaged column-structure drift fails before any tag SQL runs
+    assert result.failed is True
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
 # ---- property transition rules
 
 

@@ -90,4 +90,3 @@ def test_streaming_table_mirrors_cdf_reserved_columns_with_cdf_declared() -> Non
         "id",
         "_change_type",
     )
-

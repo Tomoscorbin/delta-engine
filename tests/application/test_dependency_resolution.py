@@ -272,6 +272,34 @@ def test_resolve_orders_referenced_table_before_dependent():
     assert not result.fk_failures
 
 
+def test_resolve_orders_referenced_streaming_table_before_dependent():
+    # Given a managed table whose foreign key targets a tag-only streaming table
+    customers = StreamingTable(
+        "cat",
+        "sch",
+        "customers",
+        columns=(Column("id", String(), nullable=False, primary_key=True),),
+    )
+    orders = DeltaTable(
+        "cat",
+        "sch",
+        "orders",
+        columns=(
+            Column("id", String(), nullable=False, primary_key=True),
+            Column("customer_id", String()),
+        ),
+        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+    ).to_desired_table()
+    tables = (orders, customers.to_desired_table())
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the referenced streaming table is ordered before its managed dependent
+    _assert_before(result, "cat.sch.customers", "cat.sch.orders")
+    assert not result.fk_failures
+
+
 def test_resolve_handles_chain_of_dependencies():
     # Given c -> b -> a
     tables = (

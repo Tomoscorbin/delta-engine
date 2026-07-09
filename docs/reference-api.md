@@ -18,6 +18,7 @@ from the top-level `delta_engine` package.
 .. autoclass:: delta_engine.schema.DeltaTable
    :members:
    :undoc-members:
+   :inherited-members:
 ```
 
 #### `metadata_only` (bool, default `False`)
@@ -33,6 +34,7 @@ exactly — any structural drift causes validation to fail.
 .. autoclass:: delta_engine.schema.StreamingTable
    :members:
    :undoc-members:
+   :inherited-members:
 ```
 
 `StreamingTable` declares the same table shape as `DeltaTable`, but syncs only
