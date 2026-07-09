@@ -42,6 +42,7 @@ def _desired_table(
     columns: tuple[Column, ...] | None = None,
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
+    clustered_by: tuple[str, ...] = (),
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
 ) -> DesiredTable:
     return DesiredTable(
@@ -49,6 +50,7 @@ def _desired_table(
         columns=(Column("id", Integer()),) if columns is None else columns,
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
+        clustered_by=clustered_by,
         managed_aspects=managed_aspects,
     )
 
@@ -58,12 +60,14 @@ def _observed_table(
     columns: tuple[Column, ...] | None = None,
     properties: dict[str, str] | None = None,
     partitioned_by: tuple[str, ...] = (),
+    clustered_by: tuple[str, ...] = (),
 ) -> ObservedTable:
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=(Column("id", Integer()),) if columns is None else columns,
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
+        clustered_by=clustered_by,
     )
 
 
@@ -383,6 +387,21 @@ def test_rejects_partitioning_change():
     assert result.failed is True
     assert len(result.failures) == 1
     assert result.failures[0].rule_name == "PartitioningChangeNotSupported"
+
+
+def test_allows_clustering_change():
+    # Given a declaration that changes clustering (identical columns on both
+    # sides so clustering is the only drift). Unlike partitioning, liquid
+    # clustering keys are reconciled in place, so no safety rule blocks them.
+    columns = (Column("id", Integer()), Column("region", String()))
+    desired = _desired_table(columns=columns, clustered_by=("region",))
+    observed = _observed_table(columns=columns)
+
+    # When validating the diff
+    result = _validate(desired, observed)
+
+    # Then it passes — clustering is an allowed in-place change
+    assert result.failed is False
 
 
 def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():

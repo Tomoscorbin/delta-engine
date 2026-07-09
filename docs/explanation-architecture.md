@@ -434,8 +434,11 @@ The phase ordering exists because backend DDL has dependencies:
 - Column nullability changes run before primary keys are set, because primary
   key columns must be non-nullable.
 - Foreign keys are set last, after the referenced primary key exists.
-- Clustering keys are altered last of all, because a clustering key may name a
-  column this same sync is still adding.
+- Clustering keys are altered after columns are added (a new clustering key may
+  name a column this same sync is still adding) but before columns are dropped,
+  so a table is reclustered off a column before that column is removed — a sync
+  that both drops the live clustering-key column and reclusters elsewhere must
+  not drop it while it is still the active key.
 
 The domain plan describes intent. The adapter compiler decides how each action
 is rendered for its backend.

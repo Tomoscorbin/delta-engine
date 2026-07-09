@@ -211,6 +211,7 @@ def test_plan_full_phase_order_with_all_action_types():
         DropForeignKey,
         DropPrimaryKey,
         AddColumn,
+        AlterClustering,
         DropColumn,
         SetColumnTag,
         UnsetColumnTag,
@@ -219,7 +220,6 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnNullability,
         SetPrimaryKey,
         SetForeignKey,
-        AlterClustering,
     ]
 
 
@@ -293,3 +293,17 @@ def test_plan_orders_alter_clustering_after_add_column():
     )
     # Then the column is added before it is used as a clustering key
     assert [type(a) for a in plan] == [AddColumn, AlterClustering]
+
+
+def test_plan_reclusters_before_dropping_a_column():
+    # Given a sync that drops the current clustering-key column and reclusters
+    # onto another column
+    plan = ActionPlan(
+        (
+            DropColumn(column_name="region"),
+            AlterClustering(columns=("id",)),
+        )
+    )
+    # Then clustering is changed off the old key before that column is dropped,
+    # so the drop never targets a live clustering key
+    assert [type(a) for a in plan] == [AlterClustering, DropColumn]

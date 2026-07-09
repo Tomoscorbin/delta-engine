@@ -29,6 +29,7 @@ class ActionPhase(IntEnum):
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
+    SET_CLUSTERING = auto()
     DROP_COLUMN = auto()
     SET_COLUMN_TAG = auto()
     UNSET_COLUMN_TAG = auto()
@@ -37,7 +38,6 @@ class ActionPhase(IntEnum):
     SET_COLUMN_NULLABILITY = auto()
     SET_PRIMARY_KEY = auto()
     SET_FOREIGN_KEY = auto()
-    SET_CLUSTERING = auto()
 
 
 class Action(ABC):
@@ -310,9 +310,12 @@ class AlterClustering(Action):
     """
     Set or clear a table's liquid-clustering keys in place.
 
-    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering). Runs in its
-    own final phase: a clustering key may be a column this same sync adds, so it
-    must follow ADD_COLUMN, and nothing depends on it.
+    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering). Ordered
+    after ADD_COLUMN (a new clustering key may be a column this same sync adds)
+    and before DROP_COLUMN, so a table is reclustered off a column before that
+    column is dropped — otherwise a sync that both drops the live clustering-key
+    column and reclusters elsewhere would drop it while it is still the active
+    key.
     """
 
     columns: tuple[str, ...]
