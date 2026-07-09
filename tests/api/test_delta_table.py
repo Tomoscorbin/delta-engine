@@ -446,7 +446,7 @@ def test_delta_table_accepts_foreign_keys_parameter():
         schema="sch",
         name="orders",
         columns=[Column("id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
     )
 
     # Then the FK is lowered to an internal constraint carrying its generated name
@@ -487,7 +487,7 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
             schema="sch",
             name="orders",
             columns=[Column("id", Integer())],
-            foreign_keys=[ForeignKey(local_columns=("nonexistent",), references=customers)],
+            foreign_keys=[ForeignKey(columns={"nonexistent": "id"}, references=customers)],
         )
 
 

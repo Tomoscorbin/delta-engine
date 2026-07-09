@@ -139,7 +139,7 @@ orders = DeltaTable(
     partitioned_by=["order_date"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("customer_id",),
+            columns={"customer_id": "id"},
             references=customers,
         )
     ],
@@ -635,7 +635,7 @@ line_items = DeltaTable(
     primary_key=["line_item_id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("product_id",),
+            columns={"product_id": "product_id"},
             references=products,  # <-- never passed to the sync
         )
     ],
@@ -764,7 +764,7 @@ DeltaTable(
     primary_key=["id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("missing_id",),  # <-- no such column on this table
+            columns={"missing_id": "id"},  # <-- no such column on this table
             references=customers,
         )
     ],
@@ -777,14 +777,15 @@ DeltaTable(
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Reference a `DeltaTable` that has no primary key. Referenced columns are
-# MAGIC inferred from the referenced table's primary key, so there is nothing to
-# MAGIC infer from — the engine rejects this at construction time.
+# MAGIC Reference a `DeltaTable` that has no primary key. A foreign key's
+# MAGIC `columns` mapping must cover the referenced table's primary key exactly,
+# MAGIC so a table with no primary key gives it nothing to match — the engine
+# MAGIC rejects this at construction time.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Rejected: referenced table declares no primary key, so referenced columns
-# MAGIC cannot be inferred.
+# MAGIC Rejected: referenced table declares no primary key, so the mapping has
+# MAGIC no key to satisfy.
 
 # COMMAND ----------
 
@@ -802,8 +803,8 @@ DeltaTable(
     primary_key=["id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("id",),
-            references=no_pk_table,  # <-- no primary key to infer from
+            columns={"id": "id"},
+            references=no_pk_table,  # <-- no primary key to match against
         )
     ],
 )

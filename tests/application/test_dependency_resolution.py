@@ -95,7 +95,7 @@ def _table_with_fk(
         primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=local_columns,
+                columns=dict(zip(local_columns, referenced_primary_key_columns, strict=True)),
                 references=_referenced_table(
                     references,
                     primary_key_columns=referenced_primary_key_columns,
@@ -131,7 +131,7 @@ def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
         primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=(_fk_column_name(reference),),
+                columns={_fk_column_name(reference): "id"},
                 references=_referenced_table(reference),
             )
             for reference in references
@@ -562,7 +562,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
         primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=("manager_id",),
+                columns={"manager_id": "id"},
                 references=Self,
             )
         ],

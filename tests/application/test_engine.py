@@ -94,7 +94,7 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
         primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=("ref_id",),
+                columns={"ref_id": "id"},
                 references=_referenced_spec(references),
             )
         ],
@@ -903,8 +903,8 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
         ),
         primary_key=["id"],
         foreign_keys=[
-            ForeignKey(local_columns=("b_id",), references=_referenced_spec("cat.sch.b")),
-            ForeignKey(local_columns=("c_id",), references=_referenced_spec("cat.sch.c")),
+            ForeignKey(columns={"b_id": "id"}, references=_referenced_spec("cat.sch.b")),
+            ForeignKey(columns={"c_id": "id"}, references=_referenced_spec("cat.sch.c")),
         ],
     )
 
