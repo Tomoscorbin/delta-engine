@@ -10,7 +10,7 @@ together rather than being scattered across its producers.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import ClassVar
+from typing import ClassVar, assert_never
 
 from delta_engine.domain.model import QualifiedName
 
@@ -44,6 +44,8 @@ class ForeignKeyFailureReason(StrEnum):
                 return "it references a table that failed to sync"
             case ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY:
                 return "its referenced columns are not the primary key of the referenced table"
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 # ---------- Failure value objects ----------

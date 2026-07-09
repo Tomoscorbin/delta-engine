@@ -30,7 +30,7 @@ class SyncFailedError(Exception):
 
 def _format_failure_detail(table_report: TableRunReport) -> list[str]:
     """Return the detail lines describing why a single table failed."""
-    lines = [f"\n❌ {table_report.qualified_name} [{table_report.status.value}]"]
+    lines = [f"\n{table_report.qualified_name} [{table_report.status.value}]"]
     for failure in table_report.failures:
         for line in failure.format_lines():
             lines.append(f"    {line}")

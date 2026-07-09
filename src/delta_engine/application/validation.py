@@ -1,7 +1,7 @@
 """Validation rules judging the diff between desired and observed table state."""
 
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, assert_never
+from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import (
@@ -330,7 +330,7 @@ class PrimaryKeyReferencedByForeignKeys:
         return tuple(failures)
 
 
-DEFAULT_RULES: tuple[Rule, ...] = (
+DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
     ColumnDataTypeChangeNotSupported(),
@@ -413,8 +413,8 @@ class MissingTableUnmanaged:
         )
 
 
-_SCOPE_INVARIANTS: tuple[Rule, ...] = (UnmanagedAspectDrift(),)
-_MISSING_TABLE_UNMANAGED = MissingTableUnmanaged()
+_SCOPE_INVARIANTS: Final[tuple[Rule, ...]] = (UnmanagedAspectDrift(),)
+_MISSING_TABLE_UNMANAGED: Final = MissingTableUnmanaged()
 
 
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
