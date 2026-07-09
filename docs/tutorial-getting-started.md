@@ -84,3 +84,11 @@ If any table fails validation or execution, `sync` raises `SyncFailedError`. The
 - [How a sync works](explanation-sync-lifecycle.md) — what happens between calling `sync` and getting a report back.
 - [How to configure a table](how-to-configure-table.md) — properties, tags, comments, keys, and partitioning.
 - [Preview changes with a dry run](how-to-preview-changes.md) — see what a sync would do before it touches anything.
+
+## Walkthrough notebook
+
+For a full end-to-end demo, see `notebooks/delta_engine_walkthrough.py`. It is a
+Databricks notebook that walks the complete lifecycle — define, sync, evolve,
+validate — and proves every step with live assertions against Unity Catalog. It
+also doubles as a manual integration test suite: run it on a cluster to confirm
+the engine behaves correctly end-to-end.
