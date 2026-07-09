@@ -5,6 +5,11 @@ tags:
 
 # API reference
 
+The public API is reached through two import surfaces: `delta_engine.schema`
+for declaring tables (no PySpark required) and `delta_engine.databricks` for
+building an engine and running syncs. Result and error types are re-exported
+from the top-level `delta_engine` package.
+
 ## Schema declarations
 
 ### DeltaTable
