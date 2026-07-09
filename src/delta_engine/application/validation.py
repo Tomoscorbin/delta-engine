@@ -92,7 +92,9 @@ class NullabilityTighteningOnExistingColumn:
                 message=(
                     "Operation not allowed: cannot tighten existing column"
                     f" '{change.column_name}' to NOT NULL. Keep it nullable,"
-                    " backfill any NULLs in a separate step, then set NOT NULL."
+                    " backfill any NULLs, set NOT NULL outside the engine"
+                    " (ALTER TABLE ... SET NOT NULL), then declare"
+                    " nullable=False — the next sync sees no drift."
                 ),
             )
             for change in drift.managed_changes

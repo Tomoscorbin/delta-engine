@@ -469,6 +469,13 @@ model — see
 for the failure reasons and [how to handle sync failures](how-to-handle-sync-failures.md)
 for reading the report.
 
+Every table a foreign key references must be registered in the same
+`sync(...)` call — including a parent that already exists in the catalog with
+no drift. A foreign key to an unregistered table fails resolution with
+`UNRESOLVABLE_REFERENCE`: the engine only trusts a parent it is also
+reconciling, so a stale or drifted parent blocks its dependents rather than
+being silently assumed correct.
+
 ### Drift
 
 The engine matches foreign keys by content — local columns, referenced table,
