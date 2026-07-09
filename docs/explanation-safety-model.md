@@ -7,17 +7,18 @@ tags:
 
 delta-engine mutates shared production tables, so its default posture is
 refusal: it only applies changes it can make safely in place, and everything
-else fails with a named rule before any SQL runs. This page explains the three
+else fails with a named rule before any SQL runs. This page explains the four
 layers that enforce that, and the scoping concept — managed aspects — that
 decides what a declaration is responsible for at all.
 
-## Three layers of protection
+## Four layers of protection
 
-| Layer                       | When it runs                         | What it catches                                                                                         |
-| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| **Declaration-time checks** | Constructing a `DeltaTable`          | Declarations that could never succeed — a nullable primary key, a typo'd property key                   |
-| **Validation rules**        | Every sync, after diffing live state | Transitions that are unsafe _from this table's current state_ — tightening nullability, changing a type |
-| **Managed aspects**         | Every sync, as part of validation    | Drift outside what the declaration manages — never silently reconciled                                  |
+| Layer                       | When it runs                                | What it catches                                                                                                                                        |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Declaration-time checks** | Constructing a `DeltaTable`                 | Declarations that could never succeed — a nullable primary key, a typo'd property key                                                                  |
+| **Validation rules**        | Every sync, after diffing live state        | Transitions that are unsafe _from this table's current state_ — tightening nullability, changing a type                                                |
+| **Managed aspects**         | Every sync, as part of validation           | Drift outside what the declaration manages — never silently reconciled                                                                                 |
+| **Dependency blocking**     | Every sync, during resolution and execution | Foreign keys that can't be satisfied — a cycle, a missing or mismatched reference — and tables whose dependency won't reach its desired state this run |
 
 ### Declaration-time checks
 
@@ -60,6 +61,32 @@ There are two scopes:
 
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
 restricted scope in practice.
+
+## Cross-table dependency blocking
+
+The first three layers protect a table from its own declaration. The fourth
+protects it from the rest of the run: a table only executes when every table
+its foreign keys reference can be trusted to reach its desired state this
+sync.
+
+The check fires in two ways, both reported as `FOREIGN_KEY_FAILED`:
+
+- **Structural foreign-key problems**, found while resolving the dependency
+  order: a dependency cycle, a reference to a table not in the sync, or a
+  foreign key that does not target the referenced table's primary key. These
+  are validation in spirit; they run separately because they need to see every
+  table in the sync at once.
+- **Failure propagation**: the declaration is fine, but the dependency failed
+  this run — at any of the layers above, or while executing. Its dependents
+  are blocked rather than executed, because the state their foreign keys
+  depend on won't exist.
+
+The rule is uniform: if a dependency won't reach its desired state this sync,
+its dependents don't run either. Fix the upstream table and re-sync.
+[How a sync works](explanation-sync-lifecycle.md) covers where resolution sits
+in the phase chain;
+[how to declare foreign keys](how-to-declare-foreign-keys.md) covers the
+declaration side.
 
 ## Declared, observed, or both: aspect semantics
 
