@@ -521,6 +521,15 @@ Every name in `partitioned_by` must also appear in `columns`. Partition columns
 are still regular columns: `partitioned_by` names them, and `columns` defines
 their types and other metadata.
 
+The order of names in `partitioned_by` is significant, and independent of the
+order columns appear in `columns`. It sets the order Delta nests partition
+directories in — `partitioned_by=["region", "event_date"]` nests `region` above
+`event_date` on storage — so `["region", "event_date"]` and
+`["event_date", "region"]` describe different physical layouts, not the same set
+of partition columns. Because partitioning is fixed at creation (below),
+reordering the list on an existing table reads as a partitioning change and
+fails validation, so declare the nesting order you want up front.
+
 ### Partitioning is fixed at creation
 
 Partitioning can only be set when the table is created. Partition columns
