@@ -142,6 +142,31 @@ def test_delta_table_rejects_local_column_count_mismatch():
         )
 
 
+def test_delta_table_rejects_duplicate_foreign_key_local_columns():
+    # Given a composite referenced PK and the same local column listed twice
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False, primary_key=True),
+        ],
+    )
+
+    # When / Then the repeated local column is rejected at declaration time
+    with pytest.raises(ValueError, match="Duplicate foreign key local column"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("customer_id", Integer())],
+            foreign_keys=[
+                ForeignKey(local_columns=("customer_id", "customer_id"), references=customers)
+            ],
+        )
+
+
 def test_delta_table_rejects_non_table_reference():
     # Given a reference that is neither a DeltaTable nor Self
     # When / Then a TypeError names the accepted types

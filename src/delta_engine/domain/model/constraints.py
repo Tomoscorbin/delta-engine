@@ -93,6 +93,16 @@ class ForeignKeyConstraint:
                 f" got {len(self.local_columns)} local and"
                 f" {len(self.referenced_columns)} referenced"
             )
+        seen_local: set[str] = set()
+        for column in self.local_columns:
+            if column in seen_local:
+                raise ValueError(f"Duplicate foreign key local column: {column}")
+            seen_local.add(column)
+        seen_referenced: set[str] = set()
+        for column in self.referenced_columns:
+            if column in seen_referenced:
+                raise ValueError(f"Duplicate foreign key referenced column: {column}")
+            seen_referenced.add(column)
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
 
