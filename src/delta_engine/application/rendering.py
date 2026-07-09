@@ -20,6 +20,7 @@ from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -48,9 +49,10 @@ class DiffCategory(IntEnum):
 
     COLUMNS = 1
     KEYS = 2
-    PROPERTIES = 3
-    TAGS = 4
-    COMMENTS = 5
+    CLUSTERING = 3
+    PROPERTIES = 4
+    TAGS = 5
+    COMMENTS = 6
 
 
 # (singular, plural) nouns per category: the plural names the diff group heading;
@@ -58,6 +60,7 @@ class DiffCategory(IntEnum):
 _CATEGORY_NOUN: dict[DiffCategory, tuple[str, str]] = {
     DiffCategory.COLUMNS: ("column", "columns"),
     DiffCategory.KEYS: ("key", "keys"),
+    DiffCategory.CLUSTERING: ("clustering", "clustering"),
     DiffCategory.PROPERTIES: ("property", "properties"),
     DiffCategory.TAGS: ("tag", "tags"),
     DiffCategory.COMMENTS: ("comment", "comments"),
@@ -95,6 +98,9 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
         entries.append(
             DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(primary_key_columns)})",))
         )
+    if action.table.clustered_by:
+        columns = ", ".join(action.table.clustered_by)
+        entries.append(DiffEntry(DiffCategory.CLUSTERING, "+", (f"clustering ({columns})",)))
     return tuple(entries)
 
 
@@ -182,6 +188,19 @@ def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
 @_action_entries.register
 def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint_name}",)),)
+
+
+_OPTIMIZE_FULL_HINT = "run OPTIMIZE FULL to recluster existing data"
+
+
+@_action_entries.register
+def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
+    if not action.columns:
+        text = f"clustering — {_OPTIMIZE_FULL_HINT}"
+        return (DiffEntry(DiffCategory.CLUSTERING, "-", (text,)),)
+    columns = ", ".join(action.columns)
+    text = f"clustering ({columns}) — {_OPTIMIZE_FULL_HINT}"
+    return (DiffEntry(DiffCategory.CLUSTERING, "~", (text,)),)
 
 
 # Shown wherever a report has a readable state but no planned actions. One
