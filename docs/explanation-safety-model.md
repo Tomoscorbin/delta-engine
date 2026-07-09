@@ -108,7 +108,7 @@ engine behaviour — retention, change data feed, column mapping — where an
 unintended unset can be destructive. Tags and comments are pure metadata, so
 converging on the declaration is always safe. Details and examples:
 [properties](how-to-configure-properties.md), [tags](how-to-configure-tags.md),
-[comments](how-to-configure-comments.md).
+[comments](how-to-configure-tags.md#comments).
 
 ## When the engine says no
 

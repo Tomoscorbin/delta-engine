@@ -27,7 +27,7 @@ the detail.
 | Tighten nullability       |      ✗      | Blocked — backfill first, then tighten ([rules](reference-safe-change-rules.md))                                   |
 | Change column type        |      ✗      | Blocked — recreate the table out of band ([rules](reference-safe-change-rules.md))                                 |
 | Rename column             |      ✗      | Not detected: a rename in the declaration is planned as a drop plus an add of an empty column                      |
-| Table and column comments |      ✓      | Always managed; an empty declaration clears the comment ([comments](how-to-configure-comments.md))                 |
+| Table and column comments |      ✓      | Always managed; an empty declaration clears the comment ([comments](how-to-configure-tags.md#comments))            |
 | Table properties          |      ✓      | Five managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-properties.md)) |
 | Table and column tags     |      ✓      | Full-state: undeclared tags are removed ([tags](how-to-configure-tags.md))                                         |
 | Primary keys              |      ✓      | Declared per column ([primary keys](how-to-declare-primary-keys.md))                                               |
