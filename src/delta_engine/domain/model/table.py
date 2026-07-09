@@ -28,6 +28,7 @@ class TableSnapshot:
         comment: Optional table-level comment (empty string when unset).
         tags: Read-only mapping of Unity Catalog tag keys to values.
         partitioned_by: Ordered tuple of partition column names.
+        clustered_by: Ordered tuple of liquid clustering column names.
         primary_key: Primary key constraint, or ``None`` when no primary key is defined.
 
     Properties live on the subclasses, not here: a desired table's mapping
@@ -41,6 +42,7 @@ class TableSnapshot:
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
+    clustered_by: tuple[str, ...] = ()
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
 
@@ -53,8 +55,8 @@ class TableSnapshot:
         """
         Validate the snapshot's structural invariants.
 
-        Columns must be non-empty and unique; partition columns must be
-        lowercase, must each exist in ``columns``, and must be unique.
+        Columns must be non-empty and unique; partition and clustering columns
+        must be lowercase, must each exist in ``columns``, and must be unique.
         Primary key columns must each exist in ``columns``.
         """
         if not self.columns:
@@ -79,6 +81,20 @@ class TableSnapshot:
             if name in seen_partitions:
                 raise ValueError(f"Duplicate partition column: {name}")
             seen_partitions.add(name)
+
+        for name in self.clustered_by:
+            if name != name.casefold():
+                raise ValueError(f"Clustering column name must be lowercase: {name!r}")
+
+        missing_clustering = [name for name in self.clustered_by if name not in seen_names]
+        if missing_clustering:
+            raise ValueError(f"Clustering column not found: {missing_clustering[0]}")
+
+        seen_clustering: set[str] = set()
+        for name in self.clustered_by:
+            if name in seen_clustering:
+                raise ValueError(f"Duplicate clustering column: {name}")
+            seen_clustering.add(name)
 
         if self.primary_key is not None:
             missing_pk = [name for name in self.primary_key.columns if name not in seen_names]
@@ -178,6 +194,23 @@ class DesiredTable(TableSnapshot):
             raise ValueError(
                 "Cannot partition by every column: at least one non-partition column is required"
             )
+
+        if self.partitioned_by and self.clustered_by:
+            raise ValueError(
+                "A table cannot both partition and cluster: declare partitioned_by"
+                " or clustering columns, not both."
+            )
+        if len(self.clustered_by) > 4:
+            raise ValueError(
+                f"A table may declare at most four clustering keys; got {len(self.clustered_by)}."
+            )
+        for name in self.clustered_by:
+            data_type = columns_by_name[name].data_type
+            if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+                raise ValueError(
+                    f"Clustering column {name!r} has type"
+                    f" {type(data_type).__name__}, which cannot be a clustering key"
+                )
 
 
 @dataclass(frozen=True, slots=True)
