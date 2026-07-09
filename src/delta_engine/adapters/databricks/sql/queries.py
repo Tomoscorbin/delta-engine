@@ -38,21 +38,29 @@ def describe_detail_query(qualified_name: QualifiedName) -> str:
 
 
 def primary_key_query(qualified_name: QualifiedName) -> str:
-    """Render the information_schema query for a table's primary key columns."""
+    """
+    Render the information_schema query for a table's primary key columns.
+
+    Reads from key_column_usage, whose ordinal_position puts a composite
+    key's columns in key order — constraint_column_usage has no ordinal and
+    returns rows in arbitrary order, which would scramble the observed
+    ``PrimaryKeyConstraint.columns`` tuple.
+    """
     catalog = backtick(qualified_name.catalog)
     return (
         f"SELECT table_constraints_info.constraint_name,"
-        f" constraint_columns.column_name"
-        f" FROM {catalog}.information_schema.constraint_column_usage"
-        f" AS constraint_columns"
+        f" key_columns.column_name"
+        f" FROM {catalog}.information_schema.key_column_usage"
+        f" AS key_columns"
         f" JOIN {catalog}.information_schema.table_constraints"
         f" AS table_constraints_info"
         f" USING (constraint_catalog, constraint_schema, constraint_name)"
-        f" WHERE constraint_columns.table_schema ="
+        f" WHERE key_columns.table_schema ="
         f" {quote_literal(qualified_name.schema)}"
-        f" AND constraint_columns.table_name ="
+        f" AND key_columns.table_name ="
         f" {quote_literal(qualified_name.name)}"
         f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
+        f" ORDER BY key_columns.ordinal_position"
     )
 
 
