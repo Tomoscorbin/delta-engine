@@ -19,6 +19,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     Struct,
     TableAspect,
+    Variant,
 )
 
 
@@ -51,6 +52,9 @@ _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()
 _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
 )
+
+# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
+_UNPARTITIONABLE_TYPES: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
 
 # Unity Catalog limits per securable object (a table and each of its
 # columns are separate securables).
@@ -102,6 +106,31 @@ def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
             return _nested_field_paths(path, key) + _nested_field_paths(path, value)
         case _:
             return ()
+
+
+def _validate_delta_partitioning(
+    columns: tuple[Column, ...], partitioned_by: tuple[str, ...]
+) -> None:
+    columns_by_name = {column.name: column for column in columns}
+    if any(name != name.casefold() for name in partitioned_by):
+        return
+    if len(set(partitioned_by)) != len(partitioned_by):
+        return
+    if any(name not in columns_by_name for name in partitioned_by):
+        return
+
+    for name in partitioned_by:
+        data_type = columns_by_name[name].data_type
+        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+            raise ValueError(
+                f"Partition column {name!r} has type"
+                f" {type(data_type).__name__}, which Delta cannot partition by"
+            )
+
+    if partitioned_by and len(set(partitioned_by)) == len(columns):
+        raise ValueError(
+            "Cannot partition by every column: at least one non-partition column is required"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +314,8 @@ class DeltaTable:
                 raise ValueError(rejection)
 
         columns = tuple(columns)
+        partitioned_by = tuple(partitioned_by)
+        _validate_delta_partitioning(columns, partitioned_by)
 
         if not metadata_only and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name":
             offending = [
@@ -340,7 +371,7 @@ class DeltaTable:
             comment=comment,
             properties=user_properties,
             tags=table_tags,
-            partitioned_by=tuple(partitioned_by),
+            partitioned_by=partitioned_by,
             primary_key=primary_key,
             foreign_keys=lowered_foreign_keys,
             managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,

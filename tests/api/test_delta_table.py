@@ -222,6 +222,31 @@ def test_missing_partition_column_raises_error():
         )
 
 
+def test_delta_table_rejects_complex_typed_partition_column() -> None:
+    with pytest.raises(ValueError, match="Delta cannot partition"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[
+                Column("id", Integer()),
+                Column("items", Array(String())),
+            ],
+            partitioned_by=["items"],
+        )
+
+
+def test_delta_table_rejects_partitioning_by_every_column() -> None:
+    with pytest.raises(ValueError, match="every column"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer()), Column("day", String())],
+            partitioned_by=["id", "day"],
+        )
+
+
 def test_to_desired_table_preserves_columns_and_metadata():
     # Given a table with explicit column metadata, comment, and partitioning
     table = DeltaTable(

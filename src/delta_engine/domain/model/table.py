@@ -2,6 +2,9 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum, auto
+from types import MappingProxyType
+from typing import Final
 
 from delta_engine.domain.model.column import Column
 from delta_engine.domain.model.constraints import (
@@ -9,12 +12,29 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
-from delta_engine.domain.model.data_type import Array, Map, Struct, Variant
 from delta_engine.domain.model.qualified_name import QualifiedName
-from delta_engine.domain.model.table_aspect import ALL_ASPECTS, TableAspect
 
-# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
-_UNPARTITIONABLE_TYPES = (Array, Map, Struct, Variant)
+
+class TableAspect(Enum):
+    """One independently manageable dimension of a table's state."""
+
+    COLUMN_STRUCTURE = auto()
+    COLUMN_COMMENTS = auto()
+    COLUMN_TAGS = auto()
+    TABLE_COMMENT = auto()
+    TABLE_TAGS = auto()
+    PROPERTIES = auto()
+    PARTITIONING = auto()
+    PRIMARY_KEY = auto()
+    FOREIGN_KEYS = auto()
+
+    @property
+    def label(self) -> str:
+        """Human-readable label (e.g. COLUMN_STRUCTURE -> 'column structure')."""
+        return self.name.lower().replace("_", " ")
+
+
+ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +77,11 @@ class TableSnapshot:
         lowercase, must each exist in ``columns``, and must be unique.
         Primary key columns must each exist in ``columns``.
         """
+        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
+
         if not self.columns:
             raise ValueError("Table requires at least one column")
 
@@ -138,10 +163,11 @@ class DesiredTable(TableSnapshot):
         not the shared base: an observed table may legitimately carry such a
         layout (a legacy catalog schema) and must stay representable.
 
-        Partition columns must not have complex types (Array, Map, Struct, Variant)
-        and at least one non-partition column must exist.
         """
         TableSnapshot.__post_init__(self)
+        object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
+
         if not self.managed_aspects:
             raise ValueError(
                 "managed_aspects must not be empty: a table that manages no aspect"
@@ -185,20 +211,6 @@ class DesiredTable(TableSnapshot):
                     " primary key column."
                 )
 
-        columns_by_name = {column.name: column for column in self.columns}
-        for name in self.partitioned_by:
-            data_type = columns_by_name[name].data_type
-            if isinstance(data_type, _UNPARTITIONABLE_TYPES):
-                raise ValueError(
-                    f"Partition column {name!r} has type"
-                    f" {type(data_type).__name__}, which Delta cannot"
-                    " partition by"
-                )
-        if self.partitioned_by and (len(self.partitioned_by) == len(self.columns)):
-            raise ValueError(
-                "Cannot partition by every column: at least one non-partition column is required"
-            )
-
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable(TableSnapshot):
@@ -213,3 +225,12 @@ class ObservedTable(TableSnapshot):
 
     properties: Mapping[str, str] = field(default_factory=dict)
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+
+    def __post_init__(self) -> None:
+        TableSnapshot.__post_init__(self)
+        object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(
+            self,
+            "referencing_foreign_keys",
+            tuple(self.referencing_foreign_keys),
+        )

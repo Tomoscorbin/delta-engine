@@ -7,7 +7,6 @@ from delta_engine.domain.model import (
     DesiredTable,
     ForeignKeyReference,
     Integer,
-    Map,
     ObservedTable,
     QualifiedName,
     String,
@@ -486,34 +485,20 @@ def test_observed_table_properties_carry_values_only():
     assert observed.properties == {"delta.enableChangeDataFeed": "true"}
 
 
-def test_desired_table_rejects_complex_typed_partition_column() -> None:
-    with pytest.raises(ValueError, match="partition"):
-        DesiredTable(
-            qualified_name=QualifiedName("dev", "silver", "orders"),
-            columns=(
-                Column("id", Integer()),
-                Column("attrs", Map(String(), String())),
-            ),
-            partitioned_by=("attrs",),
-        )
-
-
-def test_desired_table_rejects_partitioning_by_every_column() -> None:
-    with pytest.raises(ValueError, match="every column"):
-        DesiredTable(
-            qualified_name=QualifiedName("dev", "silver", "orders"),
-            columns=(Column("id", Integer()), Column("day", Date())),
-            partitioned_by=("id", "day"),
-        )
-
-
-def test_observed_table_accepts_layouts_desired_tables_reject() -> None:
-    # Observed state must stay representable even when it is not declarable.
+def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
+    # Desired and observed state stay representable even when a backend-specific
+    # API would reject the layout as undeployable.
+    desired = DesiredTable(
+        qualified_name=QualifiedName("dev", "silver", "orders"),
+        columns=(Column("id", Integer()), Column("day", Date())),
+        partitioned_by=("id", "day"),
+    )
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "orders"),
         columns=(Column("id", Integer()), Column("day", Date())),
         partitioned_by=("id", "day"),
     )
+    assert desired.partitioned_by == ("id", "day")
     assert observed.partitioned_by == ("id", "day")
 
 
