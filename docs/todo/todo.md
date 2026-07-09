@@ -30,7 +30,7 @@
 - [ ] look for redundancies; things like frozenset for local variables
 - [ ] review types hints; things like Mapping, AbstractSet, etc
 - [ ] review Matched and Matched.common, particularly in _diff_columns
-- [ ] Add tags, comment, schema, etc as properties to DeltaTable
+- [x] Add tags, comment, schema, etc as properties to DeltaTable — added read-only accessors (`catalog`, `schema`, `name`, `columns`, `comment`, `properties`, `tags`, `partitioned_by`, `metadata_only`) mirroring the constructor. Spark-schema (`StructType`) conversion deferred: `api` cannot import pyspark (import-linter contract); build from `.columns` or add a `databricks.to_spark_schema(...)` edge helper if demand appears.
 - [ ] Place QualifiedName parse method after post init
 - [ ] Improve module docstrings for the ones that need more info
 - [ ] Remove table.py from api/ and put it in src/delta_table??

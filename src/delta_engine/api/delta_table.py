@@ -335,6 +335,55 @@ class DeltaTable:
         )
 
     @property
+    def catalog(self) -> str:
+        """Unity Catalog catalog name."""
+        return self._desired_table.qualified_name.catalog
+
+    @property
+    def schema(self) -> str:
+        """Schema (database) name within the catalog."""
+        return self._desired_table.qualified_name.schema
+
+    @property
+    def name(self) -> str:
+        """Table name."""
+        return self._desired_table.qualified_name.name
+
+    @property
+    def columns(self) -> tuple[Column, ...]:
+        """Declared columns, in declaration order."""
+        return self._desired_table.columns
+
+    @property
+    def comment(self) -> str:
+        """Table-level comment (empty string when unset)."""
+        return self._desired_table.comment
+
+    @property
+    def properties(self) -> Mapping[str, str | None]:
+        """
+        Declared table properties.
+
+        A ``None`` value asserts the property must be absent from the table.
+        """
+        return self._desired_table.properties
+
+    @property
+    def tags(self) -> Mapping[str, str]:
+        """Declared table tags."""
+        return self._desired_table.tags
+
+    @property
+    def partitioned_by(self) -> tuple[str, ...]:
+        """Partition column names, in declaration order."""
+        return self._desired_table.partitioned_by
+
+    @property
+    def metadata_only(self) -> bool:
+        """Whether the sync is restricted to catalog metadata."""
+        return self._desired_table.managed_aspects != ALL_ASPECTS
+
+    @property
     def primary_key(self) -> tuple[str, ...]:
         """Column names declared as the primary key, in declaration order."""
         return self._desired_table.primary_key_columns
