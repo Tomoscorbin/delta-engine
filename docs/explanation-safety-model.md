@@ -69,17 +69,21 @@ protects it from the rest of the run: a table only executes when every table
 its foreign keys reference can be trusted to reach its desired state this
 sync.
 
-The check fires in two ways, both reported as `FOREIGN_KEY_FAILED`:
+A table blocked by this layer reports `FOREIGN_KEY_FAILED`, with one of four
+reasons in its failure message:
 
-- **Structural foreign-key problems**, found while resolving the dependency
-  order: a dependency cycle, a reference to a table not in the sync, or a
-  foreign key that does not target the referenced table's primary key. These
-  are validation in spirit; they run separately because they need to see every
-  table in the sync at once.
-- **Failure propagation**: the declaration is fine, but the dependency failed
-  this run — at any of the layers above, or while executing. Its dependents
-  are blocked rather than executed, because the state their foreign keys
-  depend on won't exist.
+| Failure reason                 | Fires when                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `UNRESOLVABLE_REFERENCE`       | A foreign key references a table that is not part of the sync                       |
+| `CYCLE`                        | The table is part of a foreign-key dependency cycle                                 |
+| `REFERENCED_COLUMNS_NOT_A_KEY` | The referenced columns are not the referenced table's primary key                   |
+| `BLOCKED_BY_FAILED_DEPENDENCY` | A referenced table failed this run — at any of the layers above, or while executing |
+
+The first three are structural problems with the declarations themselves —
+validation in spirit, run separately only because they need to see every table
+in the sync at once. The last is failure propagation: the declaration is fine,
+but the state its foreign keys depend on won't exist, so the table is blocked
+rather than executed.
 
 The rule is uniform: if a dependency won't reach its desired state this sync,
 its dependents don't run either. Fix the upstream table and re-sync.
