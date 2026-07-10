@@ -3,7 +3,7 @@ import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.spark.executor import (
-    DatabricksExecutor,
+    SparkExecutor,
     _execute_statements,
     _sql_preview,
 )
@@ -32,7 +32,7 @@ def _dummy_qualified_name() -> QualifiedName:
 
 def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
     """Compile then execute, the same two-stage flow the engine drives."""
-    executor = DatabricksExecutor(spark)
+    executor = SparkExecutor(spark)
     return executor.execute(executor.compile(qualified_name, plan))
 
 
@@ -370,7 +370,7 @@ def test_compile_returns_the_statements_execute_would_run():
     # Given a plan with one action
     qualified_name = QualifiedName("cat", "schema", "tbl")
     plan = ActionPlan((SetTableComment(comment="hello"),))
-    executor = DatabricksExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
+    executor = SparkExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
 
     # When compiling without executing
     statements = executor.compile(qualified_name, plan)
@@ -382,5 +382,5 @@ def test_compile_returns_the_statements_execute_would_run():
 
 
 def test_compile_of_empty_plan_returns_no_statements():
-    executor = DatabricksExecutor(spark=None)  # type: ignore[arg-type]
+    executor = SparkExecutor(spark=None)  # type: ignore[arg-type]
     assert executor.compile(QualifiedName("cat", "schema", "tbl"), ActionPlan()) == ()

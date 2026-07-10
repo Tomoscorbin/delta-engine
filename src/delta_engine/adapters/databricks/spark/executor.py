@@ -25,7 +25,7 @@ from delta_engine.domain.plan import ActionPlan
 logger = logging.getLogger(__name__)
 
 
-class DatabricksExecutor:
+class SparkExecutor:
     """Plan executor that compiles plans to SQL and runs them via a Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:

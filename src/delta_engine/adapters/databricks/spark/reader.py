@@ -249,7 +249,7 @@ def _clustering_columns_from_row(row: Row) -> tuple[str, ...]:
     return tuple(name.casefold() for name in columns)
 
 
-class DatabricksReader:
+class SparkReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:

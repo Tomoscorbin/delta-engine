@@ -1,5 +1,5 @@
 """
-Shell tests for DatabricksReader: sequencing, normalization at the boundary,
+Shell tests for SparkReader: sequencing, normalization at the boundary,
 and fetch_state's totality.
 
 Row->domain mapping is covered directly in test_reader_mappers.py; query text
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from pyspark.errors.exceptions.base import AnalysisException
 import pytest
 
-from delta_engine.adapters.databricks.spark.reader import DatabricksReader
+from delta_engine.adapters.databricks.spark.reader import SparkReader
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
@@ -239,7 +239,7 @@ def test_columns_maps_name_nullability_and_comment(qn):
             ]
         }
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     cols = result.table.columns
@@ -258,7 +258,7 @@ def test_partition_columns_returns_only_partition_names_in_order(qn):
             ]
         }
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.partitioned_by == ("p_store", "p_date")
@@ -276,7 +276,7 @@ def test_partition_columns_ignores_missing_or_false_flags(qn):
             ]
         }
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.partitioned_by == ()
@@ -286,7 +286,7 @@ def test_fetch_state_lowercases_mixed_case_column_names_from_catalog(qn):
     catalog = FakeCatalog(
         columns_by_table={str(qn): [make_catalog_col("CustomerID", dataType="int")]}
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert [c.name for c in result.table.columns] == ["customerid"]
@@ -301,7 +301,7 @@ def test_fetch_state_skips_unsupported_column_leaves_mappable_columns_intact(qn)
             ]
         }
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert [c.name for c in result.table.columns] == ["id"]
@@ -311,7 +311,7 @@ def test_fetch_state_returns_failed_when_all_columns_are_unsupported(qn):
     # An ObservedTable requires at least one column; a table whose every column
     # is unmappable cannot be honestly observed, so the read fails.
     catalog = FakeCatalog(columns_by_table={str(qn): [make_catalog_col("nested", dataType="void")]})
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
 
@@ -329,7 +329,7 @@ def test_observed_comment_is_description_or_empty_string(qn, desc_value, expecte
         columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
         table_comments={str(qn): desc_value},
     )
-    result = DatabricksReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
+    result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.comment == expected
@@ -342,7 +342,7 @@ def test_observed_properties_are_empty_and_read_only_when_table_has_no_propertie
     spark = routed_spark(
         qn, catalog=single_column_catalog(qn), describe=[FakeDetailRow(properties={})]
     )
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     properties = result.table.properties
@@ -362,7 +362,7 @@ def test_observed_properties_are_filtered_to_managed_keys(qn):
         )
     ]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=describe)
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert dict(result.table.properties) == {"delta.columnMapping.mode": "name"}
@@ -372,7 +372,7 @@ def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
     # DESCRIBE DETAIL yielding no row for a present table is a race or catalog
     # inconsistency, distinct from a table whose properties map is merely empty.
     spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=[])
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "RuntimeError"
@@ -383,7 +383,7 @@ def test_fetch_state_fails_when_describe_detail_returns_no_rows(qn):
 
 def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
     spark = routed_spark(qn, catalog=FakeCatalog(exists=False))
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TableAbsent)
     assert spark.queries == []
@@ -391,7 +391,7 @@ def test_fetch_state_returns_absent_when_table_does_not_exist(qn):
 
 def test_fetch_state_returns_failed_when_existence_probe_raises(qn):
     spark = routed_spark(qn, catalog=FakeCatalog(exists_exc=RuntimeError("catalog down")))
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "RuntimeError"
@@ -399,7 +399,7 @@ def test_fetch_state_returns_failed_when_existence_probe_raises(qn):
 
 def test_fetch_state_returns_failed_when_describe_detail_raises(qn):
     spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=AnalysisException("boom"))
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"
@@ -413,7 +413,7 @@ def test_fetch_state_includes_primary_key_in_observed_table(qn):
         {"constraint_name": "pk_t", "column_name": "id"},
     ]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), pk=pk_rows)
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="pk_t")
@@ -430,7 +430,7 @@ def test_fetch_state_includes_single_column_foreign_key_in_observed_table(qn):
         columns_by_table={str(qn): [make_catalog_col("customer_id", dataType="int")]}
     )
     spark = routed_spark(qn, catalog=catalog, fks=[fk_row()])
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.foreign_keys == (
@@ -450,7 +450,7 @@ def test_fetch_state_includes_referencing_foreign_key_in_observed_table(qn):
     spark = routed_spark(
         qn, catalog=single_column_catalog(qn), referencing_fks=[referencing_fk_row()]
     )
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.referencing_foreign_keys == (
@@ -467,7 +467,7 @@ def test_fetch_state_includes_referencing_foreign_key_in_observed_table(qn):
 def test_fetch_state_observes_table_tags(qn):
     tag_rows = [SimpleNamespace(tag_name="Owner", tag_value="data-platform")]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), tags=tag_rows)
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert dict(result.table.tags) == {"Owner": "data-platform"}
@@ -476,7 +476,7 @@ def test_fetch_state_observes_table_tags(qn):
 def test_fetch_state_attaches_column_tags_to_their_columns(qn):
     column_tag_rows = [SimpleNamespace(column_name="ID", tag_name="key", tag_value="primary")]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), column_tags=column_tag_rows)
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     (column,) = result.table.columns
@@ -499,7 +499,7 @@ def test_fetch_state_skips_metadata_queries_when_information_schema_is_absent(qn
             messageParameters={},
         ),
     )
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
     assert result.table.primary_key is None
@@ -532,7 +532,7 @@ def test_fetch_state_fails_when_the_probe_raises_an_unexpected_error(qn, probe_e
     # surface as ReadFailed rather than silently reading the whole catalog as
     # constraint- and tag-free.
     spark = routed_spark(qn, catalog=single_column_catalog(qn), probe=probe_error)
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"
@@ -550,7 +550,7 @@ def test_probe_availability_is_not_cached_when_the_probe_fails_unexpectedly(qn):
             messageParameters={},
         ),
     )
-    reader = DatabricksReader(spark)
+    reader = SparkReader(spark)
     assert isinstance(reader.fetch_state(qn), ReadFailed)
     assert isinstance(reader.fetch_state(qn), ReadFailed)
 
@@ -567,7 +567,7 @@ def test_fetch_state_fails_when_a_metadata_query_fails_on_unity_catalog(qn):
         catalog=single_column_catalog(qn),
         fks=AnalysisException("PERMISSION_DENIED"),
     )
-    result = DatabricksReader(spark).fetch_state(qn)
+    result = SparkReader(spark).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
     assert result.failure.exception_type == "AnalysisException"
@@ -575,7 +575,7 @@ def test_fetch_state_fails_when_a_metadata_query_fails_on_unity_catalog(qn):
 
 def test_information_schema_probe_runs_once_per_catalog_across_reads(qn):
     spark = routed_spark(qn, catalog=single_column_catalog(qn))
-    reader = DatabricksReader(spark)
+    reader = SparkReader(spark)
     reader.fetch_state(qn)
     reader.fetch_state(qn)
 

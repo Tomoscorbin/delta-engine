@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.adapters.databricks.spark.reader import DatabricksReader
+from delta_engine.adapters.databricks.spark.reader import SparkReader
 
 
 @pytest.fixture(autouse=True)
@@ -9,4 +9,4 @@ def local_spark_databricks_reader_compat(monkeypatch):
         # Local Spark fallback for existence checks.
         return self.spark.catalog.tableExists(f"{qualified_name.schema}.{qualified_name.name}")
 
-    monkeypatch.setattr(DatabricksReader, "_table_exists", _table_exists, raising=True)
+    monkeypatch.setattr(SparkReader, "_table_exists", _table_exists, raising=True)
