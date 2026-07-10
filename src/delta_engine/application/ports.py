@@ -160,15 +160,12 @@ class PlanExecutor(Protocol):
         """
         ...
 
-    def execute(
-        self, qualified_name: QualifiedName, statements: tuple[str, ...]
-    ) -> ExecutionSummary:
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         """
-        Run ``statements`` (from :meth:`compile`) against ``qualified_name``.
+        Run ``statements`` (from :meth:`compile`) in order.
 
         Total: failures are captured in the returned ``ExecutionSummary`` rather
-        than raised. ``qualified_name`` names the table the statements target,
-        for logging and failure context; the statements themselves are the unit
-        of work.
+        than raised. The statements are the complete unit of work — the table
+        they target is already baked into each statement by ``compile``.
         """
         ...

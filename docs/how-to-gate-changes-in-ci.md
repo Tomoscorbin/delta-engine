@@ -43,11 +43,11 @@ in.
 
 ## Show the SQL that would run
 
-`report.sql_statements` maps each table's dotted name to the exact statements a
+`report.planned_sql_statements` maps each table's dotted name to the exact statements a
 real sync would execute — full text, in execution order, untruncated:
 
 ```python
-for name, statements in report.sql_statements.items():
+for name, statements in report.planned_sql_statements.items():
     print(f"-- {name}")
     for statement in statements:
         print(statement)

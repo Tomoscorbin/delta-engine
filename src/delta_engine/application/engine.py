@@ -71,7 +71,7 @@ class _TableRun:
     desired: DesiredTable
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
-    sql_statements: tuple[str, ...] = ()
+    planned_sql_statements: tuple[str, ...] = ()
     diff: TableDiff | None = None
     failures: list[Failure] = field(default_factory=list)
     execution: ExecutionSummary | None = None
@@ -83,7 +83,7 @@ class _TableRun:
             desired=self.desired,
             read=self.read,
             plan=self.plan,
-            sql_statements=self.sql_statements,
+            planned_sql_statements=self.planned_sql_statements,
             failures=tuple(self.failures),
             execution=self.execution,
         )
@@ -235,7 +235,7 @@ class Engine:
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
-            run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
+            run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
 
@@ -298,7 +298,7 @@ class Engine:
             # still blocked; a healthy no-op run counts as a healthy parent.
             if not run.plan:
                 continue
-            summary = self.executor.execute(run.qualified_name, run.sql_statements)
+            summary = self.executor.execute(run.planned_sql_statements)
             logger.info(
                 "Executed %d action(s) for %s (%d failed)",
                 len(summary.results),

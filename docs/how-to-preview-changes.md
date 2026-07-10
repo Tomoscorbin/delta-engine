@@ -49,8 +49,8 @@ if report.has_failures:
 ```
 
 `report.has_changes` reports whether any table has a planned change, and
-`report.sql_statements` maps each table's name to the exact DDL a real run
-would execute. For a machine-readable view of the whole run — status, planned
+`report.planned_sql_statements` maps each table's name to the exact DDL a
+real run would execute. For a machine-readable view of the whole run — status, planned
 actions, and SQL as plain JSON — call `report.to_dict()` (see
 [the run report schema](reference-run-report.md)). To turn a dry run into a
 red/green pull-request check, see

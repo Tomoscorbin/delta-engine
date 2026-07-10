@@ -55,10 +55,10 @@ class MyExecutor:
 
 The engine calls `compile` during planning on every run — dry or real — and records the statements on the table's report, so a dry run can preview the DDL. `compile` is **not** total: compiling a validated plan is a pure, local operation that cannot fail against a backend, so it may raise on a genuine programming error rather than swallowing it.
 
-`execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs:
+`execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
 
 ```python
-    def execute(self, qualified_name: QualifiedName, statements: tuple[str, ...]) -> ExecutionSummary:
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         results = []
         for i, statement in enumerate(statements):
             try:

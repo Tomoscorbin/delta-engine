@@ -174,13 +174,13 @@ def test_sync_report_has_no_changes_when_no_table_plans_actions():
     assert report.has_changes is False
 
 
-def test_sync_report_sql_statements_maps_dotted_names_and_omits_empty():
+def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
     with_sql = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "a"),
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(comment="hello"),)),
-        sql_statements=("ALTER TABLE a SET ...",),
+        planned_sql_statements=("ALTER TABLE a SET ...",),
     )
     without_sql = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "b"),
@@ -188,7 +188,7 @@ def test_sync_report_sql_statements_maps_dotted_names_and_omits_empty():
         read=TablePresent(table=_an_observed_table()),
     )
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(with_sql, without_sql))
-    assert report.sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
+    assert report.planned_sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
@@ -350,7 +350,7 @@ def _a_changed_table_report():
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(comment="hello"),)),
-        sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
+        planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
     )
 
 
@@ -361,10 +361,12 @@ def test_table_to_dict_states_the_planned_change():
     assert payload["status"] == "SUCCESS"
     assert payload["has_changes"] is True
     assert payload["has_failures"] is False
-    assert payload["actions"] == [
+    assert payload["changes"] == [
         {"kind": "comments", "operation": "change", "subject": "table: 'hello'", "detail": ""}
     ]
-    assert payload["sql_statements"] == ["COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"]
+    assert payload["planned_sql_statements"] == [
+        "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
+    ]
     assert payload["failures"] == []
     assert payload["execution"] is None
 
@@ -408,6 +410,7 @@ def test_sync_report_to_dict_is_json_serialisable_and_complete():
     )
     payload = report.to_dict()
 
+    assert payload["schema_version"] == 1
     assert payload["started_at"] == _t0().isoformat()
     assert payload["ended_at"] == _t1().isoformat()
     assert payload["dry_run"] is True

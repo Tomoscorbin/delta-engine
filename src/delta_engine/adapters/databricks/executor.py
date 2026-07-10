@@ -35,11 +35,9 @@ class DatabricksExecutor:
         """Compile ``plan`` to its SQL statements in execution order, without touching Spark."""
         return tuple(compiled.statement for compiled in compile_plan(qualified_name, plan))
 
-    def execute(
-        self, qualified_name: QualifiedName, statements: tuple[str, ...]
-    ) -> ExecutionSummary:
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         """
-        Run each statement against ``qualified_name`` and summarize the outcome.
+        Run each statement in order and summarize the outcome.
 
         Execution stops at the first failure: the statements form a dependency
         chain, and the engine is not transactional, so continuing past a failure
@@ -47,7 +45,6 @@ class DatabricksExecutor:
         statements attempted, ending at the one that failed; statements after it
         are left unattempted rather than run against an inconsistent table.
         """
-        logger.info("Executing %d statement(s) on %s", len(statements), qualified_name)
         return _execute_statements(self.spark, statements)
 
 

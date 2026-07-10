@@ -16,44 +16,49 @@ that appears in the run-level `tables` list.
 
 ## Stability
 
-The field names below are a **public contract**. Adding a field is
-backwards-compatible; renaming or removing one is a breaking change. The
-projection is deterministic: tables appear in run order, and actions and
-statements in action-plan order, so two projections of the same report compare
-equal — successive dry-run outputs can be diffed.
+The field names below are a **public contract**, versioned by
+`schema_version`. Adding a field is backwards-compatible; renaming or removing
+one is a breaking change and increments `schema_version`. The projection is
+deterministic: tables appear in run order, and changes and statements in
+action-plan order, so two projections of the same report compare equal —
+successive dry-run outputs can be diffed.
 
 ## Run-level fields
 
 `SyncReport.to_dict()` returns:
 
-| Field          | Type         | Meaning                                     |
-| -------------- | ------------ | ------------------------------------------- |
-| `started_at`   | `str`        | ISO 8601 timestamp when the run began       |
-| `ended_at`     | `str`        | ISO 8601 timestamp when the run ended       |
-| `dry_run`      | `bool`       | Whether execution was skipped               |
-| `has_changes`  | `bool`       | True if any table has a planned change      |
-| `has_failures` | `bool`       | True if any table failed a phase            |
-| `tables`       | `list[dict]` | Per-table records, in run order (see below) |
+| Field            | Type         | Meaning                                       |
+| ---------------- | ------------ | --------------------------------------------- |
+| `schema_version` | `int`        | Version of this payload schema; currently `1` |
+| `started_at`     | `str`        | ISO 8601 timestamp when the run began         |
+| `ended_at`       | `str`        | ISO 8601 timestamp when the run ended         |
+| `dry_run`        | `bool`       | Whether execution was skipped                 |
+| `has_changes`    | `bool`       | True if any table has a planned change        |
+| `has_failures`   | `bool`       | True if any table failed a phase              |
+| `tables`         | `list[dict]` | Per-table records, in run order (see below)   |
 
 ## Table-level fields
 
 Each entry in `tables`, and the whole of `TableRunReport.to_dict()`:
 
-| Field            | Type             | Meaning                                                      |
-| ---------------- | ---------------- | ------------------------------------------------------------ |
-| `name`           | `str`            | Dotted, unquoted qualified name, e.g. `cat.schema.orders`    |
-| `status`         | `str`            | A `TableRunStatus` value (`SUCCESS`, `VALIDATION_FAILED`, …) |
-| `has_changes`    | `bool`           | True if this table has a planned change                      |
-| `has_failures`   | `bool`           | True if this table failed a phase                            |
-| `actions`        | `list[dict]`     | The planned changes, in plan order (see below)               |
-| `sql_statements` | `list[str]`      | Full compiled DDL a real run would execute, in order         |
-| `failures`       | `list[dict]`     | Failure records, in phase order (see below)                  |
-| `execution`      | `dict` \| `None` | Execution counts, or `None` on a dry run or a skipped table  |
+| Field                    | Type             | Meaning                                                      |
+| ------------------------ | ---------------- | ------------------------------------------------------------ |
+| `name`                   | `str`            | Dotted, unquoted qualified name, e.g. `cat.schema.orders`    |
+| `status`                 | `str`            | A `TableRunStatus` value (`SUCCESS`, `VALIDATION_FAILED`, …) |
+| `has_changes`            | `bool`           | True if this table has a planned change                      |
+| `has_failures`           | `bool`           | True if this table failed a phase                            |
+| `changes`                | `list[dict]`     | Summaries of the planned changes, in plan order (see below)  |
+| `planned_sql_statements` | `list[str]`      | Full compiled DDL the plan lowers to, in order               |
+| `failures`               | `list[dict]`     | Failure records, in phase order (see below)                  |
+| `execution`              | `dict` \| `None` | Execution counts, or `None` on a dry run or a skipped table  |
 
-### Action records
+### Change records
 
-Each entry in `actions` describes one planned change, derived from the same
-interpretation the text renderers use:
+Each entry in `changes` summarises part of a planned change, derived from the
+same interpretation the text renderers use. They are human-oriented summaries,
+not one record per plan action (a table creation expands into several), and
+not a complete description of the change — the authoritative, complete
+description is `planned_sql_statements`:
 
 | Field       | Type  | Meaning                                                                            |
 | ----------- | ----- | ---------------------------------------------------------------------------------- |
@@ -84,12 +89,16 @@ When a table executed, `execution` is:
 It is `None` for a dry run and for any table skipped by an earlier-phase
 failure.
 
-## The SQL statements property
+## The planned SQL property
 
-Alongside the projection, `SyncReport.sql_statements` is a
+Alongside the projection, `SyncReport.planned_sql_statements` is a
 `dict[str, tuple[str, ...]]` mapping each table's dotted name to its compiled
 statements, omitting tables with no planned change. It is the same statement
-text that appears per table under `sql_statements` in `to_dict()`.
+text that appears per table under `planned_sql_statements` in `to_dict()`.
+
+Planned is not executed: a table blocked after planning (for example by a
+foreign-key dependency failure) still reports the SQL its plan compiles to.
+Whether the statements ran is answered by `execution` and `has_failures`.
 
 See [how to gate schema changes in CI](how-to-gate-changes-in-ci.md) for the
 projection in use.

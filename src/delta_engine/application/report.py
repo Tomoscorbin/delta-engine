@@ -47,8 +47,15 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 )
 
 
-def _action_records(plan: ActionPlan) -> list[dict[str, str]]:
-    """Interpret every plan action as flat records, in plan order."""
+def _change_records(plan: ActionPlan) -> list[dict[str, str]]:
+    """
+    Summarise the plan as flat change records, in plan order.
+
+    These share the interpretation vocabulary of the text renderers: they are
+    human-oriented summaries, not one record per action (a CreateTable expands
+    into several), and not a complete description of the change — the
+    authoritative description is the planned SQL.
+    """
     return [
         {
             "kind": entry.category.name.lower(),
@@ -78,15 +85,18 @@ class TableRunReport:
     """
     Per-table report with outcomes and a single phase-ordered failure stream.
 
-    Carries the exact SQL statements its plan compiles to (``sql_statements``),
-    populated on every run — dry or real — so a dry run can preview the DDL.
+    Carries the exact SQL statements its plan compiles to
+    (``planned_sql_statements``), populated on every run — dry or real — so a
+    dry run can preview the DDL. Planned is not executed: a table blocked after
+    planning (for example by a foreign-key failure) still reports the SQL its
+    plan compiles to.
     """
 
     qualified_name: QualifiedName
     desired: DesiredTable
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
-    sql_statements: tuple[str, ...] = ()
+    planned_sql_statements: tuple[str, ...] = ()
     failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary | None = None
 
@@ -124,8 +134,8 @@ class TableRunReport:
             "status": self.status.value,
             "has_changes": self.has_changes,
             "has_failures": self.has_failures,
-            "actions": _action_records(self.plan),
-            "sql_statements": list(self.sql_statements),
+            "changes": _change_records(self.plan),
+            "planned_sql_statements": list(self.planned_sql_statements),
             "failures": _failure_records(self.failures),
             "execution": execution_record,
         }
@@ -157,12 +167,12 @@ class SyncReport:
         return any(table_report.has_changes for table_report in self.table_reports)
 
     @property
-    def sql_statements(self) -> dict[str, tuple[str, ...]]:
+    def planned_sql_statements(self) -> dict[str, tuple[str, ...]]:
         """Dotted table name → the SQL its plan compiles to; no-op tables omitted."""
         return {
-            str(table_report.qualified_name): table_report.sql_statements
+            str(table_report.qualified_name): table_report.planned_sql_statements
             for table_report in self.table_reports
-            if table_report.sql_statements
+            if table_report.planned_sql_statements
         }
 
     @property
@@ -177,6 +187,7 @@ class SyncReport:
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
+            "schema_version": 1,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "dry_run": self.dry_run,

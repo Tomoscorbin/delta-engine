@@ -33,7 +33,7 @@ def _dummy_qualified_name() -> QualifiedName:
 def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
     """Compile then execute, the same two-stage flow the engine drives."""
     executor = DatabricksExecutor(spark)
-    return executor.execute(qualified_name, executor.compile(qualified_name, plan))
+    return executor.execute(executor.compile(qualified_name, plan))
 
 
 class _FakeSpark:
