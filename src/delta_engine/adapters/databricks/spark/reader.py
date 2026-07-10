@@ -13,10 +13,10 @@ from pyspark.sql.catalog import Column as SparkColumn
 from pyspark.sql.types import DataType as SparkType
 
 from delta_engine.adapters.databricks.spark.errors import summarize_exception
+from delta_engine.adapters.databricks.spark.types import domain_type_from_spark
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
-    domain_type_from_spark,
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
