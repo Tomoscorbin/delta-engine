@@ -1,3 +1,41 @@
+## v0.3.0 (2026-07-10)
+
+### BREAKING CHANGE
+
+- DeltaTable(metadata_only=True) is replaced by
+DeltaTable(scope="metadata"). The metadata_only parameter is removed.
+
+### Feat
+
+- **api**: declare sync scope with a scope parameter
+- declare foreign key pairings as an explicit mapping
+- declare primary keys at table level
+- canonicalize foreign key pair order in the domain
+- derive clustering from Column.cluster_key in DeltaTable
+- read observed clustering from DESCRIBE DETAIL clusteringColumns
+- diff clustering by set and emit AlterClustering
+- render clustering changes with an OPTIMIZE FULL hint
+- compile CLUSTER BY for create and in-place clustering
+- add AlterClustering action and SET_CLUSTERING phase
+- carry clustered_by on table snapshots with invariants
+- add CLUSTERING aspect and Column.cluster_key flag
+
+### Fix
+
+- reject a bare string primary_key at declaration
+- **notebooks**: migrate walkthrough to the scope parameter
+- update runtime-import CI smoke test to table-level primary_key
+- drop OPTIMIZE FULL hint from clustering removal; note clustering in metadata-only docs
+- reconcile clustering before dropping columns
+- **test**: make DESCRIBE DETAIL reader fakes support asDict()
+
+### Refactor
+
+- **api**: clean up scope resolution and structure-gated validation
+- wrap ForeignKey.columns in a read-only view; drop stale inference wording
+- drop redundant clustering guard and trim docstrings
+- declare clustering with table-level clustered_by, not a per-column flag
+
 ## v0.2.0 (2026-07-09)
 
 ### Feat
