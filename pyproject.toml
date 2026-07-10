@@ -225,3 +225,9 @@ exclude = ["^notebooks/"]
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 ignore_errors = true
+
+# CI type-checks in the dev environment, where the docs group (and therefore
+# sphinx) is not installed; docs/conf.py imports Sphinx for its hook signatures.
+[[tool.mypy.overrides]]
+module = ["sphinx.*"]
+ignore_missing_imports = true
