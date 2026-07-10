@@ -198,10 +198,8 @@ class DesiredTable(TableSnapshot):
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
                     f" '{foreign_key.constraint_name}': local columns {collided}"
-                    f" and {foreign_key.local_columns}. Generated names join"
-                    " local columns with underscores, so underscore-adjacent"
-                    " tuples can collide; rename a local column so the names"
-                    " differ."
+                    f" and {foreign_key.local_columns}. Every foreign key on a"
+                    " table must have a distinct constraint name."
                 )
             local_columns_by_constraint_name[foreign_key.constraint_name] = (
                 foreign_key.local_columns
