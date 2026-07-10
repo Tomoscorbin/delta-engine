@@ -73,6 +73,15 @@ class MyExecutor:
 
 `execute` is also **total**. Stop at the first failure and return the summary — the engine records partial results and moves on to the next table.
 
+`PlanExecutor` also requires a `compile` method that returns the exact statements `execute` would run, in plan order, without touching the backend:
+
+```python
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(self._render(action) for action in plan.actions)
+```
+
+The engine calls `compile` during planning on every run — dry or real — and records the statements on the table's report, so a dry run can preview the DDL. Unlike `execute`, `compile` is **not** total: compiling a validated plan is a pure, local operation that cannot fail against a backend, so it may raise on a genuine programming error rather than swallowing it.
+
 ## Wire the engine
 
 Pass your implementations to `Engine`, then sync your declared tables through it. `sync` is variadic — pass one or more `DeltaTable` definitions directly:

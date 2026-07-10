@@ -50,7 +50,9 @@ for table_report in report:
             print("\n".join(failure.format_lines()))
 ```
 
-`table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → validation → foreign key → execution). Each `Failure` renders itself via `format_lines()`.
+`table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → validation → foreign key → execution). Each `Failure` renders itself via `format_lines()`. The concrete failure classes — `ReadFailure`, `ValidationFailure`, `ForeignKeyFailure`, and `ExecutionFailure` — are importable from `delta_engine`, so a caller can branch on failure type with `isinstance` rather than on `status` alone.
+
+For a machine-readable view of the whole run — each table's status, planned actions, SQL, and failures as plain JSON — call `report.to_dict()`; the `failures` list in each table record carries the `phase`, `type`, and `message` of every failure. See [the run report schema](reference-run-report.md).
 
 On Unity Catalog, constraint and tag metadata is read from `information_schema`.
 The reader probes once per catalog whether `information_schema` exists: where it
