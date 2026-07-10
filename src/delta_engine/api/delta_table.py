@@ -32,18 +32,6 @@ from delta_engine.domain.model import (
     Variant,
 )
 
-
-class _SelfReference:
-    """Sentinel marking a foreign key that references its own table."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "Self"
-
-
-Self: Final = _SelfReference()
-
 METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
     {
         TableAspect.TABLE_COMMENT,
@@ -88,6 +76,18 @@ _TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map,
 # columns are separate securables).
 _MAX_TAGS_PER_SECURABLE: Final[int] = 50
 _MAX_TAG_VALUE_LENGTH: Final[int] = 1000
+
+
+class _SelfReference:
+    """Sentinel marking a foreign key that references its own table."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "Self"
+
+
+Self: Final = _SelfReference()
 
 
 def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
