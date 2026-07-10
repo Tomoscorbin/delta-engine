@@ -7,6 +7,7 @@ from delta_engine.domain.model import (
     Column,
     DesiredTable,
     Integer,
+    Long,
     QualifiedName,
     String,
     Struct,
@@ -20,6 +21,7 @@ from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -128,6 +130,14 @@ def test_compile_backticks_table_and_column_identifiers():
     assert compiled.statement == (
         "ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT"
     )
+
+
+def test_alter_column_type_compiles_to_alter_column_type_statement():
+    # Given a validated widening Integer → Long
+    action = AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer())
+
+    # Then only the desired type reaches the SQL
+    assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` TYPE BIGINT"
 
 
 def test_add_column_with_comment_includes_comment_clause():

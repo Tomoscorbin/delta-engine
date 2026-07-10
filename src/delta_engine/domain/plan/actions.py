@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DataType, DesiredTable, QualifiedName
 
 
 class ActionPhase(IntEnum):
@@ -29,6 +29,7 @@ class ActionPhase(IntEnum):
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
+    ALTER_COLUMN_TYPE = auto()
     SET_CLUSTERING = auto()
     DROP_COLUMN = auto()
     SET_COLUMN_TAG = auto()
@@ -320,6 +321,29 @@ class AlterClustering(Action):
     @property
     def subject(self) -> str:
         return ""
+
+
+@dataclass(frozen=True, slots=True)
+class AlterColumnType(Action):
+    """
+    Widen a column's data type in place.
+
+    Emitted for every type change; whether the change is a permitted widening
+    is validation's judgment, not this action's. ``observed_type`` records the
+    catalog type when the plan was built. It does not affect the compiled SQL;
+    it exists so reports can render was/now — the same pattern as
+    :class:`SetProperty`'s ``observed_value``.
+    """
+
+    column_name: str
+    data_type: DataType
+    observed_type: DataType
+
+    phase: ClassVar[ActionPhase] = ActionPhase.ALTER_COLUMN_TYPE
+
+    @property
+    def subject(self) -> str:
+        return self.column_name
 
 
 def _execution_order(action: Action) -> tuple[int, str]:
