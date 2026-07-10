@@ -16,7 +16,7 @@ from pyspark.sql import Row
 from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
-from delta_engine.adapters.databricks.reader import (
+from delta_engine.adapters.databricks.spark.reader import (
     DatabricksReader,
     _clustering_columns_from_row,
     _column_tags_from_rows,

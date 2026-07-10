@@ -2,7 +2,7 @@ from hypothesis import given, strategies as st
 import pyspark.sql.types as T
 import pytest
 
-from delta_engine.adapters.databricks.executor import (
+from delta_engine.adapters.databricks.spark.executor import (
     DatabricksExecutor,
     _execute_statements,
     _sql_preview,

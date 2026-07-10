@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from py4j.protocol import Py4JJavaError
 
-from delta_engine.adapters.databricks.errors import _exception_type_name, summarize_exception
+from delta_engine.adapters.databricks.spark.errors import _exception_type_name, summarize_exception
 
 
 def test_summarize_reports_python_class_and_message_for_plain_exception():

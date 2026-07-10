@@ -21,7 +21,7 @@ __all__ = ["build_engine", "configure_logging"]
 
 def build_engine(spark: SparkSession) -> Engine:
     """Create an engine configured for Databricks."""
-    from delta_engine.adapters.databricks.factory import build_engine as _build_engine
+    from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
 
     return _build_engine(spark)
 

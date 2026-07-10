@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.adapters.databricks.reader import DatabricksReader
+from delta_engine.adapters.databricks.spark.reader import DatabricksReader
 
 
 @pytest.fixture(autouse=True)

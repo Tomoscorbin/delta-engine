@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from pyspark.errors.exceptions.base import AnalysisException
 import pytest
 
-from delta_engine.adapters.databricks.reader import DatabricksReader
+from delta_engine.adapters.databricks.spark.reader import DatabricksReader
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
