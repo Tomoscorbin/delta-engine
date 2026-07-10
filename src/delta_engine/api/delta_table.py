@@ -32,7 +32,6 @@ from delta_engine.domain.model import (
     Variant,
 )
 
-
 METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
     {
         TableAspect.TABLE_COMMENT,
