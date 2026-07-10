@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 from delta_engine.application.failures import (
     ExecutionFailure,
@@ -344,3 +345,83 @@ def test_table_run_report_carries_its_desired_definition():
     assert report.status is TableRunStatus.SUCCESS
     assert report.failures == ()
     assert report.plan == ActionPlan()
+
+
+def _a_changed_table_report():
+    return TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
+    )
+
+
+def test_table_to_dict_states_the_planned_change():
+    payload = _a_changed_table_report().to_dict()
+
+    assert payload["name"] == "cat.schema.orders"
+    assert payload["status"] == "SUCCESS"
+    assert payload["has_changes"] is True
+    assert payload["has_failures"] is False
+    assert payload["actions"] == [
+        {"kind": "comments", "operation": "change", "subject": "table: 'hello'", "detail": ""}
+    ]
+    assert payload["sql_statements"] == ["COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"]
+    assert payload["failures"] == []
+    assert payload["execution"] is None
+
+
+def test_table_to_dict_reports_failures_with_phase_and_type():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    payload = report.to_dict()
+
+    assert payload["status"] == "VALIDATION_FAILED"
+    assert payload["failures"] == [
+        {
+            "phase": "VALIDATION",
+            "type": "ValidationFailure",
+            "message": "Validation failed: SomeRule - unsafe",
+        }
+    ]
+
+
+def test_table_to_dict_reports_execution_counts_when_executed():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        execution=ExecutionSummary((_ok_exec(0),)),
+    )
+    assert report.to_dict()["execution"] == {"applied": 1, "total": 1}
+
+
+def test_sync_report_to_dict_is_json_serialisable_and_complete():
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
+    )
+    payload = report.to_dict()
+
+    assert payload["started_at"] == _t0().isoformat()
+    assert payload["ended_at"] == _t1().isoformat()
+    assert payload["dry_run"] is True
+    assert payload["has_changes"] is True
+    assert payload["has_failures"] is False
+    assert [t["name"] for t in payload["tables"]] == ["cat.schema.orders"]
+    json.dumps(payload)  # plain types only — must not raise
+
+
+def test_to_dict_is_deterministic():
+    report = SyncReport(
+        started_at=_t0(), ended_at=_t1(), table_reports=(_a_changed_table_report(),)
+    )
+    assert report.to_dict() == report.to_dict()

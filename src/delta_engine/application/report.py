@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Final
+from typing import Any, Final
 
+from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
@@ -44,6 +45,32 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
         FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
     }
 )
+
+
+def _action_records(plan: ActionPlan) -> list[dict[str, str]]:
+    """Interpret every plan action as flat records, in plan order."""
+    return [
+        {
+            "kind": entry.category.name.lower(),
+            "operation": entry.operation,
+            "subject": entry.cells[0],
+            "detail": " ".join(entry.cells[1:]),
+        }
+        for action in plan
+        for entry in action_entries(action)
+    ]
+
+
+def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
+    """Project failures as flat records, in phase order as carried."""
+    return [
+        {
+            "phase": failure.phase.name,
+            "type": type(failure).__name__,
+            "message": " ".join(line.strip() for line in failure.format_lines()),
+        }
+        for failure in failures
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +106,29 @@ class TableRunReport:
     def has_changes(self) -> bool:
         """True when the plan holds actions — drift was found and validated."""
         return bool(self.plan)
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Project this table's run as plain, JSON-serialisable data.
+
+        The field names are a public stability contract (see the run report
+        reference doc); changing them is a breaking change.
+        """
+        if self.execution is None:
+            execution_record: dict[str, int] | None = None
+        else:
+            applied = len(self.execution.results) - self.execution.failed_count
+            execution_record = {"applied": applied, "total": len(self.plan)}
+        return {
+            "name": str(self.qualified_name),
+            "status": self.status.value,
+            "has_changes": self.has_changes,
+            "has_failures": self.has_failures,
+            "actions": _action_records(self.plan),
+            "sql_statements": list(self.sql_statements),
+            "failures": _failure_records(self.failures),
+            "execution": execution_record,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +172,17 @@ class SyncReport:
             table_report.qualified_name: table_report.failures
             for table_report in self.table_reports
             if table_report.has_failures
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Project the whole run as plain, JSON-serialisable data; tables in run order."""
+        return {
+            "started_at": self.started_at.isoformat(),
+            "ended_at": self.ended_at.isoformat(),
+            "dry_run": self.dry_run,
+            "has_changes": self.has_changes,
+            "has_failures": self.has_failures,
+            "tables": [table_report.to_dict() for table_report in self.table_reports],
         }
 
     def __iter__(self) -> Iterator[TableRunReport]:
