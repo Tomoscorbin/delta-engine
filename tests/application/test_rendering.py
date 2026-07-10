@@ -3,6 +3,11 @@ from datetime import datetime
 
 import pytest
 
+from delta_engine.application.diff_entries import (
+    DiffCategory,
+    DiffEntry,
+    action_entries,
+)
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
 from delta_engine.application.ports import (
     ExecutionFailed,
@@ -12,9 +17,6 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.rendering import (
-    DiffCategory,
-    DiffEntry,
-    _action_entries,
     render_diff,
     render_diff_block,
     render_grid,
@@ -188,7 +190,7 @@ from delta_engine.domain.plan.actions import (
 )
 def test_action_entries_render_expected(action, expected):
     # Then each action lowers to its category-tagged diff entries
-    assert _action_entries(action) == expected
+    assert action_entries(action) == expected
 
 
 def test_create_table_entries_list_columns_with_types_and_primary_key():
@@ -205,7 +207,7 @@ def test_create_table_entries_list_columns_with_types_and_primary_key():
     )
 
     # Then it expands to one columns entry per column (with types) plus the primary key
-    assert _action_entries(action) == (
+    assert action_entries(action) == (
         DiffEntry(DiffCategory.COLUMNS, "+", ("id", "Integer", "NOT NULL")),
         DiffEntry(DiffCategory.COLUMNS, "+", ("name", "String")),
         DiffEntry(DiffCategory.KEYS, "+", ("primary key (id)",)),
@@ -222,7 +224,7 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
         )
     )
     # When rendering its diff entries
-    entries = _action_entries(action)
+    entries = action_entries(action)
     # Then a clustering line is present with no OPTIMIZE hint (new table, no data)
     clustering = [e for e in entries if e.category is DiffCategory.CLUSTERING]
     assert clustering == [DiffEntry(DiffCategory.CLUSTERING, "+", ("clustering (region)",))]
@@ -242,9 +244,9 @@ def test_every_action_type_has_registered_diff_entries():
     ]
 
     # Then each dispatches to a real arm, not the NotImplementedError fallback
-    fallback = _action_entries.dispatch(object)
+    fallback = action_entries.dispatch(object)
     for action_type in concrete_action_types:
-        assert _action_entries.dispatch(action_type) is not fallback, (
+        assert action_entries.dispatch(action_type) is not fallback, (
             f"No diff entries registered for {action_type.__name__}"
         )
 
