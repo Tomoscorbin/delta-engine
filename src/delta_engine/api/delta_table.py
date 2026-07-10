@@ -149,6 +149,49 @@ def _validate_delta_partitioning(
         )
 
 
+def _validate_column_names(
+    columns: tuple[Column, ...],
+    properties: Mapping[str, str | None],
+    managed_aspects: frozenset[TableAspect],
+) -> None:
+    """
+    Reject column names the declared properties make invalid on Delta.
+
+    Two naming rules depend on properties: characters such as spaces are only
+    permitted under column mapping, and change data feed reserves its output
+    column names. Both bind only when the declaration manages column
+    structure — a restricted scope mirrors columns the live table already
+    accepted, so it must be able to declare names this engine would refuse
+    to create.
+    """
+    if TableAspect.COLUMN_STRUCTURE not in managed_aspects:
+        return
+
+    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+        offending = [
+            declared_name
+            for column in columns
+            for declared_name in _column_declared_names(column)
+            if set(declared_name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+        ]
+        if offending:
+            raise ValueError(
+                f"Column or struct field names {offending} contain characters Delta only"
+                " permits with column mapping. Declare"
+                f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
+                " or rename the columns."
+            )
+
+    if properties.get(Property.CHANGE_DATA_FEED) == "true":
+        reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
+        if reserved:
+            raise ValueError(
+                f"Column names {reserved} are reserved by change data feed."
+                " Rename them or do not enable"
+                f" {Property.CHANGE_DATA_FEED}."
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class ForeignKey:
     """
@@ -313,14 +356,17 @@ class DeltaTable:
                 — for tables owned elsewhere (e.g. by a streaming pipeline)
                 whose Unity Catalog tags this engine should still govern. A
                 restricted scope still declares the full table shape; aspects
-                outside the scope are never changed, and the live table must
-                match them exactly (drift fails validation).
+                outside the scope are never changed, and drift on them fails
+                validation. Properties are the exception: a declaration that
+                does not manage properties never compares them at all.
 
         """
-        managed_aspects = _ASPECTS_BY_SCOPE.get(scope)
-        if managed_aspects is None:
+        # The Literal type catches bad scopes at type-check time; this guard
+        # covers untyped callers.
+        if scope not in _ASPECTS_BY_SCOPE:
             expected = ", ".join(repr(known_scope) for known_scope in _ASPECTS_BY_SCOPE)
             raise ValueError(f"Unknown scope {scope!r}; expected one of: {expected}")
+        managed_aspects = _ASPECTS_BY_SCOPE[scope]
 
         user_properties = dict(properties or {})
 
@@ -343,46 +389,7 @@ class DeltaTable:
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)
         _validate_delta_partitioning(columns, partitioned_by)
-
-        # Only the column-structure guardrails below are gated on the managed
-        # aspects. A restricted scope mirrors the live table's existing
-        # columns, so it must accept names this engine would otherwise reject
-        # when it owns column structure (column-mapping characters,
-        # change-data-feed-reserved names). The partition, property, and tag
-        # validation around them stays unconditional: those check the
-        # declaration itself, not a structural change this declaration is
-        # about to apply.
-        if (
-            TableAspect.COLUMN_STRUCTURE in managed_aspects
-            and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name"
-        ):
-            offending = [
-                declared_name
-                for column in columns
-                for declared_name in _column_declared_names(column)
-                if set(declared_name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
-            ]
-            if offending:
-                raise ValueError(
-                    f"Column or struct field names {offending} contain characters Delta only"
-                    " permits with column mapping. Declare"
-                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
-                    " or rename the columns."
-                )
-
-        if (
-            TableAspect.COLUMN_STRUCTURE in managed_aspects
-            and user_properties.get(Property.CHANGE_DATA_FEED) == "true"
-        ):
-            reserved = [
-                column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES
-            ]
-            if reserved:
-                raise ValueError(
-                    f"Column names {reserved} are reserved by change data feed."
-                    " Rename them or do not enable"
-                    f" {Property.CHANGE_DATA_FEED}."
-                )
+        _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})
         _validate_tags(f"table '{name}'", table_tags)

@@ -49,9 +49,10 @@ metadata is applied.
 - **Requires** the live schema to match the declaration exactly. Any unmanaged
   aspect (column structure or partitioning) that has drifted fails the sync at
   validation (`UnmanagedAspectDrift`) before any SQL executes. Catalog
-  properties are never compared for a metadata-only table — it declares none,
-  and undeclared properties (for example those written by a previous fully
-  managed sync) are not drift.
+  properties are the exception: a declaration that does not manage properties
+  makes no property assertion at all, so they are never compared — declared
+  properties are carried but ignored, and properties on the live table (for
+  example those written by a previous fully managed sync) are not drift.
 - **Cannot create** a missing table. If the table does not exist, the sync
   fails at validation (`MissingTableUnmanaged`) — a metadata-only declaration
   does not manage column structure, so it has no shape to create the table

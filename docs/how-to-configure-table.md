@@ -249,7 +249,9 @@ events = DeltaTable(
 
 The live table must already exist. If a non-tag aspect drifts from the
 declaration, validation fails before any tag SQL runs; update the declaration
-to match the live table or use the full scope.
+to match the live table or use the full scope. Properties are the exception:
+a restricted scope never compares them, so live table properties cannot fail
+the sync.
 
 ### Requirements and limits
 

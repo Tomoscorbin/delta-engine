@@ -26,8 +26,9 @@ Selects what the declaration manages. `"full"` manages the whole table.
 `"metadata"` restricts the sync to catalog metadata: comments, tags, and
 primary/foreign key constraints. `"tags"` restricts it to table and column
 tags. A restricted scope still declares the full table shape; aspects outside
-the scope are never changed, and the live table must match them exactly — any
-unmanaged drift causes validation to fail.
+the scope are never changed, and any unmanaged drift causes validation to
+fail. Properties are the exception: a declaration that does not manage
+properties never compares them at all.
 
 ### Column
 
