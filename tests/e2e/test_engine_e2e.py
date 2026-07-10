@@ -9,7 +9,7 @@ from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.report import TableRunStatus
-from delta_engine.schema import Column, Date, DeltaTable, Integer, String
+from delta_engine.schema import Column, Date, DeltaTable, Integer, Long, String
 from tests.config import TEST_CATALOG
 
 pytestmark = pytest.mark.local_e2e
@@ -551,3 +551,28 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     # And an identical re-sync is a true no-op (idempotent; order-insensitive set diff)
     third = engine.sync(reclustered)
     assert len(third.table_reports[0].plan) == 0
+
+
+def test_engine_sync_widens_column_type_with_type_widening_declared(spark, temp_schema):
+    # Given an existing Delta table with an INT column
+    table_name = f"e2e_widen_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(f"CREATE TABLE {fq} (id INT) USING DELTA")
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When we sync a declaration widening id to Long, enabling widening in the same sync
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(Column("id", Long()),),
+            properties={"delta.enableTypeWidening": "true"},
+        )
+    )
+
+    # Then the sync succeeds and the column is widened in place
+    assert report.any_failures is False
+    fields = {f.name: f for f in spark.table(fq).schema.fields}
+    assert isinstance(fields["id"].dataType, T.LongType)
