@@ -58,8 +58,11 @@ operation.
 - A validation rule that permits a `ColumnDataTypeChanged` only when the
   transition is in the widening matrix **and** the declaration states the
   property `true`; everything else keeps the current failure.
-- Iceberg-compatible matrix only: byte→short→int→bigint, float→double,
-  decimal precision growth, date→timestamp_ntz.
+- Full Delta widening matrix (decided during execution — the engine is
+  Databricks-only, so the Iceberg-compatible subset was needless caution):
+  integer widenings, integer→double/decimal, float→double, decimal digit
+  growth, date→timestamp_ntz. UniForm-Iceberg tables reject the non-Iceberg
+  entries at execution; documented, not modeled.
 - Document the runtime minimum; do not gate on it (established policy).
 
 ### 2. Column renames: `renamed_from` hint, with an interim guard

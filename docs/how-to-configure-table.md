@@ -164,22 +164,35 @@ type in place:
 properties={Property.TYPE_WIDENING: "true"}
 ```
 
-Only the Iceberg-compatible widenings are supported:
+The widenings Delta can apply in place are supported:
 
-| From            | To                                           |
-| --------------- | -------------------------------------------- |
-| `Byte`          | `Short`, `Integer`, `Long`                   |
-| `Short`         | `Integer`, `Long`                            |
-| `Integer`       | `Long`                                       |
-| `Float`         | `Double`                                     |
-| `Date`          | `TimestampNtz`                               |
-| `Decimal(p, s)` | `Decimal(p′, s)` with greater precision `p′` |
+| From            | To                                                    |
+| --------------- | ----------------------------------------------------- |
+| `Byte`          | `Short`, `Integer`, `Long`, `Double`, `Decimal`       |
+| `Short`         | `Integer`, `Long`, `Double`, `Decimal`                |
+| `Integer`       | `Long`, `Double`, `Decimal`                           |
+| `Long`          | `Decimal`                                             |
+| `Float`         | `Double`                                              |
+| `Decimal(p, s)` | `Decimal(p′, s′)` with `s′ ≥ s` and `p′ − s′ ≥ p − s` |
+| `Date`          | `TimestampNtz`                                        |
+
+A `Decimal` target must keep room for every source value: at least ten
+integer digits (`p − s ≥ 10`) when widening `Byte`, `Short`, or `Integer`,
+and at least twenty when widening `Long`. The same principle governs
+decimal-to-decimal changes — scale may grow only when precision grows with
+it, so the integer digits never shrink.
 
 A widening without the property declared fails validation
 (`TypeWideningRequiredForTypeChange`) naming the property; declaring it in
 the same sync as the widen is safe — properties are set before column types
 change. Any other type change fails validation
 (`NonWideningColumnTypeChange`); recreate the table out of band to make it.
+
+Tables using UniForm with Iceberg compatibility reject the widenings Iceberg
+cannot read — integer types to `Decimal` or `Double`, decimal scale growth,
+and `Date` to `TimestampNtz`. The engine does not model UniForm, so on such
+a table these widenings fail at execution with the original Databricks
+error.
 
 Type widening requires Databricks Runtime 15.4 LTS or later; delta-engine
 does not preflight runtime versions, so declaring it on an older runtime

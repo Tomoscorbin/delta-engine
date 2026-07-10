@@ -10,6 +10,7 @@ from delta_engine.domain.model import (
     ALL_ASPECTS,
     Byte,
     Column,
+    DataType,
     Date,
     Decimal,
     DesiredTable,
@@ -430,47 +431,80 @@ def test_rejects_narrowing_type_change():
     assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
 
 
-def test_decimal_precision_growth_is_a_widening_but_scale_or_precision_shrink_is_not():
-    # Given decimal drift against a declaration with type widening enabled
-    def _result(desired_type: Decimal, observed_type: Decimal) -> ValidationResult:
-        desired = _desired_table(
-            columns=(Column("amount", desired_type),),
-            properties={"delta.enableTypeWidening": "true"},
-        )
-        observed = _observed_table(columns=(Column("amount", observed_type),))
-        return _validate(desired, observed)
+def _widening_result(desired_type: DataType, observed_type: DataType) -> ValidationResult:
+    """Validate a single-column type change with type widening declared."""
+    desired = _desired_table(
+        columns=(Column("c", desired_type),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("c", observed_type),))
+    return _validate(desired, observed)
 
+
+def test_decimal_widening_keeps_integer_digits_and_never_shrinks_scale():
     # Then precision growth at unchanged scale passes
-    assert _result(Decimal(12, 2), Decimal(10, 2)).failed is False
-    # And a scale change is blocked, even with precision growth
-    assert _result(Decimal(12, 3), Decimal(10, 2)).failures[0].rule_name == (
+    assert _widening_result(Decimal(12, 2), Decimal(10, 2)).failed is False
+    # And scale growth passes when precision grows with it (integer digits kept)
+    assert _widening_result(Decimal(12, 3), Decimal(10, 1)).failed is False
+    # And scale growth that eats into integer digits is blocked
+    assert _widening_result(Decimal(10, 3), Decimal(10, 2)).failures[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
     # And a precision shrink is blocked
-    assert _result(Decimal(8, 2), Decimal(10, 2)).failures[0].rule_name == (
+    assert _widening_result(Decimal(8, 2), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    # And a scale shrink is blocked even though integer digits grow
+    assert _widening_result(Decimal(12, 1), Decimal(10, 2)).failures[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
 
 
-def test_byte_short_float_and_date_widenings_are_permitted():
-    # Given each remaining matrix entry against a declaration with widening enabled
+def test_integer_to_decimal_widening_requires_enough_integer_digits():
+    # Given Databricks' minimums: DECIMAL(10,0) for Byte/Short/Integer, DECIMAL(20,0) for Long
+    assert _widening_result(Decimal(10, 0), Integer()).failed is False
+    assert _widening_result(Decimal(12, 2), Byte()).failed is False
+    assert _widening_result(Decimal(20, 0), Long()).failed is False
+
+    # Then a decimal without room for every source value is blocked
+    assert _widening_result(Decimal(9, 0), Integer()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    assert _widening_result(Decimal(11, 2), Short()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    assert _widening_result(Decimal(19, 0), Long()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_long_cannot_widen_to_double():
+    # Given Long → Double — absent from the Delta matrix (Double cannot hold every Long)
+    assert _widening_result(Double(), Long()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_every_widening_matrix_entry_is_permitted():
+    # Given each matrix entry against a declaration with widening enabled
     cases = (
         (Short(), Byte()),
         (Integer(), Byte()),
         (Long(), Byte()),
+        (Double(), Byte()),
         (Integer(), Short()),
         (Long(), Short()),
+        (Double(), Short()),
+        (Long(), Integer()),
+        (Double(), Integer()),
         (Double(), Float()),
         (TimestampNtz(), Date()),
     )
     for desired_type, observed_type in cases:
-        desired = _desired_table(
-            columns=(Column("c", desired_type),),
-            properties={"delta.enableTypeWidening": "true"},
+        assert _widening_result(desired_type, observed_type).failed is False, (
+            observed_type,
+            desired_type,
         )
-        observed = _observed_table(columns=(Column("c", observed_type),))
-
-        assert _validate(desired, observed).failed is False, (observed_type, desired_type)
 
 
 def test_rejects_partitioning_change():
