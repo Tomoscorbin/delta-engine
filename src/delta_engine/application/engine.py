@@ -231,8 +231,7 @@ class Engine:
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
-            if run.plan:
-                run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
+            run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
 
