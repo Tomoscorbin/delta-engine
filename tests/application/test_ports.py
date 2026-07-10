@@ -24,15 +24,12 @@ def _an_observed_table(partitioned_by=()):
     )
 
 
-def _ok_exec(idx=0, action="AddColumn", preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(action=action, action_index=idx, statement_preview=preview)
+def _ok_exec(idx=0, preview="ALTER TABLE ..."):
+    return ExecutionSucceeded(action_index=idx, statement_preview=preview)
 
 
-def _failed_exec(
-    idx=0, action="AddColumn", preview="ALTER TABLE ...", exc="ValueError", msg="boom"
-):
+def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
-        action=action,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
@@ -107,9 +104,8 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
 
 def test_execution_outcome_variants_carry_the_right_payload():
     # Given the two execution outcomes
-    succeeded = ExecutionSucceeded(action="AddColumn", action_index=0, statement_preview="SQL")
+    succeeded = ExecutionSucceeded(action_index=0, statement_preview="SQL")
     failed = ExecutionFailed(
-        action="AddColumn",
         failure=ExecutionFailure(
             action_index=1, exception_type="E", message="m", statement_preview="SQL"
         ),
@@ -123,7 +119,6 @@ def test_execution_outcome_variants_carry_the_right_payload():
 def test_execution_failed_carries_index_only_on_its_failure_detail():
     # Given a failed action
     failed = ExecutionFailed(
-        action="AddColumn",
         failure=ExecutionFailure(
             action_index=3, exception_type="E", message="m", statement_preview="SQL"
         ),
@@ -140,13 +135,11 @@ def test_execution_failed_carries_index_only_on_its_failure_detail():
 _EXECUTION_RESULT = st.one_of(
     st.builds(
         ExecutionSucceeded,
-        action=st.just("AddColumn"),
         action_index=st.integers(min_value=0, max_value=100),
         statement_preview=st.just("ALTER TABLE ..."),
     ),
     st.builds(
         ExecutionFailed,
-        action=st.just("AddColumn"),
         failure=st.builds(
             ExecutionFailure,
             action_index=st.integers(min_value=0, max_value=100),

@@ -114,7 +114,6 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
 def test_message_renders_execution_failure_detail_with_sql_preview():
     # Given a table whose execution phase failed on one action
     failed_result = ExecutionFailed(
-        action="AddColumn",
         failure=ExecutionFailure(
             action_index=2,
             exception_type="SparkException",

@@ -226,7 +226,6 @@ def _existing_tag_drifted_table(fqn: str) -> TablePresent:
 
 def _ok_exec(action_index: int = 0) -> ExecutionResult:
     return ExecutionSucceeded(
-        action="X",
         action_index=action_index,
         statement_preview="-- ok",
     )
@@ -239,7 +238,6 @@ def _failed_exec(
     message: str = "boom",
 ) -> ExecutionResult:
     return ExecutionFailed(
-        action="X",
         failure=ExecutionFailure(
             action_index=action_index,
             exception_type=exception_type,
@@ -276,15 +274,18 @@ class _RecordingExecutor:
         self,
         per_call_results: list[tuple[ExecutionResult, ...]] | None = None,
     ) -> None:
-        self.calls: list[tuple[QualifiedName, ActionPlan]] = []
+        self.calls: list[tuple[QualifiedName, tuple[str, ...]]] = []
         self._per_call_results = None if per_call_results is None else list(per_call_results)
+
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
 
     def execute(
         self,
         qualified_name: QualifiedName,
-        plan: ActionPlan,
+        statements: tuple[str, ...],
     ) -> ExecutionSummary:
-        self.calls.append((qualified_name, plan))
+        self.calls.append((qualified_name, statements))
 
         if self._per_call_results is None:
             return ExecutionSummary((_ok_exec(),))
@@ -293,9 +294,6 @@ class _RecordingExecutor:
             raise AssertionError(f"Unexpected execution call for {qualified_name}")
 
         return ExecutionSummary(self._per_call_results.pop(0))
-
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
 
     @property
     def executed_names(self) -> list[str]:
@@ -505,7 +503,7 @@ def test_read_phase_attempts_all_tables_before_any_execution():
         def execute(
             self,
             qualified_name: QualifiedName,
-            plan: ActionPlan,
+            statements: tuple[str, ...],
         ) -> ExecutionSummary:
             events.append(f"execute:{qualified_name}")
             return ExecutionSummary((_ok_exec(0),))

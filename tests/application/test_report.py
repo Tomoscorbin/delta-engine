@@ -52,15 +52,12 @@ def _t1():
     return datetime(2025, 10, 2, 12, 5, 0)
 
 
-def _ok_exec(idx=0, action="AddColumn", preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(action=action, action_index=idx, statement_preview=preview)
+def _ok_exec(idx=0, preview="ALTER TABLE ..."):
+    return ExecutionSucceeded(action_index=idx, statement_preview=preview)
 
 
-def _failed_exec(
-    idx=0, action="AddColumn", preview="ALTER TABLE ...", exc="ValueError", msg="boom"
-):
+def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
-        action=action,
         failure=ExecutionFailure(
             action_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),

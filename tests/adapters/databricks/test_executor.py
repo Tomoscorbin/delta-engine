@@ -4,10 +4,10 @@ import pytest
 
 from delta_engine.adapters.databricks.executor import (
     DatabricksExecutor,
-    _execute_compiled,
+    _execute_statements,
     _sql_preview,
 )
-from delta_engine.adapters.databricks.sql import CompiledAction, compile_plan
+from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
@@ -28,6 +28,12 @@ from tests.config import TEST_CATALOG
 
 def _dummy_qualified_name() -> QualifiedName:
     return QualifiedName("cat", "sch", "tbl")
+
+
+def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
+    """Compile then execute, the same two-stage flow the engine drives."""
+    executor = DatabricksExecutor(spark)
+    return executor.execute(qualified_name, executor.compile(qualified_name, plan))
 
 
 class _FakeSpark:
@@ -79,8 +85,8 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
         )
     )
 
-    # When executing the plan
-    summary = DatabricksExecutor(spark).execute(_dummy_qualified_name(), plan)
+    # When compiling and executing the plan
+    summary = _apply(spark, _dummy_qualified_name(), plan)
 
     # Then the compiled SQL is sent to Spark in action order
     assert spark.executed == [
@@ -94,19 +100,15 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
 
 
 def test_execute_maps_success_and_failure_without_leaking_backend_exception():
-    # Given compiled actions where the second statement fails
-    compiled = (
-        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
-        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
-    )
+    # Given statements where the second one fails
+    statements = ("SELECT 1", "SELECT * FROM __nope__")
 
     # When executing them
-    summary = _execute_compiled(_FakeSpark(), compiled)
+    summary = _execute_statements(_FakeSpark(), statements)
 
     # Then success and failure are mapped to execution results
     results = summary.results
 
-    assert [result.action for result in results] == ["AddColumn", "DropColumn"]
     assert isinstance(results[0], ExecutionSucceeded)
     assert isinstance(results[1], ExecutionFailed)
     assert results[0].action_index == 0
@@ -114,17 +116,16 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
 
 
 def test_execute_failure_records_exception_details_and_sql_preview():
-    # Given a failing compiled action
-    compiled = (CompiledAction(DropColumn("legacy"), "SELECT * FROM __nope__"),)
+    # Given a failing statement
+    statements = ("SELECT * FROM __nope__",)
 
     # When executing it
-    summary = _execute_compiled(_FakeSpark(), compiled)
+    summary = _execute_statements(_FakeSpark(), statements)
 
     # Then useful debugging details are captured
     [result] = summary.results
 
     assert isinstance(result, ExecutionFailed)
-    assert result.action == "DropColumn"
     assert result.failure.action_index == 0
     assert result.failure.exception_type == "Exception"
     assert "boom: table not found" in result.failure.message
@@ -132,16 +133,12 @@ def test_execute_failure_records_exception_details_and_sql_preview():
 
 
 def test_execute_stops_at_first_failure_to_avoid_half_migrating():
-    # Given three compiled actions whose middle statement fails
+    # Given three statements whose middle one fails
     spark = _FakeSpark()
-    compiled = (
-        CompiledAction(AddColumn(Column("a", Integer())), "SELECT 1"),
-        CompiledAction(DropColumn("b"), "SELECT * FROM __nope__"),
-        CompiledAction(AddColumn(Column("c", Integer())), "SELECT 2"),
-    )
+    statements = ("SELECT 1", "SELECT * FROM __nope__", "SELECT 2")
 
     # When executing them
-    summary = _execute_compiled(spark, compiled)
+    summary = _execute_statements(spark, statements)
 
     # Then the third statement is never attempted
     assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
@@ -160,8 +157,8 @@ def test_execute_returns_empty_summary_for_empty_plan():
     plan = ActionPlan(actions=())
     spark = _FakeSpark()
 
-    # When executing the plan
-    summary = DatabricksExecutor(spark).execute(_dummy_qualified_name(), plan)
+    # When compiling and executing the plan
+    summary = _apply(spark, _dummy_qualified_name(), plan)
 
     # Then nothing ran and the summary is non-failing
     assert spark.executed == []
@@ -229,7 +226,7 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
     plan = ActionPlan(actions=(CreateTable(table=desired),))
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(desired.qualified_name, plan)
+    summary = _apply(spark, desired.qualified_name, plan)
 
     # Then the table exists and its schema matches exactly
     assert summary.failed is False
@@ -264,7 +261,7 @@ def test_add_column_action_adds_column_to_existing_table(spark, make_temp_table)
     )
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the new column exists with the expected type
     assert summary.failed is False
@@ -283,7 +280,7 @@ def test_drop_column_action_removes_column_from_existing_table(spark, make_temp_
     plan = ActionPlan(actions=(DropColumn(column_name="to_remove"),))
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the column no longer exists
     assert summary.failed is False
@@ -305,7 +302,7 @@ def test_set_property_action_sets_table_property(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the property exists with the expected value
     assert summary.failed is False
@@ -326,7 +323,7 @@ def test_set_column_comment_sets_comment_on_column(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the column metadata contains the new comment
     assert summary.failed is False
@@ -341,7 +338,7 @@ def test_set_table_comment_sets_comment_on_table(spark, make_temp_table):
     plan = ActionPlan(actions=(SetTableComment(comment="staging table"),))
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the table comment is set
     assert summary.failed is False
@@ -362,7 +359,7 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = DatabricksExecutor(spark).execute(qualified_name, plan)
+    summary = _apply(spark, qualified_name, plan)
 
     # Then the column becomes nullable
     assert summary.failed is False

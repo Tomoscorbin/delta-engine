@@ -298,7 +298,7 @@ class Engine:
             # still blocked; a healthy no-op run counts as a healthy parent.
             if not run.plan:
                 continue
-            summary = self.executor.execute(run.qualified_name, run.plan)
+            summary = self.executor.execute(run.qualified_name, run.sql_statements)
             logger.info(
                 "Executed %d action(s) for %s (%d failed)",
                 len(summary.results),

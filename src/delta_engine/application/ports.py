@@ -73,27 +73,26 @@ class CatalogStateReader(Protocol):
 @dataclass(frozen=True, slots=True)
 class ExecutionSucceeded:
     """
-    A single plan action that executed without error.
+    A single statement that executed without error.
 
-    ``action_index`` and ``statement_preview`` are not rendered by the
-    engine's own reports; they are carried for callers that inspect
-    ``ExecutionSummary.results`` directly.
+    ``action_index`` is the statement's position in the run (which matches the
+    action it was compiled from) and ``statement_preview`` is its truncated
+    SQL; neither is rendered by the engine's own reports — they are carried for
+    callers that inspect ``ExecutionSummary.results`` directly.
     """
 
-    action: str
     action_index: int
     statement_preview: str
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionFailed:
-    """A single plan action that raised while executing."""
+    """A single statement that raised while executing."""
 
-    action: str
     failure: ExecutionFailure
 
 
-# An executed action either succeeds or fails. The split makes "succeeded but
+# An executed statement either succeeds or fails. The split makes "succeeded but
 # carries a failure" (and "failed but carries none") unrepresentable, so no
 # runtime invariant guard is needed.
 type ExecutionResult = ExecutionSucceeded | ExecutionFailed
@@ -132,36 +131,44 @@ class ExecutionSummary:
 
 class PlanExecutor(Protocol):
     """
-    Executes an action plan against a backing engine.
+    Compiles a plan into statements and runs them against a backing engine.
 
-    Like :class:`CatalogStateReader`, the boundary is **total**: a statement that
+    Execution is a two-stage boundary: ``compile`` turns a domain plan into the
+    backend statements it lowers to, and ``execute`` runs those statements. The
+    engine compiles once (so a dry run can preview the DDL and a real run applies
+    exactly what was previewed) and passes the same statements to ``execute``.
+
+    Like :class:`CatalogStateReader`, ``execute`` is **total**: a statement that
     fails is captured in the returned ``ExecutionSummary`` (which records both the
-    actions that succeeded and the one that failed), not raised. The engine
+    statements that succeeded and the one that failed), not raised. The engine
     records the summary on the table's report and moves on, so a failure executing
     one table does not abort the others.
     """
-
-    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
-        """
-        Run the plan against ``qualified_name`` and return the execution outcome.
-
-        Total: failures are captured in the returned ``ExecutionSummary`` rather
-        than raised.
-        """
-        ...
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         """
         Return the statements that apply ``plan``, in execution order.
 
         The ordering is the plan's own deterministic order, which is the order
-        ``execute`` applies the actions; both derive from the same ``plan``.
-        An empty plan compiles to no statements.
+        ``execute`` runs the statements. An empty plan compiles to no statements.
 
         Pure and side-effect free: the engine calls this on every run -- dry or
         real -- to record the SQL on the table's report. Unlike ``execute``,
         this is not a total boundary: compiling a validated plan cannot fail
         against a backend, so an exception here is a programming error and
         propagates.
+        """
+        ...
+
+    def execute(
+        self, qualified_name: QualifiedName, statements: tuple[str, ...]
+    ) -> ExecutionSummary:
+        """
+        Run ``statements`` (from :meth:`compile`) against ``qualified_name``.
+
+        Total: failures are captured in the returned ``ExecutionSummary`` rather
+        than raised. ``qualified_name`` names the table the statements target,
+        for logging and failure context; the statements themselves are the unit
+        of work.
         """
         ...
