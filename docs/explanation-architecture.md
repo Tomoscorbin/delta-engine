@@ -133,7 +133,7 @@ domain type model carries must survive the round trip
 declaration → catalog → observation exactly. A fact that only one side can
 carry is worse than an unmodeled one. Declarable but not observable: every
 sync reports drift that is not there, and when the false drift is a blocked
-change (a column type change, say) the table fails validation forever.
+change (a partitioning change, say) the table fails validation forever.
 Observable but not declarable: the catalog permanently disagrees with the only
 spelling a declaration can use. Facts that cannot round-trip are therefore
 normalized out on both sides rather than modeled halfway.
@@ -394,8 +394,7 @@ Each dimension owns its local lowering to actions. For example, column additions
 produce `AddColumn` plus any column tag actions, table tag removals produce
 `UnsetTableTag`, and foreign-key additions produce `SetForeignKey`. Some facts
 produce no actions because they are intentionally blocked by validation policy:
-in-place data type changes and partitioning changes are represented in the diff
-but have no direct action.
+partitioning changes are represented in the diff but have no direct action.
 
 `validate_diff` is where policy lives. A missing table passes automatically
 because creating a table from its full declaration is safe. A drift is evaluated
@@ -403,7 +402,8 @@ by the rules in `DEFAULT_RULES`, which currently reject:
 
 - adding a non-nullable column to an existing table
 - tightening an existing column to `NOT NULL`
-- changing an existing column's data type in place
+- changing an existing column's data type outside the Delta widening matrix,
+  or widening it without `delta.enableTypeWidening='true'` declared
 - changing table partitioning in place
 
 Only after validation passes does the engine call `diff.plan()`.
