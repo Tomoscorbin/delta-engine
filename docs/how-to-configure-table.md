@@ -52,6 +52,7 @@ only ever touches a key you named.
 | `LOG_RETENTION_DURATION`          | `delta.logRetentionDuration`         | none                                  |
 | `DATA_SKIPPING_NUM_INDEXED_COLS`  | `delta.dataSkippingNumIndexedCols`   | none                                  |
 | `COLUMN_MAPPING_MODE`             | `delta.columnMapping.mode`           | only `none → name`; cannot be removed |
+| `TYPE_WIDENING`                   | `delta.enableTypeWidening`           | none                                  |
 
 Passing a key outside this set raises `ValueError` at `DeltaTable`
 construction (for `None` assertions too). This prevents typos from silently
@@ -75,6 +76,7 @@ write can ever reach the catalog. Each managed key has an expected format:
 | `LOG_RETENTION_DURATION`          | `interval <n> <unit>`, e.g. `interval 30 days` |
 | `DATA_SKIPPING_NUM_INDEXED_COLS`  | an integer `>= -1` (`-1` indexes all columns)  |
 | `COLUMN_MAPPING_MODE`             | `none` or `name`                               |
+| `TYPE_WIDENING`                   | lowercase `true` or `false`                    |
 
 A value outside its key's format raises `ValueError` naming the key, the
 rejected value, and the expected format. Booleans must be lowercase because
@@ -152,6 +154,40 @@ Unity Catalog managed tables) and admin session defaults
 creation). If either writes a managed key onto your table, the next sync
 fails loud with `PropertyMustBeDeclared` naming the key — add the line and
 carry on. The engine never reacts silently to keys it did not set.
+
+### Type widening
+
+Declaring `delta.enableTypeWidening='true'` allows a sync to widen a column's
+type in place:
+
+```python
+properties={Property.TYPE_WIDENING: "true"}
+```
+
+Only the Iceberg-compatible widenings are supported:
+
+| From            | To                                           |
+| --------------- | -------------------------------------------- |
+| `Byte`          | `Short`, `Integer`, `Long`                   |
+| `Short`         | `Integer`, `Long`                            |
+| `Integer`       | `Long`                                       |
+| `Float`         | `Double`                                     |
+| `Date`          | `TimestampNtz`                               |
+| `Decimal(p, s)` | `Decimal(p′, s)` with greater precision `p′` |
+
+A widening without the property declared fails validation
+(`TypeWideningRequiredForTypeChange`) naming the property; declaring it in
+the same sync as the widen is safe — properties are set before column types
+change. Any other type change fails validation
+(`NonWideningColumnTypeChange`); recreate the table out of band to make it.
+
+Type widening requires Databricks Runtime 15.4 LTS or later; delta-engine
+does not preflight runtime versions, so declaring it on an older runtime
+fails at execution with the original Databricks error. Note that enabling
+type widening adds the `typeWidening` protocol feature to the table
+permanently: declaring the property `false` (or `None`) later stops further
+widenings but does not remove the feature — that requires
+`ALTER TABLE ... DROP FEATURE`, which is outside this engine's scope.
 
 ## Tags
 

@@ -322,15 +322,14 @@ exist, else a `TableDrift` holding a flat tuple of changes. Each change is a
 frozen dataclass recording one atomic difference (`ColumnAdded`,
 `TableTagUnset`, `ColumnDataTypeChanged`, …) and carries two things: an
 `aspect` naming the `TableAspect` it belongs to, and `.actions()` returning
-the DDL steps that reconcile it. Changes with no in-place remedy (a column
-type change, a partitioning change) return no actions — validation blocks
-them instead. `*Changed` members carry both sides of the difference as one
+the DDL steps that reconcile it. Changes with no in-place remedy (a
+partitioning change) return no actions — validation blocks them instead. `*Changed` members carry both sides of the difference as one
 atomic pair (`desired_*` / `observed_*`), so rules can read the direction and
 report from/to values without correlating separate changes.
 
 Whether a change is permitted is policy — `validate_diff` evaluates
 precondition rules against the flat tuple, and rules match change types
-directly (e.g. `ColumnDataTypeChangeNotSupported` scans for
+directly (e.g. `NonWideningColumnTypeChange` scans for
 `ColumnDataTypeChanged`; `PartitioningChangeNotSupported` scans for
 `PartitioningChanged`). The engine constructs the `ActionPlan` by iterating
 changes directly after validation — there is no separate `lower_diff` step and
@@ -440,6 +439,10 @@ The phase ordering exists because backend DDL has dependencies:
   so a table is reclustered off a column before that column is removed — a sync
   that both drops the live clustering-key column and reclusters elsewhere must
   not drop it while it is still the active key.
+- Column types are widened after properties are set, so a declaration enabling
+  `delta.enableTypeWidening` in the same sync takes effect before the widen —
+  and between the primary-key drop and set, so a key whose column widens is
+  dropped before and re-added after.
 
 The domain plan describes intent. The adapter compiler decides how each action
 is rendered for its backend.
