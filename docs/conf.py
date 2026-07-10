@@ -1,10 +1,11 @@
+from importlib.metadata import version as _version
 from pathlib import Path
 
 from sphinx.application import Sphinx
 
 project = "delta-engine"
 author = "Tomos Corbin"
-release = "0.1.0"
+release = _version("delta-engine")
 
 extensions = [
     "autoapi.extension",
@@ -20,6 +21,11 @@ myst_fence_as_directive = ["mermaid"]
 
 html_theme = "furo"
 html_title = "delta-engine"
+
+# Show object titles as short names (build_engine, class Engine) rather than
+# the fully-qualified definition path. This does not shorten type annotations
+# that resolve to hidden internal modules; those still show their full path.
+add_module_names = False
 
 # sphinx-autoapi documents the package by static analysis: nothing is
 # imported at build time, so pyspark/delta need no mocking.
