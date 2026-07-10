@@ -873,7 +873,7 @@ DeltaTable(
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC With `metadata_only=True`, the engine updates metadata and ignores column
+# MAGIC With `scope="metadata"`, the engine updates metadata and ignores column
 # MAGIC and property state entirely (7a). Attempting to create a table that does not
 # MAGIC exist is blocked — column structure management is required for creation (7b).
 # MAGIC Declaring columns that do not match the live table is also blocked — structural
@@ -887,7 +887,7 @@ DeltaTable(
 
 # COMMAND ----------
 
-# metadata_only=True restricts the sync to comments, tags, and key constraints.
+# scope="metadata" restricts the sync to comments, tags, and key constraints.
 # Columns and properties are still declared (the engine validates structural
 # alignment) but never compared or changed.
 customers_meta = DeltaTable(
@@ -906,7 +906,7 @@ customers_meta = DeltaTable(
         Property.COLUMN_MAPPING_MODE: "name",
         Property.CHANGE_DATA_FEED: "true",
     },
-    metadata_only=True,  # <-- restricts sync to metadata aspects only
+    scope="metadata",  # <-- restricts sync to metadata aspects only
 )
 
 report = engine.sync(customers_meta)
@@ -931,7 +931,7 @@ print("Step 7a verified: metadata-only sync updated the comment; columns untouch
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Attempt to sync a `metadata_only` declaration for a table that does not yet
+# MAGIC Attempt to sync a metadata-scoped declaration for a table that does not yet
 # MAGIC exist in the catalog.
 # MAGIC
 # MAGIC **Outcome**
@@ -949,7 +949,7 @@ new_table_meta_only = DeltaTable(
     columns=[
         Column("id", Long(), nullable=False, primary_key=True),
     ],
-    metadata_only=True,  # <-- cannot create; no column structure management
+    scope="metadata",  # <-- cannot create; no column structure management
 )
 
 # COMMAND ----------
@@ -972,7 +972,7 @@ print("Step 7b verified: metadata-only declaration blocked from creating a missi
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Declare a column that doesn't exist on the live table in a `metadata_only`
+# MAGIC Declare a column that doesn't exist on the live table in a metadata-scoped
 # MAGIC declaration and attempt to sync.
 # MAGIC
 # MAGIC **Outcome**
@@ -1000,7 +1000,7 @@ customers_meta_drifted = DeltaTable(
         Property.COLUMN_MAPPING_MODE: "name",
         Property.CHANGE_DATA_FEED: "true",
     },
-    metadata_only=True,  # <-- restricts sync to metadata aspects only
+    scope="metadata",  # <-- restricts sync to metadata aspects only
 )
 
 report = sync_expecting_failure(customers_meta_drifted)
