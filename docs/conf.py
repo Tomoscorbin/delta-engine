@@ -9,6 +9,7 @@ release = "0.1.0"
 
 extensions = [
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
@@ -22,6 +23,8 @@ myst_fence_as_directive = ["mermaid"]
 
 html_theme = "furo"
 html_title = "delta-engine"
+
+autosummary_generate = True
 
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"

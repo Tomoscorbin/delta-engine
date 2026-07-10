@@ -10,15 +10,26 @@ for declaring tables (no PySpark required) and `delta_engine.databricks` for
 building an engine and running syncs. Result and error types are re-exported
 from the top-level `delta_engine` package.
 
+Each entry below links to a full page generated from the object's docstring.
+
 ## Schema declarations
 
-### DeltaTable
+```{eval-rst}
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   delta_engine.schema.DeltaTable
+   delta_engine.schema.Column
+   delta_engine.schema.ForeignKey
+   delta_engine.schema.Property
+```
 
 ```{eval-rst}
-.. autoclass:: delta_engine.schema.DeltaTable
-   :members:
-   :undoc-members:
+.. autodata:: delta_engine.schema.Self
 ```
+
+### Notes on `DeltaTable`
 
 #### `scope` (str, default `"full"`)
 
@@ -38,93 +49,41 @@ sibling of `partitioned_by` and mutually exclusive with it; at most four keys.
 Key order is not significant. See
 [clustering](how-to-configure-table.md#clustering).
 
-### Column
-
-```{eval-rst}
-.. autoclass:: delta_engine.schema.Column
-   :members:
-   :undoc-members:
-```
-
-### ForeignKey
-
-```{eval-rst}
-.. autoclass:: delta_engine.schema.ForeignKey
-   :members:
-   :undoc-members:
-```
-
-### Self
-
-```{eval-rst}
-.. autodata:: delta_engine.schema.Self
-```
-
-### Property
-
-```{eval-rst}
-.. autoclass:: delta_engine.schema.Property
-   :members:
-```
-
 ## Engine
 
-### Engine
-
 ```{eval-rst}
-.. autoclass:: delta_engine.Engine
-   :members:
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   delta_engine.Engine
 ```
 
 ## Results and errors
 
-### SyncReport
-
-```{eval-rst}
-.. autoclass:: delta_engine.SyncReport
-   :members:
-```
-
-### Rendering a report
-
 `SyncReport` is a pure data object. To turn one into human-readable text, pass
-it to one of these functions:
+it to `render_report` or `render_diff`.
 
 ```{eval-rst}
-.. autofunction:: delta_engine.render_report
-```
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
 
-```{eval-rst}
-.. autofunction:: delta_engine.render_diff
-```
-
-### TableRunStatus
-
-```{eval-rst}
-.. autoclass:: delta_engine.TableRunStatus
-   :members:
-```
-
-### SyncFailedError
-
-```{eval-rst}
-.. autoexception:: delta_engine.SyncFailedError
-   :members:
-```
-
-### Failure
-
-```{eval-rst}
-.. autoclass:: delta_engine.Failure
-   :members:
+   delta_engine.SyncReport
+   delta_engine.render_report
+   delta_engine.render_diff
+   delta_engine.TableRunStatus
+   delta_engine.SyncFailedError
+   delta_engine.Failure
 ```
 
 ## Databricks adapter
 
 ```{eval-rst}
-.. autofunction:: delta_engine.databricks.build_engine
-```
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
 
-```{eval-rst}
-.. autofunction:: delta_engine.databricks.configure_logging
+   delta_engine.databricks.build_engine
+   delta_engine.databricks.configure_logging
 ```
