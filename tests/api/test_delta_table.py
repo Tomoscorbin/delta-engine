@@ -2,7 +2,7 @@ from types import MappingProxyType
 
 import pytest
 
-from delta_engine.api.delta_table import METADATA_ASPECTS
+from delta_engine.api.delta_table import METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column as DomainColumn,
@@ -353,20 +353,89 @@ def test_to_desired_table_defaults_partitioning_to_empty_tuple():
     assert desired.partitioned_by == ()
 
 
-def test_column_with_primary_key_flag():
-    # Given a Column with primary_key=True
-    col = Column("id", Integer(), nullable=False, primary_key=True)
+def test_primary_key_parameter_lowers_into_table_level_constraint():
+    # Given a composite key declared at table level
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="accounts",
+        columns=[
+            Column("tenant_id", Integer(), nullable=False),
+            Column("id", Integer(), nullable=False),
+        ],
+        primary_key=["tenant_id", "id"],
+    )
 
-    # Then the flag is readable
-    assert col.primary_key is True
+    # Then the constraint carries the declared columns and generated name
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert desired.primary_key.columns == ("tenant_id", "id")
+    assert desired.primary_key.constraint_name == "accounts_pk"
 
 
-def test_column_primary_key_defaults_to_false():
-    # Given a Column without the primary_key flag
-    col = Column("id", Integer())
+def test_no_primary_key_parameter_means_no_key():
+    table = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="events",
+        columns=[Column("id", Integer())],
+    )
 
-    # Then it defaults to False
-    assert col.primary_key is False
+    assert table.to_desired_table().primary_key is None
+    assert table.primary_key == ()
+
+
+def test_empty_primary_key_sequence_is_rejected():
+    # Given an empty sequence — a meaningless assertion, distinct from None
+    with pytest.raises(ValueError, match="must not be empty"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer())],
+            primary_key=[],
+        )
+
+
+def test_primary_key_as_a_bare_string_is_rejected():
+    # "i" is a real column, so without the guard this string would silently
+    # declare a valid per-character key; the shape must be refused outright
+    with pytest.raises(TypeError, match="not a string"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("i", Integer(), nullable=False)],
+            primary_key="i",
+        )
+
+
+def test_primary_key_naming_unknown_column_is_rejected():
+    with pytest.raises(ValueError, match="missing_col"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer(), nullable=False)],
+            primary_key=["missing_col"],
+        )
+
+
+def test_primary_key_over_nullable_column_is_rejected():
+    with pytest.raises(ValueError, match="NOT NULL"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("id", Integer(), nullable=True)],
+            primary_key=["id"],
+        )
+
+
+def test_column_no_longer_accepts_a_primary_key_flag():
+    # The per-column flag is deleted; the fact lives at table level now
+    with pytest.raises(TypeError):
+        Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
 
 
 def test_delta_table_primary_key_returns_pk_column_names():
@@ -376,9 +445,10 @@ def test_delta_table_primary_key_returns_pk_column_names():
         schema="s",
         name="orders",
         columns=[
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False),
             Column("name", String()),
         ],
+        primary_key=["id"],
     )
 
     # Then primary_key returns the PK column names in declaration order
@@ -405,9 +475,10 @@ def test_delta_table_passes_pk_to_desired_table():
         schema="s",
         name="orders",
         columns=[
-            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("id", Integer(), nullable=False),
             Column("ds", String()),
         ],
+        primary_key=["id"],
     )
 
     # When converting to domain
@@ -424,10 +495,11 @@ def test_delta_table_pk_column_order_matches_declaration_order():
         schema="s",
         name="orders",
         columns=[
-            Column("tenant_id", Integer(), nullable=False, primary_key=True),
-            Column("order_id", Integer(), nullable=False, primary_key=True),
+            Column("tenant_id", Integer(), nullable=False),
+            Column("order_id", Integer(), nullable=False),
             Column("ds", String()),
         ],
+        primary_key=["tenant_id", "order_id"],
     )
 
     # Then the order in primary_key matches declaration order
@@ -440,7 +512,8 @@ def test_delta_table_accepts_foreign_keys_parameter():
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When constructing a table with a FK to it
@@ -449,7 +522,7 @@ def test_delta_table_accepts_foreign_keys_parameter():
         schema="sch",
         name="orders",
         columns=[Column("id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
     )
 
     # Then the FK is lowered to an internal constraint carrying its generated name
@@ -479,7 +552,8 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
         catalog="cat",
         schema="sch",
         name="customers",
-        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
     )
 
     # When / Then domain validation fires at construction time
@@ -489,7 +563,7 @@ def test_delta_table_rejects_fk_with_unknown_local_column():
             schema="sch",
             name="orders",
             columns=[Column("id", Integer())],
-            foreign_keys=[ForeignKey(local_columns=("nonexistent",), references=customers)],
+            foreign_keys=[ForeignKey(columns={"nonexistent": "id"}, references=customers)],
         )
 
 
@@ -571,11 +645,11 @@ def test_delta_table_preserves_tag_key_case():
     assert "CostCentre" in dict(table.to_desired_table().tags)
 
 
-# ---- metadata_only flag
+# ---- scope
 
 
 def test_delta_table_manages_all_aspects_by_default():
-    # Given a table declared without metadata_only
+    # Given a table declared without a scope
     table = DeltaTable(
         catalog="dev", schema="silver", name="orders", columns=[Column("id", Integer())]
     )
@@ -584,30 +658,71 @@ def test_delta_table_manages_all_aspects_by_default():
     assert table.to_desired_table().managed_aspects == ALL_ASPECTS
 
 
-def test_metadata_only_table_manages_metadata_aspects():
-    # Given a metadata-only declaration
+def test_metadata_scope_manages_metadata_aspects():
+    # Given a metadata-scoped declaration
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then the lowered scope is exactly the metadata aspects
     assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
 
 
-def test_metadata_only_declaration_carries_properties_without_deploying_them():
-    # Given a metadata-only declaration of a full table, properties included —
-    # the flag scopes deployment, not what may be declared
+def test_tag_scope_manages_only_table_and_column_tags():
+    # Given a tag-scoped declaration of a full table shape
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False),
+            Column("email", String(), comment="PII", tags={"pii": "true"}),
+        ],
+        comment="Streaming orders",
+        tags={"domain": "sales"},
+        partitioned_by=["id"],
+        primary_key=["id"],
+        scope="tags",
+    )
+
+    # Then only the tag aspects are managed; the rest is carried for comparison
+    desired = table.to_desired_table()
+    assert desired.managed_aspects == TAG_ASPECTS
+    assert desired.comment == "Streaming orders"
+    assert desired.partitioned_by == ("id",)
+    assert desired.primary_key_columns == ("id",)
+    assert desired.tags == {"domain": "sales"}
+    assert desired.columns[1].comment == "PII"
+    assert desired.columns[1].tags == {"pii": "true"}
+
+
+def test_delta_table_rejects_unknown_scope():
+    # Given a scope value outside the named scopes
+    # When / Then construction fails naming the valid options
+    with pytest.raises(ValueError, match="'full', 'metadata', 'tags'"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            scope="everything",  # type: ignore[arg-type]
+        )
+
+
+def test_metadata_scope_carries_properties_without_deploying_them():
+    # Given a metadata-scoped declaration of a full table, properties included —
+    # the scope restricts deployment, not what may be declared
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
         properties={Property.CHANGE_DATA_FEED.value: "true"},
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then the declaration carries the property; PROPERTIES stays unmanaged
@@ -616,13 +731,41 @@ def test_metadata_only_declaration_carries_properties_without_deploying_them():
     assert TableAspect.PROPERTIES not in desired.managed_aspects
 
 
-def test_metadata_only_without_properties_constructs_cleanly():
+def test_tag_scope_carries_foreign_keys_without_managing_them():
+    # Given a tag-scoped declaration that mirrors the live table's foreign key
+    customers = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
+    )
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False),
+            Column("customer_id", Integer()),
+        ],
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
+        scope="tags",
+    )
+
+    # Then the declaration carries the key; FOREIGN_KEYS stays unmanaged
+    desired = table.to_desired_table()
+    assert len(desired.foreign_keys) == 1
+    assert TableAspect.FOREIGN_KEYS not in desired.managed_aspects
+
+
+def test_metadata_scope_without_properties_constructs_cleanly():
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     assert table.to_desired_table().properties == {}
@@ -689,16 +832,30 @@ def test_delta_table_accepts_none_property_value_without_value_check() -> None:
     assert table.to_desired_table().properties["delta.enableChangeDataFeed"] is None
 
 
-def test_metadata_only_table_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
-    # metadata_only declarations do not manage properties, so the declaration
-    # is a mirror of existing state, not an attempt to enable CDF.
+def test_metadata_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
+    # A metadata-scoped declaration does not manage properties, so the
+    # declaration is a mirror of existing state, not an attempt to enable CDF.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer()), Column("_change_type", String())],
         properties={"delta.enableChangeDataFeed": "true"},
-        metadata_only=True,
+        scope="metadata",
+    )
+    assert len(table.to_desired_table().columns) == 2
+
+
+def test_tag_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
+    # A tag-scoped declaration does not manage column structure either, so it
+    # must mirror reserved names the live table already carries.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer()), Column("_change_type", String())],
+        properties={"delta.enableChangeDataFeed": "true"},
+        scope="tags",
     )
     assert len(table.to_desired_table().columns) == 2
 
@@ -715,14 +872,14 @@ def test_delta_table_accepts_column_tags_at_the_limits() -> None:
     assert len(table.to_desired_table().columns[0].tags) == 50
 
 
-def test_metadata_only_table_still_lowers_the_full_schema():
-    # Given a metadata-only declaration with full schema detail
+def test_metadata_scope_still_lowers_the_full_schema():
+    # Given a metadata-scoped declaration with full schema detail
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer(), nullable=False), Column("name", String())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then all columns are lowered — scope controls reconciliation, not lowering
@@ -731,7 +888,7 @@ def test_metadata_only_table_still_lowers_the_full_schema():
 
 
 def test_metadata_aspects_excludes_structure_properties_partitioning_and_clustering():
-    # Given the metadata-only named mode
+    # Given the metadata named scope
     # Then physical-behaviour aspects are excluded by design
     assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
         {
@@ -741,6 +898,12 @@ def test_metadata_aspects_excludes_structure_properties_partitioning_and_cluster
             TableAspect.CLUSTERING,
         }
     )
+
+
+def test_tag_aspects_contains_only_tag_aspects():
+    # Given the tags named scope
+    # Then it manages exactly table and column tags
+    assert TAG_ASPECTS == frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
 
 
 def test_delta_table_rejects_special_character_column_names_without_column_mapping() -> None:
@@ -806,15 +969,27 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
         )
 
 
-def test_metadata_only_table_mirrors_special_character_columns_without_the_property() -> None:
-    # metadata_only never creates or adds columns; the catalog already
-    # accepted this name, so the declaration must be able to mirror it.
+def test_metadata_scope_mirrors_special_character_columns_without_the_property() -> None:
+    # A metadata-scoped declaration never creates or adds columns; the catalog
+    # already accepted this name, so the declaration must be able to mirror it.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("order id", Integer())],
-        metadata_only=True,
+        scope="metadata",
+    )
+    assert table.to_desired_table().columns[0].name == "order id"
+
+
+def test_tag_scope_mirrors_special_character_columns_without_column_mapping() -> None:
+    # A tag-scoped declaration never creates or adds columns either.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("order id", Integer())],
+        scope="tags",
     )
     assert table.to_desired_table().columns[0].name == "order id"
 

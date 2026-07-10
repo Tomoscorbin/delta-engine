@@ -383,6 +383,20 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
     assert diff.changes == ()
 
 
+def test_declared_properties_are_not_compared_when_properties_unmanaged():
+    # Given a declaration that carries a property but does not manage
+    # properties, over a catalog where that property is absent
+    managed = ALL_ASPECTS - frozenset({TableAspect.PROPERTIES})
+    diff = diff_table(
+        _desired(properties={"delta.enableChangeDataFeed": "true"}, managed_aspects=managed),
+        _observed(properties={}),
+    )
+
+    # Then the carried property makes no assertion and produces no change
+    assert isinstance(diff, TableDrift)
+    assert diff.changes == ()
+
+
 def test_property_set_rejects_equal_values():
     with pytest.raises(ValueError, match="no difference"):
         PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")

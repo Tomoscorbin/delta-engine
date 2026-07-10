@@ -18,15 +18,17 @@ from the top-level `delta_engine` package.
 .. autoclass:: delta_engine.schema.DeltaTable
    :members:
    :undoc-members:
-   :show-inheritance:
 ```
 
-#### `metadata_only` (bool, default `False`)
+#### `scope` (str, default `"full"`)
 
-When `True`, restricts the sync to catalog metadata: comments, tags, and
-primary/foreign key constraints. Column structure, properties, partitioning,
-and clustering are never changed. The live schema must match the declaration
-exactly — any structural drift causes validation to fail.
+Selects what the declaration manages. `"full"` manages the whole table.
+`"metadata"` restricts the sync to catalog metadata: comments, tags, and
+primary/foreign key constraints. `"tags"` restricts it to table and column
+tags. A restricted scope still declares the full table shape; aspects outside
+the scope are never changed, and any unmanaged drift causes validation to
+fail. Properties are the exception: a declaration that does not manage
+properties never compares them at all.
 
 #### `clustered_by` (read-only accessor)
 

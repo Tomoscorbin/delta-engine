@@ -30,11 +30,12 @@ the page with the detail.
 | Table and column comments |      ✓      | Always managed; an empty declaration clears the comment ([comments](how-to-configure-table.md#comments))                                                                  |
 | Table properties          |      ✓      | Five managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties))                                                  |
 | Table and column tags     |      ✓      | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                                                                          |
-| Primary keys              |      ✓      | Declared per column ([primary keys](how-to-configure-table.md#primary-keys))                                                                                              |
+| Primary keys              |      ✓      | Declared at table level ([primary keys](how-to-configure-table.md#primary-keys))                                                                                          |
 | Foreign keys              |      ✓      | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys)) |
 | Partitioning              | Create only | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                       |
 | Clustering                |      ✓      | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                  |
-| Metadata-only scope       |      ✓      | `metadata_only=True` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                               |
+| Metadata-only scope       |      ✓      | `scope="metadata"` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                                 |
+| Tag-only scope            |      ✓      | `scope="tags"` restricts a sync to table and column tags ([tags](how-to-configure-table.md#manage-tags-only))                                                             |
 | Dry run                   |      ✓      | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                                                                             |
 
 ## Outside the model

@@ -101,7 +101,8 @@ orders = DeltaTable(
     catalog="prod",
     schema="sales",
     name="orders",
-    columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    columns=[Column("id", Integer(), nullable=False)],
+    primary_key=["id"],
     properties={
         Property.CHANGE_DATA_FEED: "true",          # ensure it is set
         Property.LOG_RETENTION_DURATION: None,       # ensure it is absent
@@ -224,6 +225,36 @@ the next sync unless it is also declared.
 
 As with table tags, keys are **case-sensitive** (`PII` and `pii` are distinct).
 
+### Manage tags only
+
+Use `scope="tags"` when the table is owned elsewhere — for example by a
+streaming pipeline — but you still want delta-engine to reconcile Unity
+Catalog tags. The declaration carries the same table shape as any other, but
+only table tags and column tags are managed: columns, comments, properties,
+partitioning, primary keys, and foreign keys are never changed.
+
+```python
+from delta_engine.schema import Column, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="streaming_events",
+    columns=[
+        Column("id", String()),
+        Column("email", String(), tags={"pii": "true"}),
+    ],
+    tags={"domain": "events"},
+    scope="tags",
+)
+```
+
+The live table must already exist. If a non-tag aspect drifts from the
+declaration, validation fails before any tag SQL runs; update the declaration
+to match the live table or use the full scope. Properties are the exception:
+a restricted scope never compares them, so live table properties cannot fail
+the sync.
+
 ### Requirements and limits
 
 Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and the
@@ -271,8 +302,9 @@ drift that the sync overwrites.
 
 ## Primary keys
 
-Declare a primary key by setting `primary_key=True` on one or more columns.
-Every primary key column must be non-nullable.
+Declare a primary key by passing `primary_key` to `DeltaTable` — a list of
+column names, in the order the constraint is rendered. Every primary key
+column must be non-nullable.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, Integer, String
@@ -282,10 +314,11 @@ orders = DeltaTable(
     schema="silver",
     name="orders",
     columns=[
-        Column("order_id", Integer(), nullable=False, primary_key=True),
+        Column("order_id", Integer(), nullable=False),
         Column("customer_id", Integer(), nullable=False),
         Column("status", String()),
     ],
+    primary_key=["order_id"],
 )
 ```
 
@@ -296,8 +329,8 @@ exposed on the table object.
 
 ### Composite primary keys
 
-Set `primary_key=True` on several columns. The constraint covers them in
-declaration order.
+List several column names in `primary_key`. The constraint covers them in
+that order.
 
 ```python
 order_items = DeltaTable(
@@ -305,10 +338,11 @@ order_items = DeltaTable(
     schema="silver",
     name="order_items",
     columns=[
-        Column("order_id", Integer(), nullable=False, primary_key=True),
-        Column("line_number", Integer(), nullable=False, primary_key=True),
+        Column("order_id", Integer(), nullable=False),
+        Column("line_number", Integer(), nullable=False),
         Column("product_id", Integer(), nullable=False),
     ],
+    primary_key=["order_id", "line_number"],
 )
 ```
 
@@ -316,8 +350,8 @@ order_items = DeltaTable(
 
 A primary key identifies a row, so a nullable key column is not a well-formed
 table definition — and Databricks rejects a nullable primary key at execution
-time regardless. The engine enforces this early: declaring `primary_key=True`
-on a nullable column raises `ValueError` when the `DeltaTable` is constructed,
+time regardless. The engine enforces this early: naming a nullable column in
+`primary_key` raises `ValueError` when the `DeltaTable` is constructed,
 before any sync runs.
 
 ### Constraints are informational
@@ -355,9 +389,8 @@ table with the original error. See
 
 ## Foreign keys
 
-Pass `foreign_keys` with one `ForeignKey` per constraint. Each names the local
-columns and the table they reference; the referenced columns are inferred from
-that table's primary key.
+Pass `foreign_keys` with one `ForeignKey` per constraint. `columns` maps each
+local column to the referenced-table primary-key column it references.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
@@ -367,9 +400,10 @@ customers = DeltaTable(
     schema="silver",
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String()),
     ],
+    primary_key=["id"],
 )
 
 orders = DeltaTable(
@@ -377,22 +411,23 @@ orders = DeltaTable(
     schema="silver",
     name="orders",
     columns=[
-        Column("order_id", Long(), nullable=False, primary_key=True),
+        Column("order_id", Long(), nullable=False),
         Column("customer_id", Long(), nullable=False),
         Column("status", String()),
     ],
+    primary_key=["order_id"],
     foreign_keys=[
-        ForeignKey(local_columns=["customer_id"], references=customers),
+        ForeignKey(columns={"customer_id": "id"}, references=customers),
     ],
 )
 ```
 
 Referencing the target `DeltaTable` object — rather than a dotted table name —
-is what lets the engine infer the referenced columns from that table's primary
+is what lets the engine validate the mapping against that table's actual primary
 key, and keeps the reference valid if the target is renamed. The constraint
-name is generated at lowering as `{table}_{local_columns}_fk`
-(`orders_customer_id_fk` above). The name cannot be chosen, and drift matching
-never depends on it — a foreign key created outside the engine under a
+name is generated at lowering as `{table}_{local_columns}_fk`, joining the
+local columns in sorted order (`orders_customer_id_fk` above). The name cannot
+be chosen, and drift matching never depends on it — a foreign key created outside the engine under a
 different name still matches by content.
 
 Generated names join local columns with underscores, so two foreign keys over
@@ -419,20 +454,20 @@ employees = DeltaTable(
     schema="silver",
     name="employees",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("manager_id", Long()),
     ],
+    primary_key=["id"],
     foreign_keys=[
-        ForeignKey(local_columns=["manager_id"], references=Self),
+        ForeignKey(columns={"manager_id": "id"}, references=Self),
     ],
 )
 ```
 
 ### Composite foreign keys
 
-For a composite primary key, list `local_columns` in the referenced table's
-primary-key declaration order. The referenced columns are inferred one-to-one
-in that same order.
+For a composite primary key, map each local column to the primary-key column
+it references.
 
 ```python
 customer_accounts = DeltaTable(
@@ -440,9 +475,10 @@ customer_accounts = DeltaTable(
     schema="silver",
     name="customer_accounts",
     columns=[
-        Column("tenant_id", Long(), nullable=False, primary_key=True),
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("tenant_id", Long(), nullable=False),
+        Column("id", Long(), nullable=False),
     ],
+    primary_key=["tenant_id", "id"],
 )
 
 order_lines = DeltaTable(
@@ -450,19 +486,23 @@ order_lines = DeltaTable(
     schema="silver",
     name="order_lines",
     columns=[
-        Column("order_line_id", Long(), nullable=False, primary_key=True),
+        Column("order_line_id", Long(), nullable=False),
         Column("tenant_id", Long(), nullable=False),
         Column("customer_id", Long(), nullable=False),
     ],
+    primary_key=["order_line_id"],
     foreign_keys=[
         ForeignKey(
-            # aligns with customer_accounts PK (tenant_id, id)
-            local_columns=["tenant_id", "customer_id"],
+            columns={"tenant_id": "tenant_id", "customer_id": "id"},
             references=customer_accounts,
         ),
     ],
 )
 ```
+
+The mapping states which primary-key column each local column references;
+its order never matters, and a mapping that does not cover the referenced
+table's primary key exactly fails when the `DeltaTable` is constructed.
 
 ### Dependency ordering
 

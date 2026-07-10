@@ -182,7 +182,7 @@ def test_create_table_entries_list_columns_with_types_and_primary_key():
         table=DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(
-                Column("id", Integer(), nullable=False, primary_key=True),
+                Column("id", Integer(), nullable=False),
                 Column("name", String()),
             ),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),

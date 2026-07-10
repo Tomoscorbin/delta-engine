@@ -17,8 +17,6 @@ class Column:
         data_type: Logical data type of the column.
         nullable: Whether the column accepts ``NULL`` values.
         comment: Optional column comment.
-        primary_key: Whether this column is part of the table's primary key.
-            Used by the API layer to derive the table-level primary key tuple.
         tags: Read-only mapping of Unity Catalog column tag keys to values. Tag
             keys are case-sensitive and are stored verbatim (never casefolded,
             unlike the column name).
@@ -29,7 +27,6 @@ class Column:
     data_type: DataType
     nullable: bool = True
     comment: str = ""
-    primary_key: bool = False
     tags: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

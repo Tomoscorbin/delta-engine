@@ -37,9 +37,10 @@ jobs:
               schema="silver",
               name="customers",
               columns=[
-                  Column("id", Integer(), nullable=False, primary_key=True),
+                  Column("id", Integer(), nullable=False),
                   Column("name", String(), nullable=True),
               ],
+              primary_key=["id"],
           )
 
           desired = table.to_desired_table()
