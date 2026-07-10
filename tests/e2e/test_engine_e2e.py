@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pyspark.sql.types as T
@@ -583,3 +584,42 @@ def test_engine_sync_widens_column_types_with_type_widening_declared(spark, temp
     assert isinstance(fields["id"].dataType, T.LongType)
     assert fields["amount"].dataType == T.DecimalType(12, 3)
     assert isinstance(fields["ratio"].dataType, T.DoubleType)
+
+
+def test_dry_run_report_is_ci_consumable(spark, temp_schema):
+    # Given a declared table that does not exist yet (dry run plans a CREATE)
+    table_name = f"e2e_dry_ci_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When we sync as a dry run
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("name", String()),
+            ),
+        ),
+        dry_run=True,
+    )
+
+    # Then the gate booleans, SQL, and projection are all consistent
+    assert report.has_changes is True
+    assert report.has_failures is False
+
+    [table_report] = list(report)
+    assert table_report.sql_statements
+    statement = table_report.sql_statements[0]
+    assert "CREATE TABLE" in statement.upper()
+
+    payload = report.to_dict()
+    json.dumps(payload)  # plain types only — must not raise
+    assert payload["dry_run"] is True
+    assert payload["tables"][0]["sql_statements"] == list(table_report.sql_statements)
+
+    # And nothing was created
+    assert spark.catalog.tableExists(fq) is False
