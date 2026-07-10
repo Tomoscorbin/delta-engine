@@ -502,6 +502,30 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
     assert observed.partitioned_by == ("id", "day")
 
 
+def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
+    # The public API refuses to author these layouts (partitioning and
+    # clustering together, more than four clustering keys), but desired and
+    # observed state must stay representable: layout deployability is a
+    # declaration-time rule, not a snapshot invariant.
+    columns = tuple(Column(name, Integer()) for name in ("a", "b", "c", "d", "e"))
+    name = QualifiedName("dev", "silver", "orders")
+
+    five_keys = DesiredTable(
+        qualified_name=name, columns=columns, clustered_by=("a", "b", "c", "d", "e")
+    )
+    partitioned_and_clustered = DesiredTable(
+        qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
+    )
+    observed = ObservedTable(
+        qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
+    )
+
+    assert five_keys.clustered_by == ("a", "b", "c", "d", "e")
+    assert partitioned_and_clustered.partitioned_by == ("a",)
+    assert partitioned_and_clustered.clustered_by == ("b",)
+    assert observed.clustered_by == ("b",)
+
+
 # ---------- clustered_by ----------
 
 
