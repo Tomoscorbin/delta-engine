@@ -1,17 +1,26 @@
 # delta-engine
 
-Declarative schema management for Delta Lake tables on Databricks. You declare
-the state a table should have; the engine reads the state it actually has,
-computes the difference, checks that the difference is safe to apply, and runs
-exactly the DDL needed to close the gap.
+Declarative, safety-first schema and metadata management for Delta Lake tables on Databricks.
 
-There is no migration script to write and no DDL to hand-order. The declaration
-is the source of truth, and every `sync` reconciles the catalog to it.
+Define the state your tables should have in Python. Delta Engine reads their current Unity Catalog state, calculates the difference, validates whether each change is safe, and executes only the DDL needed to reconcile them.
 
-**Backends:** delta-engine targets Delta Lake on Databricks with Unity Catalog
-today. The planning core is deliberately backend-free — backends plug in as
-adapters that read catalog state and execute plans — so other backends, such as
-open-source Unity Catalog, can be added without changing the model.
+There are no migration scripts to maintain and no DDL statements to hand-order. Your declarations remain the source of truth across the lifetime of the table.
+
+What Delta Engine gives you
+
+Desired-state reconciliation — declare the complete table state rather than a sequence of migrations.
+
+Safe in-place evolution — unsafe changes, such as type narrowing, repartitioning or destructive schema changes, are rejected before any SQL runs.
+
+Reviewable plans — preview the semantic changes and exact DDL with a dry run before applying them.
+
+Drift detection — compare version-controlled declarations against the live Unity Catalog state in local workflows or CI.
+
+Scoped ownership — manage governance metadata without taking ownership of a table’s schema or data lifecycle.
+
+Dependency-aware execution — synchronise groups of tables in the correct order when primary-key and foreign-key relationships exist.
+
+Delta Engine does not need to own how a table’s data is produced. It can manage the catalog state around tables populated by PySpark jobs, declarative pipelines, dbt models or other systems.
 
 ## Install
 
