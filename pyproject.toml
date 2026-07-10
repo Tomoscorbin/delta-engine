@@ -29,7 +29,7 @@ databricks = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
 Repository = "https://github.com/Tomoscorbin/delta-engine"
-Documentation = "https://github.com/Tomoscorbin/delta-engine/tree/main/docs"
+Documentation = "https://tomoscorbin.github.io/delta-engine/"
 Issues = "https://github.com/Tomoscorbin/delta-engine/issues"
 
 [dependency-groups]
