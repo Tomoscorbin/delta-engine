@@ -13,8 +13,14 @@ import delta_engine
 _EAGER = {
     "Engine",
     "SyncReport",
+    "TableRunReport",
     "SyncFailedError",
     "Failure",
+    "FailurePhase",
+    "ReadFailure",
+    "ValidationFailure",
+    "ExecutionFailure",
+    "ForeignKeyFailure",
     "TableRunStatus",
     "render_diff",
     "render_report",
@@ -26,27 +32,45 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     # Then every pyspark-free name resolves to the same object as its source module
     from delta_engine import (
         Engine,
+        ExecutionFailure,
         Failure,
+        FailurePhase,
+        ForeignKeyFailure,
+        ReadFailure,
         SyncFailedError,
         SyncReport,
+        TableRunReport,
         TableRunStatus,
+        ValidationFailure,
         render_diff,
         render_report,
     )
     from delta_engine.application import (
         Engine as EngineImpl,
+        ExecutionFailure as ExecutionFailureImpl,
         Failure as FailureImpl,
+        FailurePhase as FailurePhaseImpl,
+        ForeignKeyFailure as ForeignKeyFailureImpl,
+        ReadFailure as ReadFailureImpl,
         SyncFailedError as SyncFailedErrorImpl,
         SyncReport as SyncReportImpl,
+        TableRunReport as TableRunReportImpl,
         TableRunStatus as TableRunStatusImpl,
+        ValidationFailure as ValidationFailureImpl,
         render_diff as render_diff_impl,
         render_report as render_report_impl,
     )
 
     assert Engine is EngineImpl
     assert Failure is FailureImpl
+    assert FailurePhase is FailurePhaseImpl
+    assert ReadFailure is ReadFailureImpl
+    assert ValidationFailure is ValidationFailureImpl
+    assert ExecutionFailure is ExecutionFailureImpl
+    assert ForeignKeyFailure is ForeignKeyFailureImpl
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
+    assert TableRunReport is TableRunReportImpl
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
     assert render_report is render_report_impl
