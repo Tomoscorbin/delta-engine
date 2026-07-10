@@ -7,8 +7,8 @@ things:
 - ``aspect`` — the :class:`TableAspect` the difference belongs to. Validation
   uses this to gate drift in aspects the declaration does not manage.
 - ``actions()`` — the imperative actions that reconcile the difference.
-  Changes with no in-place remedy (a column type change, a partitioning
-  change) return no actions; validation blocks them instead.
+  Changes with no in-place remedy (a partitioning change) return no actions;
+  validation blocks them instead.
 
 Naming conventions:
 
@@ -36,6 +36,7 @@ from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -81,7 +82,7 @@ class ColumnRemoved:
 
 @dataclass(frozen=True, slots=True)
 class ColumnDataTypeChanged:
-    """A column whose data type differs — no in-place action is possible."""
+    """A column whose data type differs from the declaration."""
 
     column_name: str
     desired_type: DataType
@@ -94,8 +95,14 @@ class ColumnDataTypeChanged:
             raise ValueError(f"ColumnDataTypeChanged carries no difference: {self.desired_type!r}")
 
     def actions(self) -> tuple[Action, ...]:
-        """No actions — type changes require recreation; see ColumnDataTypeChangeNotSupported."""
-        return ()
+        """AlterColumnType with the desired type; validation blocks non-widening changes."""
+        return (
+            AlterColumnType(
+                column_name=self.column_name,
+                data_type=self.desired_type,
+                observed_type=self.observed_type,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

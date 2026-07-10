@@ -17,6 +17,7 @@ from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -598,11 +599,13 @@ def test_column_removed_produces_drop_column():
     assert ColumnRemoved(column=Column("stale", Integer())).actions() == (DropColumn("stale"),)
 
 
-def test_column_data_type_changed_produces_no_actions():
-    # Given a type change — no in-place remedy exists; validation blocks it
+def test_column_data_type_changed_lowers_to_alter_column_type():
+    # Given a type change — validation decides whether the change is permitted
     change = ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Long())
 
-    assert change.actions() == ()
+    assert change.actions() == (
+        AlterColumnType(column_name="id", data_type=Integer(), observed_type=Long()),
+    )
 
 
 def test_column_nullability_changed_produces_set_column_nullability():
