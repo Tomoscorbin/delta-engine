@@ -8,8 +8,13 @@ from delta_engine.application.validation import (
 )
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Byte,
     Column,
+    Date,
+    Decimal,
     DesiredTable,
+    Double,
+    Float,
     ForeignKeyConstraint,
     ForeignKeyReference,
     Integer,
@@ -17,8 +22,10 @@ from delta_engine.domain.model import (
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
+    Short,
     String,
     TableAspect,
+    TimestampNtz,
 )
 from delta_engine.domain.plan.changes import (
     Change,
@@ -126,7 +133,8 @@ def test_default_rules_cover_all_safety_policies():
     assert rule_names == {
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
-        "ColumnDataTypeChangeNotSupported",
+        "NonWideningColumnTypeChange",
+        "TypeWideningRequiredForTypeChange",
         "PartitioningChangeNotSupported",
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
@@ -362,19 +370,107 @@ def test_allows_loosening_existing_column_to_nullable():
 # ---- unsupported structural changes
 
 
-def test_rejects_existing_column_type_change():
-    # Given an existing column whose declared type changes
+def test_rejects_widening_type_change_without_type_widening_declared():
+    # Given an existing column widened Integer → Long, with no property declared
     desired = _desired_table(columns=(Column("id", Long()),))
     observed = _observed_table(columns=(Column("id", Integer()),))
 
     # When validating the diff
     result = _validate(desired, observed)
 
-    # Then the type change is rejected
+    # Then the widen is rejected pending the enabling property
     assert result.failed is True
     assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "ColumnDataTypeChangeNotSupported"
+    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
     assert "id" in result.failures[0].message
+    assert "delta.enableTypeWidening" in result.failures[0].message
+
+
+def test_widening_type_change_passes_with_type_widening_declared():
+    # Given a widen Integer → Long with the property declared in the same sync
+    desired = _desired_table(
+        columns=(Column("id", Long()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Integer()),))
+
+    # When validating
+    result = _validate(desired, observed)
+
+    # Then the widen is permitted (SET_PROPERTY phases before ALTER_COLUMN_TYPE)
+    assert result.failed is False
+
+
+def test_rejects_non_widening_type_change_even_with_type_widening_declared():
+    # Given Integer → String, which no widening supports
+    desired = _desired_table(
+        columns=(Column("id", String()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Integer()),))
+
+    result = _validate(desired, observed)
+
+    assert result.failed is True
+    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
+    assert "recreate the table" in result.failures[0].message
+
+
+def test_rejects_narrowing_type_change():
+    # Given Long → Integer — the reverse of a widening is a narrowing
+    desired = _desired_table(
+        columns=(Column("id", Integer()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Long()),))
+
+    result = _validate(desired, observed)
+
+    assert result.failed is True
+    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
+
+
+def test_decimal_precision_growth_is_a_widening_but_scale_or_precision_shrink_is_not():
+    # Given decimal drift against a declaration with type widening enabled
+    def _result(desired_type: Decimal, observed_type: Decimal) -> ValidationResult:
+        desired = _desired_table(
+            columns=(Column("amount", desired_type),),
+            properties={"delta.enableTypeWidening": "true"},
+        )
+        observed = _observed_table(columns=(Column("amount", observed_type),))
+        return _validate(desired, observed)
+
+    # Then precision growth at unchanged scale passes
+    assert _result(Decimal(12, 2), Decimal(10, 2)).failed is False
+    # And a scale change is blocked, even with precision growth
+    assert _result(Decimal(12, 3), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    # And a precision shrink is blocked
+    assert _result(Decimal(8, 2), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_byte_short_float_and_date_widenings_are_permitted():
+    # Given each remaining matrix entry against a declaration with widening enabled
+    cases = (
+        (Short(), Byte()),
+        (Integer(), Byte()),
+        (Long(), Byte()),
+        (Integer(), Short()),
+        (Long(), Short()),
+        (Double(), Float()),
+        (TimestampNtz(), Date()),
+    )
+    for desired_type, observed_type in cases:
+        desired = _desired_table(
+            columns=(Column("c", desired_type),),
+            properties={"delta.enableTypeWidening": "true"},
+        )
+        observed = _observed_table(columns=(Column("c", observed_type),))
+
+        assert _validate(desired, observed).failed is False, (observed_type, desired_type)
 
 
 def test_rejects_partitioning_change():
@@ -422,7 +518,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     assert result.failed is True
     assert [failure.rule_name for failure in result.failures] == [
         "NonNullableColumnAdd",
-        "ColumnDataTypeChangeNotSupported",
+        "TypeWideningRequiredForTypeChange",
     ]
 
 
@@ -502,7 +598,7 @@ def test_managed_drift_still_trips_safety_rules():
 
     # Then the safety rule fires
     assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "ColumnDataTypeChangeNotSupported"
+    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
 
 
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():

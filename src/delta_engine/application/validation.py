@@ -1,6 +1,8 @@
 """Validation rules judging the diff between desired and observed table state."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
@@ -9,7 +11,19 @@ from delta_engine.application.properties import (
     Property,
     PropertyRegistry,
 )
-from delta_engine.domain.model import TableAspect
+from delta_engine.domain.model import (
+    Byte,
+    DataType,
+    Date,
+    Decimal,
+    Double,
+    Float,
+    Integer,
+    Long,
+    Short,
+    TableAspect,
+    TimestampNtz,
+)
 from delta_engine.domain.plan import (
     ColumnAdded,
     ColumnDataTypeChanged,
@@ -102,13 +116,35 @@ class NullabilityTighteningOnExistingColumn:
         )
 
 
-class ColumnDataTypeChangeNotSupported:
-    """Disallow in-place column type changes."""
+# The Iceberg-compatible widenings Delta can apply in place (observed -> desired).
+# Deliberately excludes integer -> decimal/double, which Databricks removed for
+# Iceberg compatibility, and every composite type: arrays, maps, and structs are
+# never widened as a whole, so any change to them stays blocked.
+_WIDENING_TARGETS: Final[Mapping[type[DataType], frozenset[type[DataType]]]] = MappingProxyType(
+    {
+        Byte: frozenset({Short, Integer, Long}),
+        Short: frozenset({Integer, Long}),
+        Integer: frozenset({Long}),
+        Float: frozenset({Double}),
+        Date: frozenset({TimestampNtz}),
+    }
+)
 
-    name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
+
+def _is_safe_widening(observed: DataType, desired: DataType) -> bool:
+    """Whether Delta type widening can apply this type change in place."""
+    if isinstance(observed, Decimal) and isinstance(desired, Decimal):
+        return desired.scale == observed.scale and desired.precision > observed.precision
+    return type(desired) in _WIDENING_TARGETS.get(type(observed), frozenset())
+
+
+class NonWideningColumnTypeChange:
+    """Disallow in-place column type changes outside the type-widening matrix."""
+
+    name: ClassVar[str] = "NonWideningColumnTypeChange"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every in-place column type change."""
+        """Flag every type change that widening cannot apply in place."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
@@ -116,12 +152,47 @@ class ColumnDataTypeChangeNotSupported:
                     f"Operation not allowed: cannot change the type of existing column"
                     f" '{change.column_name}'"
                     f" from {change.observed_type} to {change.desired_type}."
-                    " Type migrations are not supported;"
-                    " recreate the table to change a column's type."
+                    " Only Delta type widenings can be applied in place"
+                    " (integer widenings, Float to Double, Decimal precision growth,"
+                    " Date to TimestampNtz); recreate the table to make any other"
+                    " type change."
                 ),
             )
             for change in drift.managed_changes
             if isinstance(change, ColumnDataTypeChanged)
+            and not _is_safe_widening(change.observed_type, change.desired_type)
+        )
+
+
+class TypeWideningRequiredForTypeChange:
+    """
+    Disallow a widening type change without type widening declared.
+
+    Mirrors ColumnMappingRequiredForDrop: exact declaration guarantees a
+    validated declaration states the property whenever the catalog has it, so
+    the declaration alone is sufficient input; declaring it 'true' in the same
+    sync as the widen is safe (SET_PROPERTY phases before ALTER_COLUMN_TYPE).
+    """
+
+    name: ClassVar[str] = "TypeWideningRequiredForTypeChange"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every widening type change when the declaration lacks the property."""
+        if drift.desired.properties.get(Property.TYPE_WIDENING) == "true":
+            return ()
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: widening column '{change.column_name}'"
+                    f" from {change.observed_type} to {change.desired_type} requires"
+                    f" {Property.TYPE_WIDENING}='true'. Declare"
+                    f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
+                ),
+            )
+            for change in drift.managed_changes
+            if isinstance(change, ColumnDataTypeChanged)
+            and _is_safe_widening(change.observed_type, change.desired_type)
         )
 
 
@@ -333,7 +404,8 @@ class PrimaryKeyReferencedByForeignKeys:
 DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
-    ColumnDataTypeChangeNotSupported(),
+    NonWideningColumnTypeChange(),
+    TypeWideningRequiredForTypeChange(),
     PartitioningChangeNotSupported(),
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
