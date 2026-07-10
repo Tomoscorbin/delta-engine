@@ -7,8 +7,9 @@ tags:
 
 `DeltaTable(scope="metadata")` restricts a sync to catalog metadata: table
 and column comments, table and column tags, and primary/foreign key constraints.
-Column structure, table properties, and partitioning are read for context but
-never changed — a metadata-only sync can never add, drop, or alter a column.
+Column structure, table properties, partitioning, and clustering are read for
+context but never changed — a metadata-only sync can never add, drop, or alter
+a column.
 
 Use it to roll out governance metadata with a hard guarantee that no schema
 change can slip in — for example, applying tags and comments across tables
@@ -47,12 +48,13 @@ metadata is applied.
 - **Reconciles** table comment, column comments, table tags, column tags, and
   PK/FK constraints, exactly as a fully managed sync would.
 - **Requires** the live schema to match the declaration exactly. Any unmanaged
-  aspect (column structure or partitioning) that has drifted fails the sync at
-  validation (`UnmanagedAspectDrift`) before any SQL executes. Catalog
-  properties are the exception: a declaration that does not manage properties
-  makes no property assertion at all, so they are never compared — declared
-  properties are carried but ignored, and properties on the live table (for
-  example those written by a previous fully managed sync) are not drift.
+  aspect (column structure, partitioning, or clustering) that has drifted
+  fails the sync at validation (`UnmanagedAspectDrift`) before any SQL
+  executes. Catalog properties are the exception: a declaration that does not
+  manage properties makes no property assertion at all, so they are never
+  compared — declared properties are carried but ignored, and properties on
+  the live table (for example those written by a previous fully managed sync)
+  are not drift.
 - **Cannot create** a missing table. If the table does not exist, the sync
   fails at validation (`MissingTableUnmanaged`) — a metadata-only declaration
   does not manage column structure, so it has no shape to create the table

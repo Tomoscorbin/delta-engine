@@ -234,6 +234,21 @@ def _managed_properties_from_row(row: Row) -> MappingProxyType[str, str]:
     return MappingProxyType(observed_properties)
 
 
+def _clustering_columns_from_row(row: Row) -> tuple[str, ...]:
+    """
+    Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
+
+    ``clusteringColumns`` is a Delta 4.x DESCRIBE DETAIL field. Absence is handled
+    gracefully via ``asDict().get`` — DESCRIBE DETAIL is read for every table, so a
+    missing field (older Delta) must yield no clustering rather than break the read.
+    Names are casefolded to match the domain's lowercase columns.
+    """
+    columns = row.asDict().get("clusteringColumns")
+    if not columns:
+        return ()
+    return tuple(name.casefold() for name in columns)
+
+
 class DatabricksReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
@@ -282,17 +297,19 @@ class DatabricksReader:
             )
             for mapping in mappings
         )
+        detail_row = self._describe_detail_row(qualified_name)
         observed = ObservedTable(
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=_managed_properties_from_row(self._describe_detail_row(qualified_name)),
+            properties=_managed_properties_from_row(detail_row),
             tags=_table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
             partitioned_by=tuple(
                 mapping.column.name for mapping in mappings if mapping.is_partition
             ),
+            clustered_by=_clustering_columns_from_row(detail_row),
             primary_key=_primary_key_from_rows(
                 self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),

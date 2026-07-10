@@ -18,6 +18,7 @@ partitioned. This page is the practical reference for configuring each aspect.
 | Primary keys      | The table's primary key                               | [Primary keys](#primary-keys), below                                                  |
 | Foreign keys      | Cross-table references and sync ordering              | [Foreign keys](#foreign-keys), below                                                  |
 | Partitioning      | Partition columns, fixed at creation                  | [Partitioning](#partitioning), below                                                  |
+| Clustering        | Liquid clustering keys, reconciled in place           | [Clustering](#clustering), below                                                      |
 
 ## Properties
 
@@ -613,3 +614,57 @@ Partition columns also cannot be of complex type (`Array`, `Map`, `Struct`,
 rejected when the `DeltaTable` is constructed. See
 [safe-change rules](reference-safe-change-rules.md) for the full set of changes
 the engine rejects.
+
+## Clustering
+
+Declare Delta liquid clustering keys with the `clustered_by` argument — a
+table-level list of column names, the same shape as `partitioned_by`:
+
+```python
+from delta_engine.schema import Column, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="events",
+    columns=[
+        Column("region", String()),
+        Column("event_type", String()),
+    ],
+    clustered_by=["region"],
+)
+```
+
+`DeltaTable.clustered_by` exposes the declared tuple of clustering column
+names, in declaration order. Key order does not matter — Delta clusters by the
+key set — so reordering the keys is never treated as drift.
+
+A table cannot declare both `partitioned_by` and `clustered_by` — Delta
+supports one physical layout strategy per table — and a declaration is
+limited to four clustering keys. Both are rejected when the `DeltaTable` is
+constructed. See
+[limitations](reference-limitations.md) for the unsupported key types.
+
+### Clustering is reconciled in place
+
+Unlike partitioning, clustering keys are not fixed at creation. The engine
+changes the key set with `ALTER TABLE ... CLUSTER BY (...)` (or `CLUSTER BY
+NONE` to remove clustering) whenever the declaration changes — no table
+recreation required.
+
+The `ALTER` is a metadata change: it sets the _target_ clustering keys but
+does not rewrite existing data, so it stays cheap regardless of table size.
+Liquid clustering still lays data out physically — it co-locates rows within
+files rather than in partition directories — but existing files keep their
+old clustering until a later `OPTIMIZE` (or `OPTIMIZE FULL` to recluster the
+whole table) rewrites them. This is why partitioning is blocked while
+clustering is not: changing partition columns would mean physically rewriting
+every data file up front. See
+[safe-change rules](reference-safe-change-rules.md) for the full contrast.
+
+### Drift
+
+The engine compares clustering keys by _set_, not by order: declaring the
+same keys in a different order is not drift and plans nothing. This mirrors
+primary keys, and is unlike partitioning, where order is a physical layout
+decision.

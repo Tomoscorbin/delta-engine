@@ -35,6 +35,7 @@ from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
+    AlterClustering,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -299,6 +300,30 @@ class PartitioningChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class ClusteringChanged:
+    """Clustering keys that differ from the declaration — reconciled in place."""
+
+    desired_clustering: tuple[str, ...]
+    observed_clustering: tuple[str, ...]
+
+    aspect: ClassVar[TableAspect] = TableAspect.CLUSTERING
+
+    def __post_init__(self) -> None:
+        # Clustering-key identity is order-insensitive (Delta: keys may be defined
+        # in any order), so compare as sets. Do NOT change this to tuple equality:
+        # the catalog can return keys in a different order than declared, and a
+        # tuple compare would churn an ALTER CLUSTER BY on every otherwise-clean sync.
+        if set(self.desired_clustering) == set(self.observed_clustering):
+            raise ValueError(
+                f"ClusteringChanged carries no difference: {self.desired_clustering!r}"
+            )
+
+    def actions(self) -> tuple[Action, ...]:
+        """AlterClustering with the desired keys (empty means CLUSTER BY NONE)."""
+        return (AlterClustering(columns=self.desired_clustering),)
+
+
+@dataclass(frozen=True, slots=True)
 class PrimaryKeyAdded:
     """A declared primary key absent from the catalog."""
 
@@ -423,6 +448,7 @@ type Change = (
     | TableTagSet
     | TableTagUnset
     | PartitioningChanged
+    | ClusteringChanged
     | PrimaryKeyAdded
     | PrimaryKeyRemoved
     | PrimaryKeyChanged

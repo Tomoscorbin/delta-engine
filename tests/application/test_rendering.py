@@ -34,6 +34,7 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -152,6 +153,22 @@ from delta_engine.domain.plan.actions import (
             SetTableComment(comment=""),
             (DiffEntry(DiffCategory.COMMENTS, "~", ("table comment (unset)",)),),
         ),
+        (
+            AlterClustering(columns=("region", "day")),
+            (
+                DiffEntry(
+                    DiffCategory.CLUSTERING,
+                    "~",
+                    ("clustering (region, day) — run OPTIMIZE FULL to recluster existing data",),
+                ),
+            ),
+        ),
+        # Removal carries no OPTIMIZE hint: OPTIMIZE FULL errors on a table
+        # without clustering columns.
+        (
+            AlterClustering(columns=()),
+            (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),),
+        ),
     ],
 )
 def test_action_entries_render_expected(action, expected):
@@ -178,6 +195,22 @@ def test_create_table_entries_list_columns_with_types_and_primary_key():
         DiffEntry(DiffCategory.COLUMNS, "+", ("name", "String")),
         DiffEntry(DiffCategory.KEYS, "+", ("primary key (id)",)),
     )
+
+
+def test_create_table_entries_include_clustering_without_optimize_hint():
+    # Given a CREATE TABLE that declares clustering keys
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "tbl"),
+            columns=(Column("id", Integer()), Column("region", String())),
+            clustered_by=("region",),
+        )
+    )
+    # When rendering its diff entries
+    entries = _action_entries(action)
+    # Then a clustering line is present with no OPTIMIZE hint (new table, no data)
+    clustering = [e for e in entries if e.category is DiffCategory.CLUSTERING]
+    assert clustering == [DiffEntry(DiffCategory.CLUSTERING, "+", ("clustering (region)",))]
 
 
 def test_every_action_type_has_registered_diff_entries():

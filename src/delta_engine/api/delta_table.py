@@ -129,8 +129,6 @@ def _validate_delta_partitioning(
     columns: tuple[Column, ...], partitioned_by: tuple[str, ...]
 ) -> None:
     columns_by_name = {column.name: column for column in columns}
-    if any(name != name.casefold() for name in partitioned_by):
-        return
     if len(set(partitioned_by)) != len(partitioned_by):
         return
     if any(name not in columns_by_name for name in partitioned_by):
@@ -148,6 +146,36 @@ def _validate_delta_partitioning(
         raise ValueError(
             "Cannot partition by every column: at least one non-partition column is required"
         )
+
+
+def _validate_clustering(
+    columns: tuple[Column, ...],
+    clustered_by: tuple[str, ...],
+    partitioned_by: tuple[str, ...],
+) -> None:
+    if partitioned_by and clustered_by:
+        raise ValueError(
+            "A table cannot both partition and cluster: declare partitioned_by"
+            " or clustered_by, not both."
+        )
+    if len(clustered_by) > 4:
+        raise ValueError(
+            f"A table may declare at most four clustering keys; got {len(clustered_by)}."
+        )
+
+    columns_by_name = {column.name: column for column in columns}
+    if len(set(clustered_by)) != len(clustered_by):
+        return
+    if any(name not in columns_by_name for name in clustered_by):
+        return
+
+    for name in clustered_by:
+        data_type = columns_by_name[name].data_type
+        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+            raise ValueError(
+                f"Clustering column {name!r} has type"
+                f" {type(data_type).__name__}, which cannot be a clustering key"
+            )
 
 
 def _validate_column_names(
@@ -351,6 +379,7 @@ class DeltaTable:
         properties: Mapping[str, str | None] | None = None,
         tags: Mapping[str, str] | None = None,
         partitioned_by: Iterable[str] = (),
+        clustered_by: Iterable[str] = (),
         primary_key: Sequence[str] | None = None,
         foreign_keys: Iterable[ForeignKey] | None = None,
         scope: Literal["full", "metadata", "tags"] = "full",
@@ -366,7 +395,11 @@ class DeltaTable:
             comment: Table-level comment.
             properties: Delta/Spark table properties to manage.
             tags: Key/value tags to apply to the table.
-            partitioned_by: Column names to partition by.
+            partitioned_by: Column names to partition by. Mutually exclusive
+                with ``clustered_by``.
+            clustered_by: Column names to use as Delta liquid-clustering keys
+                (at most four). Key order is immaterial. Mutually exclusive with
+                ``partitioned_by``.
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
             foreign_keys: Foreign key relationships declared on this table.
@@ -409,7 +442,9 @@ class DeltaTable:
 
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)
+        clustered_by = tuple(clustered_by)
         _validate_delta_partitioning(columns, partitioned_by)
+        _validate_clustering(columns, clustered_by, partitioned_by)
         _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})
@@ -452,6 +487,7 @@ class DeltaTable:
             properties=user_properties,
             tags=table_tags,
             partitioned_by=partitioned_by,
+            clustered_by=clustered_by,
             primary_key=primary_key_constraint,
             foreign_keys=lowered_foreign_keys,
             managed_aspects=managed_aspects,
@@ -500,6 +536,11 @@ class DeltaTable:
     def partitioned_by(self) -> tuple[str, ...]:
         """Partition column names, in declaration order."""
         return self._desired_table.partitioned_by
+
+    @property
+    def clustered_by(self) -> tuple[str, ...]:
+        """Clustering key column names, in declaration order."""
+        return self._desired_table.clustered_by
 
     @property
     def primary_key(self) -> tuple[str, ...]:

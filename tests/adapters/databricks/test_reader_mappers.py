@@ -18,6 +18,7 @@ import pytest
 
 from delta_engine.adapters.databricks.reader import (
     DatabricksReader,
+    _clustering_columns_from_row,
     _column_tags_from_rows,
     _foreign_keys_from_rows,
     _managed_properties_from_row,
@@ -210,6 +211,23 @@ def test_properties_mapper_returns_empty_read_only_mapping_for_empty_map():
     assert dict(properties) == {}
     with pytest.raises(TypeError):
         properties["x"] = "y"  # type: ignore[index]
+
+
+def test_clustering_columns_mapper_returns_empty_when_field_absent():
+    # Given a DESCRIBE DETAIL row from an older Delta without the field
+    row = Row(properties={})
+    # Then no clustering is reported (must not break reads of non-clustered tables)
+    assert _clustering_columns_from_row(row) == ()
+
+
+def test_clustering_columns_mapper_returns_empty_for_empty_array():
+    row = Row(clusteringColumns=[])
+    assert _clustering_columns_from_row(row) == ()
+
+
+def test_clustering_columns_mapper_lowercases_names():
+    row = Row(clusteringColumns=["Region", "STORE"])
+    assert _clustering_columns_from_row(row) == ("region", "store")
 
 
 # ---------- column mapping ----------

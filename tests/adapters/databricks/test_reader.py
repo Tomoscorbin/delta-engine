@@ -43,6 +43,20 @@ class FakeDataFrame:
         return list(self._rows)
 
 
+class FakeDetailRow(dict):
+    """
+    Duck-typed DESCRIBE DETAIL row.
+
+    A real Spark ``Row`` supports both ``row["properties"]`` and
+    ``row.asDict()``; a plain dict only supports the former. The reader reads
+    ``clusteringColumns`` via ``asDict().get(...)`` to tolerate the field's
+    absence on older Delta versions, so detail-row fakes need ``asDict`` too.
+    """
+
+    def asDict(self):
+        return dict(self)
+
+
 class FakeCatalog:
     def __init__(
         self,
@@ -111,7 +125,9 @@ def routed_spark(
 ):
     """Build a RoutedSpark with a full default response set for one table."""
     responses = {
-        describe_detail_query(qn): describe if describe is not None else [{"properties": {}}],
+        describe_detail_query(qn): (
+            describe if describe is not None else [FakeDetailRow(properties={})]
+        ),
         primary_key_query(qn): list(pk) if not isinstance(pk, Exception) else pk,
         foreign_keys_query(qn): list(fks) if not isinstance(fks, Exception) else fks,
         referencing_foreign_keys_query(qn): (
@@ -323,7 +339,9 @@ def test_observed_comment_is_description_or_empty_string(qn, desc_value, expecte
 
 
 def test_observed_properties_are_empty_and_read_only_when_table_has_no_properties(qn):
-    spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=[{"properties": {}}])
+    spark = routed_spark(
+        qn, catalog=single_column_catalog(qn), describe=[FakeDetailRow(properties={})]
+    )
     result = DatabricksReader(spark).fetch_state(qn)
 
     assert isinstance(result, TablePresent)
@@ -335,13 +353,13 @@ def test_observed_properties_are_empty_and_read_only_when_table_has_no_propertie
 
 def test_observed_properties_are_filtered_to_managed_keys(qn):
     describe = [
-        {
-            "properties": {
+        FakeDetailRow(
+            properties={
                 "delta.columnMapping.mode": "name",
                 "delta.minReaderVersion": "2",
                 "custom.unlisted": "dropped",
             }
-        }
+        )
     ]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=describe)
     result = DatabricksReader(spark).fetch_state(qn)

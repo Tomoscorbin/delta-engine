@@ -3,6 +3,7 @@ from delta_engine.domain.plan.actions import (
     ActionPhase,
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -21,6 +22,7 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.changes import (
     Change,
+    ClusteringChanged,
     ColumnAdded,
     ColumnCommentChanged,
     ColumnDataTypeChanged,
@@ -53,7 +55,9 @@ __all__ = [
     "ActionPhase",
     "ActionPlan",
     "AddColumn",
+    "AlterClustering",
     "Change",
+    "ClusteringChanged",
     "ColumnAdded",
     "ColumnCommentChanged",
     "ColumnDataTypeChanged",

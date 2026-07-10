@@ -21,6 +21,7 @@ from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -81,6 +82,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     table_comment = _table_comment_clause(table.comment)
     properties = _properties_clause(table.properties)
     partition_by = _partitioned_by_clause(table.partitioned_by)
+    cluster_by = _clustered_by_clause(table.clustered_by)
 
     # IF NOT EXISTS, even though CreateTable is only emitted after the reader
     # reports the table absent. It guards the read-then-create race: if another
@@ -96,6 +98,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
         table_comment,
         properties,
         partition_by,
+        cluster_by,
     ]
     return " ".join(p for p in parts if p)
 
@@ -193,6 +196,15 @@ def _(action: SetColumnNullability, backticked_table_name: str) -> str:
 
 
 @_compile_action.register
+def _(action: AlterClustering, backticked_table_name: str) -> str:
+    """Compile ALTER TABLE ... CLUSTER BY (...) or CLUSTER BY NONE."""
+    if not action.columns:
+        return f"ALTER TABLE {backticked_table_name} CLUSTER BY NONE"
+    columns = ", ".join(backtick(column) for column in action.columns)
+    return f"ALTER TABLE {backticked_table_name} CLUSTER BY ({columns})"
+
+
+@_compile_action.register
 def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
     return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY IF EXISTS"
@@ -267,3 +279,11 @@ def _partitioned_by_clause(partitioned_by: tuple[str, ...] = ()) -> str:
         return ""
     quoted_columns = ", ".join(backtick(column_name) for column_name in partitioned_by)
     return f"PARTITIONED BY ({quoted_columns})"
+
+
+def _clustered_by_clause(clustered_by: tuple[str, ...] = ()) -> str:
+    """Return CLUSTER BY (...) or '' when the table declares no clustering."""
+    if not clustered_by:
+        return ""
+    quoted_columns = ", ".join(backtick(column_name) for column_name in clustered_by)
+    return f"CLUSTER BY ({quoted_columns})"

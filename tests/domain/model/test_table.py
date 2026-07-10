@@ -502,6 +502,48 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
     assert observed.partitioned_by == ("id", "day")
 
 
+# ---------- clustered_by ----------
+
+
+def test_table_snapshot_defaults_to_no_clustering():
+    # Given a snapshot built without clustering
+    table = TableSnapshot(_QUALIFIED_NAME, (Column("id", Integer()),))
+    # Then clustered_by is a stable empty tuple
+    assert table.clustered_by == ()
+
+
+def test_table_snapshot_stores_clustering_columns():
+    # Given a snapshot clustered by an existing column
+    columns = (Column("id", Integer()), Column("region", String()))
+    table = TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("region",))
+    # Then it reads the clustering columns back
+    assert table.clustered_by == ("region",)
+
+
+def test_table_snapshot_rejects_clustering_column_not_in_columns():
+    # Given a clustering column that is not defined
+    with pytest.raises(ValueError, match=r"[Cc]luster"):
+        TableSnapshot(_QUALIFIED_NAME, (Column("id", Integer()),), clustered_by=("region",))
+
+
+def test_table_snapshot_rejects_non_lowercase_clustering_column():
+    columns = (Column("id", Integer()), Column("region", String()))
+    with pytest.raises(ValueError, match="lowercase"):
+        TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
+
+
+def test_table_snapshot_rejects_duplicate_clustering_column():
+    columns = (Column("id", Integer()), Column("region", String()))
+    with pytest.raises(ValueError, match=r"[Cc]luster"):
+        TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
+
+
+def test_observed_table_accepts_clustering():
+    columns = (Column("id", Integer()), Column("region", String()))
+    table = ObservedTable(_QUALIFIED_NAME, columns, clustered_by=("region",))
+    assert table.clustered_by == ("region",)
+
+
 # ---------- referencing_foreign_keys ----------
 
 

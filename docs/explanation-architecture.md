@@ -65,7 +65,7 @@ through a sync.
 | `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                             |
 | `TableDiff`        | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`.                                                   |
 | `Change`           | One atomic difference inside a `TableDrift` (`ColumnAdded`, `TableTagUnset`, …). Each names the `TableAspect` it belongs to and can lower itself to actions. |
-| `TableAspect`      | One managed aspect of a table: columns, table comment, properties, tags, partitioning, primary key, or foreign keys. Internal enum.                          |
+| `TableAspect`      | One managed aspect of a table: columns, table comment, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.              |
 | `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                                              |
 | `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                     |
 | `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                                              |
@@ -369,6 +369,10 @@ maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
 and `"tags"` to table and column tags only. The `TableAspect` enum stays
 internal.
 
+`CLUSTERING` is not one of the metadata aspects: liquid clustering keys
+change how data files are laid out on storage, so a `metadata_only` sync
+never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
+
 `diff_table(desired, observed)` produces a `TableDiff`:
 
 - `TableMissing` means the catalog has no table at that name.
@@ -383,6 +387,7 @@ aspects:
 - table properties
 - table tags
 - partitioning
+- clustering
 - primary key
 - foreign keys
 
@@ -430,6 +435,11 @@ The phase ordering exists because backend DDL has dependencies:
 - Column nullability changes run before primary keys are set, because primary
   key columns must be non-nullable.
 - Foreign keys are set last, after the referenced primary key exists.
+- Clustering keys are altered after columns are added (a new clustering key may
+  name a column this same sync is still adding) but before columns are dropped,
+  so a table is reclustered off a column before that column is removed — a sync
+  that both drops the live clustering-key column and reclusters elsewhere must
+  not drop it while it is still the active key.
 
 The domain plan describes intent. The adapter compiler decides how each action
 is rendered for its backend.
@@ -535,6 +545,18 @@ significant instead: the order of names in `partitioned_by` sets the physical
 directory nesting Delta writes, and that nesting can be different from the
 order columns appear in the table. The differ compares that list positionally,
 which is why reordering it is drift, not a no-op.
+
+Clustering is the other physical layout, and it is declared the same way —
+`clustered_by` is a table-level list on `DeltaTable`, the sibling of
+`partitioned_by` (the two are mutually exclusive; a table has one layout
+strategy). What differs is not the declaration shape but the _comparison_:
+liquid clustering has no physical directory nesting, so key order carries no
+meaning — Delta clusters by the key _set_. So the differ compares
+`partitioned_by` positionally (reordering it is drift) but compares
+`clustered_by` as a set (reordering the keys is a no-op). The general rule: a
+physical layout is a table-level list (`partitioned_by`, `clustered_by`), and
+whether order is significant is a property of the differ, not of the
+declaration shape.
 
 ## Constraint names
 

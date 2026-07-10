@@ -29,6 +29,7 @@ class ActionPhase(IntEnum):
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
     ADD_COLUMN = auto()
+    SET_CLUSTERING = auto()
     DROP_COLUMN = auto()
     SET_COLUMN_TAG = auto()
     UNSET_COLUMN_TAG = auto()
@@ -302,6 +303,23 @@ class SetForeignKey(Action):
     @property
     def subject(self) -> str:
         return ",".join(self.local_columns)
+
+
+@dataclass(frozen=True, slots=True)
+class AlterClustering(Action):
+    """
+    Set or clear a table's liquid-clustering keys in place.
+
+    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering).
+    """
+
+    columns: tuple[str, ...]
+
+    phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
+
+    @property
+    def subject(self) -> str:
+        return ""
 
 
 def _execution_order(action: Action) -> tuple[int, str]:

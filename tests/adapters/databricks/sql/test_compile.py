@@ -19,6 +19,7 @@ from delta_engine.domain.plan.actions import (
     Action,
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -44,6 +45,7 @@ def _create_table(
     comment: str = "",
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
+    clustered_by: tuple[str, ...] = (),
     primary_key: PrimaryKeyConstraint | None = None,
 ) -> CreateTable:
     return CreateTable(
@@ -53,6 +55,7 @@ def _create_table(
             comment=comment,
             properties=properties or {},
             partitioned_by=partitioned_by,
+            clustered_by=clustered_by,
             primary_key=primary_key,
         )
     )
@@ -204,6 +207,29 @@ def test_create_table_renders_partition_clause():
 
     # Then the partition clause is rendered
     assert statement.endswith("PARTITIONED BY (`ds`)")
+
+
+def test_create_table_renders_cluster_by_clause():
+    # Given a clustered table
+    action = _create_table(
+        Column("id", Integer()),
+        Column("region", String()),
+        clustered_by=("region",),
+    )
+    # When compiling
+    statement = _compile_single(action)
+    # Then the clustering clause is rendered
+    assert statement.endswith("CLUSTER BY (`region`)")
+
+
+def test_alter_clustering_renders_cluster_by():
+    action = AlterClustering(columns=("region", "day"))
+    assert _compile_single(action) == ("ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY (`region`, `day`)")
+
+
+def test_alter_clustering_with_no_columns_renders_cluster_by_none():
+    action = AlterClustering(columns=())
+    assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY NONE"
 
 
 def test_create_table_renders_properties_in_sorted_order_and_filters_none_values():

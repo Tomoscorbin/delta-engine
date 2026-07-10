@@ -498,3 +498,56 @@ def test_engine_property_sync_is_idempotent(spark, temp_schema):
 
     # Then nothing is planned
     assert len(report.table_reports[0].plan) == 0
+
+
+def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
+    # Given a clustered table declaration
+    table_name = f"cluster_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+
+    def _clustering_columns() -> list[str]:
+        detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
+        return list(detail["clusteringColumns"])
+
+    # When creating the table clustered by `region`
+    first = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("region", String()),
+            ),
+            clustered_by=("region",),
+            comment="clustered table",
+        )
+    )
+
+    # Then the catalog reports `region` as the clustering column
+    assert first.any_failures is False
+    assert _clustering_columns() == ["region"]
+
+    # When the clustering key changes to `id`
+    reclustered = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("region", String()),
+        ),
+        clustered_by=("id",),
+        comment="clustered table",
+    )
+    second = engine.sync(reclustered)
+
+    # Then it is reconciled in place (an action ran) and the catalog reflects it
+    assert second.any_failures is False
+    assert second.table_reports[0].execution is not None
+    assert _clustering_columns() == ["id"]
+
+    # And an identical re-sync is a true no-op (idempotent; order-insensitive set diff)
+    third = engine.sync(reclustered)
+    assert len(third.table_reports[0].plan) == 0

@@ -33,6 +33,7 @@ the page with the detail.
 | Primary keys              |      ✓      | Declared at table level ([primary keys](how-to-configure-table.md#primary-keys))                                                                                          |
 | Foreign keys              |      ✓      | Must target the referenced table's primary key; orders the sync; names are engine-generated and cannot be chosen ([foreign keys](how-to-configure-table.md#foreign-keys)) |
 | Partitioning              | Create only | Fixed after creation; changes are blocked ([rules](reference-safe-change-rules.md))                                                                                       |
+| Clustering                |      ✓      | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                  |
 | Metadata-only scope       |      ✓      | `scope="metadata"` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                                 |
 | Tag-only scope            |      ✓      | `scope="tags"` restricts a sync to table and column tags ([tags](how-to-configure-table.md#manage-tags-only))                                                             |
 | Dry run                   |      ✓      | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                                                                             |
@@ -47,7 +48,6 @@ changes, or drops them, and they produce no drift.
 | CHECK constraints                                                 | Existing ones are left untouched and cannot be declared                                                                                                                             |
 | Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key |
 | Identity and generated columns                                    | A column's generation expression is invisible to the engine                                                                                                                         |
-| Liquid clustering                                                 | Only Hive-style `PARTITIONED BY` is modeled                                                                                                                                         |
 | Views and materialized views                                      | Only Delta tables are managed                                                                                                                                                       |
 | Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                 |
 | Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                 |
@@ -63,6 +63,21 @@ in brief:
 | `CHAR(n)` / `VARCHAR(n)` | Treated as `String`; the length bound is not modeled and never altered                            |
 | Struct fields            | Structs change as a whole: any field change is a blocked column type change                       |
 | `Decimal` precision      | Maximum 38, enforced at declaration                                                               |
+
+## Clustering limits
+
+Liquid clustering ([clustering](how-to-configure-table.md#clustering)) has
+its own set of declaration-time and execution-time limits, distinct from
+partitioning:
+
+| Limitation               | Behaviour                                                                                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key count                | At most four `clustered_by` keys per table, rejected at declaration                                                                                            |
+| Mutual exclusivity       | A table cannot declare both `partitioned_by` and `clustered_by`, rejected at declaration                                                                       |
+| Unsupported key types    | `Array`, `Map`, `Struct`, and `Variant` columns cannot be clustering keys, rejected at declaration                                                             |
+| Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be named in `clustered_by`                     |
+| Stats and column order   | Databricks only collects the file statistics clustering relies on for a table's first 32 columns; a clustering key outside that range gets no skipping benefit |
+| Runtime compatibility    | Liquid clustering requires Databricks Runtime 14.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features)              |
 
 ## Runtime features
 

@@ -30,6 +30,14 @@ the scope are never changed, and any unmanaged drift causes validation to
 fail. Properties are the exception: a declaration that does not manage
 properties never compares them at all.
 
+#### `clustered_by` (read-only accessor)
+
+The tuple of liquid clustering key column names, in declaration order,
+reflecting the `clustered_by` constructor argument. A table-level list, the
+sibling of `partitioned_by` and mutually exclusive with it; at most four keys.
+Key order is not significant. See
+[clustering](how-to-configure-table.md#clustering).
+
 ### Column
 
 ```{eval-rst}

@@ -26,6 +26,7 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.changes import (
     Change,
+    ClusteringChanged,
     ColumnAdded,
     ColumnCommentChanged,
     ColumnDataTypeChanged,
@@ -147,6 +148,7 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
         *_diff_partitioning(desired, observed),
+        *_diff_clustering(desired, observed),
         *_diff_primary_key(desired, observed),
         *_diff_foreign_keys(desired, observed),
     )
@@ -306,6 +308,25 @@ def _diff_partitioning(desired: DesiredTable, observed: ObservedTable) -> list[C
         PartitioningChanged(
             desired_partitioning=desired.partitioned_by,
             observed_partitioning=observed.partitioned_by,
+        )
+    ]
+
+
+def _diff_clustering(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+    """
+    Return the clustering change, or nothing when the key sets agree.
+
+    Identity is set equality, not tuple equality: Delta clustering keys are
+    order-insensitive (unlike partitioning, whose order is a directory layout).
+    A reordered same-set pair is not a change. The emitted change keeps the
+    desired declaration order for rendering CLUSTER BY (...).
+    """
+    if set(desired.clustered_by) == set(observed.clustered_by):
+        return []
+    return [
+        ClusteringChanged(
+            desired_clustering=desired.clustered_by,
+            observed_clustering=observed.clustered_by,
         )
     ]
 

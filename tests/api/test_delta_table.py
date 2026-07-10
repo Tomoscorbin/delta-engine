@@ -13,9 +13,11 @@ from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import (
     Array,
     Column,
+    Date,
     DeltaTable,
     ForeignKey,
     Integer,
+    Map,
     Property,
     String,
     Struct,
@@ -127,6 +129,67 @@ def test_delta_table_exposes_declared_partitioning():
 
     # Then partitioned_by reads it back
     assert table.partitioned_by == ("ds",)
+
+
+def test_delta_table_exposes_declared_clustering():
+    # Given a table declared with clustering keys
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[
+            Column("id", Integer()),
+            Column("region", String()),
+            Column("day", Date()),
+        ],
+        clustered_by=["region", "day"],
+    )
+    # Then clustered_by reads them back in declaration order
+    assert table.clustered_by == ("region", "day")
+
+
+def test_delta_table_clustering_defaults_to_empty_tuple():
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer())],
+    )
+    assert table.clustered_by == ()
+
+
+def test_delta_table_rejects_partitioning_and_clustering_together():
+    with pytest.raises(ValueError, match="both partition"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("id", Integer()), Column("region", String())],
+            partitioned_by=["id"],
+            clustered_by=["region"],
+        )
+
+
+def test_delta_table_rejects_more_than_four_clustering_keys():
+    with pytest.raises(ValueError, match="four"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column(name, Integer()) for name in ("a", "b", "c", "d", "e")],
+            clustered_by=["a", "b", "c", "d", "e"],
+        )
+
+
+def test_delta_table_rejects_complex_typed_clustering_column():
+    with pytest.raises(ValueError, match="clustering key"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("id", Integer()), Column("attrs", Map(String(), String()))],
+            clustered_by=["attrs"],
+        )
 
 
 @pytest.mark.parametrize(
@@ -824,7 +887,7 @@ def test_metadata_scope_still_lowers_the_full_schema():
     assert tuple(c.name for c in desired.columns) == ("id", "name")
 
 
-def test_metadata_aspects_excludes_structure_properties_and_partitioning():
+def test_metadata_aspects_excludes_structure_properties_partitioning_and_clustering():
     # Given the metadata named scope
     # Then physical-behaviour aspects are excluded by design
     assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
@@ -832,6 +895,7 @@ def test_metadata_aspects_excludes_structure_properties_and_partitioning():
             TableAspect.COLUMN_STRUCTURE,
             TableAspect.PROPERTIES,
             TableAspect.PARTITIONING,
+            TableAspect.CLUSTERING,
         }
     )
 

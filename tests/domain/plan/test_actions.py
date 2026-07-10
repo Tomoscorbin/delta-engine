@@ -7,6 +7,7 @@ from delta_engine.domain.plan.actions import (
     ActionPhase,
     ActionPlan,
     AddColumn,
+    AlterClustering,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -118,6 +119,7 @@ def test_plan_ordering_ignores_non_subject_fields():
             ),
             "customer_id",
         ),
+        (AlterClustering(columns=("region",)), ""),
     ],
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
@@ -195,6 +197,7 @@ def test_plan_full_phase_order_with_all_action_types():
             _create_table_action(),
             SetTableTag(name="env", value="prod"),
             UnsetTableTag(name="old_tag"),
+            AlterClustering(columns=("region",)),
         )
     )
 
@@ -208,6 +211,7 @@ def test_plan_full_phase_order_with_all_action_types():
         DropForeignKey,
         DropPrimaryKey,
         AddColumn,
+        AlterClustering,
         DropColumn,
         SetColumnTag,
         UnsetColumnTag,
@@ -277,3 +281,29 @@ def test_drop_foreign_key_phases_before_drop_primary_key():
     # Reordering these phases would make that exemption approve plans that
     # fail at execution.
     assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
+
+
+def test_plan_orders_alter_clustering_after_add_column():
+    # Given a new column that is also the clustering key
+    plan = ActionPlan(
+        (
+            AlterClustering(columns=("region",)),
+            AddColumn(column=_column("region")),
+        )
+    )
+    # Then the column is added before it is used as a clustering key
+    assert [type(a) for a in plan] == [AddColumn, AlterClustering]
+
+
+def test_plan_reclusters_before_dropping_a_column():
+    # Given a sync that drops the current clustering-key column and reclusters
+    # onto another column
+    plan = ActionPlan(
+        (
+            DropColumn(column_name="region"),
+            AlterClustering(columns=("id",)),
+        )
+    )
+    # Then clustering is changed off the old key before that column is dropped,
+    # so the drop never targets a live clustering key
+    assert [type(a) for a in plan] == [AlterClustering, DropColumn]
