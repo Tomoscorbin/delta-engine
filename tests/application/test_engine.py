@@ -1103,6 +1103,40 @@ def test_dry_run_exposes_the_planned_actions_on_the_report():
     assert executor.executed_names == []
 
 
+def test_dry_run_records_the_sql_that_would_execute():
+    # Given a table that would be created (dry run plans a CREATE)
+    fqn = "c.s.new_table"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then the report carries the compiled statements even though nothing ran
+    [table_report] = list(report)
+    assert table_report.has_changes is True
+    assert table_report.execution is None
+    assert len(table_report.sql_statements) == len(table_report.plan)
+    assert all("STATEMENT" in statement for statement in table_report.sql_statements)
+
+
+def test_failed_table_records_no_sql_statements():
+    # Given a table whose read fails, so no plan is built
+    fqn = "c.s.unreadable"
+    reader = _RecordingReader({fqn: ReadFailed(ReadFailure("IOError", "cannot read"))})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then no statements are recorded for the failed table
+    [table_report] = list(report)
+    assert table_report.has_failures is True
+    assert table_report.sql_statements == ()
+
+
 def test_dry_run_returns_validation_failures_without_raising_or_executing():
     # Given a table that would fail validation
     fqn = "c.s.val_fail"

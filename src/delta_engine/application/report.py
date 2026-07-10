@@ -48,12 +48,18 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 
 @dataclass(frozen=True, slots=True)
 class TableRunReport:
-    """Per-table report with outcomes and a single phase-ordered failure stream."""
+    """
+    Per-table report with outcomes and a single phase-ordered failure stream.
+
+    Carries the exact SQL statements its plan compiles to (``sql_statements``),
+    populated on every run — dry or real — so a dry run can preview the DDL.
+    """
 
     qualified_name: QualifiedName
     desired: DesiredTable
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
+    sql_statements: tuple[str, ...] = ()
     failures: tuple[Failure, ...] = ()
     execution: ExecutionSummary | None = None
 
@@ -99,6 +105,15 @@ class SyncReport:
         ``report.has_failures or report.has_changes``.
         """
         return any(table_report.has_changes for table_report in self.table_reports)
+
+    @property
+    def sql_statements(self) -> dict[str, tuple[str, ...]]:
+        """Dotted table name → the SQL its plan compiles to; no-op tables omitted."""
+        return {
+            str(table_report.qualified_name): table_report.sql_statements
+            for table_report in self.table_reports
+            if table_report.sql_statements
+        }
 
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:

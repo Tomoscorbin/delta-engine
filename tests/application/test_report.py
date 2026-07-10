@@ -176,6 +176,23 @@ def test_sync_report_has_no_changes_when_no_table_plans_actions():
     assert report.has_changes is False
 
 
+def test_sync_report_sql_statements_maps_dotted_names_and_omits_empty():
+    with_sql = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "a"),
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        sql_statements=("ALTER TABLE a SET ...",),
+    )
+    without_sql = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(with_sql, without_sql))
+    assert report.sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
+
+
 def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
     ok_name = QualifiedName("cat", "s", "x")
