@@ -1,4 +1,13 @@
-"""Schema declaration implementation for Delta tables and foreign keys."""
+"""
+Schema declaration implementation for Delta tables and foreign keys.
+
+Validation here is declaration-time deployability: rules Delta or Unity
+Catalog enforce when an author creates a table (layout key types, quotas,
+property-dependent naming rules). Structural coherence — columns exist,
+names are unique, at least one column — is the domain ``DesiredTable``'s
+job, enforced the moment a declaration is lowered; this module skips names
+it cannot resolve rather than re-checking existence.
+"""
 
 from __future__ import annotations
 
@@ -70,8 +79,10 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
 )
 
-# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
-_UNPARTITIONABLE_TYPES: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
+# Complex types Delta accepts neither as partition columns
+# (DELTA_INVALID_PARTITION_COLUMN_TYPE) nor as liquid-clustering keys.
+# Two distinct backend rules that happen to name the same types today.
+_TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
 
 # Unity Catalog limits per securable object (a table and each of its
 # columns are separate securables).
@@ -125,34 +136,19 @@ def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
             return ()
 
 
-def _validate_delta_partitioning(
-    columns: tuple[Column, ...], partitioned_by: tuple[str, ...]
-) -> None:
-    columns_by_name = {column.name: column for column in columns}
-    if len(set(partitioned_by)) != len(partitioned_by):
-        return
-    if any(name not in columns_by_name for name in partitioned_by):
-        return
-
-    for name in partitioned_by:
-        data_type = columns_by_name[name].data_type
-        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
-            raise ValueError(
-                f"Partition column {name!r} has type"
-                f" {type(data_type).__name__}, which Delta cannot partition by"
-            )
-
-    if partitioned_by and len(set(partitioned_by)) == len(columns):
-        raise ValueError(
-            "Cannot partition by every column: at least one non-partition column is required"
-        )
-
-
-def _validate_clustering(
+def _validate_layout(
     columns: tuple[Column, ...],
-    clustered_by: tuple[str, ...],
     partitioned_by: tuple[str, ...],
+    clustered_by: tuple[str, ...],
 ) -> None:
+    """
+    Reject physical layouts Delta cannot deploy.
+
+    Checks declaration-level deployability only: the partition/cluster
+    relationship, the clustering-key budget, and key data types. Whether the
+    named columns exist and are unique is a ``DesiredTable`` invariant, so
+    names that do not resolve are skipped here and the domain's error fires.
+    """
     if partitioned_by and clustered_by:
         raise ValueError(
             "A table cannot both partition and cluster: declare partitioned_by"
@@ -164,18 +160,29 @@ def _validate_clustering(
         )
 
     columns_by_name = {column.name: column for column in columns}
-    if len(set(clustered_by)) != len(clustered_by):
-        return
-    if any(name not in columns_by_name for name in clustered_by):
-        return
-
+    for name in partitioned_by:
+        column = columns_by_name.get(name)
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
+            raise ValueError(
+                f"Partition column {name!r} has type"
+                f" {type(column.data_type).__name__}, which Delta cannot partition by"
+            )
     for name in clustered_by:
-        data_type = columns_by_name[name].data_type
-        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+        column = columns_by_name.get(name)
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
-                f" {type(data_type).__name__}, which cannot be a clustering key"
+                f" {type(column.data_type).__name__}, which cannot be a clustering key"
             )
+
+    if (
+        partitioned_by
+        and set(partitioned_by) <= columns_by_name.keys()
+        and len(set(partitioned_by)) == len(columns)
+    ):
+        raise ValueError(
+            "Cannot partition by every column: at least one non-partition column is required"
+        )
 
 
 def _validate_column_names(
@@ -443,8 +450,7 @@ class DeltaTable:
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)
         clustered_by = tuple(clustered_by)
-        _validate_delta_partitioning(columns, partitioned_by)
-        _validate_clustering(columns, clustered_by, partitioned_by)
+        _validate_layout(columns, partitioned_by, clustered_by)
         _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})
