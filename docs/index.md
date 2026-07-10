@@ -104,6 +104,7 @@ reference-limitations
 reference-data-types
 reference-safe-change-rules
 reference-api
+autoapi/delta_engine/index
 ```
 
 ```{toctree}
