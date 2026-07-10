@@ -15,10 +15,16 @@ from importlib.metadata import PackageNotFoundError, version as _version
 
 from delta_engine.application import (
     Engine,
+    ExecutionFailure,
     Failure,
+    FailurePhase,
+    ForeignKeyFailure,
+    ReadFailure,
     SyncFailedError,
     SyncReport,
+    TableRunReport,
     TableRunStatus,
+    ValidationFailure,
     render_diff,
     render_report,
 )
@@ -32,10 +38,16 @@ except PackageNotFoundError:  # running from a source tree that is not installed
 # is intentionally not advertised in `__all__`; access it as `delta_engine.__version__`.
 __all__ = [
     "Engine",
+    "ExecutionFailure",
     "Failure",
+    "FailurePhase",
+    "ForeignKeyFailure",
+    "ReadFailure",
     "SyncFailedError",
     "SyncReport",
+    "TableRunReport",
     "TableRunStatus",
+    "ValidationFailure",
     "render_diff",
     "render_report",
 ]

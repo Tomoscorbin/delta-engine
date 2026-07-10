@@ -20,14 +20,14 @@ Every sync runs the same chain of phases over every table in the call:
 read → diff → validate → plan → resolve → execute → report
 ```
 
-| Phase        | Question it answers                          | Outcome                                                        |
-| ------------ | -------------------------------------------- | -------------------------------------------------------------- |
-| **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure   |
-| **Diff**     | How does observed state differ from desired? | Typed drift facts — or no drift, meaning nothing to do         |
-| **Validate** | Is that drift safe to fix in place?          | Pass, or named validation failures                             |
-| **Plan**     | What DDL closes the gap, in what order?      | A deterministic action plan                                    |
-| **Resolve**  | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                 |
-| **Execute**  | Apply the plan                               | An execution summary per table (skipped entirely on a dry run) |
+| Phase        | Question it answers                          | Outcome                                                           |
+| ------------ | -------------------------------------------- | ----------------------------------------------------------------- |
+| **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure      |
+| **Diff**     | How does observed state differ from desired? | Typed drift facts — or no drift, meaning nothing to do            |
+| **Validate** | Is that drift safe to fix in place?          | Pass, or named validation failures                                |
+| **Plan**     | What DDL closes the gap, in what order?      | A deterministic action plan and the SQL statements it compiles to |
+| **Resolve**  | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                    |
+| **Execute**  | Apply the plan                               | An execution summary per table (skipped entirely on a dry run)    |
 
 The result is a `SyncReport` with one entry per table. On a real run, if any
 table failed, the engine raises `SyncFailedError` with that report attached; a
@@ -53,10 +53,10 @@ it.
 
 Validation happens before planning, and planning before execution, so a table
 that fails validation is untouched — there is no partial application of the
-safe subset. Within execution, actions run in a deterministic order and a
-statement failure stops that table's remaining actions. Re-running `sync`
-after fixing the cause is always the recovery path: the engine re-reads live
-state and plans only the drift that still remains.
+safe subset. Within execution, statements run in a deterministic order and a
+failure stops that table's remaining statements. Re-running `sync` after
+fixing the cause is always the recovery path: the engine re-reads live state
+and plans only the drift that still remains.
 
 ## One table's failure does not abort the run
 
@@ -87,8 +87,8 @@ declaration side.
 
 `sync(..., dry_run=True)` runs read, diff, validate, plan, and resolve — the
 full decision-making — and skips only execution. You get the same report with
-every planned action and every failure the run _would_ have had, with zero
-catalog mutations, and no exception is raised. See
+every planned action, the exact SQL it would run, and every failure the run
+_would_ have had, with zero catalog mutations, and no exception is raised. See
 [how to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down

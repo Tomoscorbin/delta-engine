@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 from delta_engine.application.failures import (
     ExecutionFailure,
@@ -21,7 +22,7 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan.actions import ActionPlan, SetTableComment
 
 # ---------- test builders
 
@@ -51,17 +52,14 @@ def _t1():
     return datetime(2025, 10, 2, 12, 5, 0)
 
 
-def _ok_exec(idx=0, action="AddColumn", preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(action=action, action_index=idx, statement_preview=preview)
+def _ok_exec(idx=0, preview="ALTER TABLE ..."):
+    return ExecutionSucceeded(statement_index=idx, statement_preview=preview)
 
 
-def _failed_exec(
-    idx=0, action="AddColumn", preview="ALTER TABLE ...", exc="ValueError", msg="boom"
-):
+def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
-        action=action,
         failure=ExecutionFailure(
-            action_index=idx, exception_type=exc, message=msg, statement_preview=preview
+            statement_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
     )
 
@@ -88,7 +86,7 @@ def test_table_status_success_when_all_actions_succeed():
     assert report.execution.failures == ()
 
 
-def test_sync_report_any_failures_true_if_any_table_has_failures():
+def test_sync_report_has_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "a"),
@@ -103,7 +101,7 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
             ExecutionFailure(
-                action_index=0,
+                statement_index=0,
                 exception_type="ValueError",
                 message="boom",
                 statement_preview="ALTER TABLE ...",
@@ -114,8 +112,83 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     # When aggregating the sync
     sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
 
-    # Then any_failures is True
-    assert sr.any_failures is True
+    # Then has_failures is True
+    assert sr.has_failures is True
+
+
+def test_table_has_changes_when_plan_is_non_empty():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+    )
+    assert report.has_changes is True
+
+
+def test_table_has_no_changes_when_plan_is_empty():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    assert report.has_changes is False
+
+
+def test_validation_failed_table_has_failures_but_no_changes():
+    # Validation refuses the drift before planning, so the plan stays empty:
+    # the table reports failures, not changes.
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    assert report.has_failures is True
+    assert report.has_changes is False
+
+
+def test_sync_report_has_changes_when_any_table_plans_actions():
+    changed = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "a"),
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+    )
+    unchanged = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged))
+    assert report.has_changes is True
+
+
+def test_sync_report_has_no_changes_when_no_table_plans_actions():
+    unchanged = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
+    assert report.has_changes is False
+
+
+def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
+    with_sql = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "a"),
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        planned_sql_statements=("ALTER TABLE a SET ...",),
+    )
+    without_sql = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(with_sql, without_sql))
+    assert report.planned_sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
@@ -232,7 +305,7 @@ def test_status_reflects_the_earliest_failing_phase():
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
             ExecutionFailure(
-                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
             ),
         ),
     )
@@ -247,7 +320,7 @@ def test_status_reflects_the_earliest_failing_phase():
         failures=(
             ReadFailure("IOError", "boom"),
             ExecutionFailure(
-                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
             ),
         ),
     )
@@ -269,3 +342,88 @@ def test_table_run_report_carries_its_desired_definition():
     assert report.status is TableRunStatus.SUCCESS
     assert report.failures == ()
     assert report.plan == ActionPlan()
+
+
+def _a_changed_table_report():
+    return TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
+    )
+
+
+def test_table_to_dict_states_the_planned_change():
+    payload = _a_changed_table_report().to_dict()
+
+    assert payload["name"] == "cat.schema.orders"
+    assert payload["status"] == "SUCCESS"
+    assert payload["has_changes"] is True
+    assert payload["has_failures"] is False
+    assert payload["changes"] == [
+        {"kind": "comments", "operation": "change", "subject": "table: 'hello'", "detail": ""}
+    ]
+    assert payload["planned_sql_statements"] == [
+        "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
+    ]
+    assert payload["failures"] == []
+    assert payload["execution"] is None
+
+
+def test_table_to_dict_reports_failures_with_phase_and_type():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    payload = report.to_dict()
+
+    assert payload["status"] == "VALIDATION_FAILED"
+    assert payload["failures"] == [
+        {
+            "phase": "VALIDATION",
+            "type": "ValidationFailure",
+            "message": "Validation failed: SomeRule - unsafe",
+        }
+    ]
+
+
+def test_table_to_dict_reports_execution_counts_when_executed():
+    # The counts are statement-denominated: statements applied of statements planned.
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "orders"),
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
+        execution=ExecutionSummary((_ok_exec(0),)),
+    )
+    assert report.to_dict()["execution"] == {"applied": 1, "total": 1}
+
+
+def test_sync_report_to_dict_is_json_serialisable_and_complete():
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
+    )
+    payload = report.to_dict()
+
+    assert payload["schema_version"] == 1
+    assert payload["started_at"] == _t0().isoformat()
+    assert payload["ended_at"] == _t1().isoformat()
+    assert payload["dry_run"] is True
+    assert payload["has_changes"] is True
+    assert payload["has_failures"] is False
+    assert [t["name"] for t in payload["tables"]] == ["cat.schema.orders"]
+    json.dumps(payload)  # plain types only — must not raise
+
+
+def test_to_dict_is_deterministic():
+    report = SyncReport(
+        started_at=_t0(), ended_at=_t1(), table_reports=(_a_changed_table_report(),)
+    )
+    assert report.to_dict() == report.to_dict()

@@ -3,14 +3,14 @@ High-level orchestration of planning, validation, and execution.
 
 `Engine.sync` runs a chain of phases, each a pass over the per-table
 runs — one `TableRunReport` is born per table in the read phase and accretes
-its plan, failures, and execution as the chain proceeds. On a real run, if any
-table fails, `SyncFailedError` is raised with a formatted summary.
+its plan, SQL, failures, and execution as the chain proceeds. On a real run, if
+any table fails, `SyncFailedError` is raised with a formatted summary.
 
 The six phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
   2. Diff     — compute the desired-observed diff; states the facts
   3. Validate — check every diff against rules; append per-table failures
-  4. Plan     — lower every diff into its action plan
+  4. Plan     — lower every diff into its action plan and the SQL that applies it
   5. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
   6. Execute  — run the plan of every run with no failures and a non-empty
@@ -71,6 +71,7 @@ class _TableRun:
     desired: DesiredTable
     read: CatalogState
     plan: ActionPlan = field(default_factory=ActionPlan)
+    planned_sql_statements: tuple[str, ...] = ()
     diff: TableDiff | None = None
     failures: list[Failure] = field(default_factory=list)
     execution: ExecutionSummary | None = None
@@ -82,6 +83,7 @@ class _TableRun:
             desired=self.desired,
             read=self.read,
             plan=self.plan,
+            planned_sql_statements=self.planned_sql_statements,
             failures=tuple(self.failures),
             execution=self.execution,
         )
@@ -155,7 +157,7 @@ class Engine:
             dry_run=dry_run,
         )
 
-        if not dry_run and report.any_failures:
+        if not dry_run and report.has_failures:
             raise SyncFailedError(report)
 
         if dry_run:
@@ -222,13 +224,18 @@ class Engine:
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Build the action plan for each run by delegating to the diff."""
+        """
+        Produce each run's concrete change: its action plan and the SQL that applies it.
+
+        Compiling here, before the dry-run/execute split, means a dry run can
+        preview the exact DDL. Only validated drift is lowered: a run that
+        failed read or validation keeps its empty plan and no statements.
+        """
         for run in runs:
-            # Only validated drift is lowered into actions: a run that failed
-            # read or validation keeps its empty plan.
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
+            run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
 
@@ -291,9 +298,9 @@ class Engine:
             # still blocked; a healthy no-op run counts as a healthy parent.
             if not run.plan:
                 continue
-            summary = self.executor.execute(run.qualified_name, run.plan)
+            summary = self.executor.execute(run.planned_sql_statements)
             logger.info(
-                "Executed %d action(s) for %s (%d failed)",
+                "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
                 run.qualified_name,
                 summary.failed_count,

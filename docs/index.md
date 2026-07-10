@@ -93,6 +93,7 @@ explanation-safety-model
 how-to-configure-table
 how-to-deploy-metadata-only
 how-to-preview-changes
+how-to-gate-changes-in-ci
 how-to-handle-sync-failures
 ```
 
@@ -103,6 +104,7 @@ how-to-handle-sync-failures
 reference-limitations
 reference-data-types
 reference-safe-change-rules
+reference-run-report
 reference-api
 autoapi/delta_engine/index
 ```

@@ -40,6 +40,8 @@ class MyReader:
 
 ### PlanExecutor
 
+Execution is a two-stage boundary. `compile` turns a domain plan into the backend statements it lowers to, without touching the backend:
+
 ```python
 from delta_engine.application.ports import PlanExecutor, ExecutionSummary, ExecutionSucceeded, ExecutionFailed
 from delta_engine.application.failures import ExecutionFailure
@@ -47,31 +49,38 @@ from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
 class MyExecutor:
-    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(self._render(action) for action in plan.actions)
+```
+
+The engine calls `compile` during planning on every run — dry or real — and records the statements on the table's report, so a dry run can preview the DDL. `compile` is **not** total: compiling a validated plan is a pure, local operation that cannot fail against a backend, so it may raise on a genuine programming error rather than swallowing it.
+
+`execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
+
+```python
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         results = []
-        for i, action in enumerate(plan.actions):
+        for i, statement in enumerate(statements):
             try:
-                self._run(action)
+                self._run(statement)
                 results.append(ExecutionSucceeded(
-                    action=repr(action),
-                    action_index=i,
-                    statement_preview=repr(action),
+                    statement_index=i,
+                    statement_preview=statement,
                 ))
             except Exception as exc:
                 results.append(ExecutionFailed(
-                    action=repr(action),
                     failure=ExecutionFailure(
-                        action_index=i,
+                        statement_index=i,
                         exception_type=type(exc).__name__,
                         message=str(exc),
-                        statement_preview=repr(action),
+                        statement_preview=statement,
                     ),
                 ))
                 break  # stop at first failure — the engine is non-transactional
         return ExecutionSummary(results=tuple(results))
 ```
 
-`execute` is also **total**. Stop at the first failure and return the summary — the engine records partial results and moves on to the next table.
+`execute` **is** total. Stop at the first failure and return the summary — the engine records partial results and moves on to the next table.
 
 ## Wire the engine
 

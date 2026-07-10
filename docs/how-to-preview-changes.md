@@ -44,9 +44,17 @@ gate is "no failures":
 ```python
 report = engine.sync(customers, orders, dry_run=True)
 
-if report.any_failures:
+if report.has_failures:
     raise SystemExit(render_report(report))
 ```
+
+`report.has_changes` reports whether any table has a planned change, and
+`report.planned_sql_statements` maps each table's name to the exact DDL a
+real run would execute. For a machine-readable view of the whole run — status, planned
+actions, and SQL as plain JSON — call `report.to_dict()` (see
+[the run report schema](reference-run-report.md)). To turn a dry run into a
+red/green pull-request check, see
+[how to gate schema changes in CI](how-to-gate-changes-in-ci.md).
 
 ## Dry run first, then apply
 

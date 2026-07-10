@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pyspark.sql.types as T
@@ -36,7 +37,7 @@ def test_engine_sync_happy_path(spark, temp_schema):
     )
 
     # Then the run is reported as a successful SyncReport for the caller
-    assert report.any_failures is False
+    assert report.has_failures is False
 
     # And the table exists with expected schema and comment
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
@@ -195,7 +196,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
         properties={"delta.columnMapping.mode": "name"},
     )
     first_report = engine.sync(initial)
-    assert first_report.any_failures is False
+    assert first_report.has_failures is False
 
     evolved = DeltaTable(
         TEST_CATALOG,
@@ -213,7 +214,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
         },
     )
     second_report = engine.sync(evolved)
-    assert second_report.any_failures is False
+    assert second_report.has_failures is False
     assert second_report.table_reports[0].execution is not None
 
     fields = {f.name: f for f in spark.table(fq).schema.fields}
@@ -358,7 +359,7 @@ def test_engine_metadata_scope_applies_comments_when_schema_matches(spark, temp_
     )
 
     # Then the sync succeeds, comments are applied, and the schema is untouched
-    assert report.any_failures is False
+    assert report.has_failures is False
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert set(fields) == {"id"}
     assert fields["id"].metadata.get("comment") == "surrogate key"
@@ -467,7 +468,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
     )
 
     # Then the unregistered key is invisible — no failure, no action
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert len(report.table_reports[0].plan) == 0
 
 
@@ -526,7 +527,7 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     )
 
     # Then the catalog reports `region` as the clustering column
-    assert first.any_failures is False
+    assert first.has_failures is False
     assert _clustering_columns() == ["region"]
 
     # When the clustering key changes to `id`
@@ -544,7 +545,7 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     second = engine.sync(reclustered)
 
     # Then it is reconciled in place (an action ran) and the catalog reflects it
-    assert second.any_failures is False
+    assert second.has_failures is False
     assert second.table_reports[0].execution is not None
     assert _clustering_columns() == ["id"]
 
@@ -578,8 +579,49 @@ def test_engine_sync_widens_column_types_with_type_widening_declared(spark, temp
     )
 
     # Then the sync succeeds and every column is widened in place
-    assert report.any_failures is False
+    assert report.has_failures is False
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert isinstance(fields["id"].dataType, T.LongType)
     assert fields["amount"].dataType == T.DecimalType(12, 3)
     assert isinstance(fields["ratio"].dataType, T.DoubleType)
+
+
+def test_dry_run_report_is_ci_consumable(spark, temp_schema):
+    # Given a declared table that does not exist yet (dry run plans a CREATE)
+    table_name = f"e2e_dry_ci_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+
+    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+
+    # When we sync as a dry run
+    report = engine.sync(
+        DeltaTable(
+            TEST_CATALOG,
+            temp_schema,
+            table_name,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("name", String()),
+            ),
+        ),
+        dry_run=True,
+    )
+
+    # Then the gate booleans, SQL, and projection are all consistent
+    assert report.has_changes is True
+    assert report.has_failures is False
+
+    [table_report] = list(report)
+    assert table_report.planned_sql_statements
+    statement = table_report.planned_sql_statements[0]
+    assert "CREATE TABLE" in statement.upper()
+
+    payload = report.to_dict()
+    json.dumps(payload)  # plain types only — must not raise
+    assert payload["dry_run"] is True
+    assert payload["tables"][0]["planned_sql_statements"] == list(
+        table_report.planned_sql_statements
+    )
+
+    # And nothing was created
+    assert spark.catalog.tableExists(fq) is False

@@ -69,8 +69,8 @@ through a sync.
 | `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                                              |
 | `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                     |
 | `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                                              |
-| `ExecutionSummary` | The result of attempting a table's plan. It records successful actions and the first failed action, if execution failed.                                     |
-| `TableRunReport`   | The complete per-table outcome, including read state, plan, failures, and execution.                                                                         |
+| `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                    |
+| `TableRunReport`   | The complete per-table outcome, including read state, plan, planned SQL statements, failures, and execution.                                                 |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                    |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
@@ -111,14 +111,20 @@ flowchart LR
 - `TableAbsent()`
 - `ReadFailed(failure=ReadFailure(...))`
 
-`PlanExecutor.execute(qualified_name, plan)` returns an `ExecutionSummary` with
-one result per attempted action.
+`PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan)` lowers
+a plan to the backend statements that apply it — the engine calls it in the
+plan phase on every run, dry or real, and records the statements on the
+table's report. `execute(statements)` then runs that same tuple and returns an
+`ExecutionSummary` with one result per attempted statement, so the previewed
+SQL is exactly what executes.
 
-Both ports are **total**. Adapter implementations catch backend exceptions and
-return typed failures instead of raising backend-specific exceptions through the
-port. This is not just a convenience for callers. It is what lets one unreadable
-or unmodifiable table fail while the engine keeps processing the rest of the
-run and returns a complete report.
+`fetch_state` and `execute` are **total**. Adapter implementations catch
+backend exceptions and return typed failures instead of raising
+backend-specific exceptions through the port. This is not just a convenience
+for callers. It is what lets one unreadable or unmodifiable table fail while
+the engine keeps processing the rest of the run and returns a complete report.
+`compile` is the exception: it is pure and local, cannot fail against a
+backend, and an exception from it is a programming error that propagates.
 
 The Databricks adapter also owns backend normalization. It lowercases catalog
 identifiers returned from Spark where needed, parses Spark DDL type strings into
@@ -235,9 +241,11 @@ sequenceDiagram
     Validator-->>Engine: ValidationResult
     Engine->>Planner: plan from diff.changes
     Planner-->>Engine: ActionPlan
+    Engine->>Executor: compile(qualified_name, plan)
+    Executor-->>Engine: SQL statements
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
-    Engine->>Executor: execute(qualified_name, plan)
+    Engine->>Executor: execute(statements)
     Executor-->>Engine: ExecutionSummary
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
@@ -250,10 +258,14 @@ phases:
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Diff**: compute the typed `TableDiff` with `diff_table`.
 4. **Validate**: judge the diff with `validate_diff`.
-5. **Plan**: construct an `ActionPlan` by iterating `diff.changes` after validation.
+5. **Plan**: construct an `ActionPlan` by iterating `diff.changes` after
+   validation, and compile it through the executor port into the SQL
+   statements that apply it — recorded on the report so a dry run can preview
+   the exact DDL.
 6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
-7. **Execute**: execute non-empty plans for tables that have no failures.
+7. **Execute**: run the compiled statements of every table that has a
+   non-empty plan and no failures.
 8. **Report** (after the chain): return `SyncReport`, or raise
    `SyncFailedError` with the report on real runs that failed.
 
@@ -267,9 +279,10 @@ skipped during execution. The engine still processes other tables.
 | `DesiredTable`     | API lowering          | Domain planner, resolver, report | Target schema snapshot                         |
 | `ObservedTable`    | Reader adapter        | Domain planner, report           | Catalog schema snapshot                        |
 | `TableDiff`        | `diff_table`          | Validation, Engine (changes)     | Typed changes separating observed from desired |
-| `ActionPlan`       | Engine (from changes) | Executor, report                 | Ordered table-local changes                    |
+| `ActionPlan`       | Engine (from changes) | Executor (`compile`), report     | Ordered table-local changes                    |
 | `CatalogState`     | Reader port           | Engine                           | Present, absent, or read-failed state          |
-| `ExecutionSummary` | Executor port         | Engine, report                   | Attempted action outcomes                      |
+| SQL statements     | Executor (`compile`)  | Executor (`execute`), report     | The DDL a plan lowers to                       |
+| `ExecutionSummary` | Executor port         | Engine, report                   | Attempted statement outcomes                   |
 | `SyncReport`       | Engine                | User code                        | Immutable run result                           |
 
 ## Package map
@@ -601,9 +614,9 @@ status from the earliest failing phase:
 
 The report keeps the full failure tuple, not just the status. That matters when
 a table has multiple validation failures or multiple FK failures. For execution,
-the Databricks executor stops at the first failed action because the engine is
-not transactional and later actions may depend on earlier ones. The
-`ExecutionSummary` records all attempted actions up to that point.
+the Databricks executor stops at the first failed statement because the engine
+is not transactional and later statements may depend on earlier ones. The
+`ExecutionSummary` records all attempted statements up to that point.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would

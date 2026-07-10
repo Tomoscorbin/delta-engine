@@ -224,24 +224,22 @@ def _existing_tag_drifted_table(fqn: str) -> TablePresent:
     )
 
 
-def _ok_exec(action_index: int = 0) -> ExecutionResult:
+def _ok_exec(statement_index: int = 0) -> ExecutionResult:
     return ExecutionSucceeded(
-        action="X",
-        action_index=action_index,
+        statement_index=statement_index,
         statement_preview="-- ok",
     )
 
 
 def _failed_exec(
-    action_index: int = 0,
+    statement_index: int = 0,
     *,
     exception_type: str = "AnalysisException",
     message: str = "boom",
 ) -> ExecutionResult:
     return ExecutionFailed(
-        action="X",
         failure=ExecutionFailure(
-            action_index=action_index,
+            statement_index=statement_index,
             exception_type=exception_type,
             message=message,
             statement_preview="-- bad sql",
@@ -276,27 +274,28 @@ class _RecordingExecutor:
         self,
         per_call_results: list[tuple[ExecutionResult, ...]] | None = None,
     ) -> None:
-        self.calls: list[tuple[QualifiedName, ActionPlan]] = []
+        self.calls: list[tuple[str, ...]] = []
         self._per_call_results = None if per_call_results is None else list(per_call_results)
 
-    def execute(
-        self,
-        qualified_name: QualifiedName,
-        plan: ActionPlan,
-    ) -> ExecutionSummary:
-        self.calls.append((qualified_name, plan))
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
+
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
+        self.calls.append(statements)
 
         if self._per_call_results is None:
             return ExecutionSummary((_ok_exec(),))
 
         if not self._per_call_results:
-            raise AssertionError(f"Unexpected execution call for {qualified_name}")
+            raise AssertionError(f"Unexpected execution call: {statements}")
 
         return ExecutionSummary(self._per_call_results.pop(0))
 
     @property
     def executed_names(self) -> list[str]:
-        return [str(qualified_name) for qualified_name, _ in self.calls]
+        # compile embeds the table name in each fake statement; recover it so
+        # tests can assert which tables executed, since execute takes no name.
+        return [statements[0].split(" FOR ", 1)[1] for statements in self.calls]
 
 
 def _reports_by_name(report: SyncReport) -> dict[str, TableRunReport]:
@@ -359,7 +358,7 @@ def test_syncing_no_tables_returns_empty_report_without_reading_or_executing():
 
     # Then an empty, non-failing report is returned
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert tuple(report) == ()
     assert reader.fetched_names == []
     assert executor.executed_names == []
@@ -389,7 +388,7 @@ def test_sync_returns_report_when_all_tables_succeed():
 
     # Then both tables succeed in prepared name order
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
         TableRunStatus.SUCCESS,
@@ -499,12 +498,14 @@ def test_read_phase_attempts_all_tables_before_any_execution():
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def execute(
-            self,
-            qualified_name: QualifiedName,
-            plan: ActionPlan,
-        ) -> ExecutionSummary:
-            events.append(f"execute:{qualified_name}")
+        def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+            # Silent by design: the plan phase compiles every table, but this
+            # test asserts read/execute event ordering, not compilation. The
+            # name is embedded so execute can name the table in its event.
+            return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
+
+        def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
+            events.append(f"execute:{statements[0].split(' FOR ', 1)[1]}")
             return ExecutionSummary((_ok_exec(0),))
 
     engine = Engine(
@@ -1014,7 +1015,7 @@ def test_synced_fk_parent_with_no_work_does_not_block_dependent():
     )
 
     # Then the healthy no-op parent does not block its dependent
-    assert report.any_failures is False
+    assert report.has_failures is False
     _assert_status(report, "cat.sch.customers", TableRunStatus.SUCCESS)
     _assert_status(report, "cat.sch.orders", TableRunStatus.SUCCESS)
     assert executor.executed_names == ["cat.sch.orders"]
@@ -1068,7 +1069,7 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
 
     # Then plans are produced, but nothing is executed
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
         TableRunStatus.SUCCESS,
@@ -1095,6 +1096,62 @@ def test_dry_run_exposes_the_planned_actions_on_the_report():
     assert executor.executed_names == []
 
 
+def test_dry_run_records_the_sql_that_would_execute():
+    # Given a table that would be created (dry run plans a CREATE)
+    fqn = "c.s.new_table"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then the report carries the compiled statements even though nothing ran
+    [table_report] = list(report)
+    assert table_report.has_changes is True
+    assert table_report.execution is None
+    assert len(table_report.planned_sql_statements) == len(table_report.plan)
+    assert all("STATEMENT" in statement for statement in table_report.planned_sql_statements)
+
+
+def test_failed_table_records_no_planned_sql():
+    # Given a table whose read fails, so no plan is built
+    fqn = "c.s.unreadable"
+    reader = _RecordingReader({fqn: ReadFailed(ReadFailure("IOError", "cannot read"))})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then no statements are recorded for the failed table
+    [table_report] = list(report)
+    assert table_report.has_failures is True
+    assert table_report.planned_sql_statements == ()
+
+
+def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
+    # Given an absent table whose FK references a table not in the sync.
+    # FK resolution runs after planning, so the plan and its SQL are already
+    # legitimate facts about the table — only the ordering/dependency failed.
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When performing a dry run
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"), dry_run=True)
+
+    # Then the table is FK-failed but still exposes the change it planned
+    [orders] = list(report)
+    assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert orders.has_changes is True
+    assert orders.planned_sql_statements != ()
+
+    # And nothing executed
+    assert orders.execution is None
+    assert executor.executed_names == []
+
+
 def test_dry_run_returns_validation_failures_without_raising_or_executing():
     # Given a table that would fail validation
     fqn = "c.s.val_fail"
@@ -1110,7 +1167,7 @@ def test_dry_run_returns_validation_failures_without_raising_or_executing():
 
     # Then the failure is reported without raising or executing
     [table_report] = list(report)
-    assert report.any_failures is True
+    assert report.has_failures is True
     assert table_report.status is TableRunStatus.VALIDATION_FAILED
     assert table_report.execution is None
     assert executor.executed_names == []
@@ -1130,7 +1187,7 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
 
     # Then the FK failure is returned in the report
     [orders] = list(report)
-    assert report.any_failures is True
+    assert report.has_failures is True
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert orders.execution is None
     assert executor.executed_names == []
@@ -1160,7 +1217,7 @@ def test_metadata_scoped_sync_applies_metadata_when_schema_matches():
     # Then the sync succeeds and metadata actions are planned
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert any(isinstance(action, SetColumnComment) for action in table_report.plan)
     assert any(isinstance(action, SetTableComment) for action in table_report.plan)
     assert executor.executed_names == [fqn]

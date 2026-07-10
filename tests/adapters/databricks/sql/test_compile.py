@@ -64,8 +64,8 @@ def _create_table(
 
 
 def _compile_single(action: Action) -> str:
-    (compiled,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
-    return compiled.statement
+    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
+    return statement
 
 
 def _concrete_action_types() -> list[type[Action]]:
@@ -99,23 +99,10 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
     )
 
     # When compiling the plan
-    statements = tuple(compiled.statement for compiled in compile_plan(_TARGET, plan))
+    statements = compile_plan(_TARGET, plan)
 
     # Then each action in the normalized ActionPlan is compiled to its SQL statement
     assert statements == tuple(_compile_single(action) for action in plan)
-
-
-def test_compile_plan_pairs_each_action_with_its_statement():
-    # Given a two-action plan
-    plan = ActionPlan(actions=(AddColumn(Column("age", Integer())), DropColumn("legacy")))
-
-    # When compiling the plan
-    compiled = compile_plan(_TARGET, plan)
-
-    # Then each action is paired with its own statement -- the pairing is the
-    # executor's contract, with no positional re-association
-    assert tuple(c.action for c in compiled) == tuple(plan)
-    assert all(isinstance(c.statement, str) and c.statement for c in compiled)
 
 
 def test_compile_backticks_table_and_column_identifiers():
@@ -124,12 +111,10 @@ def test_compile_backticks_table_and_column_identifiers():
     plan = ActionPlan(actions=(AddColumn(Column("weird column", Integer())),))
 
     # When compiling
-    (compiled,) = compile_plan(target, plan)
+    (statement,) = compile_plan(target, plan)
 
     # Then table and column identifiers are backticked
-    assert compiled.statement == (
-        "ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT"
-    )
+    assert statement == ("ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT")
 
 
 def test_alter_column_type_compiles_to_alter_column_type_statement():
@@ -478,11 +463,11 @@ def test_set_property_sql_ignores_observed_value():
     )
 
     # When compiling both
-    (first_compiled,) = compile_plan(_TARGET, ActionPlan(actions=(first_write,)))
-    (update_compiled,) = compile_plan(_TARGET, ActionPlan(actions=(update,)))
+    (first_statement,) = compile_plan(_TARGET, ActionPlan(actions=(first_write,)))
+    (update_statement,) = compile_plan(_TARGET, ActionPlan(actions=(update,)))
 
     # Then observed_value has no effect on rendered SQL
-    assert first_compiled.statement == update_compiled.statement
+    assert first_statement == update_statement
 
 
 def test_every_action_type_has_a_registered_compiler():

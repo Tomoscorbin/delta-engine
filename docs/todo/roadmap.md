@@ -40,6 +40,9 @@ value of item 3, so plan them together.
 
 ### 1. Type widening
 
+**Status.** Shipped 2026-07-10. The shape below was built as described; the
+widening matrix and runtime notes live in `reference-safe-change-rules.md`.
+
 **Why.** `ColumnDataTypeChangeNotSupported` blocks every type change with
 "recreate the table", and type evolution is the most common real schema change
 users hit. Delta supports the safe subset natively via
@@ -90,6 +93,15 @@ only documented (`reference-limitations.md`).
    extends later to table renames.
 
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
+
+**Status.** Shipped 2026-07-10, with the shape refined during design: the SQL
+preview flows through a new `PlanExecutor.compile` port method onto
+`TableRunReport.planned_sql_statements` (no `databricks.py` helper — the
+engine compiles once and `execute` runs exactly the previewed statements);
+`to_dict()` only, under `schema_version: 1` (no `to_rows`, no Spark lift);
+`has_changes` and the `any_failures` → `has_failures` rename shipped
+together. See `reference-run-report.md` and `how-to-gate-changes-in-ci.md`.
+The sketch below is kept as the original motivation.
 
 **Why.** The workflow that makes tools like this indispensable: PR opens →
 `sync(dry_run=True)` runs → the plan renders as a PR comment → merge applies.

@@ -73,27 +73,26 @@ class CatalogStateReader(Protocol):
 @dataclass(frozen=True, slots=True)
 class ExecutionSucceeded:
     """
-    A single plan action that executed without error.
+    A single statement that executed without error.
 
-    ``action_index`` and ``statement_preview`` are not rendered by the
-    engine's own reports; they are carried for callers that inspect
+    ``statement_index`` is the statement's position in the run and
+    ``statement_preview`` is its truncated SQL; neither is rendered by the
+    engine's own reports — they are carried for callers that inspect
     ``ExecutionSummary.results`` directly.
     """
 
-    action: str
-    action_index: int
+    statement_index: int
     statement_preview: str
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionFailed:
-    """A single plan action that raised while executing."""
+    """A single statement that raised while executing."""
 
-    action: str
     failure: ExecutionFailure
 
 
-# An executed action either succeeds or fails. The split makes "succeeded but
+# An executed statement either succeeds or fails. The split makes "succeeded but
 # carries a failure" (and "failed but carries none") unrepresentable, so no
 # runtime invariant guard is needed.
 type ExecutionResult = ExecutionSucceeded | ExecutionFailed
@@ -102,50 +101,77 @@ type ExecutionResult = ExecutionSucceeded | ExecutionFailed
 @dataclass(frozen=True, slots=True)
 class ExecutionSummary:
     """
-    The outcome of running a whole action plan.
+    The outcome of running a plan's compiled statements.
 
     Mirrors :class:`ValidationResult`: a frozen container over the phase's raw
     results that answers ``failed`` and exposes its ``failures``. It owns the
-    single pass that separates failed actions from successful ones, so callers
-    read a property instead of re-deriving the split with ``isinstance``.
+    single pass that separates failed statements from successful ones, so
+    callers read a property instead of re-deriving the split with
+    ``isinstance``.
     """
 
     results: tuple[ExecutionResult, ...] = ()
 
     @property
     def failed(self) -> bool:
-        """True when any action in the plan failed."""
+        """True when any statement failed."""
         return any(isinstance(result, ExecutionFailed) for result in self.results)
 
     @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
-        """The failure detail from each failed action, in execution order."""
+        """The failure detail from each failed statement, in execution order."""
         return tuple(
             result.failure for result in self.results if isinstance(result, ExecutionFailed)
         )
 
     @property
     def failed_count(self) -> int:
-        """How many of the plan's actions failed."""
+        """How many statements failed."""
         return len(self.failures)
+
+    @property
+    def applied_count(self) -> int:
+        """How many statements ran successfully."""
+        return len(self.results) - self.failed_count
 
 
 class PlanExecutor(Protocol):
     """
-    Executes an action plan against a backing engine.
+    Compiles a plan into statements and runs them against a backing engine.
 
-    Like :class:`CatalogStateReader`, the boundary is **total**: a statement that
+    Execution is a two-stage boundary: ``compile`` turns a domain plan into the
+    backend statements it lowers to, and ``execute`` runs those statements. The
+    engine compiles once (so a dry run can preview the DDL and a real run applies
+    exactly what was previewed) and passes the same statements to ``execute``.
+
+    Like :class:`CatalogStateReader`, ``execute`` is **total**: a statement that
     fails is captured in the returned ``ExecutionSummary`` (which records both the
-    actions that succeeded and the one that failed), not raised. The engine
+    statements that succeeded and the one that failed), not raised. The engine
     records the summary on the table's report and moves on, so a failure executing
     one table does not abort the others.
     """
 
-    def execute(self, qualified_name: QualifiedName, plan: ActionPlan) -> ExecutionSummary:
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         """
-        Run the plan against ``qualified_name`` and return the execution outcome.
+        Return the statements that apply ``plan``, in execution order.
+
+        The ordering is the plan's own deterministic order, which is the order
+        ``execute`` runs the statements. An empty plan compiles to no statements.
+
+        Pure and side-effect free: the engine calls this on every run -- dry or
+        real -- to record the SQL on the table's report. Unlike ``execute``,
+        this is not a total boundary: compiling a validated plan cannot fail
+        against a backend, so an exception here is a programming error and
+        propagates.
+        """
+        ...
+
+    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
+        """
+        Run ``statements`` (from :meth:`compile`) in order.
 
         Total: failures are captured in the returned ``ExecutionSummary`` rather
-        than raised.
+        than raised. The statements are the complete unit of work — the table
+        they target is already baked into each statement by ``compile``.
         """
         ...

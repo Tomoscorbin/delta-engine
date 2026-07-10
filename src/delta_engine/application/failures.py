@@ -99,23 +99,23 @@ class ValidationFailure(Failure):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionFailure(Failure):
-    """Details about a failed action execution."""
+    """Details about a statement that failed while executing."""
 
     phase: ClassVar[FailurePhase] = FailurePhase.EXECUTION
-    action_index: int
+    statement_index: int
     exception_type: str
     message: str
     statement_preview: str
 
     def format_lines(self) -> tuple[str, ...]:
         return (
-            f"Execution failed at action {self.action_index}: "
+            f"Execution failed at statement {self.statement_index}: "
             f"{self.exception_type} - {self.message}",
             f"    SQL preview: {self.statement_preview}",
         )
 
     def headline(self) -> str:
-        return f"Execution failed at action {self.action_index}: {self.exception_type}"
+        return f"Execution failed at statement {self.statement_index}: {self.exception_type}"
 
 
 @dataclass(frozen=True, slots=True)
