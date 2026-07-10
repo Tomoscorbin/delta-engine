@@ -52,7 +52,7 @@ for table_report in report:
 
 `table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → validation → foreign key → execution). Each `Failure` renders itself via `format_lines()`. The concrete failure classes — `ReadFailure`, `ValidationFailure`, `ForeignKeyFailure`, and `ExecutionFailure` — are importable from `delta_engine`, so a caller can branch on failure type with `isinstance` rather than on `status` alone.
 
-For a machine-readable view of the whole run — each table's status, planned actions, SQL, and failures as plain JSON — call `report.to_dict()`; the `failures` list in each table record carries the `phase`, `type`, and `message` of every failure. See [the run report schema](reference-run-report.md).
+For a machine-readable view of the whole run — each table's status, planned changes, SQL, and failures as plain JSON — call `report.to_dict()`; the `failures` list in each table record carries the `phase`, `type`, and `message` of every failure. See [the run report schema](reference-run-report.md).
 
 On Unity Catalog, constraint and tag metadata is read from `information_schema`.
 The reader probes once per catalog whether `information_schema` exists: where it
@@ -104,7 +104,7 @@ See [Foreign keys](how-to-configure-table.md#foreign-keys) for how dependency or
 
 ## Act on execution failures
 
-Execution failures are partial: actions before the failure ran and committed; actions after were not attempted. Tables whose foreign keys depend on the failed table are blocked in the same run and report `FOREIGN_KEY_FAILED`. Fix the root cause and re-run — the engine re-reads live state and plans only the remaining drift.
+Execution failures are partial: statements before the failure ran and committed; statements after were not attempted. Tables whose foreign keys depend on the failed table are blocked in the same run and report `FOREIGN_KEY_FAILED`. Fix the root cause and re-run — the engine re-reads live state and plans only the remaining drift.
 
 (runtime-and-delta-feature-compatibility)=
 
