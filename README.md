@@ -49,14 +49,18 @@ engine = build_engine(spark)  # `spark` is provided by your Databricks notebook
 engine.sync(customers)         # creates the table, or no-ops if it already matches
 ```
 
-## What a sync does
+## How a sync works
 
-Every `sync` runs the same phase chain for each table: read the current catalog
-state, diff it against your declaration, validate that the drift is safe to fix
-in place, plan deterministic DDL, order tables so foreign-key dependencies are
-created first, execute, and return a per-table `SyncReport`. Unsafe changes —
-dropping data, narrowing a column's type, repartitioning — fail validation
-with a named rule before any SQL runs.
+Every sync follows the same process:
+
+read live state
+    → compare with the declaration
+    → validate the differences
+    → build a deterministic plan
+    → resolve table dependencies
+    → execute
+
+Validation happens before execution. When a table contains an unsafe change, Delta Engine does not execute a partially valid plan for that table.
 
 ## Documentation
 
