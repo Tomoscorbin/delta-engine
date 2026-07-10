@@ -2,7 +2,7 @@ from types import MappingProxyType
 
 import pytest
 
-from delta_engine.api.delta_table import METADATA_ASPECTS
+from delta_engine.api.delta_table import METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Column as DomainColumn,
@@ -508,11 +508,11 @@ def test_delta_table_preserves_tag_key_case():
     assert "CostCentre" in dict(table.to_desired_table().tags)
 
 
-# ---- metadata_only flag
+# ---- scope
 
 
 def test_delta_table_manages_all_aspects_by_default():
-    # Given a table declared without metadata_only
+    # Given a table declared without a scope
     table = DeltaTable(
         catalog="dev", schema="silver", name="orders", columns=[Column("id", Integer())]
     )
@@ -521,30 +521,70 @@ def test_delta_table_manages_all_aspects_by_default():
     assert table.to_desired_table().managed_aspects == ALL_ASPECTS
 
 
-def test_metadata_only_table_manages_metadata_aspects():
-    # Given a metadata-only declaration
+def test_metadata_scope_manages_metadata_aspects():
+    # Given a metadata-scoped declaration
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then the lowered scope is exactly the metadata aspects
     assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
 
 
-def test_metadata_only_declaration_carries_properties_without_deploying_them():
-    # Given a metadata-only declaration of a full table, properties included —
-    # the flag scopes deployment, not what may be declared
+def test_tag_scope_manages_only_table_and_column_tags():
+    # Given a tag-scoped declaration of a full table shape
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("email", String(), comment="PII", tags={"pii": "true"}),
+        ],
+        comment="Streaming orders",
+        tags={"domain": "sales"},
+        partitioned_by=["id"],
+        scope="tags",
+    )
+
+    # Then only the tag aspects are managed; the rest is carried for comparison
+    desired = table.to_desired_table()
+    assert desired.managed_aspects == TAG_ASPECTS
+    assert desired.comment == "Streaming orders"
+    assert desired.partitioned_by == ("id",)
+    assert desired.primary_key_columns == ("id",)
+    assert desired.tags == {"domain": "sales"}
+    assert desired.columns[1].comment == "PII"
+    assert desired.columns[1].tags == {"pii": "true"}
+
+
+def test_delta_table_rejects_unknown_scope():
+    # Given a scope value outside the named scopes
+    # When / Then construction fails naming the valid options
+    with pytest.raises(ValueError, match="'full', 'metadata', 'tags'"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer())],
+            scope="everything",  # type: ignore[arg-type]
+        )
+
+
+def test_metadata_scope_carries_properties_without_deploying_them():
+    # Given a metadata-scoped declaration of a full table, properties included —
+    # the scope restricts deployment, not what may be declared
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
         properties={Property.CHANGE_DATA_FEED.value: "true"},
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then the declaration carries the property; PROPERTIES stays unmanaged
@@ -553,13 +593,39 @@ def test_metadata_only_declaration_carries_properties_without_deploying_them():
     assert TableAspect.PROPERTIES not in desired.managed_aspects
 
 
-def test_metadata_only_without_properties_constructs_cleanly():
+def test_tag_scope_carries_foreign_keys_without_managing_them():
+    # Given a tag-scoped declaration that mirrors the live table's foreign key
+    customers = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False, primary_key=True)],
+    )
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[
+            Column("id", Integer(), nullable=False, primary_key=True),
+            Column("customer_id", Integer()),
+        ],
+        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        scope="tags",
+    )
+
+    # Then the declaration carries the key; FOREIGN_KEYS stays unmanaged
+    desired = table.to_desired_table()
+    assert len(desired.foreign_keys) == 1
+    assert TableAspect.FOREIGN_KEYS not in desired.managed_aspects
+
+
+def test_metadata_scope_without_properties_constructs_cleanly():
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     assert table.to_desired_table().properties == {}
@@ -626,16 +692,30 @@ def test_delta_table_accepts_none_property_value_without_value_check() -> None:
     assert table.to_desired_table().properties["delta.enableChangeDataFeed"] is None
 
 
-def test_metadata_only_table_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
-    # metadata_only declarations do not manage properties, so the declaration
-    # is a mirror of existing state, not an attempt to enable CDF.
+def test_metadata_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
+    # A metadata-scoped declaration does not manage properties, so the
+    # declaration is a mirror of existing state, not an attempt to enable CDF.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer()), Column("_change_type", String())],
         properties={"delta.enableChangeDataFeed": "true"},
-        metadata_only=True,
+        scope="metadata",
+    )
+    assert len(table.to_desired_table().columns) == 2
+
+
+def test_tag_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
+    # A tag-scoped declaration does not manage column structure either, so it
+    # must mirror reserved names the live table already carries.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer()), Column("_change_type", String())],
+        properties={"delta.enableChangeDataFeed": "true"},
+        scope="tags",
     )
     assert len(table.to_desired_table().columns) == 2
 
@@ -652,14 +732,14 @@ def test_delta_table_accepts_column_tags_at_the_limits() -> None:
     assert len(table.to_desired_table().columns[0].tags) == 50
 
 
-def test_metadata_only_table_still_lowers_the_full_schema():
-    # Given a metadata-only declaration with full schema detail
+def test_metadata_scope_still_lowers_the_full_schema():
+    # Given a metadata-scoped declaration with full schema detail
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer(), nullable=False), Column("name", String())],
-        metadata_only=True,
+        scope="metadata",
     )
 
     # Then all columns are lowered — scope controls reconciliation, not lowering
@@ -668,7 +748,7 @@ def test_metadata_only_table_still_lowers_the_full_schema():
 
 
 def test_metadata_aspects_excludes_structure_properties_and_partitioning():
-    # Given the metadata-only named mode
+    # Given the metadata named scope
     # Then physical-behaviour aspects are excluded by design
     assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
         {
@@ -677,6 +757,12 @@ def test_metadata_aspects_excludes_structure_properties_and_partitioning():
             TableAspect.PARTITIONING,
         }
     )
+
+
+def test_tag_aspects_contains_only_tag_aspects():
+    # Given the tags named scope
+    # Then it manages exactly table and column tags
+    assert TAG_ASPECTS == frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
 
 
 def test_delta_table_rejects_special_character_column_names_without_column_mapping() -> None:
@@ -742,15 +828,27 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
         )
 
 
-def test_metadata_only_table_mirrors_special_character_columns_without_the_property() -> None:
-    # metadata_only never creates or adds columns; the catalog already
-    # accepted this name, so the declaration must be able to mirror it.
+def test_metadata_scope_mirrors_special_character_columns_without_the_property() -> None:
+    # A metadata-scoped declaration never creates or adds columns; the catalog
+    # already accepted this name, so the declaration must be able to mirror it.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("order id", Integer())],
-        metadata_only=True,
+        scope="metadata",
+    )
+    assert table.to_desired_table().columns[0].name == "order id"
+
+
+def test_tag_scope_mirrors_special_character_columns_without_column_mapping() -> None:
+    # A tag-scoped declaration never creates or adds columns either.
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("order id", Integer())],
+        scope="tags",
     )
     assert table.to_desired_table().columns[0].name == "order id"
 
