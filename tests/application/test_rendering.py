@@ -343,23 +343,27 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 def _grid_report(name, *, plan=None, failures=()):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (Column("id", Integer()),)
+    plan = plan if plan is not None else ActionPlan()
     return TableRunReport(
         qualified_name=qualified_name,
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(table=ObservedTable(qualified_name=qualified_name, columns=columns)),
-        plan=plan if plan is not None else ActionPlan(),
+        plan=plan,
+        # One fake statement per action, as the engine would have compiled.
+        planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),
         failures=failures,
     )
 
 
 def _execution(*, applied: int, failed: int) -> ExecutionSummary:
     succeeded = tuple(
-        ExecutionSucceeded(action_index=index, statement_preview="SQL") for index in range(applied)
+        ExecutionSucceeded(statement_index=index, statement_preview="SQL")
+        for index in range(applied)
     )
     failures = tuple(
         ExecutionFailed(
             failure=ExecutionFailure(
-                action_index=applied + index,
+                statement_index=applied + index,
                 exception_type="AnalysisException",
                 message="boom",
                 statement_preview="SQL",
@@ -391,8 +395,8 @@ def test_grid_detail_summarizes_changes_by_category_not_class_names():
     assert "AddColumn" not in data_row
 
 
-def test_grid_actions_cell_shows_applied_over_total_on_partial_failure():
-    # Given a three-action plan where two applied and one failed during execution
+def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
+    # Given a three-statement plan where two applied and one failed during execution
     plan = ActionPlan(
         (
             AddColumn(Column("a", Integer())),
@@ -409,7 +413,7 @@ def test_grid_actions_cell_shows_applied_over_total_on_partial_failure():
     # When rendering the grid row
     data_row = render_grid((report,)).splitlines()[1]
 
-    # Then the ACTIONS cell reads applied/total
+    # Then the STATEMENTS cell reads applied/planned
     assert "2/3" in data_row
 
 
@@ -504,7 +508,7 @@ def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     lines = rendered.splitlines()
     assert lines[0] == "SYNC REPORT"
     grid_header = next(line for line in lines if line.startswith("TABLE"))
-    assert grid_header.split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    assert grid_header.split() == ["TABLE", "STATUS", "STATEMENTS", "DETAIL"]
     assert rendered.endswith("2 tables: 1 changed, 0 unchanged, 1 failed (3.0s)")
 
 
@@ -523,7 +527,7 @@ def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
     lines = rendered.splitlines()
     assert lines[0] == "SYNC REPORT"
     grid_header = next(line for line in lines if line.startswith("TABLE"))
-    assert grid_header.split() == ["TABLE", "STATUS", "ACTIONS", "DETAIL"]
+    assert grid_header.split() == ["TABLE", "STATUS", "STATEMENTS", "DETAIL"]
     assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (3.0s)")
 
 

@@ -111,8 +111,8 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
 
     assert isinstance(results[0], ExecutionSucceeded)
     assert isinstance(results[1], ExecutionFailed)
-    assert results[0].action_index == 0
-    assert results[1].failure.action_index == 1
+    assert results[0].statement_index == 0
+    assert results[1].failure.statement_index == 1
 
 
 def test_execute_failure_records_exception_details_and_sql_preview():
@@ -126,7 +126,7 @@ def test_execute_failure_records_exception_details_and_sql_preview():
     [result] = summary.results
 
     assert isinstance(result, ExecutionFailed)
-    assert result.failure.action_index == 0
+    assert result.failure.statement_index == 0
     assert result.failure.exception_type == "Exception"
     assert "boom: table not found" in result.failure.message
     assert result.failure.statement_preview == "SELECT * FROM __nope__"
@@ -148,8 +148,8 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
         ExecutionSucceeded,
         ExecutionFailed,
     ]
-    assert results[0].action_index == 0
-    assert results[1].failure.action_index == 1
+    assert results[0].statement_index == 0
+    assert results[1].failure.statement_index == 1
 
 
 def test_execute_returns_empty_summary_for_empty_plan():
@@ -376,9 +376,7 @@ def test_compile_returns_the_statements_execute_would_run():
     statements = executor.compile(qualified_name, plan)
 
     # Then the statements match the SQL compiler's output, in plan order
-    assert statements == tuple(
-        compiled.statement for compiled in compile_plan(qualified_name, plan)
-    )
+    assert statements == compile_plan(qualified_name, plan)
     assert len(statements) == 1
     assert "COMMENT" in statements[0].upper()
 

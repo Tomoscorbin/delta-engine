@@ -115,7 +115,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
     # Given a table whose execution phase failed on one action
     failed_result = ExecutionFailed(
         failure=ExecutionFailure(
-            action_index=2,
+            statement_index=2,
             exception_type="SparkException",
             message="boom",
             statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
@@ -126,7 +126,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
         execution=ExecutionSummary((failed_result,)),
         failures=(
             ExecutionFailure(
-                action_index=2,
+                statement_index=2,
                 exception_type="SparkException",
                 message="boom",
                 statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
@@ -139,7 +139,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
 
     # Then both the failure line and the SQL preview are present
     assert "cat.sch.tbl [EXECUTION_FAILED]" in message
-    assert "Execution failed at action 2: SparkException - boom" in message
+    assert "Execution failed at statement 2: SparkException - boom" in message
     assert "ALTER TABLE cat.sch.tbl ADD COLUMN x INT" in message
 
 

@@ -29,7 +29,7 @@ _NO_CHANGES: Final[str] = "no changes"
 
 _DETAIL_MAX_CHARS: Final[int] = 60
 
-_GRID_HEADERS: Final[tuple[str, str, str, str]] = ("TABLE", "STATUS", "ACTIONS", "DETAIL")
+_GRID_HEADERS: Final[tuple[str, str, str, str]] = ("TABLE", "STATUS", "STATEMENTS", "DETAIL")
 
 
 def _plan_creates_table(plan: ActionPlan) -> bool:
@@ -69,15 +69,13 @@ def render_diff_block(report: TableRunReport) -> str:
     return "\n".join([header, *_render_entry_groups(entries)])
 
 
-def _grid_actions_cell(report: TableRunReport) -> str:
-    """ACTIONS cell: applied/total when execution ran, — on a plan-less failure, else count."""
-    execution = report.execution
-    if execution is not None:
-        applied = len(execution.results) - execution.failed_count
-        return f"{applied}/{len(report.plan)}"
+def _grid_statements_cell(report: TableRunReport) -> str:
+    """STATEMENTS cell: applied/planned when execution ran, — on a failure, else planned count."""
+    if report.execution is not None:
+        return f"{report.execution.applied_count}/{len(report.planned_sql_statements)}"
     if report.has_failures:
         return "—"
-    return str(len(report.plan))
+    return str(len(report.planned_sql_statements))
 
 
 def _humanized_action_summary(plan: ActionPlan) -> str:
@@ -115,13 +113,13 @@ def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
     return (
         str(report.qualified_name),
         report.status.value,
-        _grid_actions_cell(report),
+        _grid_statements_cell(report),
         _truncate(_grid_detail(report)),
     )
 
 
 def render_grid(reports: tuple[TableRunReport, ...]) -> str:
-    """Render an aligned TABLE | STATUS | ACTIONS | DETAIL grid for ``reports``."""
+    """Render an aligned TABLE | STATUS | STATEMENTS | DETAIL grid for ``reports``."""
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
     widths = [max(len(row[col]) for row in rows) for col in range(len(_GRID_HEADERS))]
     return "\n".join(

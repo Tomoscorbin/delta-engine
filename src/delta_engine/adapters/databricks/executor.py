@@ -33,7 +33,7 @@ class DatabricksExecutor:
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         """Compile ``plan`` to its SQL statements in execution order, without touching Spark."""
-        return tuple(compiled.statement for compiled in compile_plan(qualified_name, plan))
+        return compile_plan(qualified_name, plan)
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         """
@@ -85,7 +85,7 @@ def _run_statement(spark: SparkSession, statement_index: int, statement: str) ->
         logger.warning("Statement failed: %s\nSQL: %s", summary.message, preview)
         return ExecutionFailed(
             failure=ExecutionFailure(
-                action_index=statement_index,
+                statement_index=statement_index,
                 exception_type=summary.type_name,
                 message=summary.message,
                 statement_preview=preview,
@@ -94,7 +94,7 @@ def _run_statement(spark: SparkSession, statement_index: int, statement: str) ->
 
     logger.info("Executed: %s", preview)
     return ExecutionSucceeded(
-        action_index=statement_index,
+        statement_index=statement_index,
         statement_preview=preview,
     )
 

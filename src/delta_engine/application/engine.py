@@ -300,7 +300,7 @@ class Engine:
                 continue
             summary = self.executor.execute(run.planned_sql_statements)
             logger.info(
-                "Executed %d action(s) for %s (%d failed)",
+                "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
                 run.qualified_name,
                 summary.failed_count,

@@ -60,8 +60,8 @@ def _change_records(plan: ActionPlan) -> list[dict[str, str]]:
         {
             "kind": entry.category.name.lower(),
             "operation": entry.operation,
-            "subject": entry.cells[0],
-            "detail": " ".join(entry.cells[1:]),
+            "subject": entry.subject,
+            "detail": entry.detail,
         }
         for action in plan
         for entry in action_entries(action)
@@ -127,8 +127,10 @@ class TableRunReport:
         if self.execution is None:
             execution_record: dict[str, int] | None = None
         else:
-            applied = len(self.execution.results) - self.execution.failed_count
-            execution_record = {"applied": applied, "total": len(self.plan)}
+            execution_record = {
+                "applied": self.execution.applied_count,
+                "total": len(self.planned_sql_statements),
+            }
         return {
             "name": str(self.qualified_name),
             "status": self.status.value,

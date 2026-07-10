@@ -53,13 +53,13 @@ def _t1():
 
 
 def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(action_index=idx, statement_preview=preview)
+    return ExecutionSucceeded(statement_index=idx, statement_preview=preview)
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
         failure=ExecutionFailure(
-            action_index=idx, exception_type=exc, message=msg, statement_preview=preview
+            statement_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
     )
 
@@ -101,7 +101,7 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
             ExecutionFailure(
-                action_index=0,
+                statement_index=0,
                 exception_type="ValueError",
                 message="boom",
                 statement_preview="ALTER TABLE ...",
@@ -305,7 +305,7 @@ def test_status_reflects_the_earliest_failing_phase():
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
             ExecutionFailure(
-                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
             ),
         ),
     )
@@ -320,7 +320,7 @@ def test_status_reflects_the_earliest_failing_phase():
         failures=(
             ReadFailure("IOError", "boom"),
             ExecutionFailure(
-                action_index=0, exception_type="E", message="m", statement_preview="SQL"
+                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
             ),
         ),
     )
@@ -391,11 +391,13 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
 
 
 def test_table_to_dict_reports_execution_counts_when_executed():
+    # The counts are statement-denominated: statements applied of statements planned.
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "orders"),
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(comment="hello"),)),
+        planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
     assert report.to_dict()["execution"] == {"applied": 1, "total": 1}

@@ -32,7 +32,7 @@ def test_validation_failure_formats_itself_as_a_display_line():
 def test_execution_failure_formats_itself_as_two_lines_including_sql_preview():
     # Given an execution failure with a SQL preview
     failure = ExecutionFailure(
-        action_index=2,
+        statement_index=2,
         exception_type="SparkException",
         message="boom",
         statement_preview="ALTER TABLE t ADD COLUMN x INT",
@@ -40,7 +40,7 @@ def test_execution_failure_formats_itself_as_two_lines_including_sql_preview():
 
     # Then it renders the error line and the SQL preview together
     lines = failure.format_lines()
-    assert lines[0] == "Execution failed at action 2: SparkException - boom"
+    assert lines[0] == "Execution failed at statement 2: SparkException - boom"
     assert "ALTER TABLE t ADD COLUMN x INT" in lines[1]
 
 
@@ -95,9 +95,12 @@ def test_failure_headlines_summarize_without_the_detail_message():
     )
     assert (
         ExecutionFailure(
-            action_index=2, exception_type="SparkException", message="boom", statement_preview="SQL"
+            statement_index=2,
+            exception_type="SparkException",
+            message="boom",
+            statement_preview="SQL",
         ).headline()
-        == "Execution failed at action 2: SparkException"
+        == "Execution failed at statement 2: SparkException"
     )
     assert (
         ForeignKeyFailure(
@@ -126,7 +129,7 @@ def test_each_failure_kind_declares_its_producing_phase():
     )
     assert (
         ExecutionFailure(
-            action_index=0, exception_type="E", message="m", statement_preview="SQL"
+            statement_index=0, exception_type="E", message="m", statement_preview="SQL"
         ).phase
         is FailurePhase.EXECUTION
     )

@@ -75,13 +75,13 @@ class ExecutionSucceeded:
     """
     A single statement that executed without error.
 
-    ``action_index`` is the statement's position in the run (which matches the
-    action it was compiled from) and ``statement_preview`` is its truncated
-    SQL; neither is rendered by the engine's own reports — they are carried for
-    callers that inspect ``ExecutionSummary.results`` directly.
+    ``statement_index`` is the statement's position in the run and
+    ``statement_preview`` is its truncated SQL; neither is rendered by the
+    engine's own reports — they are carried for callers that inspect
+    ``ExecutionSummary.results`` directly.
     """
 
-    action_index: int
+    statement_index: int
     statement_preview: str
 
 
@@ -101,32 +101,38 @@ type ExecutionResult = ExecutionSucceeded | ExecutionFailed
 @dataclass(frozen=True, slots=True)
 class ExecutionSummary:
     """
-    The outcome of running a whole action plan.
+    The outcome of running a plan's compiled statements.
 
     Mirrors :class:`ValidationResult`: a frozen container over the phase's raw
     results that answers ``failed`` and exposes its ``failures``. It owns the
-    single pass that separates failed actions from successful ones, so callers
-    read a property instead of re-deriving the split with ``isinstance``.
+    single pass that separates failed statements from successful ones, so
+    callers read a property instead of re-deriving the split with
+    ``isinstance``.
     """
 
     results: tuple[ExecutionResult, ...] = ()
 
     @property
     def failed(self) -> bool:
-        """True when any action in the plan failed."""
+        """True when any statement failed."""
         return any(isinstance(result, ExecutionFailed) for result in self.results)
 
     @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
-        """The failure detail from each failed action, in execution order."""
+        """The failure detail from each failed statement, in execution order."""
         return tuple(
             result.failure for result in self.results if isinstance(result, ExecutionFailed)
         )
 
     @property
     def failed_count(self) -> int:
-        """How many of the plan's actions failed."""
+        """How many statements failed."""
         return len(self.failures)
+
+    @property
+    def applied_count(self) -> int:
+        """How many statements ran successfully."""
+        return len(self.results) - self.failed_count
 
 
 class PlanExecutor(Protocol):

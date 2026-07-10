@@ -93,6 +93,16 @@ class DiffEntry:
         """The symbol as a stable word for machine consumers: add, remove, or change."""
         return _OPERATION_FOR_SYMBOL[self.symbol]
 
+    @property
+    def subject(self) -> str:
+        """What the entry targets, e.g. a column name — the first cell."""
+        return self.cells[0]
+
+    @property
+    def detail(self) -> str:
+        """The remaining cells joined as extra detail; empty when there is none."""
+        return " ".join(self.cells[1:])
+
 
 def _column_add_entry(column: Column) -> DiffEntry:
     """Build a '+' columns entry for a created column (name, type, optional NOT NULL)."""

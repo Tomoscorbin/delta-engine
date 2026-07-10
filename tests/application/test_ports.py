@@ -25,13 +25,13 @@ def _an_observed_table(partitioned_by=()):
 
 
 def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(action_index=idx, statement_preview=preview)
+    return ExecutionSucceeded(statement_index=idx, statement_preview=preview)
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
         failure=ExecutionFailure(
-            action_index=idx, exception_type=exc, message=msg, statement_preview=preview
+            statement_index=idx, exception_type=exc, message=msg, statement_preview=preview
         ),
     )
 
@@ -72,23 +72,25 @@ def test_read_failed_carries_the_failure():
     assert result.failure is failure
 
 
-def test_execution_summary_reports_no_failure_when_every_action_succeeds():
-    # Given a plan whose actions all executed
+def test_execution_summary_reports_no_failure_when_every_statement_succeeds():
+    # Given a run whose statements all executed
     summary = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
 
     # Then the summary reports success with no failures
     assert summary.failed is False
     assert summary.failures == ()
     assert summary.failed_count == 0
+    assert summary.applied_count == 2
 
 
 def test_execution_summary_exposes_the_failures_among_mixed_results():
-    # Given a plan that ran two actions, the second of which failed
+    # Given a run of two statements, the second of which failed
     summary = ExecutionSummary((_ok_exec(0), _failed_exec(1, msg="bang")))
 
-    # Then the summary surfaces the single failure and its count
+    # Then the summary surfaces the single failure and the applied count
     assert summary.failed is True
     assert summary.failed_count == 1
+    assert summary.applied_count == 1
     assert tuple(f.message for f in summary.failures) == ("bang",)
 
 
@@ -100,14 +102,15 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
     assert summary.results == ()
     assert summary.failed is False
     assert summary.failed_count == 0
+    assert summary.applied_count == 0
 
 
 def test_execution_outcome_variants_carry_the_right_payload():
     # Given the two execution outcomes
-    succeeded = ExecutionSucceeded(action_index=0, statement_preview="SQL")
+    succeeded = ExecutionSucceeded(statement_index=0, statement_preview="SQL")
     failed = ExecutionFailed(
         failure=ExecutionFailure(
-            action_index=1, exception_type="E", message="m", statement_preview="SQL"
+            statement_index=1, exception_type="E", message="m", statement_preview="SQL"
         ),
     )
 
@@ -120,13 +123,13 @@ def test_execution_failed_carries_index_only_on_its_failure_detail():
     # Given a failed action
     failed = ExecutionFailed(
         failure=ExecutionFailure(
-            action_index=3, exception_type="E", message="m", statement_preview="SQL"
+            statement_index=3, exception_type="E", message="m", statement_preview="SQL"
         ),
     )
 
     # Then the index lives on the failure detail, not duplicated on the carrier
-    assert failed.failure.action_index == 3
-    assert not hasattr(failed, "action_index")
+    assert failed.failure.statement_index == 3
+    assert not hasattr(failed, "statement_index")
 
 
 # ---------- property: ExecutionSummary internal consistency ----------
@@ -135,14 +138,14 @@ def test_execution_failed_carries_index_only_on_its_failure_detail():
 _EXECUTION_RESULT = st.one_of(
     st.builds(
         ExecutionSucceeded,
-        action_index=st.integers(min_value=0, max_value=100),
+        statement_index=st.integers(min_value=0, max_value=100),
         statement_preview=st.just("ALTER TABLE ..."),
     ),
     st.builds(
         ExecutionFailed,
         failure=st.builds(
             ExecutionFailure,
-            action_index=st.integers(min_value=0, max_value=100),
+            statement_index=st.integers(min_value=0, max_value=100),
             exception_type=st.just("SparkException"),
             message=st.text(max_size=40),
             statement_preview=st.just("ALTER TABLE ..."),
@@ -158,7 +161,8 @@ def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
     # Given: any mix of succeeded and failed execution results
     summary = ExecutionSummary(tuple(results))
 
-    # Then: failed, failures, and failed_count all agree
+    # Then: failed, failures, failed_count, and applied_count all agree
     assert summary.failed == (summary.failed_count > 0)
     assert summary.failed_count == len(summary.failures)
+    assert summary.applied_count + summary.failed_count == len(summary.results)
     assert all(isinstance(f, ExecutionFailure) for f in summary.failures)

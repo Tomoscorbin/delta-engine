@@ -64,13 +64,13 @@ The engine calls `compile` during planning on every run — dry or real — and 
             try:
                 self._run(statement)
                 results.append(ExecutionSucceeded(
-                    action_index=i,
+                    statement_index=i,
                     statement_preview=statement,
                 ))
             except Exception as exc:
                 results.append(ExecutionFailed(
                     failure=ExecutionFailure(
-                        action_index=i,
+                        statement_index=i,
                         exception_type=type(exc).__name__,
                         message=str(exc),
                         statement_preview=statement,
