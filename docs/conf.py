@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from sphinx.application import Sphinx
+
 project = "delta-engine"
 author = "Tomos Corbin"
 release = "0.1.0"
@@ -49,7 +51,14 @@ _PUBLIC_MODULES = {
 _HIDDEN_MEMBERS = {"DeltaTable.to_desired_table"}
 
 
-def _skip_non_public(app, what, name, obj, skip, options):
+def _skip_non_public(
+    app: Sphinx,
+    what: str,
+    name: str,
+    obj: object,
+    skip: bool,
+    options: object,
+) -> bool | None:
     if what in ("module", "package") and name not in _PUBLIC_MODULES:
         return True
     if any(name.endswith(hidden) for hidden in _HIDDEN_MEMBERS):
@@ -57,7 +66,7 @@ def _skip_non_public(app, what, name, obj, skip, options):
     return None
 
 
-def setup(app):
+def setup(app: Sphinx) -> None:
     app.connect("autoapi-skip-member", _skip_non_public)
 
 
