@@ -480,7 +480,7 @@ dependency's report, but it is not retroactively converted into
 
 - rejects property keys the engine does not manage (valued or `None`) and
   rejects invalid declared property values
-- generates a primary-key constraint from columns marked `primary_key=True`
+- generates a primary-key constraint from the table-level `primary_key` argument
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values
 - validates structural invariants such as non-empty columns, unique column
@@ -496,6 +496,7 @@ customers = DeltaTable(
     schema="silver",
     name="customers",
     columns=[...],
+    primary_key=["id"],
 )
 
 orders = DeltaTable(
@@ -504,17 +505,16 @@ orders = DeltaTable(
     name="orders",
     columns=[...],
     foreign_keys=[
-        ForeignKey(local_columns=["customer_id"], references=customers),
+        ForeignKey(columns={"customer_id": "id"}, references=customers),
     ],
 )
 ```
 
-This object reference lets the API infer the referenced columns from the
-referenced table's primary key. The declaration does not repeat those columns,
-so it cannot drift from the target table's primary-key declaration. The tradeoff
-is that the referenced table must be declared in Python scope. Within one module
-that usually means defining the parent before the child; across modules it means
-importing the referenced table.
+This object reference lets the API validate the mapping against the
+referenced table's actual primary key, and keeps the reference valid if the
+target is renamed. The tradeoff is that the referenced table must be declared
+in Python scope. Within one module that usually means defining the parent
+before the child; across modules it means importing the referenced table.
 
 This source-code order does not determine execution order. The engine sorts
 prepared desired tables by qualified name for deterministic setup, then the
@@ -522,20 +522,19 @@ resolver topologically orders them by FK dependency before execution.
 
 References by dotted name are intentionally not supported in this iteration. If
 that becomes necessary, the API can be widened to accept a `QualifiedName` as an
-additional branch. That would be backward-compatible, but it would also need
-explicit referenced columns because a bare name carries no primary key object to
-inspect.
+additional branch. That would be backward-compatible: the referenced columns are
+already explicit in the `columns` mapping, so a bare name would only lose the
+primary-key object the engine validates the mapping against.
 
-Partitioning is shaped by a related decision. Primary-key membership is a
-per-column flag (`primary_key=True`), and a composite key simply takes the
-flagged columns in declaration order. Partitioning cannot reuse that shape,
-because partition order is significant _and_ independent of column order: the
-order of names in `partitioned_by` sets the physical directory nesting Delta
-writes, and that nesting can be different from the order columns appear in the
-table. A per-column flag has nowhere to express an ordering distinct from
-column declaration order, so partition columns are named in one ordered,
-table-level list instead. The differ compares that list positionally, which is
-why reordering it is drift, not a no-op.
+Partitioning is shaped by a related decision. `primary_key` and
+`partitioned_by` are both table-level lists of column names, but "order"
+means something different for each. A primary key's declaration order only
+controls how the constraint is rendered — identity and drift compare it as a
+set, so `(a, b)` and `(b, a)` are the same key. Partition order is
+significant instead: the order of names in `partitioned_by` sets the physical
+directory nesting Delta writes, and that nesting can be different from the
+order columns appear in the table. The differ compares that list positionally,
+which is why reordering it is drift, not a no-op.
 
 ## Constraint names
 
@@ -545,7 +544,8 @@ For desired tables, the API layer generates names when a `DeltaTable` is lowered
 to a `DesiredTable`:
 
 - primary key: `{table}_pk`
-- foreign key: `{table}_{local_columns}_fk`
+- foreign key: `{table}_{local_columns}_fk`, joining the local columns in
+  sorted order, so the name is independent of declaration order
 
 For observed tables, the reader adapter reads constraint names from the catalog.
 After that, names live on `PrimaryKeyConstraint` and `ForeignKeyConstraint`
@@ -621,6 +621,13 @@ dependency cost.
 
 - Keep PySpark and Databricks imports inside `delta_engine.adapters`.
 - Keep the domain backend-free, immutable, and deterministic.
+- Make immutability real, not conventional: frozen dataclasses copy their
+  collection fields in `__post_init__` — sequences into tuples, mappings into
+  read-only views (`MappingProxyType`), aspect sets into `frozenset` — so an
+  object cannot change after construction through a collection the caller
+  still holds. This applies at the public boundary too: `ForeignKey.columns`
+  and `Column.tags` copy what the user passed, so mutating the original
+  mapping later does not alter the declaration.
 - Put orchestration, safety policy, dependency resolution, and failure
   propagation in the application layer.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog

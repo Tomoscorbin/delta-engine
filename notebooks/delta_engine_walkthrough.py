@@ -117,11 +117,12 @@ customers = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String()),
         Column("legacy_code", String(), comment="Retired identifier, dropped in step 4a"),
         Column("status", String(), nullable=False),
     ],
+    primary_key=["id"],
     comment="Customer master table",
 )
 
@@ -130,14 +131,15 @@ orders = DeltaTable(
     schema=SCHEMA,
     name="orders",
     columns=[
-        Column("order_id", Long(), nullable=False, primary_key=True),
+        Column("order_id", Long(), nullable=False),
         Column("customer_id", Long(), nullable=False),
         Column("order_date", Date()),
     ],
+    primary_key=["order_id"],
     partitioned_by=["order_date"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("customer_id",),
+            columns={"customer_id": "id"},
             references=customers,
         )
     ],
@@ -263,13 +265,14 @@ customers = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),  # <-- added column comment
         Column(
             "email", String(), tags={"pii": "true"}
         ),  # <-- added with column tag (legacy_code dropped by omission)
         Column("status", String()),  # <-- loosened from NOT NULL to nullable
     ],
+    primary_key=["id"],
     comment="Customer master table (with contact details)",  # <-- added table comment
     tags={"domain": "sales", "owner": "data-eng"},  # <-- set 2 table tags
     properties={
@@ -331,11 +334,12 @@ customers = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),  # <-- pii column tag dropped
         Column("status", String()),
     ],
+    primary_key=["id"],
     comment="Customer master table (with contact details)",
     tags={"domain": "sales"},  # <-- "owner" table tag dropped
     properties={
@@ -391,11 +395,12 @@ customers = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
     ],
+    primary_key=["id"],
     comment="Customer master table (with contact details)",
     tags={"domain": "sales"},
     properties={
@@ -439,7 +444,7 @@ print("Step 4c verified: platform-managed property left untouched by sync.")
 # COMMAND ----------
 
 
-def define_events(*, columns, partitioned_by=("event_date",)):
+def define_events(*, columns, partitioned_by=("event_date",), primary_key=("event_id",)):
     """Build the events table from a column list (baseline plus one variation)."""
     return DeltaTable(
         catalog=CATALOG,
@@ -447,6 +452,7 @@ def define_events(*, columns, partitioned_by=("event_date",)):
         name="events",
         columns=columns,
         partitioned_by=partitioned_by,
+        primary_key=primary_key,
         comment="Raw events",
     )
 
@@ -462,7 +468,7 @@ def sync_expecting_failure(*tables: DeltaTable) -> SyncReport:
 
 
 events_baseline_columns = [
-    Column("event_id", Long(), nullable=False, primary_key=True),
+    Column("event_id", Long(), nullable=False),
     Column("event_date", Date()),
     Column("amount", Decimal(12, 2)),
     Column("created_at", Timestamp()),
@@ -521,7 +527,7 @@ print("Step 5a verified: NOT NULL add blocked, table untouched.")
 report = sync_expecting_failure(
     define_events(
         columns=[
-            Column("event_id", Long(), nullable=False, primary_key=True),
+            Column("event_id", Long(), nullable=False),
             Column("event_date", Date(), nullable=False),  # <-- tightened to NOT NULL
             Column("amount", Decimal(12, 2)),
             Column("created_at", Timestamp()),
@@ -553,7 +559,7 @@ print("Step 5b verified: tightening blocked, event_date still nullable.")
 report = sync_expecting_failure(
     define_events(
         columns=[
-            Column("event_id", Long(), nullable=False, primary_key=True),
+            Column("event_id", Long(), nullable=False),
             Column("event_date", Date()),
             Column("amount", Double()),  # <-- was Decimal(12, 2)
             Column("created_at", Timestamp()),
@@ -613,8 +619,9 @@ products = DeltaTable(
     schema=SCHEMA,
     name="products",
     columns=[
-        Column("product_id", Long(), nullable=False, primary_key=True),
+        Column("product_id", Long(), nullable=False),
     ],
+    primary_key=["product_id"],
 )
 
 line_items = DeltaTable(
@@ -622,12 +629,13 @@ line_items = DeltaTable(
     schema=SCHEMA,
     name="line_items",
     columns=[
-        Column("line_item_id", Long(), nullable=False, primary_key=True),
+        Column("line_item_id", Long(), nullable=False),
         Column("product_id", Long(), nullable=False),
     ],
+    primary_key=["line_item_id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("product_id",),
+            columns={"product_id": "product_id"},
             references=products,  # <-- never passed to the sync
         )
     ],
@@ -669,7 +677,7 @@ customers_without_pk = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False),  # <-- primary_key=True removed
+        Column("id", Long(), nullable=False),  # <-- no longer listed in primary_key=[...]
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
@@ -729,7 +737,8 @@ DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
     name="bad_pk",
-    columns=[Column("id", Long(), primary_key=True)],  # <-- nullable primary key
+    columns=[Column("id", Long())],  # <-- nullable (no NOT NULL)
+    primary_key=["id"],
 )
 
 # COMMAND ----------
@@ -751,10 +760,11 @@ DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
     name="bad_fk_column",
-    columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    columns=[Column("id", Long(), nullable=False)],
+    primary_key=["id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("missing_id",),  # <-- no such column on this table
+            columns={"missing_id": "id"},  # <-- no such column on this table
             references=customers,
         )
     ],
@@ -767,14 +777,15 @@ DeltaTable(
 # MAGIC
 # MAGIC **Goal**
 # MAGIC
-# MAGIC Reference a `DeltaTable` that has no primary key. Referenced columns are
-# MAGIC inferred from the referenced table's primary key, so there is nothing to
-# MAGIC infer from — the engine rejects this at construction time.
+# MAGIC Reference a `DeltaTable` that has no primary key. A foreign key's
+# MAGIC `columns` mapping must cover the referenced table's primary key exactly,
+# MAGIC so a table with no primary key gives it nothing to match — the engine
+# MAGIC rejects this at construction time.
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Rejected: referenced table declares no primary key, so referenced columns
-# MAGIC cannot be inferred.
+# MAGIC Rejected: referenced table declares no primary key, so the mapping has
+# MAGIC no key to satisfy.
 
 # COMMAND ----------
 
@@ -782,17 +793,18 @@ no_pk_table = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
     name="no_pk",
-    columns=[Column("id", Long())],  # <-- no primary_key=True
+    columns=[Column("id", Long())],  # <-- no primary_key declared
 )
 DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
     name="bad_fk_no_pk",
-    columns=[Column("id", Long(), nullable=False, primary_key=True)],
+    columns=[Column("id", Long(), nullable=False)],
+    primary_key=["id"],
     foreign_keys=[
         ForeignKey(
-            local_columns=("id",),
-            references=no_pk_table,  # <-- no primary key to infer from
+            columns={"id": "id"},
+            references=no_pk_table,  # <-- no primary key to match against
         )
     ],
 )
@@ -821,9 +833,10 @@ DeltaTable(
     schema=SCHEMA,
     name="bad_cdf_reserved_col",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("_change_type", String()),  # <-- reserved by CDF
     ],
+    primary_key=["id"],
     properties={Property.CHANGE_DATA_FEED: "true"},
 )
 
@@ -851,12 +864,13 @@ DeltaTable(
     schema=SCHEMA,
     name="bad_struct_field_name",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column(
             "payload",
             Struct([StructField("order id", String())]),  # <-- space in field name
         ),
     ],
+    primary_key=["id"],
 )
 
 # COMMAND ----------
@@ -895,11 +909,12 @@ customers_meta = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
     ],
+    primary_key=["id"],
     comment="Customer master table (managed externally)",  # <-- comment changed
     tags={"domain": "sales"},
     properties={
@@ -947,8 +962,9 @@ new_table_meta_only = DeltaTable(
     schema=SCHEMA,
     name="never_created",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
     ],
+    primary_key=["id"],
     scope="metadata",  # <-- cannot create; no column structure management
 )
 
@@ -988,12 +1004,13 @@ customers_meta_drifted = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
         Column("ghost", String()),  # <-- does not exist on the live table
     ],
+    primary_key=["id"],
     comment="Customer master table (managed externally)",
     tags={"domain": "sales"},
     properties={
@@ -1035,12 +1052,13 @@ customers = DeltaTable(
     schema=SCHEMA,
     name="customers",
     columns=[
-        Column("id", Long(), nullable=False, primary_key=True),
+        Column("id", Long(), nullable=False),
         Column("name", String(), comment="Full legal name"),
         Column("email", String()),
         Column("status", String()),
         Column("phone", String()),  # <-- added
     ],
+    primary_key=["id"],
     comment="Customer master table (with contact details)",
     tags={"domain": "sales"},
     properties={

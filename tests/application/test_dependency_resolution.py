@@ -41,10 +41,10 @@ def _referenced_table(
                 column_name,
                 String(),
                 nullable=False,
-                primary_key=True,
             )
             for column_name in primary_key_columns
         ),
+        primary_key=list(primary_key_columns) if primary_key_columns else None,
     )
 
 
@@ -61,7 +61,6 @@ def _table(
             column_name,
             String(),
             nullable=False,
-            primary_key=True,
         )
         for column_name in primary_key_columns
     )
@@ -72,6 +71,7 @@ def _table(
         schema,
         table_name,
         columns=primary_key_column_definitions + extra_column_definitions,
+        primary_key=list(primary_key_columns) if primary_key_columns else None,
     ).to_desired_table()
 
 
@@ -89,12 +89,13 @@ def _table_with_fk(
         schema,
         table_name,
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             *tuple(Column(column_name, String()) for column_name in local_columns),
         ),
+        primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=local_columns,
+                columns=dict(zip(local_columns, referenced_primary_key_columns, strict=True)),
                 references=_referenced_table(
                     references,
                     primary_key_columns=referenced_primary_key_columns,
@@ -124,12 +125,13 @@ def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
         schema,
         table_name,
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             *(Column(_fk_column_name(reference), String()) for reference in references),
         ),
+        primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=(_fk_column_name(reference),),
+                columns={_fk_column_name(reference): "id"},
                 references=_referenced_table(reference),
             )
             for reference in references
@@ -146,12 +148,13 @@ def _tag_scoped_table_with_fk(fqn: str, references: str) -> DesiredTable:
         schema,
         table_name,
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("ref_id", String()),
         ),
+        primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=("ref_id",),
+                columns={"ref_id": "id"},
                 references=_referenced_table(references),
             )
         ],
@@ -280,7 +283,8 @@ def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
         "cat",
         "sch",
         "customers",
-        columns=(Column("id", String(), nullable=False, primary_key=True),),
+        columns=(Column("id", String(), nullable=False),),
+        primary_key=["id"],
         scope="tags",
     )
     orders = DeltaTable(
@@ -288,10 +292,11 @@ def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
         "sch",
         "orders",
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("customer_id", String()),
         ),
-        foreign_keys=[ForeignKey(local_columns=("customer_id",), references=customers)],
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
     ).to_desired_table()
     tables = (orders, customers.to_desired_table())
 
@@ -632,12 +637,13 @@ def test_resolve_treats_self_referential_fk_as_applicable():
         "sch",
         "employees",
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("manager_id", String()),
         ),
+        primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=("manager_id",),
+                columns={"manager_id": "id"},
                 references=Self,
             )
         ],
@@ -792,9 +798,10 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
         "sch",
         "customers",
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("email", String()),
         ),
+        primary_key=["id"],
     ).to_desired_table()
 
     orders = DesiredTable(

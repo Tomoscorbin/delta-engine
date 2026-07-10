@@ -64,9 +64,9 @@ def _spec(fqn: str) -> DeltaTable:
                 "id",
                 String(),
                 nullable=False,
-                primary_key=True,
             ),
         ),
+        primary_key=["id"],
     )
 
 
@@ -96,12 +96,13 @@ def _spec_with_fk(fqn: str, references: str) -> DeltaTable:
         schema,
         table_name,
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("ref_id", String()),
         ),
+        primary_key=["id"],
         foreign_keys=[
             ForeignKey(
-                local_columns=("ref_id",),
+                columns={"ref_id": "id"},
                 references=_referenced_spec(references),
             )
         ],
@@ -121,9 +122,10 @@ def _spec_adding_not_null(fqn: str) -> DeltaTable:
         schema,
         table_name,
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("order_id", String(), nullable=False),
         ),
+        primary_key=["id"],
     )
 
 
@@ -952,13 +954,14 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
         "sch",
         "d",
         columns=(
-            Column("id", String(), nullable=False, primary_key=True),
+            Column("id", String(), nullable=False),
             Column("b_id", String()),
             Column("c_id", String()),
         ),
+        primary_key=["id"],
         foreign_keys=[
-            ForeignKey(local_columns=("b_id",), references=_referenced_spec("cat.sch.b")),
-            ForeignKey(local_columns=("c_id",), references=_referenced_spec("cat.sch.c")),
+            ForeignKey(columns={"b_id": "id"}, references=_referenced_spec("cat.sch.b")),
+            ForeignKey(columns={"c_id": "id"}, references=_referenced_spec("cat.sch.c")),
         ],
     )
 
