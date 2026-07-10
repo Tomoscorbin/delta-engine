@@ -22,7 +22,7 @@ pip install delta-engine
 The base package is pure Python with no runtime dependencies: declaring and
 planning schemas needs no PySpark. Running a sync needs a Databricks
 environment, which provides Spark and Delta. See the
-[installation guide](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/installation.md)
+[installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
 for the `[databricks]` extra used for local development.
 
 ## Quickstart
@@ -56,35 +56,35 @@ a named rule before any SQL runs.
 
 ## Documentation
 
-Start with [how a sync works](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-sync-lifecycle.md)
+Start with [how a sync works](https://tomoscorbin.github.io/delta-engine/explanation-sync-lifecycle.html)
 for the model, or jump to what you need:
 
 **Getting started**
 
-- [Installation](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/installation.md)
-- [Getting started tutorial](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/tutorial-getting-started.md) — define a table and run your first sync
+- [Installation](https://tomoscorbin.github.io/delta-engine/installation.html)
+- [Getting started tutorial](https://tomoscorbin.github.io/delta-engine/tutorial-getting-started.html) — define a table and run your first sync
 
 **Concepts**
 
-- [How a sync works](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-sync-lifecycle.md) — the phases between calling `sync` and getting a report
-- [The safety model](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-safety-model.md) — what the engine blocks, and why
+- [How a sync works](https://tomoscorbin.github.io/delta-engine/explanation-sync-lifecycle.html) — the phases between calling `sync` and getting a report
+- [The safety model](https://tomoscorbin.github.io/delta-engine/explanation-safety-model.html) — what the engine blocks, and why
 
 **How-to guides**
 
-- [Configure a table](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-configure-table.md) — properties, tags, comments, keys, and partitioning
-- [Deploy metadata only](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-deploy-metadata-only.md) — roll out governance metadata with no schema change
-- [Preview changes with a dry run](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-preview-changes.md)
-- [Handle sync failures](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-handle-sync-failures.md) — inspect `SyncReport` and act on each status
+- [Configure a table](https://tomoscorbin.github.io/delta-engine/how-to-configure-table.html) — properties, tags, comments, keys, and partitioning
+- [Deploy metadata only](https://tomoscorbin.github.io/delta-engine/how-to-deploy-metadata-only.html) — roll out governance metadata with no schema change
+- [Preview changes with a dry run](https://tomoscorbin.github.io/delta-engine/how-to-preview-changes.html)
+- [Handle sync failures](https://tomoscorbin.github.io/delta-engine/how-to-handle-sync-failures.html) — inspect `SyncReport` and act on each status
 
 **Reference**
 
-- [Capabilities and limitations](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-limitations.md) — what the engine can and cannot manage
-- [Data types](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-data-types.md) — supported types and Spark SQL equivalents
-- [Safe-change rules](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-safe-change-rules.md) — changes the engine blocks at validation
-- [API reference](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/reference-api.md)
+- [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
+- [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
+- [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation
+- [API reference](https://tomoscorbin.github.io/delta-engine/reference-api.html)
 
 **Architecture**
 
-- [Architecture](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/explanation-architecture.md) — layers, ports and adapters, design decisions
-- [Implement a custom adapter](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-implement-adapter.md) — the `CatalogStateReader` and `PlanExecutor` ports
-- [Add a new action type](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/how-to-add-action-type.md) — extend `Action`, `ActionPhase`, and the compiler
+- [Architecture](https://tomoscorbin.github.io/delta-engine/explanation-architecture.html) — layers, ports and adapters, design decisions
+- [Implement a custom adapter](https://tomoscorbin.github.io/delta-engine/how-to-implement-adapter.html) — the `CatalogStateReader` and `PlanExecutor` ports
+- [Add a new action type](https://tomoscorbin.github.io/delta-engine/how-to-add-action-type.html) — extend `Action`, `ActionPhase`, and the compiler
