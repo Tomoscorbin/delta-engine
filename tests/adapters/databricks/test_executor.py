@@ -7,7 +7,7 @@ from delta_engine.adapters.databricks.executor import (
     _execute_compiled,
     _sql_preview,
 )
-from delta_engine.adapters.databricks.sql import CompiledAction
+from delta_engine.adapters.databricks.sql import CompiledAction, compile_plan
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
@@ -367,3 +367,25 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
     # Then the column becomes nullable
     assert summary.failed is False
     assert _get_field(spark, full_table_name, "id").nullable is True
+
+
+def test_compile_returns_the_statements_execute_would_run():
+    # Given a plan with one action
+    qualified_name = QualifiedName("cat", "schema", "tbl")
+    plan = ActionPlan((SetTableComment(comment="hello"),))
+    executor = DatabricksExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
+
+    # When compiling without executing
+    statements = executor.compile(qualified_name, plan)
+
+    # Then the statements match the SQL compiler's output, in plan order
+    assert statements == tuple(
+        compiled.statement for compiled in compile_plan(qualified_name, plan)
+    )
+    assert len(statements) == 1
+    assert "COMMENT" in statements[0].upper()
+
+
+def test_compile_of_empty_plan_returns_no_statements():
+    executor = DatabricksExecutor(spark=None)  # type: ignore[arg-type]
+    assert executor.compile(QualifiedName("cat", "schema", "tbl"), ActionPlan()) == ()

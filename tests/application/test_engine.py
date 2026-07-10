@@ -294,6 +294,9 @@ class _RecordingExecutor:
 
         return ExecutionSummary(self._per_call_results.pop(0))
 
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
+
     @property
     def executed_names(self) -> list[str]:
         return [str(qualified_name) for qualified_name, _ in self.calls]
@@ -506,6 +509,11 @@ def test_read_phase_attempts_all_tables_before_any_execution():
         ) -> ExecutionSummary:
             events.append(f"execute:{qualified_name}")
             return ExecutionSummary((_ok_exec(0),))
+
+        def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+            # Silent by design: the plan phase compiles every table, but this
+            # test asserts read/execute event ordering, not compilation.
+            return tuple(f"STATEMENT {index}" for index in range(len(plan)))
 
     engine = Engine(
         reader=_EventRecordingReader(),

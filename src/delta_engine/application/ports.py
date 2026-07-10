@@ -149,3 +149,15 @@ class PlanExecutor(Protocol):
         than raised.
         """
         ...
+
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        """
+        Return the exact statements ``execute`` would run for ``plan``, in order.
+
+        Pure and side-effect free: the engine calls this on every run -- dry or
+        real -- to record the SQL on the table's report. Unlike ``execute``,
+        this is not a total boundary: compiling a validated plan cannot fail
+        against a backend, so an exception here is a programming error and
+        propagates.
+        """
+        ...

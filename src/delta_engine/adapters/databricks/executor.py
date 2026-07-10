@@ -46,6 +46,10 @@ class DatabricksExecutor:
         """
         return _execute_compiled(self.spark, compile_plan(qualified_name, plan))
 
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        """Return the exact SQL ``execute`` would run for ``plan``, without touching Spark."""
+        return tuple(compiled.statement for compiled in compile_plan(qualified_name, plan))
+
 
 def _execute_compiled(spark: SparkSession, compiled: Iterable[CompiledAction]) -> ExecutionSummary:
     """
