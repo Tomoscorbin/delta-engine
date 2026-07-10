@@ -364,9 +364,10 @@ every change in the drift belongs to a managed aspect, so
 `TableDrift.plan()` naturally produces only the managed actions, with no
 filtering logic needed.
 
-The public API exposes named modes only: `DeltaTable(metadata_only=True)` maps
-to the metadata aspects (comments, tags, key constraints). The `TableAspect`
-enum stays internal.
+The public API exposes named scopes only: `DeltaTable`'s `scope` parameter
+maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
+and `"tags"` to table and column tags only. The `TableAspect` enum stays
+internal.
 
 `diff_table(desired, observed)` produces a `TableDiff`:
 
@@ -477,8 +478,8 @@ dependency's report, but it is not retroactively converted into
 `DeltaTable` is the public declaration object, but the engine plans with
 `DesiredTable`. The lowering boundary does several important things up front:
 
-- rejects property keys the engine does not manage (valued or `None`),
-  and rejects `metadata_only=True` combined with `properties`
+- rejects property keys the engine does not manage (valued or `None`) and
+  rejects invalid declared property values
 - generates a primary-key constraint from the table-level `primary_key` argument
 - lowers public `ForeignKey` declarations into domain `ForeignKeyConstraint`
   values

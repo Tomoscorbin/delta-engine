@@ -23,8 +23,10 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan.changes import (
     Change,
     ColumnAdded,
+    ColumnCommentChanged,
     ColumnDataTypeChanged,
     ColumnRemoved,
+    ColumnTagSet,
     ForeignKeyRemoved,
     PrimaryKeyChanged,
     PrimaryKeyRemoved,
@@ -514,6 +516,75 @@ def test_unmanaged_column_drop_does_not_require_column_mapping():
     result = validate_diff(diff)
 
     # Then validation reports only the scope failure, not the drop precondition
+    assert result.failed is True
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
+def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
+    # Given a tag-only declaration with table and column tag drift
+    desired = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), tags={"pii": "false"}),),
+        tags={"domain": "sales"},
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+    observed = ObservedTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(Column("id", Integer(), tags={"pii": "true"}),),
+        tags={"legacy": "yes"},
+    )
+
+    # When validating the diff
+    result = _validate(desired, observed)
+
+    # Then both tag aspects are managed, so the drift is allowed
+    assert result.failed is False
+
+
+def test_tag_only_scope_fails_when_table_comment_drifts():
+    # Given a tag-only declaration with comment drift
+    diff = _drift(
+        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+
+    # When validating
+    result = validate_diff(diff)
+
+    # Then table comments are outside this declaration's responsibility
+    assert result.failed is True
+    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+    assert "table comment" in result.failures[0].message
+
+
+def test_tag_only_scope_fails_when_column_comment_drifts():
+    # Given a tag-only declaration with column comment drift
+    diff = _drift(
+        ColumnTagSet(column_name="id", tag_name="pii", tag_value="true"),
+        ColumnCommentChanged(column_name="id", desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+
+    # When validating
+    result = validate_diff(diff)
+
+    # Then managed tag drift does not hide unmanaged comment drift
+    assert result.failed is True
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
+def test_tag_only_scope_fails_when_column_structure_drifts():
+    # Given a tag-only declaration whose live table has an extra, undeclared column
+    desired = _desired_table(
+        columns=(Column("id", Integer()),),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+    observed = _observed_table(columns=(Column("id", Integer()), Column("extra", String())))
+
+    # When validating the diff
+    result = _validate(desired, observed)
+
+    # Then unmanaged column-structure drift fails before any tag SQL runs
     assert result.failed is True
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
 

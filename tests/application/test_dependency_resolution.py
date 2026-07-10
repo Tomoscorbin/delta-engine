@@ -139,6 +139,29 @@ def _table_with_fks(fqn: str, *references: str) -> DesiredTable:
     ).to_desired_table()
 
 
+def _tag_scoped_table_with_fk(fqn: str, references: str) -> DesiredTable:
+    """Build a tag-scoped table that carries an FK it does not manage."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("ref_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[
+            ForeignKey(
+                columns={"ref_id": "id"},
+                references=_referenced_table(references),
+            )
+        ],
+        scope="tags",
+    ).to_desired_table()
+
+
 def _names(result: ResolveResult) -> list[str]:
     return [str(name) for name in result.ordered_names]
 
@@ -212,6 +235,33 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
     assert not result.fk_failures
 
 
+def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
+    # Given a tag-scoped declaration that carries an FK but does not manage FKs
+    tables = (_tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the carried FK does not produce an unresolvable-reference failure
+    assert _names(result) == ["cat.sch.orders"]
+    assert not result.fk_failures
+
+
+def test_resolve_does_not_order_by_unmanaged_foreign_keys():
+    # Given a tag-scoped declaration listed before the table it references
+    tables = (
+        _tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),
+        _table("cat.sch.customers"),
+    )
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the unmanaged FK does not impose parent-before-child ordering
+    assert _names(result) == ["cat.sch.orders", "cat.sch.customers"]
+    assert not result.fk_failures
+
+
 def test_resolve_orders_referenced_table_before_dependent():
     # Given orders depends on customers
     tables = (
@@ -223,6 +273,37 @@ def test_resolve_orders_referenced_table_before_dependent():
     result = resolve(tables)
 
     # Then customers appears before orders
+    _assert_before(result, "cat.sch.customers", "cat.sch.orders")
+    assert not result.fk_failures
+
+
+def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
+    # Given a managed table whose foreign key targets a tag-scoped table
+    customers = DeltaTable(
+        "cat",
+        "sch",
+        "customers",
+        columns=(Column("id", String(), nullable=False),),
+        primary_key=["id"],
+        scope="tags",
+    )
+    orders = DeltaTable(
+        "cat",
+        "sch",
+        "orders",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("customer_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
+    ).to_desired_table()
+    tables = (orders, customers.to_desired_table())
+
+    # When resolving dependencies
+    result = resolve(tables)
+
+    # Then the referenced tag-scoped table is ordered before its managed dependent
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
     assert not result.fk_failures
 

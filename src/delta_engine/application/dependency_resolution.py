@@ -36,7 +36,7 @@ from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
-from delta_engine.domain.model import DesiredTable, ForeignKeyConstraint, QualifiedName
+from delta_engine.domain.model import DesiredTable, ForeignKeyConstraint, QualifiedName, TableAspect
 
 # A table dependency graph is small (tens of tables, shallow chains), so the
 # recursion depth of the SCC traversal below stays far under Python's limit.
@@ -119,9 +119,16 @@ def blocking_failures(
             references=foreign_key.referenced_table,
             reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
         )
-        for foreign_key in table.foreign_keys
+        for foreign_key in _managed_foreign_keys(table)
         if foreign_key.referenced_table in failed
     )
+
+
+def _managed_foreign_keys(table: DesiredTable) -> tuple[ForeignKeyConstraint, ...]:
+    """Return foreign keys this declaration is responsible for reconciling."""
+    if TableAspect.FOREIGN_KEYS not in table.managed_aspects:
+        return ()
+    return table.foreign_keys
 
 
 def _build_dependency_graph(
@@ -142,7 +149,7 @@ def _build_dependency_graph(
     }
     for table in tables:
         table_name = table.qualified_name
-        for foreign_key in table.foreign_keys:
+        for foreign_key in _managed_foreign_keys(table):
             referenced_table = foreign_key.referenced_table
             if referenced_table in registered_names and referenced_table != table_name:
                 dependencies_by_table[table_name].add(referenced_table)
@@ -310,7 +317,7 @@ def _classify_failures(
     # Pass 1 — direct failures.
     for table in tables:
         table_name = table.qualified_name
-        for foreign_key in table.foreign_keys:
+        for foreign_key in _managed_foreign_keys(table):
             referenced_table = foreign_key.referenced_table
             if referenced_table not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)

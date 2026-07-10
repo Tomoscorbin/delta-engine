@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final
+from typing import Final, Literal
 
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
 from delta_engine.domain.model import (
@@ -45,6 +45,22 @@ METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
         TableAspect.FOREIGN_KEYS,
     }
 )
+
+TAG_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {
+        TableAspect.COLUMN_TAGS,
+        TableAspect.TABLE_TAGS,
+    }
+)
+
+# The public API exposes named scopes only, each mapping to an aspect set.
+# The TableAspect enum stays internal so a declaration can only manage
+# combinations the engine's safety rules are written against.
+_ASPECTS_BY_SCOPE: Final[Mapping[str, frozenset[TableAspect]]] = {
+    "full": ALL_ASPECTS,
+    "metadata": METADATA_ASPECTS,
+    "tags": TAG_ASPECTS,
+}
 
 # Delta permits these characters in column names only under column mapping.
 _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
@@ -132,6 +148,49 @@ def _validate_delta_partitioning(
         raise ValueError(
             "Cannot partition by every column: at least one non-partition column is required"
         )
+
+
+def _validate_column_names(
+    columns: tuple[Column, ...],
+    properties: Mapping[str, str | None],
+    managed_aspects: frozenset[TableAspect],
+) -> None:
+    """
+    Reject column names the declared properties make invalid on Delta.
+
+    Two naming rules depend on properties: characters such as spaces are only
+    permitted under column mapping, and change data feed reserves its output
+    column names. Both bind only when the declaration manages column
+    structure — a restricted scope mirrors columns the live table already
+    accepted, so it must be able to declare names this engine would refuse
+    to create.
+    """
+    if TableAspect.COLUMN_STRUCTURE not in managed_aspects:
+        return
+
+    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+        offending = [
+            declared_name
+            for column in columns
+            for declared_name in _column_declared_names(column)
+            if set(declared_name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
+        ]
+        if offending:
+            raise ValueError(
+                f"Column or struct field names {offending} contain characters Delta only"
+                " permits with column mapping. Declare"
+                f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
+                " or rename the columns."
+            )
+
+    if properties.get(Property.CHANGE_DATA_FEED) == "true":
+        reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
+        if reserved:
+            raise ValueError(
+                f"Column names {reserved} are reserved by change data feed."
+                " Rename them or do not enable"
+                f" {Property.CHANGE_DATA_FEED}."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +335,9 @@ class DeltaTable:
     """
     Defines a Delta table schema.
 
+    ``scope`` selects how much of the table the declaration manages: the whole
+    table (default), catalog metadata only, or tags only.
+
     Note on dropping columns: Delta only permits ``ALTER TABLE ... DROP COLUMN``
     when ``delta.columnMapping.mode`` is ``name``. Declare it in ``properties``
     on any table whose columns may be dropped; a sync that drops a column
@@ -294,7 +356,7 @@ class DeltaTable:
         partitioned_by: Iterable[str] = (),
         primary_key: Sequence[str] | None = None,
         foreign_keys: Iterable[ForeignKey] | None = None,
-        metadata_only: bool = False,
+        scope: Literal["full", "metadata", "tags"] = "full",
     ) -> None:
         """
         Initialise a DeltaTable definition.
@@ -311,14 +373,25 @@ class DeltaTable:
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
             foreign_keys: Foreign key relationships declared on this table.
-            metadata_only: When ``True``, restricts the sync to catalog metadata:
-                comments, tags, and key constraints. The full table is still
-                declared — columns, properties, partitioning — but only
-                metadata is deployed; the rest is never compared or changed,
-                except that the live schema must match the declared columns
-                exactly (structural drift fails validation).
+            scope: What this declaration manages. ``"full"`` (the default)
+                manages the whole table. ``"metadata"`` restricts the sync to
+                catalog metadata: comments, tags, and primary/foreign key
+                constraints. ``"tags"`` restricts it to table and column tags
+                — for tables owned elsewhere (e.g. by a streaming pipeline)
+                whose Unity Catalog tags this engine should still govern. A
+                restricted scope still declares the full table shape; aspects
+                outside the scope are never changed, and drift on them fails
+                validation. Properties are the exception: a declaration that
+                does not manage properties never compares them at all.
 
         """
+        # The Literal type catches bad scopes at type-check time; this guard
+        # covers untyped callers.
+        if scope not in _ASPECTS_BY_SCOPE:
+            expected = ", ".join(repr(known_scope) for known_scope in _ASPECTS_BY_SCOPE)
+            raise ValueError(f"Unknown scope {scope!r}; expected one of: {expected}")
+        managed_aspects = _ASPECTS_BY_SCOPE[scope]
+
         user_properties = dict(properties or {})
 
         # Fast-fail on property keys this engine does not manage (e.g. typos).
@@ -340,32 +413,7 @@ class DeltaTable:
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)
         _validate_delta_partitioning(columns, partitioned_by)
-
-        if not metadata_only and user_properties.get(Property.COLUMN_MAPPING_MODE) != "name":
-            offending = [
-                name
-                for column in columns
-                for name in _column_declared_names(column)
-                if set(name) & _CHARACTERS_REQUIRING_COLUMN_MAPPING
-            ]
-            if offending:
-                raise ValueError(
-                    f"Column or struct field names {offending} contain characters Delta only"
-                    " permits with column mapping. Declare"
-                    f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}}"
-                    " or rename the columns."
-                )
-
-        if not metadata_only and user_properties.get(Property.CHANGE_DATA_FEED) == "true":
-            reserved = [
-                column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES
-            ]
-            if reserved:
-                raise ValueError(
-                    f"Column names {reserved} are reserved by change data feed."
-                    " Rename them or do not enable"
-                    f" {Property.CHANGE_DATA_FEED}."
-                )
+        _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})
         _validate_tags(f"table '{name}'", table_tags)
@@ -400,7 +448,7 @@ class DeltaTable:
             partitioned_by=partitioned_by,
             primary_key=primary_key_constraint,
             foreign_keys=lowered_foreign_keys,
-            managed_aspects=METADATA_ASPECTS if metadata_only else ALL_ASPECTS,
+            managed_aspects=managed_aspects,
         )
 
     @property
