@@ -3,17 +3,19 @@ High-level orchestration of planning, validation, and execution.
 
 `Engine.sync` runs a chain of phases, each a pass over the per-table
 runs — one `TableRunReport` is born per table in the read phase and accretes
-its plan, failures, and execution as the chain proceeds. On a real run, if any
-table fails, `SyncFailedError` is raised with a formatted summary.
+its plan, SQL, failures, and execution as the chain proceeds. On a real run, if
+any table fails, `SyncFailedError` is raised with a formatted summary.
 
-The six phases, each taking the runs and returning them:
+The seven phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
   2. Diff     — compute the desired-observed diff; states the facts
   3. Validate — check every diff against rules; append per-table failures
   4. Plan     — lower every diff into its action plan
-  5. Resolve  — order runs by FK dependency; append FK failures and
+  5. Compile  — lower every plan into the backend SQL it will run, so a dry
+                run can preview the DDL
+  6. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  6. Execute  — run the plan of every run with no failures and a non-empty
+  7. Execute  — run the plan of every run with no failures and a non-empty
                 plan, blocking FK dependents of runs that fail mid-execution
 
 Running `resolve()` after validation means a table that fails validation
@@ -147,6 +149,7 @@ class Engine:
         runs = self._diff(runs)
         runs = self._validate(runs)
         runs = self._plan(runs)
+        runs = self._compile(runs)
         runs = self._resolve(runs)
         runs = self._execute(runs, dry_run=dry_run)
 
@@ -231,8 +234,19 @@ class Engine:
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
-            run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+        return runs
+
+    def _compile(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """
+        Lower every run's action plan into the backend SQL it will run.
+
+        Runs on every sync, dry or real, so a dry run can preview the exact
+        DDL. An empty plan (a run that failed read or validation, or has no
+        drift) compiles to no statements, so no case needs guarding.
+        """
+        for run in runs:
+            run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
         return runs
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:

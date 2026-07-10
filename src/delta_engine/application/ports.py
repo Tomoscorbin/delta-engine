@@ -152,7 +152,11 @@ class PlanExecutor(Protocol):
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         """
-        Return the exact statements ``execute`` would run for ``plan``, in order.
+        Return the statements that apply ``plan``, in execution order.
+
+        The ordering is the plan's own deterministic order, which is the order
+        ``execute`` applies the actions; both derive from the same ``plan``.
+        An empty plan compiles to no statements.
 
         Pure and side-effect free: the engine calls this on every run -- dry or
         real -- to record the SQL on the table's report. Unlike ``execute``,
