@@ -13,7 +13,7 @@ def test_property_enum_values_match_the_registry_keys():
     assert Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"
 
 
-def test_registry_covers_the_five_managed_keys():
+def test_registry_covers_exactly_the_managed_keys():
     # Given deletion vectors is deliberately absent — Databricks manages it
     assert set(DELTA_PROPERTY_REGISTRY) == {
         "delta.enableChangeDataFeed",
@@ -21,6 +21,7 @@ def test_registry_covers_the_five_managed_keys():
         "delta.logRetentionDuration",
         "delta.dataSkippingNumIndexedCols",
         "delta.columnMapping.mode",
+        "delta.enableTypeWidening",
     }
 
 
@@ -50,7 +51,7 @@ def test_first_write_is_always_permitted():
 
 
 def test_every_other_key_permits_any_transition_and_removal():
-    # Given the four pure-configuration keys
+    # Given the pure-configuration keys
     for key, definition in DELTA_PROPERTY_REGISTRY.items():
         if key == "delta.columnMapping.mode":
             continue
@@ -70,6 +71,8 @@ def test_every_other_key_permits_any_transition_and_removal():
         (Property.DELETED_FILE_RETENTION_DURATION, "interval 7 days"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-1"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "32"),
+        (Property.TYPE_WIDENING, "true"),
+        (Property.TYPE_WIDENING, "false"),
     ],
 )
 def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
@@ -89,6 +92,8 @@ def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "1_000"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "+5"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, " 5 "),
+        (Property.TYPE_WIDENING, "True"),  # catalog stores lowercase; drift churn otherwise
+        (Property.TYPE_WIDENING, "enabled"),
     ],
 )
 def test_registry_rejects_invalid_property_values(key: str, value: str) -> None:

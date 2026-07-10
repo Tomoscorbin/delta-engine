@@ -8,8 +8,14 @@ from delta_engine.application.validation import (
 )
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Byte,
     Column,
+    DataType,
+    Date,
+    Decimal,
     DesiredTable,
+    Double,
+    Float,
     ForeignKeyConstraint,
     ForeignKeyReference,
     Integer,
@@ -17,8 +23,10 @@ from delta_engine.domain.model import (
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
+    Short,
     String,
     TableAspect,
+    TimestampNtz,
 )
 from delta_engine.domain.plan.changes import (
     Change,
@@ -126,7 +134,8 @@ def test_default_rules_cover_all_safety_policies():
     assert rule_names == {
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
-        "ColumnDataTypeChangeNotSupported",
+        "NonWideningColumnTypeChange",
+        "TypeWideningRequiredForTypeChange",
         "PartitioningChangeNotSupported",
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
@@ -362,19 +371,140 @@ def test_allows_loosening_existing_column_to_nullable():
 # ---- unsupported structural changes
 
 
-def test_rejects_existing_column_type_change():
-    # Given an existing column whose declared type changes
+def test_rejects_widening_type_change_without_type_widening_declared():
+    # Given an existing column widened Integer → Long, with no property declared
     desired = _desired_table(columns=(Column("id", Long()),))
     observed = _observed_table(columns=(Column("id", Integer()),))
 
     # When validating the diff
     result = _validate(desired, observed)
 
-    # Then the type change is rejected
+    # Then the widen is rejected pending the enabling property
     assert result.failed is True
     assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "ColumnDataTypeChangeNotSupported"
+    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
     assert "id" in result.failures[0].message
+    assert "delta.enableTypeWidening" in result.failures[0].message
+
+
+def test_widening_type_change_passes_with_type_widening_declared():
+    # Given a widen Integer → Long with the property declared in the same sync
+    desired = _desired_table(
+        columns=(Column("id", Long()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Integer()),))
+
+    # When validating
+    result = _validate(desired, observed)
+
+    # Then the widen is permitted (SET_PROPERTY phases before ALTER_COLUMN_TYPE)
+    assert result.failed is False
+
+
+def test_rejects_non_widening_type_change_even_with_type_widening_declared():
+    # Given Integer → String, which no widening supports
+    desired = _desired_table(
+        columns=(Column("id", String()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Integer()),))
+
+    result = _validate(desired, observed)
+
+    assert result.failed is True
+    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
+    assert "recreate the table" in result.failures[0].message
+
+
+def test_rejects_narrowing_type_change():
+    # Given Long → Integer — the reverse of a widening is a narrowing
+    desired = _desired_table(
+        columns=(Column("id", Integer()),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("id", Long()),))
+
+    result = _validate(desired, observed)
+
+    assert result.failed is True
+    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
+
+
+def _widening_result(desired_type: DataType, observed_type: DataType) -> ValidationResult:
+    """Validate a single-column type change with type widening declared."""
+    desired = _desired_table(
+        columns=(Column("c", desired_type),),
+        properties={"delta.enableTypeWidening": "true"},
+    )
+    observed = _observed_table(columns=(Column("c", observed_type),))
+    return _validate(desired, observed)
+
+
+def test_decimal_widening_keeps_integer_digits_and_never_shrinks_scale():
+    # Then precision growth at unchanged scale passes
+    assert _widening_result(Decimal(12, 2), Decimal(10, 2)).failed is False
+    # And scale growth passes when precision grows with it (integer digits kept)
+    assert _widening_result(Decimal(12, 3), Decimal(10, 1)).failed is False
+    # And scale growth that eats into integer digits is blocked
+    assert _widening_result(Decimal(10, 3), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    # And a precision shrink is blocked
+    assert _widening_result(Decimal(8, 2), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    # And a scale shrink is blocked even though integer digits grow
+    assert _widening_result(Decimal(12, 1), Decimal(10, 2)).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_integer_to_decimal_widening_requires_enough_integer_digits():
+    # Given Databricks' minimums: DECIMAL(10,0) for Byte/Short/Integer, DECIMAL(20,0) for Long
+    assert _widening_result(Decimal(10, 0), Integer()).failed is False
+    assert _widening_result(Decimal(12, 2), Byte()).failed is False
+    assert _widening_result(Decimal(20, 0), Long()).failed is False
+
+    # Then a decimal without room for every source value is blocked
+    assert _widening_result(Decimal(9, 0), Integer()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    assert _widening_result(Decimal(11, 2), Short()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+    assert _widening_result(Decimal(19, 0), Long()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_long_cannot_widen_to_double():
+    # Given Long → Double — absent from the Delta matrix (Double cannot hold every Long)
+    assert _widening_result(Double(), Long()).failures[0].rule_name == (
+        "NonWideningColumnTypeChange"
+    )
+
+
+def test_every_widening_matrix_entry_is_permitted():
+    # Given each matrix entry against a declaration with widening enabled
+    cases = (
+        (Short(), Byte()),
+        (Integer(), Byte()),
+        (Long(), Byte()),
+        (Double(), Byte()),
+        (Integer(), Short()),
+        (Long(), Short()),
+        (Double(), Short()),
+        (Long(), Integer()),
+        (Double(), Integer()),
+        (Double(), Float()),
+        (TimestampNtz(), Date()),
+    )
+    for desired_type, observed_type in cases:
+        assert _widening_result(desired_type, observed_type).failed is False, (
+            observed_type,
+            desired_type,
+        )
 
 
 def test_rejects_partitioning_change():
@@ -422,7 +552,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     assert result.failed is True
     assert [failure.rule_name for failure in result.failures] == [
         "NonNullableColumnAdd",
-        "ColumnDataTypeChangeNotSupported",
+        "TypeWideningRequiredForTypeChange",
     ]
 
 
@@ -502,7 +632,7 @@ def test_managed_drift_still_trips_safety_rules():
 
     # Then the safety rule fires
     assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "ColumnDataTypeChangeNotSupported"
+    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
 
 
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():

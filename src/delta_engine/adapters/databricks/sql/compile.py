@@ -22,6 +22,7 @@ from delta_engine.domain.plan import (
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -202,6 +203,14 @@ def _(action: AlterClustering, backticked_table_name: str) -> str:
         return f"ALTER TABLE {backticked_table_name} CLUSTER BY NONE"
     columns = ", ".join(backtick(column) for column in action.columns)
     return f"ALTER TABLE {backticked_table_name} CLUSTER BY ({columns})"
+
+
+@_compile_action.register
+def _(action: AlterColumnType, backticked_table_name: str) -> str:
+    """Compile ALTER TABLE ... ALTER COLUMN ... TYPE for a validated type widening."""
+    column_name = backtick(action.column_name)
+    sql_type = sql_type_for_data_type(action.data_type)
+    return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} TYPE {sql_type}"
 
 
 @_compile_action.register

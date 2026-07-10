@@ -31,8 +31,9 @@ under [Unsupported types](#unsupported-types).
 
 Any change to a struct's fields (adding, removing, renaming, or retyping a
 field) surfaces as a column type change on the owning column and is blocked
-by `ColumnDataTypeChangeNotSupported`, the same as any other unsupported type
-change; recreate the table to change a struct.
+by `NonWideningColumnTypeChange`, the same as any other non-widening type
+change — structs are never widened as a whole; recreate the table to change
+a struct.
 
 ## Unsupported types
 

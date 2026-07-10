@@ -1,13 +1,14 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPhase,
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -120,6 +121,7 @@ def test_plan_ordering_ignores_non_subject_fields():
             "customer_id",
         ),
         (AlterClustering(columns=("region",)), ""),
+        (AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer()), "id"),
     ],
 )
 def test_action_subject_identifies_the_within_phase_target(action: Action, expected_subject: str):
@@ -198,6 +200,7 @@ def test_plan_full_phase_order_with_all_action_types():
             SetTableTag(name="env", value="prod"),
             UnsetTableTag(name="old_tag"),
             AlterClustering(columns=("region",)),
+            AlterColumnType(column_name="w_col", data_type=Long(), observed_type=Integer()),
         )
     )
 
@@ -211,6 +214,7 @@ def test_plan_full_phase_order_with_all_action_types():
         DropForeignKey,
         DropPrimaryKey,
         AddColumn,
+        AlterColumnType,
         AlterClustering,
         DropColumn,
         SetColumnTag,
@@ -281,6 +285,20 @@ def test_drop_foreign_key_phases_before_drop_primary_key():
     # Reordering these phases would make that exemption approve plans that
     # fail at execution.
     assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
+
+
+def test_plan_orders_alter_column_type_after_property_set_and_before_key_set():
+    # Given a widen, its enabling property, and a primary-key set, supplied shuffled
+    plan = ActionPlan(
+        (
+            SetPrimaryKey(columns=("id",), constraint_name="tbl_id_pk"),
+            AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer()),
+            SetProperty(name="delta.enableTypeWidening", value="true"),
+        )
+    )
+
+    # Then the property lands before the widen, and the widen before the key
+    assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
 
 
 def test_plan_orders_alter_clustering_after_add_column():

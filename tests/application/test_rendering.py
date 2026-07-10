@@ -24,8 +24,10 @@ from delta_engine.application.rendering import (
 from delta_engine.application.report import SyncReport, TableRunReport
 from delta_engine.domain.model import (
     Column,
+    Decimal,
     DesiredTable,
     Integer,
+    Long,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -35,6 +37,7 @@ from delta_engine.domain.plan.actions import (
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -77,6 +80,18 @@ from delta_engine.domain.plan.actions import (
         (
             SetColumnNullability(column_name="id", nullable=True),
             (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "drop NOT NULL (was NOT NULL)")),),
+        ),
+        (
+            AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer()),
+            (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "Integer → Long")),),
+        ),
+        # Decimal renders its parameters — the bare class name would hide a
+        # precision widen.
+        (
+            AlterColumnType(
+                column_name="amount", data_type=Decimal(12, 2), observed_type=Decimal(10, 2)
+            ),
+            (DiffEntry(DiffCategory.COLUMNS, "~", ("amount", "Decimal(10,2) → Decimal(12,2)")),),
         ),
         (
             SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk"),

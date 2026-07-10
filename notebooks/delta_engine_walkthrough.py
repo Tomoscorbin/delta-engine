@@ -551,8 +551,11 @@ print("Step 5b verified: tightening blocked, event_date still nullable.")
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC Blocked: type changes can corrupt or fail to cast existing data. Recreate the
-# MAGIC table out of band if a type must change.
+# MAGIC Blocked: `Decimal` to `Double` is not one of the widenings Delta can apply
+# MAGIC in place, and any other type change can corrupt or fail to cast existing
+# MAGIC data — recreate the table out of band if a type must change this way.
+# MAGIC (Widenings, such as `Integer` to `Long`, are applied in place when
+# MAGIC `delta.enableTypeWidening='true'` is declared.)
 
 # COMMAND ----------
 

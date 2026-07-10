@@ -41,7 +41,7 @@ for the `[databricks]` extra used for local development.
 The engine reads the current catalog state, diffs it against your declaration,
 validates that the drift is safe to fix in place, plans deterministic DDL
 actions, orders tables so foreign-key dependencies are created first, executes,
-and returns a per-table report. Unsafe changes — dropping data, changing a
+and returns a per-table report. Unsafe changes — dropping data, narrowing a
 column's type, repartitioning — fail validation with a named rule before any
 SQL runs. [How a sync works](explanation-sync-lifecycle.md) walks through the
 phases; [the safety model](explanation-safety-model.md) explains what gets

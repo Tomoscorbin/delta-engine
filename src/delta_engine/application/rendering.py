@@ -18,12 +18,13 @@ from typing import Final
 
 from delta_engine.application.ports import ReadFailed
 from delta_engine.application.report import SyncReport, TableRunReport
-from delta_engine.domain.model import Column, DataType
+from delta_engine.domain.model import Column, DataType, Decimal
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
     AddColumn,
     AlterClustering,
+    AlterColumnType,
     CreateTable,
     DropColumn,
     DropForeignKey,
@@ -45,6 +46,13 @@ from delta_engine.domain.plan import (
 def _type_name(data_type: DataType) -> str:
     """Backend-agnostic display name for a domain data type (e.g. 'String')."""
     return type(data_type).__name__
+
+
+def _type_display(data_type: DataType) -> str:
+    """Display name including decimal parameters, so a precision widen is visible."""
+    if isinstance(data_type, Decimal):
+        return f"Decimal({data_type.precision},{data_type.scale})"
+    return _type_name(data_type)
 
 
 class DiffCategory(IntEnum):
@@ -131,6 +139,12 @@ def _(action: DropColumn) -> tuple[DiffEntry, ...]:
 @_action_entries.register
 def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
     change = "drop NOT NULL (was NOT NULL)" if action.nullable else "set NOT NULL (was nullable)"
+    return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
+
+
+@_action_entries.register
+def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
+    change = f"{_type_display(action.observed_type)} → {_type_display(action.data_type)}"
     return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
 
 

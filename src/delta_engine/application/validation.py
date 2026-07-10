@@ -1,6 +1,8 @@
 """Validation rules judging the diff between desired and observed table state."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
@@ -9,7 +11,19 @@ from delta_engine.application.properties import (
     Property,
     PropertyRegistry,
 )
-from delta_engine.domain.model import TableAspect
+from delta_engine.domain.model import (
+    Byte,
+    DataType,
+    Date,
+    Decimal,
+    Double,
+    Float,
+    Integer,
+    Long,
+    Short,
+    TableAspect,
+    TimestampNtz,
+)
 from delta_engine.domain.plan import (
     ColumnAdded,
     ColumnDataTypeChanged,
@@ -102,13 +116,64 @@ class NullabilityTighteningOnExistingColumn:
         )
 
 
-class ColumnDataTypeChangeNotSupported:
-    """Disallow in-place column type changes."""
+# The widenings Delta can apply in place (observed -> desired), per the
+# Databricks type-widening matrix. Decimal targets are handled separately —
+# whether they fit depends on precision and scale, not the type alone.
+# Composite types are deliberately absent: this engine models arrays, maps,
+# and structs atomically, so they are never widened as a whole and any change
+# to them stays blocked (Delta itself can widen nested fields).
+_WIDENING_TARGETS: Final[Mapping[type[DataType], frozenset[type[DataType]]]] = MappingProxyType(
+    {
+        Byte: frozenset({Short, Integer, Long, Double}),
+        Short: frozenset({Integer, Long, Double}),
+        Integer: frozenset({Long, Double}),
+        Float: frozenset({Double}),
+        Date: frozenset({TimestampNtz}),
+    }
+)
 
-    name: ClassVar[str] = "ColumnDataTypeChangeNotSupported"
+# Widening an integer column to Decimal needs room for every value the source
+# type can hold. Databricks specifies DECIMAL(10,0) as the minimum for
+# Byte/Short/Integer and DECIMAL(20,0) for Long — i.e. this many integer
+# digits (precision minus scale).
+_DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingProxyType(
+    {
+        Byte: 10,
+        Short: 10,
+        Integer: 10,
+        Long: 20,
+    }
+)
+
+
+def _is_safe_widening(observed: DataType, desired: DataType) -> bool:
+    """Whether Delta type widening can apply this type change in place."""
+    if isinstance(desired, Decimal):
+        return _is_safe_widening_to_decimal(observed, desired)
+    return type(desired) in _WIDENING_TARGETS.get(type(observed), frozenset())
+
+
+def _is_safe_widening_to_decimal(observed: DataType, desired: Decimal) -> bool:
+    """Decimal widening keeps integer digits: scale may grow only if precision grows with it."""
+    desired_integer_digits = desired.precision - desired.scale
+    if isinstance(observed, Decimal):
+        return (
+            desired.scale >= observed.scale
+            and desired_integer_digits >= observed.precision - observed.scale
+        )
+    required_integer_digits = _DECIMAL_INTEGER_DIGITS_REQUIRED.get(type(observed))
+    if required_integer_digits is None:
+        return False
+    return desired_integer_digits >= required_integer_digits
+
+
+class NonWideningColumnTypeChange:
+    """Disallow in-place column type changes outside the type-widening matrix."""
+
+    name: ClassVar[str] = "NonWideningColumnTypeChange"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every in-place column type change."""
+        """Flag every type change that widening cannot apply in place."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
@@ -116,12 +181,47 @@ class ColumnDataTypeChangeNotSupported:
                     f"Operation not allowed: cannot change the type of existing column"
                     f" '{change.column_name}'"
                     f" from {change.observed_type} to {change.desired_type}."
-                    " Type migrations are not supported;"
-                    " recreate the table to change a column's type."
+                    " Only Delta type widenings can be applied in place"
+                    " (integer widenings, integer types to Double or a sufficiently"
+                    " wide Decimal, Float to Double, Decimal digit growth, Date to"
+                    " TimestampNtz); recreate the table to make any other type change."
                 ),
             )
             for change in drift.managed_changes
             if isinstance(change, ColumnDataTypeChanged)
+            and not _is_safe_widening(change.observed_type, change.desired_type)
+        )
+
+
+class TypeWideningRequiredForTypeChange:
+    """
+    Disallow a widening type change without type widening declared.
+
+    Mirrors ColumnMappingRequiredForDrop: exact declaration guarantees a
+    validated declaration states the property whenever the catalog has it, so
+    the declaration alone is sufficient input; declaring it 'true' in the same
+    sync as the widen is safe (SET_PROPERTY phases before ALTER_COLUMN_TYPE).
+    """
+
+    name: ClassVar[str] = "TypeWideningRequiredForTypeChange"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every widening type change when the declaration lacks the property."""
+        if drift.desired.properties.get(Property.TYPE_WIDENING) == "true":
+            return ()
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: widening column '{change.column_name}'"
+                    f" from {change.observed_type} to {change.desired_type} requires"
+                    f" {Property.TYPE_WIDENING}='true'. Declare"
+                    f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
+                ),
+            )
+            for change in drift.managed_changes
+            if isinstance(change, ColumnDataTypeChanged)
+            and _is_safe_widening(change.observed_type, change.desired_type)
         )
 
 
@@ -333,7 +433,8 @@ class PrimaryKeyReferencedByForeignKeys:
 DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     NonNullableColumnAdd(),
     NullabilityTighteningOnExistingColumn(),
-    ColumnDataTypeChangeNotSupported(),
+    NonWideningColumnTypeChange(),
+    TypeWideningRequiredForTypeChange(),
     PartitioningChangeNotSupported(),
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),

@@ -41,6 +41,7 @@ class Property(StrEnum):
     DELETED_FILE_RETENTION_DURATION = "delta.deletedFileRetentionDuration"
     LOG_RETENTION_DURATION = "delta.logRetentionDuration"
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
+    TYPE_WIDENING = "delta.enableTypeWidening"
 
 
 # A single `interval <n> <unit>` term only — deliberately stricter than the
@@ -153,6 +154,15 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
         # absence of any (value, None) pair blocks removal by the same
         # mechanism — declaring the key absent is a transition to None.
         permitted_transitions=frozenset({("none", "name")}),
+    ),
+    PropertyDefinition(
+        key=Property.TYPE_WIDENING,
+        value_description="'true' or 'false' (lowercase, as the catalog stores it)",
+        is_valid_value=_is_lowercase_boolean,
+        # No transition restrictions: the catalog accepts enabling, disabling,
+        # and removal. Disabling only stops future widenings — the typeWidening
+        # protocol feature persists until ALTER TABLE ... DROP FEATURE, which
+        # is outside this engine's scope (documented, not validated).
     ),
 )
 

@@ -16,7 +16,7 @@ decides what a declaration is responsible for at all.
 | Layer                       | When it runs                                | What it catches                                                                                                                                        |
 | --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Declaration-time checks** | Constructing a `DeltaTable`                 | Declarations that could never succeed — a nullable primary key, a typo'd property key                                                                  |
-| **Validation rules**        | Every sync, after diffing live state        | Transitions that are unsafe _from this table's current state_ — tightening nullability, changing a type                                                |
+| **Validation rules**        | Every sync, after diffing live state        | Transitions that are unsafe _from this table's current state_ — tightening nullability, narrowing a type                                               |
 | **Managed aspects**         | Every sync, as part of validation           | Drift outside what the declaration manages — never silently reconciled                                                                                 |
 | **Dependency blocking**     | Every sync, during resolution and execution | Foreign keys that can't be satisfied — a cycle, a missing or mismatched reference — and tables whose dependency won't reach its desired state this run |
 
