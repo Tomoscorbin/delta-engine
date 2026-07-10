@@ -148,7 +148,7 @@ def _validate_delta_partitioning(
         )
 
 
-def _validate_delta_clustering(
+def _validate_clustering(
     columns: tuple[Column, ...],
     clustered_by: tuple[str, ...],
     partitioned_by: tuple[str, ...],
@@ -444,7 +444,7 @@ class DeltaTable:
         partitioned_by = tuple(partitioned_by)
         clustered_by = tuple(clustered_by)
         _validate_delta_partitioning(columns, partitioned_by)
-        _validate_delta_clustering(columns, clustered_by, partitioned_by)
+        _validate_clustering(columns, clustered_by, partitioned_by)
         _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})
