@@ -1,11 +1,20 @@
-"""Schema declaration implementation for Delta tables and foreign keys."""
+"""
+Schema declaration implementation for Delta tables and foreign keys.
+
+Validation here is declaration-time deployability: rules Delta or Unity
+Catalog enforce when an author creates a table (layout key types, quotas,
+property-dependent naming rules). Structural coherence — columns exist,
+names are unique, at least one column — is the domain ``DesiredTable``'s
+job, enforced the moment a declaration is lowered; this module skips names
+it cannot resolve rather than re-checking existence.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Final, Literal, NamedTuple
 
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
 from delta_engine.domain.model import (
@@ -70,8 +79,10 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
 )
 
-# Complex types Delta cannot partition by (DELTA_INVALID_PARTITION_COLUMN_TYPE).
-_UNPARTITIONABLE_TYPES: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
+# Complex types Delta accepts neither as partition columns
+# (DELTA_INVALID_PARTITION_COLUMN_TYPE) nor as liquid-clustering keys.
+# Two distinct backend rules that happen to name the same types today.
+_TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
 
 # Unity Catalog limits per securable object (a table and each of its
 # columns are separate securables).
@@ -125,34 +136,19 @@ def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
             return ()
 
 
-def _validate_delta_partitioning(
-    columns: tuple[Column, ...], partitioned_by: tuple[str, ...]
-) -> None:
-    columns_by_name = {column.name: column for column in columns}
-    if len(set(partitioned_by)) != len(partitioned_by):
-        return
-    if any(name not in columns_by_name for name in partitioned_by):
-        return
-
-    for name in partitioned_by:
-        data_type = columns_by_name[name].data_type
-        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
-            raise ValueError(
-                f"Partition column {name!r} has type"
-                f" {type(data_type).__name__}, which Delta cannot partition by"
-            )
-
-    if partitioned_by and len(set(partitioned_by)) == len(columns):
-        raise ValueError(
-            "Cannot partition by every column: at least one non-partition column is required"
-        )
-
-
-def _validate_clustering(
+def _validate_layout(
     columns: tuple[Column, ...],
-    clustered_by: tuple[str, ...],
     partitioned_by: tuple[str, ...],
+    clustered_by: tuple[str, ...],
 ) -> None:
+    """
+    Reject physical layouts Delta cannot deploy.
+
+    Checks declaration-level deployability only: the partition/cluster
+    relationship, the clustering-key budget, and key data types. Whether the
+    named columns exist and are unique is a ``DesiredTable`` invariant, so
+    names that do not resolve are skipped here and the domain's error fires.
+    """
     if partitioned_by and clustered_by:
         raise ValueError(
             "A table cannot both partition and cluster: declare partitioned_by"
@@ -164,18 +160,29 @@ def _validate_clustering(
         )
 
     columns_by_name = {column.name: column for column in columns}
-    if len(set(clustered_by)) != len(clustered_by):
-        return
-    if any(name not in columns_by_name for name in clustered_by):
-        return
-
+    for name in partitioned_by:
+        column = columns_by_name.get(name)
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
+            raise ValueError(
+                f"Partition column {name!r} has type"
+                f" {type(column.data_type).__name__}, which Delta cannot partition by"
+            )
     for name in clustered_by:
-        data_type = columns_by_name[name].data_type
-        if isinstance(data_type, _UNPARTITIONABLE_TYPES):
+        column = columns_by_name.get(name)
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
-                f" {type(data_type).__name__}, which cannot be a clustering key"
+                f" {type(column.data_type).__name__}, which cannot be a clustering key"
             )
+
+    if (
+        partitioned_by
+        and set(partitioned_by) <= columns_by_name.keys()
+        and len(set(partitioned_by)) == len(columns)
+    ):
+        raise ValueError(
+            "Cannot partition by every column: at least one non-partition column is required"
+        )
 
 
 def _validate_column_names(
@@ -219,6 +226,14 @@ def _validate_column_names(
                 " Rename them or do not enable"
                 f" {Property.CHANGE_DATA_FEED}."
             )
+
+
+class _ReferencedSide(NamedTuple):
+    """The referenced side of a foreign key, resolved at lowering time."""
+
+    table: QualifiedName
+    key_columns: tuple[str, ...]
+    column_types: dict[str, DataType]
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,29 +282,27 @@ class ForeignKey:
         match its referenced column's. Local column existence is not checked
         here — the ``DesiredTable`` built right after enforces it.
         """
-        referenced_table, referenced_key_columns, referenced_types = self._resolve_reference(
-            owner_name, owner_columns, owner_primary_key
-        )
+        referenced = self._resolve_reference(owner_name, owner_columns, owner_primary_key)
 
-        if referenced_table.catalog != owner_name.catalog:
+        if referenced.table.catalog != owner_name.catalog:
             raise ValueError(
                 f"cross-catalog foreign key not supported: {owner_name} cannot"
-                f" reference {referenced_table}. information_schema is"
+                f" reference {referenced.table}. information_schema is"
                 " per-catalog, so the engine could create the constraint but"
                 " never observe it afterwards; declare both tables in the same"
                 " catalog."
             )
 
-        if not referenced_key_columns:
+        if not referenced.key_columns:
             raise ValueError(
-                f"foreign key references {referenced_table}, which declares no primary key"
+                f"foreign key references {referenced.table}, which declares no primary key"
             )
 
         local_columns = tuple(self.columns.keys())
         referenced_columns = tuple(self.columns.values())
 
         declared = set(referenced_columns)
-        key = set(referenced_key_columns)
+        key = set(referenced.key_columns)
         if declared != key:
             missing = sorted(key - declared)
             extra = sorted(declared - key)
@@ -299,8 +312,8 @@ class ForeignKey:
             if extra:
                 details.append(f"not in the key: {', '.join(extra)}")
             raise ValueError(
-                f"foreign key columns must reference {referenced_table}'s"
-                f" primary key ({', '.join(referenced_key_columns)}) exactly;"
+                f"foreign key columns must reference {referenced.table}'s"
+                f" primary key ({', '.join(referenced.key_columns)}) exactly;"
                 f" {'; '.join(details)}"
             )
 
@@ -309,18 +322,18 @@ class ForeignKey:
             local_type = local_types.get(local_name)
             if local_type is None:
                 continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = referenced_types[referenced_name]
+            referenced_type = referenced.column_types[referenced_name]
             if local_type != referenced_type:
                 raise ValueError(
                     f"foreign key column type mismatch: {owner_name}.{local_name}"
-                    f" is {local_type} but {referenced_table}.{referenced_name}"
+                    f" is {local_type} but {referenced.table}.{referenced_name}"
                     f" is {referenced_type}"
                 )
 
         return ForeignKeyConstraint.generate(
             owner_table_name=owner_name.name,
             local_columns=local_columns,
-            referenced_table=referenced_table,
+            referenced_table=referenced.table,
             referenced_columns=referenced_columns,
         )
 
@@ -329,27 +342,25 @@ class ForeignKey:
         owner_name: QualifiedName,
         owner_columns: tuple[Column, ...],
         owner_primary_key: tuple[str, ...],
-    ) -> tuple[QualifiedName, tuple[str, ...], dict[str, DataType]]:
+    ) -> _ReferencedSide:
         """
         Resolve ``references`` to the referenced side of the constraint.
 
-        Returns the referenced table's name, its primary-key columns (the
-        columns this key references), and its column types by name. For
-        :data:`Self` the enclosing table supplies all three — its own name,
-        ``owner_primary_key``, and ``owner_columns`` — because the owner's
-        ``DesiredTable`` does not exist yet while its foreign keys are being
-        lowered. The returned mapping always covers every referenced column:
-        primary-key columns are validated to exist on whichever table
-        declares them.
+        For :data:`Self` the enclosing table supplies every field — its own
+        name, ``owner_primary_key``, and ``owner_columns`` — because the
+        owner's ``DesiredTable`` does not exist yet while its foreign keys
+        are being lowered. ``column_types`` always covers every referenced
+        column: primary-key columns are validated to exist on whichever
+        table declares them.
         """
         match self.references:
             case _SelfReference():
                 types = {column.name: column.data_type for column in owner_columns}
-                return owner_name, owner_primary_key, types
+                return _ReferencedSide(owner_name, owner_primary_key, types)
             case DeltaTable() as target:
                 desired = target.to_desired_table()
                 types = {column.name: column.data_type for column in desired.columns}
-                return desired.qualified_name, desired.primary_key_columns, types
+                return _ReferencedSide(desired.qualified_name, desired.primary_key_columns, types)
             case _:
                 raise TypeError(
                     f"foreign key references must be a DeltaTable or Self; got {self.references!r}"
@@ -443,8 +454,7 @@ class DeltaTable:
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)
         clustered_by = tuple(clustered_by)
-        _validate_delta_partitioning(columns, partitioned_by)
-        _validate_clustering(columns, clustered_by, partitioned_by)
+        _validate_layout(columns, partitioned_by, clustered_by)
         _validate_column_names(columns, user_properties, managed_aspects)
 
         table_tags = dict(tags or {})

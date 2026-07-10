@@ -15,6 +15,23 @@ from delta_engine.domain.model.constraints import (
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 
+def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
+    """Rules shared by partition and clustering key lists: lowercase, existing, unique."""
+    for name in names:
+        if name != name.casefold():
+            raise ValueError(f"{kind} column name must be lowercase: {name!r}")
+
+    missing = [name for name in names if name not in column_names]
+    if missing:
+        raise ValueError(f"{kind} column not found: {', '.join(missing)}")
+
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            raise ValueError(f"Duplicate {kind.casefold()} column: {name}")
+        seen.add(name)
+
+
 class TableAspect(Enum):
     """One independently manageable dimension of a table's state."""
 
@@ -83,6 +100,7 @@ class TableSnapshot:
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
 
         if not self.columns:
@@ -94,33 +112,8 @@ class TableSnapshot:
                 raise ValueError(f"Duplicate column name: {column.name}")
             seen_names.add(column.name)
 
-        for name in self.partitioned_by:
-            if name != name.casefold():
-                raise ValueError(f"Partition column name must be lowercase: {name!r}")
-
-        missing_partitions = [name for name in self.partitioned_by if name not in seen_names]
-        if missing_partitions:
-            raise ValueError(f"Partition column not found: {missing_partitions[0]}")
-
-        seen_partitions: set[str] = set()
-        for name in self.partitioned_by:
-            if name in seen_partitions:
-                raise ValueError(f"Duplicate partition column: {name}")
-            seen_partitions.add(name)
-
-        for name in self.clustered_by:
-            if name != name.casefold():
-                raise ValueError(f"Clustering column name must be lowercase: {name!r}")
-
-        missing_clustering = [name for name in self.clustered_by if name not in seen_names]
-        if missing_clustering:
-            raise ValueError(f"Clustering column not found: {missing_clustering[0]}")
-
-        seen_clustering: set[str] = set()
-        for name in self.clustered_by:
-            if name in seen_clustering:
-                raise ValueError(f"Duplicate clustering column: {name}")
-            seen_clustering.add(name)
+        _validate_key_column_list("Partition", self.partitioned_by, seen_names)
+        _validate_key_column_list("Clustering", self.clustered_by, seen_names)
 
         if self.primary_key is not None:
             missing_pk = [name for name in self.primary_key.columns if name not in seen_names]
@@ -205,10 +198,8 @@ class DesiredTable(TableSnapshot):
                 raise ValueError(
                     "Two foreign keys carry the same constraint name"
                     f" '{foreign_key.constraint_name}': local columns {collided}"
-                    f" and {foreign_key.local_columns}. Generated names join"
-                    " local columns with underscores, so underscore-adjacent"
-                    " tuples can collide; rename a local column so the names"
-                    " differ."
+                    f" and {foreign_key.local_columns}. Every foreign key on a"
+                    " table must have a distinct constraint name."
                 )
             local_columns_by_constraint_name[foreign_key.constraint_name] = (
                 foreign_key.local_columns
