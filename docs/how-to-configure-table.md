@@ -424,9 +424,9 @@ orders = DeltaTable(
 Referencing the target `DeltaTable` object — rather than a dotted table name —
 is what lets the engine validate the mapping against that table's actual primary
 key, and keeps the reference valid if the target is renamed. The constraint
-name is generated at lowering as `{table}_{local_columns}_fk`
-(`orders_customer_id_fk` above). The name cannot be chosen, and drift matching
-never depends on it — a foreign key created outside the engine under a
+name is generated at lowering as `{table}_{local_columns}_fk`, joining the
+local columns in sorted order (`orders_customer_id_fk` above). The name cannot
+be chosen, and drift matching never depends on it — a foreign key created outside the engine under a
 different name still matches by content.
 
 Generated names join local columns with underscores, so two foreign keys over

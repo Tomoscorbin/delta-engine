@@ -334,6 +334,19 @@ def test_empty_primary_key_sequence_is_rejected():
         )
 
 
+def test_primary_key_as_a_bare_string_is_rejected():
+    # "i" is a real column, so without the guard this string would silently
+    # declare a valid per-character key; the shape must be refused outright
+    with pytest.raises(TypeError, match="not a string"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="events",
+            columns=[Column("i", Integer(), nullable=False)],
+            primary_key="i",
+        )
+
+
 def test_primary_key_naming_unknown_column_is_rejected():
     with pytest.raises(ValueError, match="missing_col"):
         DeltaTable(

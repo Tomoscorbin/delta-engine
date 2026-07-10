@@ -544,7 +544,8 @@ For desired tables, the API layer generates names when a `DeltaTable` is lowered
 to a `DesiredTable`:
 
 - primary key: `{table}_pk`
-- foreign key: `{table}_{local_columns}_fk`
+- foreign key: `{table}_{local_columns}_fk`, joining the local columns in
+  sorted order, so the name is independent of declaration order
 
 For observed tables, the reader adapter reads constraint names from the catalog.
 After that, names live on `PrimaryKeyConstraint` and `ForeignKeyConstraint`
@@ -620,6 +621,13 @@ dependency cost.
 
 - Keep PySpark and Databricks imports inside `delta_engine.adapters`.
 - Keep the domain backend-free, immutable, and deterministic.
+- Make immutability real, not conventional: frozen dataclasses copy their
+  collection fields in `__post_init__` — sequences into tuples, mappings into
+  read-only views (`MappingProxyType`), aspect sets into `frozenset` — so an
+  object cannot change after construction through a collection the caller
+  still holds. This applies at the public boundary too: `ForeignKey.columns`
+  and `Column.tags` copy what the user passed, so mutating the original
+  mapping later does not alter the declaration.
 - Put orchestration, safety policy, dependency resolution, and failure
   propagation in the application layer.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog

@@ -222,9 +222,6 @@ class ForeignKey:
                 " {local column: referenced column};"
                 f" got {type(self.columns).__name__}"
             )
-        # Copy behind a read-only view at the public boundary so the frozen
-        # declaration is immutable in fact, not just by convention (matching
-        # Column.tags).
         object.__setattr__(self, "columns", MappingProxyType(dict(self.columns)))
 
     def _to_constraint(
@@ -419,6 +416,15 @@ class DeltaTable:
         _validate_tags(f"table '{name}'", table_tags)
         for column in columns:
             _validate_tags(f"column '{column.name}'", column.tags)
+
+        # A bare string is itself a Sequence[str], so the type checker cannot
+        # reject it; refuse the shape before it silently means per-character
+        # columns.
+        if isinstance(primary_key, str):
+            raise TypeError(
+                "primary_key must be a sequence of column names, not a string;"
+                f" write primary_key=[{primary_key!r}] for a single-column key"
+            )
 
         primary_key_constraint = (
             PrimaryKeyConstraint.generate(table_name=name, columns=tuple(primary_key))

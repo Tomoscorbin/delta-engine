@@ -32,24 +32,6 @@ def test_foreign_key_declaration_has_only_columns_and_references():
         )
 
 
-def test_delta_table_infers_referenced_columns_from_referenced_primary_key():
-    # Given a referenced table with a single-column primary key
-    customers = _customers()
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
-    )
-
-    # Then the FK is lowered against the referenced table's declared primary key
-    [foreign_key] = orders.foreign_keys
-    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
-    assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.constraint_name == "orders_customer_id_fk"
-
-
 def test_delta_table_stores_composite_foreign_key_canonically():
     # Given a referenced table with a composite primary key (tenant_id, id)
     customers = DeltaTable(
@@ -340,6 +322,7 @@ def test_mapping_lowers_single_column_foreign_key():
 
     [foreign_key] = orders.foreign_keys
     assert foreign_key.local_columns == ("customer_id",)
+    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
     assert foreign_key.constraint_name == "orders_customer_id_fk"
 
