@@ -6,16 +6,14 @@ runs — one `TableRunReport` is born per table in the read phase and accretes
 its plan, SQL, failures, and execution as the chain proceeds. On a real run, if
 any table fails, `SyncFailedError` is raised with a formatted summary.
 
-The seven phases, each taking the runs and returning them:
+The six phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
   2. Diff     — compute the desired-observed diff; states the facts
   3. Validate — check every diff against rules; append per-table failures
-  4. Plan     — lower every diff into its action plan
-  5. Compile  — lower every plan into the backend SQL it will run, so a dry
-                run can preview the DDL
-  6. Resolve  — order runs by FK dependency; append FK failures and
+  4. Plan     — lower every diff into its action plan and the SQL that applies it
+  5. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  7. Execute  — run the plan of every run with no failures and a non-empty
+  6. Execute  — run the plan of every run with no failures and a non-empty
                 plan, blocking FK dependents of runs that fail mid-execution
 
 Running `resolve()` after validation means a table that fails validation
@@ -149,7 +147,6 @@ class Engine:
         runs = self._diff(runs)
         runs = self._validate(runs)
         runs = self._plan(runs)
-        runs = self._compile(runs)
         runs = self._resolve(runs)
         runs = self._execute(runs, dry_run=dry_run)
 
@@ -227,26 +224,19 @@ class Engine:
         return runs
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Build the action plan for each run by delegating to the diff."""
+        """
+        Produce each run's concrete change: its action plan and the SQL that applies it.
+
+        Compiling here, before the dry-run/execute split, means a dry run can
+        preview the exact DDL. Only validated drift is lowered: a run that
+        failed read or validation keeps its empty plan and no statements.
+        """
         for run in runs:
-            # Only validated drift is lowered into actions: a run that failed
-            # read or validation keeps its empty plan.
             if run.diff is None or run.failures:
                 continue
             run.plan = run.diff.plan()
-            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
-        return runs
-
-    def _compile(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """
-        Lower every run's action plan into the backend SQL it will run.
-
-        Runs on every sync, dry or real, so a dry run can preview the exact
-        DDL. An empty plan (a run that failed read or validation, or has no
-        drift) compiles to no statements, so no case needs guarding.
-        """
-        for run in runs:
             run.sql_statements = self.executor.compile(run.qualified_name, run.plan)
+            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
