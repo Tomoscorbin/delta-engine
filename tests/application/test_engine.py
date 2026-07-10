@@ -359,7 +359,7 @@ def test_syncing_no_tables_returns_empty_report_without_reading_or_executing():
 
     # Then an empty, non-failing report is returned
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert tuple(report) == ()
     assert reader.fetched_names == []
     assert executor.executed_names == []
@@ -389,7 +389,7 @@ def test_sync_returns_report_when_all_tables_succeed():
 
     # Then both tables succeed in prepared name order
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
         TableRunStatus.SUCCESS,
@@ -1014,7 +1014,7 @@ def test_synced_fk_parent_with_no_work_does_not_block_dependent():
     )
 
     # Then the healthy no-op parent does not block its dependent
-    assert report.any_failures is False
+    assert report.has_failures is False
     _assert_status(report, "cat.sch.customers", TableRunStatus.SUCCESS)
     _assert_status(report, "cat.sch.orders", TableRunStatus.SUCCESS)
     assert executor.executed_names == ["cat.sch.orders"]
@@ -1068,7 +1068,7 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
 
     # Then plans are produced, but nothing is executed
     assert isinstance(report, SyncReport)
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
         TableRunStatus.SUCCESS,
@@ -1110,7 +1110,7 @@ def test_dry_run_returns_validation_failures_without_raising_or_executing():
 
     # Then the failure is reported without raising or executing
     [table_report] = list(report)
-    assert report.any_failures is True
+    assert report.has_failures is True
     assert table_report.status is TableRunStatus.VALIDATION_FAILED
     assert table_report.execution is None
     assert executor.executed_names == []
@@ -1130,7 +1130,7 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
 
     # Then the FK failure is returned in the report
     [orders] = list(report)
-    assert report.any_failures is True
+    assert report.has_failures is True
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert orders.execution is None
     assert executor.executed_names == []
@@ -1160,7 +1160,7 @@ def test_metadata_scoped_sync_applies_metadata_when_schema_matches():
     # Then the sync succeeds and metadata actions are planned
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert any(isinstance(action, SetColumnComment) for action in table_report.plan)
     assert any(isinstance(action, SetTableComment) for action in table_report.plan)
     assert executor.executed_names == [fqn]

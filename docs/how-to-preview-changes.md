@@ -44,7 +44,7 @@ gate is "no failures":
 ```python
 report = engine.sync(customers, orders, dry_run=True)
 
-if report.any_failures:
+if report.has_failures:
     raise SystemExit(render_report(report))
 ```
 

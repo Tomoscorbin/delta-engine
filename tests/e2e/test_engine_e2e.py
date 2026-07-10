@@ -36,7 +36,7 @@ def test_engine_sync_happy_path(spark, temp_schema):
     )
 
     # Then the run is reported as a successful SyncReport for the caller
-    assert report.any_failures is False
+    assert report.has_failures is False
 
     # And the table exists with expected schema and comment
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
@@ -195,7 +195,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
         properties={"delta.columnMapping.mode": "name"},
     )
     first_report = engine.sync(initial)
-    assert first_report.any_failures is False
+    assert first_report.has_failures is False
 
     evolved = DeltaTable(
         TEST_CATALOG,
@@ -213,7 +213,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
         },
     )
     second_report = engine.sync(evolved)
-    assert second_report.any_failures is False
+    assert second_report.has_failures is False
     assert second_report.table_reports[0].execution is not None
 
     fields = {f.name: f for f in spark.table(fq).schema.fields}
@@ -358,7 +358,7 @@ def test_engine_metadata_scope_applies_comments_when_schema_matches(spark, temp_
     )
 
     # Then the sync succeeds, comments are applied, and the schema is untouched
-    assert report.any_failures is False
+    assert report.has_failures is False
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert set(fields) == {"id"}
     assert fields["id"].metadata.get("comment") == "surrogate key"
@@ -467,7 +467,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
     )
 
     # Then the unregistered key is invisible — no failure, no action
-    assert report.any_failures is False
+    assert report.has_failures is False
     assert len(report.table_reports[0].plan) == 0
 
 
@@ -526,7 +526,7 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     )
 
     # Then the catalog reports `region` as the clustering column
-    assert first.any_failures is False
+    assert first.has_failures is False
     assert _clustering_columns() == ["region"]
 
     # When the clustering key changes to `id`
@@ -544,7 +544,7 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     second = engine.sync(reclustered)
 
     # Then it is reconciled in place (an action ran) and the catalog reflects it
-    assert second.any_failures is False
+    assert second.has_failures is False
     assert second.table_reports[0].execution is not None
     assert _clustering_columns() == ["id"]
 
@@ -578,7 +578,7 @@ def test_engine_sync_widens_column_types_with_type_widening_declared(spark, temp
     )
 
     # Then the sync succeeds and every column is widened in place
-    assert report.any_failures is False
+    assert report.has_failures is False
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert isinstance(fields["id"].dataType, T.LongType)
     assert fields["amount"].dataType == T.DecimalType(12, 3)

@@ -155,7 +155,7 @@ class Engine:
             dry_run=dry_run,
         )
 
-        if not dry_run and report.any_failures:
+        if not dry_run and report.has_failures:
             raise SyncFailedError(report)
 
         if dry_run:

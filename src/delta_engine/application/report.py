@@ -69,6 +69,11 @@ class TableRunReport:
         """True if the table did not fully succeed."""
         return bool(self.failures)
 
+    @property
+    def has_changes(self) -> bool:
+        """True when the plan holds actions — drift was found and validated."""
+        return bool(self.plan)
+
 
 @dataclass(frozen=True, slots=True)
 class SyncReport:
@@ -80,9 +85,20 @@ class SyncReport:
     dry_run: bool = False
 
     @property
-    def any_failures(self) -> bool:
+    def has_failures(self) -> bool:
         """Return True if any table failed in the run."""
         return any(table_report.has_failures for table_report in self.table_reports)
+
+    @property
+    def has_changes(self) -> bool:
+        """
+        True if any table's plan holds actions.
+
+        States facts about *planned* changes only: a table that failed
+        validation contributes failures, not changes. The CI gate idiom is
+        ``report.has_failures or report.has_changes``.
+        """
+        return any(table_report.has_changes for table_report in self.table_reports)
 
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:

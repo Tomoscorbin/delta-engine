@@ -21,7 +21,7 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
-from delta_engine.domain.plan.actions import ActionPlan
+from delta_engine.domain.plan.actions import ActionPlan, SetTableComment
 
 # ---------- test builders
 
@@ -88,7 +88,7 @@ def test_table_status_success_when_all_actions_succeed():
     assert report.execution.failures == ()
 
 
-def test_sync_report_any_failures_true_if_any_table_has_failures():
+def test_sync_report_has_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
     t_ok = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "a"),
@@ -114,8 +114,66 @@ def test_sync_report_any_failures_true_if_any_table_has_failures():
     # When aggregating the sync
     sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
 
-    # Then any_failures is True
-    assert sr.any_failures is True
+    # Then has_failures is True
+    assert sr.has_failures is True
+
+
+def test_table_has_changes_when_plan_is_non_empty():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+    )
+    assert report.has_changes is True
+
+
+def test_table_has_no_changes_when_plan_is_empty():
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    assert report.has_changes is False
+
+
+def test_validation_failed_table_has_failures_but_no_changes():
+    # Validation refuses the drift before planning, so the plan stays empty:
+    # the table reports failures, not changes.
+    report = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "tbl"),
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    assert report.has_failures is True
+    assert report.has_changes is False
+
+
+def test_sync_report_has_changes_when_any_table_plans_actions():
+    changed = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "a"),
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=ActionPlan((SetTableComment(comment="hello"),)),
+    )
+    unchanged = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged))
+    assert report.has_changes is True
+
+
+def test_sync_report_has_no_changes_when_no_table_plans_actions():
+    unchanged = TableRunReport(
+        qualified_name=QualifiedName("cat", "schema", "b"),
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
+    assert report.has_changes is False
 
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
