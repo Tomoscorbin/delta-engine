@@ -210,6 +210,20 @@ source_modules = [
 ]
 forbidden_modules = ["delta", "pyspark"]
 
+[[tool.importlinter.contracts]]
+id = "shared-sql-core-is-backend-free"
+name = "Shared SQL core stays PySpark-free"
+type = "forbidden"
+source_modules = ["delta_engine.adapters.databricks.sql"]
+forbidden_modules = ["delta", "pyspark", "py4j"]
+
+[[tool.importlinter.contracts]]
+id = "databricks-backends-above-shared-sql"
+name = "Databricks backends sit above the shared SQL core"
+type = "layers"
+containers = ["delta_engine.adapters.databricks"]
+layers = ["spark", "sql"]
+
 
 # -------------------- MyPy --------------------
 
