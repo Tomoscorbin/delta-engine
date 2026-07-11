@@ -357,8 +357,7 @@ def _grid_report(name, *, plan=None, failures=()):
 
 def _execution(*, applied: int, failed: int) -> ExecutionSummary:
     succeeded = tuple(
-        ExecutionSucceeded(statement_index=index, statement="SQL")
-        for index in range(applied)
+        ExecutionSucceeded(statement_index=index, statement="SQL") for index in range(applied)
     )
     failures = tuple(
         ExecutionFailed(

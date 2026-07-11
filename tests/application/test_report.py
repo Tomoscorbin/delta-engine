@@ -304,9 +304,7 @@ def test_status_reflects_the_earliest_failing_phase():
         read=read,
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
-            ExecutionFailure(
-                statement_index=0, exception_type="E", message="m", statement="SQL"
-            ),
+            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
         ),
     )
     # Then it is EXECUTION_FAILED
@@ -319,9 +317,7 @@ def test_status_reflects_the_earliest_failing_phase():
         read=ReadFailed(ReadFailure("IOError", "boom")),
         failures=(
             ReadFailure("IOError", "boom"),
-            ExecutionFailure(
-                statement_index=0, exception_type="E", message="m", statement="SQL"
-            ),
+            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
         ),
     )
     # Then READ_FAILED wins (earliest phase)
