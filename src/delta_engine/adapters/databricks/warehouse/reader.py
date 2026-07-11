@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -33,9 +32,9 @@ from delta_engine.adapters.databricks.sql import (
     table_row_query,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
+    column_from_catalog,
     column_tags_from_rows,
     foreign_keys_from_rows,
     managed_properties_from_detail_row,
@@ -58,8 +57,6 @@ from delta_engine.domain.model import (
 
 if TYPE_CHECKING:
     from databricks.sql.client import Connection
-
-logger = logging.getLogger(__name__)
 
 
 class WarehouseReader:
@@ -158,53 +155,17 @@ def _to_columns(
     """Map information_schema.columns rows to domain columns, skipping unmappable types."""
     columns = []
     for row in column_rows:
-        column = _to_column(row, qualified_name)
+        column = column_from_catalog(
+            name=row.column_name,
+            type_text=row.full_data_type,
+            nullable=row.is_nullable == "YES",
+            comment=row.comment or "",
+            is_partition=row.partition_index is not None,
+            qualified_name=qualified_name,
+        )
         if column is not None:
             columns.append(column)
     return tuple(columns)
-
-
-def _to_column(row: Any, qualified_name: QualifiedName) -> DomainColumn | None:
-    """
-    Convert one information_schema.columns row into a domain ``Column``.
-
-    Returns ``None`` for columns whose type string has no domain mapping,
-    logging a warning so operators can track gaps as new types are released.
-    A partition column with no domain mapping instead raises: skipping it
-    would leave ``ObservedTable.partitioned_by`` silently incomplete, and
-    the differ would fabricate a false ``PartitioningChanged`` from the gap.
-    Raising here lets ``fetch_state``'s exception boundary turn it into
-    ``ReadFailed`` — the honest "could not determine state" — rather than a
-    wrong diff.
-    """
-    data_type = parse_data_type(row.full_data_type)
-    if data_type is None:
-        if row.partition_index is not None:
-            raise RuntimeError(
-                f"Partition column {row.column_name!r} in {qualified_name} has"
-                f" type {row.full_data_type!r}, which this version of"
-                " delta-engine has no mapping for (catalogs gain new types"
-                " before engines that pin a type model); the observed"
-                " partitioning cannot be determined, so the table cannot be"
-                " read safely."
-            )
-        logger.warning(
-            "Skipping column %r in %s: unrecognised type %r"
-            " — the column is invisible to this sync; if a declaration includes"
-            " it, the planned ADD COLUMN will fail at execution because the"
-            " column already exists",
-            row.column_name,
-            qualified_name,
-            row.full_data_type,
-        )
-        return None
-
-    return DomainColumn(
-        name=row.column_name.casefold(),
-        data_type=data_type,
-        nullable=row.is_nullable == "YES",
-        comment=row.comment or "",
-    )
 
 
 def _partitioned_by(column_rows: Sequence[Any]) -> tuple[str, ...]:

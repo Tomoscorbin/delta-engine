@@ -18,16 +18,76 @@ and values are case-sensitive and preserved verbatim.
 from collections.abc import Iterable, Sequence
 from itertools import groupby
 import json
+import logging
 from types import MappingProxyType
 from typing import Any
 
+from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
+    Column,
     ForeignKeyConstraint,
     ForeignKeyReference,
     PrimaryKeyConstraint,
     QualifiedName,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def column_from_catalog(
+    *,
+    name: str,
+    type_text: str,
+    nullable: bool,
+    comment: str,
+    is_partition: bool,
+    qualified_name: QualifiedName,
+) -> Column | None:
+    """
+    Build a domain ``Column`` from catalog-reported facts, or ``None``.
+
+    Owns the shared unmappable-type policy for both read backends, so the
+    two readers cannot drift apart on it. A column whose type string has no
+    domain mapping returns ``None``, logging a warning so operators can
+    track gaps as new types are released. A *partition* column with no
+    domain mapping instead raises: skipping it would leave
+    ``ObservedTable.partitioned_by`` silently incomplete, and the differ
+    would fabricate a false ``PartitioningChanged`` from the gap. Raising
+    lets ``fetch_state``'s exception boundary turn it into ``ReadFailed`` —
+    the honest "could not determine state" — rather than a wrong diff.
+
+    The name is casefolded here: the domain model requires lowercase
+    identifiers, and case-preserving catalogs can report mixed-case names.
+    """
+    data_type = parse_data_type(type_text)
+    if data_type is None:
+        if is_partition:
+            raise RuntimeError(
+                f"Partition column {name!r} in {qualified_name} has"
+                f" type {type_text!r}, which this version of"
+                " delta-engine has no mapping for (catalogs gain new types"
+                " before engines that pin a type model); the observed"
+                " partitioning cannot be determined, so the table cannot be"
+                " read safely."
+            )
+        logger.warning(
+            "Skipping column %r in %s: unrecognised type %r"
+            " — the column is invisible to this sync; if a declaration includes"
+            " it, the planned ADD COLUMN will fail at execution because the"
+            " column already exists",
+            name,
+            qualified_name,
+            type_text,
+        )
+        return None
+
+    return Column(
+        name=name.casefold(),
+        data_type=data_type,
+        nullable=nullable,
+        comment=comment,
+    )
 
 
 def primary_key_from_rows(rows: Sequence[Any]) -> PrimaryKeyConstraint | None:
