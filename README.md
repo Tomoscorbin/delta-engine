@@ -49,8 +49,6 @@ engine = build_engine(spark)  # `spark` is provided by your Databricks notebook
 engine.sync(customers)         # creates the table, or no-ops if it already matches
 ```
 
-## How a sync works
-
 Every sync follows the same process:
 
 ```
