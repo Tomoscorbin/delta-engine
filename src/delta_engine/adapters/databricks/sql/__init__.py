@@ -14,6 +14,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
+from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
     describe_detail_query,
@@ -33,6 +34,7 @@ __all__ = [
     "describe_detail_query",
     "foreign_keys_query",
     "information_schema_probe_query",
+    "parse_data_type",
     "primary_key_query",
     "quote_literal",
     "referencing_foreign_keys_query",
