@@ -1,8 +1,6 @@
 """Reader adapter for Databricks Unity Catalog."""
 
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from itertools import groupby
 import logging
 from types import MappingProxyType
 from typing import Final
@@ -23,6 +21,14 @@ from delta_engine.adapters.databricks.sql import (
     referencing_foreign_keys_query,
     table_tags_query,
 )
+from delta_engine.adapters.databricks.sql.rows import (
+    column_tags_from_rows,
+    foreign_keys_from_rows,
+    managed_properties_from_mapping,
+    primary_key_from_rows,
+    referencing_foreign_keys_from_rows,
+    table_tags_from_rows,
+)
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
     CatalogState,
@@ -30,13 +36,9 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
     Column as DomainColumn,
-    ForeignKeyConstraint,
-    ForeignKeyReference,
     ObservedTable,
-    PrimaryKeyConstraint,
     QualifiedName,
 )
 
@@ -123,117 +125,6 @@ def _to_column_mapping(
     )
 
 
-def _primary_key_from_rows(rows: Sequence[Row]) -> PrimaryKeyConstraint | None:
-    """
-    Build the primary key from its information_schema rows, or ``None``.
-
-    The query orders rows by ordinal_position, so the columns tuple is in
-    key order. Constraint and column names are normalised to lowercase at
-    the adapter boundary.
-    """
-    columns = tuple(row["column_name"].casefold() for row in rows)
-    if not columns:
-        return None
-    constraint_name = rows[0]["constraint_name"].casefold()
-    return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
-
-
-def _foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyConstraint, ...]:
-    """
-    Build all foreign keys from information_schema rows.
-
-    The query orders by (constraint_name, ordinal_position), so each
-    constraint's rows are contiguous and already in column order. groupby
-    yields one contiguous run per constraint without a manual accumulator.
-    """
-    return tuple(
-        _foreign_key_from_rows(constraint_name, list(constraint_rows))
-        for constraint_name, constraint_rows in groupby(rows, key=lambda row: row.constraint_name)
-    )
-
-
-def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyConstraint:
-    """
-    Build one foreign key constraint from its key_column_usage rows.
-
-    ``rows`` are all rows for a single constraint, ordered by
-    ordinal_position, so local and referenced columns stay positionally
-    aligned. The referenced table is identical on every row, so it is read
-    from the first. Column and table names are lowercased at the adapter
-    boundary, consistent with the rest of this reader. Constraint names are
-    read from the catalog so observed-only constraints can be dropped by
-    their real names.
-    """
-    first = rows[0]
-    return ForeignKeyConstraint(
-        local_columns=tuple(row.local_column.casefold() for row in rows),
-        referenced_table=QualifiedName(
-            first.ref_catalog.casefold(),
-            first.ref_schema.casefold(),
-            first.ref_table.casefold(),
-        ),
-        referenced_columns=tuple(row.ref_column.casefold() for row in rows),
-        constraint_name=constraint_name.casefold(),
-    )
-
-
-def _referencing_foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyReference, ...]:
-    """
-    Build the inbound foreign key references from information_schema rows.
-
-    Names are casefolded at the adapter boundary, consistent with the rest of
-    this reader.
-    """
-    return tuple(
-        ForeignKeyReference(
-            constraint_name=row.constraint_name.casefold(),
-            referencing_table=QualifiedName(
-                row.referencing_catalog.casefold(),
-                row.referencing_schema.casefold(),
-                row.referencing_table.casefold(),
-            ),
-        )
-        for row in rows
-    )
-
-
-def _table_tags_from_rows(rows: Iterable[Row]) -> MappingProxyType[str, str]:
-    """Map table-tag rows to a read-only mapping; tag case is preserved verbatim."""
-    return MappingProxyType({row.tag_name: row.tag_value for row in rows})
-
-
-def _column_tags_from_rows(
-    rows: Iterable[Row],
-) -> MappingProxyType[str, MappingProxyType[str, str]]:
-    """
-    Map column-tag rows to ``{column_name: {tag: value}}``.
-
-    Column names are casefolded to match the domain's lowercase columns; tag
-    keys and values are case-sensitive and returned verbatim — never casefolded.
-    """
-    grouped: dict[str, dict[str, str]] = {}
-    for row in rows:
-        grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
-    return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})
-
-
-def _managed_properties_from_row(row: Row) -> MappingProxyType[str, str]:
-    """
-    Filter a DESCRIBE DETAIL row's properties to the managed registry keys.
-
-    Platform-written keys (protocol bookkeeping, auto-enabled features,
-    internal counters) never reach the domain, so they can neither trip
-    validation nor churn plans. This is backend normalization, owned here
-    like identifier lowercasing and type parsing.
-    """
-    observed_properties = {
-        name: value
-        for name, value in dict(row["properties"]).items()
-        if name in DELTA_PROPERTY_REGISTRY
-    }
-    return MappingProxyType(observed_properties)
-
-
 def _clustering_columns_from_row(row: Row) -> tuple[str, ...]:
     """
     Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
@@ -287,7 +178,7 @@ class SparkReader:
             for spark_column in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(mapping for mapping in candidate_mappings if mapping is not None)
-        column_tags = _column_tags_from_rows(
+        column_tags = column_tags_from_rows(
             self._information_schema_rows(catalog, column_tags_query(qualified_name))
         )
         columns = tuple(
@@ -302,21 +193,21 @@ class SparkReader:
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=_managed_properties_from_row(detail_row),
-            tags=_table_tags_from_rows(
+            properties=managed_properties_from_mapping(dict(detail_row["properties"])),
+            tags=table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
             partitioned_by=tuple(
                 mapping.column.name for mapping in mappings if mapping.is_partition
             ),
             clustered_by=_clustering_columns_from_row(detail_row),
-            primary_key=_primary_key_from_rows(
+            primary_key=primary_key_from_rows(
                 self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),
-            foreign_keys=_foreign_keys_from_rows(
+            foreign_keys=foreign_keys_from_rows(
                 self._information_schema_rows(catalog, foreign_keys_query(qualified_name))
             ),
-            referencing_foreign_keys=_referencing_foreign_keys_from_rows(
+            referencing_foreign_keys=referencing_foreign_keys_from_rows(
                 self._information_schema_rows(
                     catalog, referencing_foreign_keys_query(qualified_name)
                 )
