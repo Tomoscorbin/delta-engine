@@ -4,9 +4,9 @@ Execute compiled statements on a Databricks SQL warehouse and capture results.
 Compiles an `ActionPlan` to SQL via the shared compiler — byte-for-byte the
 same statements the Spark backend runs, so dry-run previews are
 backend-independent — and runs them through the shared stop-on-first-failure
-loop with a warehouse cursor as the runner and the generic exception
-translation (the connector raises a plain Python exception hierarchy, so the
-class name is already the informative fact).
+loop with a warehouse cursor as the runner. The connector raises a plain
+Python exception hierarchy, so the loop's default Python-class type naming
+is already the informative fact.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
-from delta_engine.adapters.databricks.errors import translate_exception
 from delta_engine.adapters.databricks.execution import execute_statements
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.failures import ExecutionFailure
@@ -59,7 +58,7 @@ class WarehouseExecutor:
         except Exception as exception:
             return ExecutionSummary((_failed_to_start(statements[0], exception),))
         try:
-            return execute_statements(cursor.execute, statements, translate_exception)
+            return execute_statements(cursor.execute, statements)
         finally:
             with contextlib.suppress(Exception):
                 cursor.close()
@@ -67,12 +66,11 @@ class WarehouseExecutor:
 
 def _failed_to_start(first_statement: str, exception: Exception) -> ExecutionFailed:
     """Map a cursor-acquisition failure to a failure of the first, unattempted statement."""
-    details = translate_exception(exception)
     return ExecutionFailed(
         failure=ExecutionFailure(
             statement_index=0,
-            exception_type=details.type_name,
-            message=details.message,
+            exception_type=type(exception).__name__,
+            message=str(exception),
             statement=first_statement,
         ),
     )

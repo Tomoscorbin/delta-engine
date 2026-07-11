@@ -4,13 +4,13 @@ Shared statement-execution loop for the Databricks backends.
 Both backends execute compiled SQL statements one at a time, stop at the
 first failure, and record each statement verbatim on its result. Only two
 facts differ per backend — how a statement is physically executed, and how
-its exceptions are translated — so both are injected as callables.
+a failing exception's type is named — so both are injected as callables,
+the latter defaulting to the Python class name.
 """
 
 from collections.abc import Callable, Iterable
 import logging
 
-from delta_engine.adapters.databricks.errors import ExceptionDetails
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
     ExecutionFailed,
@@ -22,10 +22,15 @@ from delta_engine.application.ports import (
 logger = logging.getLogger(__name__)
 
 
+def _python_exception_type_name(exception: Exception) -> str:
+    """Name an exception by its Python class — the informative default outside py4j."""
+    return type(exception).__name__
+
+
 def execute_statements(
     execute: Callable[[str], object],
     statements: Iterable[str],
-    translate: Callable[[Exception], ExceptionDetails],
+    exception_type_name: Callable[[Exception], str] = _python_exception_type_name,
 ) -> ExecutionSummary:
     """
     Execute each statement in order, stopping at the first failure.
@@ -38,7 +43,7 @@ def execute_statements(
     """
     results: list[ExecutionResult] = []
     for statement_index, statement in enumerate(statements):
-        result = _execute_statement(execute, statement_index, statement, translate)
+        result = _execute_statement(execute, statement_index, statement, exception_type_name)
         results.append(result)
         if isinstance(result, ExecutionFailed):
             break
@@ -49,7 +54,7 @@ def _execute_statement(
     execute: Callable[[str], object],
     statement_index: int,
     statement: str,
-    translate: Callable[[Exception], ExceptionDetails],
+    exception_type_name: Callable[[Exception], str],
 ) -> ExecutionResult:
     """
     Execute a single statement and map its outcome to an ``ExecutionResult``.
@@ -68,13 +73,12 @@ def _execute_statement(
     try:
         execute(statement)
     except Exception as exception:
-        details = translate(exception)
-        logger.warning("Statement failed: %s\nSQL: %s", details.message, statement)
+        logger.warning("Statement failed: %s\nSQL: %s", exception, statement)
         return ExecutionFailed(
             failure=ExecutionFailure(
                 statement_index=statement_index,
-                exception_type=details.type_name,
-                message=details.message,
+                exception_type=exception_type_name(exception),
+                message=str(exception),
                 statement=statement,
             ),
         )
