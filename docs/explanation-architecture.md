@@ -293,7 +293,7 @@ skipped during execution. The engine still processes other tables.
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                               |
-| `delta_engine.adapters`    | Backend integration and translation                                                 | `SparkReader`, `SparkExecutor`, SQL compiler                                   |
+| `delta_engine.adapters`    | Backend integration and translation                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler     |
 
 ```mermaid
 flowchart TB
@@ -330,10 +330,16 @@ for users. Their implementations still live in `delta_engine.api` and
 Inside `delta_engine.adapters.databricks`, the code is split by what it needs
 at import time. The `sql` subpackage is the shared SQL-text core — DDL
 compilation, identifier quoting, and `information_schema` queries — and is
-PySpark-free, enforced by an import-linter contract. The `spark` subpackage is
-the Spark backend: the reader, the executor, and py4j error translation, built
-on that core. A future backend that reaches Databricks without a Spark session
-reuses the `sql` core and adds only its own reader and executor.
+PySpark-free, enforced by an import-linter contract. Two backends build on
+that core today: the `spark` subpackage syncs through an active Spark
+session (the reader, the executor, and py4j error translation), and the
+`warehouse` subpackage syncs through a Databricks SQL warehouse connection
+over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
+compile to identical SQL through the shared compiler, so a dry-run preview
+does not depend on which one ran it; they differ only in transport (a Spark
+session versus a warehouse connection) and in how they source read rows
+(Spark catalog calls versus `information_schema` and `DESCRIBE DETAIL` over a
+cursor).
 
 ## Diff-first planning
 

@@ -41,6 +41,39 @@ A green job means the catalog already matches the declarations. Fail on
 require that changes are reviewed and applied deliberately rather than drifting
 in.
 
+## The warehouse variant
+
+The example above needs a live Spark session, which usually means a cluster
+sitting around for the job. Most CI runners have neither. Open a
+`databricks.sql` connection to a SQL warehouse instead, and the same dry run
+runs from a plain Python job — no Spark session or cluster required:
+
+```python
+import os
+
+from databricks import sql
+
+from delta_engine.databricks import build_sql_engine
+
+from myproject.tables import all_tables  # your DeltaTable declarations
+
+with sql.connect(
+    server_hostname=os.environ["DATABRICKS_SERVER_HOSTNAME"],
+    http_path=os.environ["DATABRICKS_HTTP_PATH"],
+    access_token=os.environ["DATABRICKS_TOKEN"],
+) as connection:
+    engine = build_sql_engine(connection)
+    report = engine.sync(*all_tables, dry_run=True)
+```
+
+`report` is the same `SyncReport` either way: the `has_failures`/`has_changes`
+gate above, the SQL preview below, and failure discrimination all apply
+unchanged. The warehouse backend compiles the same statements the Spark
+backend does, so a gate written against one works against the other
+untouched. This path needs the `delta-engine[sql]` extra
+([installation](installation.md)) and Unity Catalog
+([limitations](reference-limitations.md)).
+
 ## Show the SQL that would run
 
 `report.planned_sql_statements` maps each table's dotted name to the exact statements a
