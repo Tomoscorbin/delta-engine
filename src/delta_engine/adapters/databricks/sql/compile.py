@@ -13,7 +13,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
-from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
+from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.domain.model import Column, QualifiedName
 from delta_engine.domain.plan import (
     Action,
@@ -106,7 +106,7 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
             "validation (NonNullableColumnAdd) should have blocked this"
         )
     name = backtick(action.column.name)
-    dtype = sql_type_for_data_type(action.column.data_type)
+    dtype = render_data_type(action.column.data_type)
     comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
     return f"ALTER TABLE {backticked_table_name} ADD COLUMN {name} {dtype}{comment}"
 
@@ -192,7 +192,7 @@ def _(action: AlterClustering, backticked_table_name: str) -> str:
 def _(action: AlterColumnType, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ALTER COLUMN ... TYPE for a validated type widening."""
     column_name = backtick(action.column_name)
-    sql_type = sql_type_for_data_type(action.data_type)
+    sql_type = render_data_type(action.data_type)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} TYPE {sql_type}"
 
 
@@ -240,7 +240,7 @@ def _(action: SetForeignKey, backticked_table_name: str) -> str:
 def _column_definition(column: Column) -> str:
     """Render a single column definition fragment, including its comment."""
     column_name = backtick(column.name)
-    sql_type = sql_type_for_data_type(column.data_type)
+    sql_type = render_data_type(column.data_type)
     nullable = "" if column.nullable else "NOT NULL"
     comment = f"COMMENT {quote_literal(column.comment)}" if column.comment else ""
     return " ".join(part for part in (column_name, sql_type, nullable, comment) if part)

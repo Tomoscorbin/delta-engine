@@ -26,7 +26,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     table_row_query,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
+from delta_engine.adapters.databricks.sql.types import render_data_type
 
 __all__ = [
     "backtick",
@@ -41,7 +41,7 @@ __all__ = [
     "primary_key_query",
     "quote_literal",
     "referencing_foreign_keys_query",
-    "sql_type_for_data_type",
+    "render_data_type",
     "table_row_query",
     "table_tags_query",
 ]

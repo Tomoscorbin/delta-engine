@@ -2,7 +2,7 @@ import pyspark.sql.types as T
 import pytest
 
 from delta_engine.adapters.databricks.spark.types import domain_type_from_spark
-from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
+from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.domain.model.data_type import (
     Array,
     Binary,
@@ -110,8 +110,8 @@ def test_leaf_types_round_trip_inside_collections() -> None:
     assert domain_type_from_spark(T.MapType(T.ShortType(), T.TimestampNTZType())) == Map(
         Short(), TimestampNtz()
     )
-    assert sql_type_for_data_type(Array(Binary())) == "ARRAY<BINARY>"
-    assert sql_type_for_data_type(Map(Short(), TimestampNtz())) == "MAP<SMALLINT,TIMESTAMP_NTZ>"
+    assert render_data_type(Array(Binary())) == "ARRAY<BINARY>"
+    assert render_data_type(Map(Short(), TimestampNtz())) == "MAP<SMALLINT,TIMESTAMP_NTZ>"
 
 
 def test_struct_maps_when_nested_in_structs_and_maps() -> None:
@@ -126,6 +126,6 @@ def test_struct_maps_when_nested_in_structs_and_maps() -> None:
     assert domain_type_from_spark(spark_nested) == Struct((StructField("inner", domain_inner),))
     assert domain_type_from_spark(spark_in_map) == Map(String(), domain_inner)
     assert (
-        sql_type_for_data_type(Struct((StructField("inner", domain_inner),)))
+        render_data_type(Struct((StructField("inner", domain_inner),)))
         == "STRUCT<`inner`: STRUCT<`x`: INT>>"
     )

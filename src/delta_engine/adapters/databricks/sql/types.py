@@ -40,7 +40,7 @@ from delta_engine.domain.model import (
 )
 
 
-def sql_type_for_data_type(data_type: DataType) -> str:
+def render_data_type(data_type: DataType) -> str:
     """Return a Spark SQL type string for a domain :class:`DataType`."""
     match data_type:
         case Integer():
@@ -62,9 +62,9 @@ def sql_type_for_data_type(data_type: DataType) -> str:
         case Decimal(precision, scale):
             return f"DECIMAL({precision},{scale})"
         case Array(element):
-            return f"ARRAY<{sql_type_for_data_type(element)}>"
+            return f"ARRAY<{render_data_type(element)}>"
         case Map(key, value):
-            return f"MAP<{sql_type_for_data_type(key)},{sql_type_for_data_type(value)}>"
+            return f"MAP<{render_data_type(key)},{render_data_type(value)}>"
         case Byte():
             return "TINYINT"
         case Short():
@@ -77,7 +77,7 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             return "VARIANT"
         case Struct(fields):
             rendered = ", ".join(
-                f"{backtick(field.name)}: {sql_type_for_data_type(field.data_type)}"
+                f"{backtick(field.name)}: {render_data_type(field.data_type)}"
                 for field in fields
             )
             return f"STRUCT<{rendered}>"

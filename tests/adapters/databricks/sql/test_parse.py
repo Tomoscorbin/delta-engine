@@ -2,7 +2,7 @@
 
 import pytest
 
-from delta_engine.adapters.databricks.sql import sql_type_for_data_type
+from delta_engine.adapters.databricks.sql import render_data_type
 from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.domain.model import (
     Array,
@@ -178,4 +178,4 @@ def test_unmappable_or_malformed_types_return_none(ddl):
 )
 def test_round_trips_every_rendered_domain_type(data_type):
     # The parser must accept everything the compiler emits.
-    assert parse_data_type(sql_type_for_data_type(data_type)) == data_type
+    assert parse_data_type(render_data_type(data_type)) == data_type
