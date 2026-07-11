@@ -1,17 +1,14 @@
 """Reader adapter for Databricks Unity Catalog."""
 
 from dataclasses import dataclass, replace
-import logging
 from types import MappingProxyType
 from typing import Final
 
 from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
-from pyspark.sql.types import DataType as SparkType
 
 from delta_engine.adapters.databricks.spark.errors import exception_type_name
-from delta_engine.adapters.databricks.spark.types import domain_type_from_spark
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
@@ -23,6 +20,7 @@ from delta_engine.adapters.databricks.sql import (
 )
 from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
+    column_from_catalog,
     column_tags_from_rows,
     foreign_keys_from_rows,
     managed_properties_from_detail_row,
@@ -42,8 +40,6 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
 )
-
-logger = logging.getLogger(__name__)
 
 # AnalysisException conditions that mean a catalog has no information_schema
 # (plain Spark, Hive metastore). TABLE_OR_VIEW_NOT_FOUND is what Spark raises
@@ -67,63 +63,31 @@ def _to_column_mapping(
     """
     Convert a Spark catalog column into a domain ``Column`` and its partition flag.
 
-    Returns ``None`` for columns whose Spark type has no domain mapping yet,
-    logging a warning so operators can track gaps as new Spark types are released.
-    A partition column with no domain mapping instead raises: skipping it would
-    leave ``ObservedTable.partitioned_by`` silently incomplete, and the differ
-    would fabricate a false ``PartitioningChanged`` from the gap. Raising here
-    lets ``fetch_state``'s exception boundary turn it into ``ReadFailed`` — the
-    honest "could not determine state" — rather than a wrong diff.
+    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``),
+    the same shape information_schema gives the warehouse backend, so both
+    readers share one type parser and one unmappable-column policy through
+    ``column_from_catalog`` (skip and warn; raise for partition columns).
 
-    The column name is lowercased here: the domain model requires lowercase
-    identifiers, and case-preserving catalogs (e.g. Hive Metastore) can return
-    mixed-case names. Normalising at the adapter boundary keeps that impedance
-    mismatch out of the domain. The partition name in ``_ColumnMapping`` is
-    therefore derived from the already-normalised domain column name, not from
-    the raw Spark object.
-
-    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``);
-    parsing that into a ``SparkType`` is this adapter's job, so the domain-type
-    mapper receives a parsed instance.
+    The partition name in ``_ColumnMapping`` is derived from the
+    already-normalised domain column name, not from the raw Spark object,
+    because case-preserving catalogs (e.g. Hive Metastore) can return
+    mixed-case names.
     """
     # Catalog column objects are duck-typed: some catalog implementations omit
     # the nullable/isPartition flags, so a missing flag means "nullable" /
     # "not a partition" rather than an error.
     is_partition = bool(getattr(spark_column, "isPartition", False))
-    domain_data_type = domain_type_from_spark(SparkType.fromDDL(spark_column.dataType))
-    if domain_data_type is None:
-        if is_partition:
-            raise RuntimeError(
-                f"Partition column {spark_column.name!r} in {qualified_name} has"
-                f" type {spark_column.dataType!r}, which this version of"
-                " delta-engine has no mapping for (catalogs gain new types"
-                " before engines that pin a type model); the observed"
-                " partitioning cannot be determined, so the table cannot be"
-                " read safely."
-            )
-        logger.warning(
-            "Skipping column %r in %s: unrecognised Spark type %r"
-            " — the column is invisible to this sync; if a declaration includes"
-            " it, the planned ADD COLUMN will fail at execution because the"
-            " column already exists",
-            spark_column.name,
-            qualified_name,
-            spark_column.dataType,
-        )
-        return None
-
-    nullable = bool(getattr(spark_column, "nullable", True))
-    comment = spark_column.description or ""
-
-    return _ColumnMapping(
-        column=DomainColumn(
-            name=spark_column.name.casefold(),
-            data_type=domain_data_type,
-            nullable=nullable,
-            comment=comment,
-        ),
+    column = column_from_catalog(
+        name=spark_column.name,
+        type_text=spark_column.dataType,
+        nullable=bool(getattr(spark_column, "nullable", True)),
+        comment=spark_column.description or "",
         is_partition=is_partition,
+        qualified_name=qualified_name,
     )
+    if column is None:
+        return None
+    return _ColumnMapping(column=column, is_partition=is_partition)
 
 
 class SparkReader:

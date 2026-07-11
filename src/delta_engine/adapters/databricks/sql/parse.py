@@ -10,14 +10,14 @@ Returns ``None`` for any type the domain does not model (``interval``,
 ``void``, geospatial, collated strings, future types) and for malformed
 input. An unmappable type is a routine condition — catalogs gain types
 before engines that pin a type model — so parsing never raises; callers
-decide what to do (the warehouse reader skips the column and warns, the
-same policy as the Spark read path).
+decide what to do (both readers skip the column and warn, via the shared
+``column_from_catalog`` policy).
 
 Struct fields may carry ``NOT NULL`` and ``COMMENT '...'`` clauses in
 catalog output; both are tolerated and discarded — field nullability and
 comments are deliberately not modeled (see ``StructField``). Field names
 are casefolded; names that collide after casefolding make the struct
-unmappable, matching the Spark mapper.
+unmappable.
 """
 
 import re

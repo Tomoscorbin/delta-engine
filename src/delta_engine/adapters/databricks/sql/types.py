@@ -2,12 +2,12 @@
 Render domain ``DataType`` values as Spark SQL DDL type strings.
 
 The write half of the adapter's type mapping, and PySpark-free: the compiler
-renders domain types into DDL text. The shared read half — parsing catalog
-DDL type text into domain types — lives in
-:mod:`delta_engine.adapters.databricks.sql.parse`, used directly by the
-warehouse backend. The Spark backend has its own read-side mapping instead,
-from parsed ``pyspark`` type instances to domain types, in
-:mod:`delta_engine.adapters.databricks.spark.types`.
+renders domain types into DDL text. The read half — parsing catalog DDL
+type text into domain types — lives in
+:mod:`delta_engine.adapters.databricks.sql.parse` and is shared by both
+backends: Unity Catalog reports column types as DDL strings on the Spark
+path (``listColumns``) and the warehouse path (``information_schema``)
+alike.
 
 Uses ``match``/``case`` rather than ``functools.singledispatch`` (which the plan
 compiler uses): ``DataType`` is a closed set and the mapping is a leaf lookup,

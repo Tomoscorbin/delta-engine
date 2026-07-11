@@ -141,6 +141,9 @@ def test_struct_field_names_colliding_after_casefold_are_unmappable():
         "void",
         "geography",
         "decimal(40,2)",  # over the Delta/Spark precision limit
+        "array<void>",  # an unmappable element makes the whole type unmappable
+        "map<string,void>",
+        "struct<x: void>",
         "array<int",  # malformed: unclosed bracket
         "array<>",
         "struct<>",

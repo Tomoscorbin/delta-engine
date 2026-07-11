@@ -131,10 +131,12 @@ between the two backends through the `sql` core: lowercasing catalog
 identifiers, reading Unity Catalog constraints and tags through the same
 information_schema queries and row mappers, and quoting SQL identifiers.
 DDL type-string parsing is shared too — `sql/parse.py` turns catalog type
-text into domain data types, and the warehouse backend calls it directly.
-The Spark backend instead lets PySpark parse that same DDL text into a
-`pyspark.sql.types.DataType` instance, then maps the instance to a domain
-type in `spark/types.py`. Exception translation is where the backends
+text into domain data types for both backends, since Unity Catalog reports
+column types as DDL strings on the Spark path (`listColumns`) and the
+warehouse path (`information_schema.columns`) alike. The per-column read
+policy is equally shared: an unmappable type skips the column with a
+warning, unless it is a partition column, which fails the read.
+Exception translation is where the backends
 genuinely diverge: the Spark backend unwraps `Py4JJavaError` to report the
 underlying JVM exception class, while the warehouse backend has no such
 wrapper to unwrap and calls the shared, generic summarizer directly. Both

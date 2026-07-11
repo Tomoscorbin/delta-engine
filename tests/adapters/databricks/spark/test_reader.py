@@ -217,18 +217,6 @@ def referencing_fk_row(
 # ---------- shared fixtures ----------
 
 
-@pytest.fixture(autouse=True)
-def _active_spark_session(spark):
-    """
-    Keep a live SparkSession up for every test in this module.
-
-    The reader maps each catalog column's DDL type string through
-    ``SparkType.fromDDL``, and that parser needs an active session. Production
-    always has one; requesting the session fixture here exercises the
-    column-mapping path against the same DDL strings Unity Catalog reports.
-    """
-
-
 @pytest.fixture
 def qn() -> QualifiedName:
     return QualifiedName("c", "s", "t")
