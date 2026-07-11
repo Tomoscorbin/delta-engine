@@ -29,19 +29,37 @@ def test_validation_failure_formats_itself_as_a_display_line():
     )
 
 
-def test_execution_failure_formats_itself_as_two_lines_including_sql_preview():
-    # Given an execution failure with a SQL preview
+def test_execution_failure_formats_itself_as_two_lines_including_the_sql():
+    # Given an execution failure carrying its SQL
     failure = ExecutionFailure(
         statement_index=2,
         exception_type="SparkException",
         message="boom",
-        statement_preview="ALTER TABLE t ADD COLUMN x INT",
+        statement="ALTER TABLE t ADD COLUMN x INT",
     )
 
-    # Then it renders the error line and the SQL preview together
+    # Then it renders the error line and the SQL together
     lines = failure.format_lines()
     assert lines[0] == "Execution failed at statement 2: SparkException - boom"
     assert "ALTER TABLE t ADD COLUMN x INT" in lines[1]
+
+
+def test_failure_display_shows_only_the_head_of_a_long_message():
+    # Given failures whose message carries a full backend stack trace
+    message = "\n".join(f"line {i}" for i in range(1, 10))
+
+    # Then display renders the head while the field keeps the full text
+    [read_line] = ReadFailure(exception_type="E", message=message).format_lines()
+    assert "line 5" in read_line
+    assert "line 6" not in read_line
+
+    execution_failure = ExecutionFailure(
+        statement_index=0, exception_type="E", message=message, statement="SQL"
+    )
+    execution_line, _ = execution_failure.format_lines()
+    assert "line 5" in execution_line
+    assert "line 6" not in execution_line
+    assert execution_failure.message == message
 
 
 def test_foreign_key_failure_renders_a_descriptive_line():
@@ -98,7 +116,7 @@ def test_failure_headlines_summarize_without_the_detail_message():
             statement_index=2,
             exception_type="SparkException",
             message="boom",
-            statement_preview="SQL",
+            statement="SQL",
         ).headline()
         == "Execution failed at statement 2: SparkException"
     )
@@ -128,9 +146,7 @@ def test_each_failure_kind_declares_its_producing_phase():
         is FailurePhase.FOREIGN_KEY
     )
     assert (
-        ExecutionFailure(
-            statement_index=0, exception_type="E", message="m", statement_preview="SQL"
-        ).phase
+        ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL").phase
         is FailurePhase.EXECUTION
     )
     assert (

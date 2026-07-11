@@ -2,9 +2,9 @@
 Shared statement-execution loop for the Databricks backends.
 
 Both backends execute compiled SQL statements one at a time, stop at the
-first failure, and record bounded single-line previews on the results. Only
-two facts differ per backend — how a statement is physically executed, and
-how its exceptions are translated — so both are injected as callables.
+first failure, and record each statement verbatim on its result. Only two
+facts differ per backend — how a statement is physically executed, and how
+its exceptions are translated — so both are injected as callables.
 """
 
 from collections.abc import Callable, Iterable
@@ -54,6 +54,10 @@ def _execute_statement(
     """
     Execute a single statement and map its outcome to an ``ExecutionResult``.
 
+    The statement and any exception message are recorded verbatim — results
+    are what users debug from, so nothing is normalized or truncated here;
+    bounding long text is display policy, owned by the failure renderers.
+
     The broad ``except`` is intentional: each backend raises a heterogeneous
     set of failures that varies across runtime environments, and the
     executor's contract is to wrap any failure in an ``ExecutionFailed`` so
@@ -61,38 +65,24 @@ def _execute_statement(
     exception escape. Narrowing the catch would reintroduce silent
     propagation of whichever type was missed.
     """
-    preview = sql_preview(statement)
     try:
         execute(statement)
     except Exception as exception:
         details = translate(exception)
-        logger.warning("Statement failed: %s\nSQL: %s", details.message, preview)
+        logger.warning("Statement failed: %s\nSQL: %s", details.message, statement)
         return ExecutionFailed(
             failure=ExecutionFailure(
                 statement_index=statement_index,
                 exception_type=details.type_name,
                 message=details.message,
-                statement_preview=preview,
+                statement=statement,
             ),
         )
 
-    logger.info("Executed: %s", preview)
+    # Per-statement narration is trace detail; the engine already reports
+    # per-table progress at INFO.
+    logger.debug("Executed: %s", statement)
     return ExecutionSucceeded(
         statement_index=statement_index,
-        statement_preview=preview,
+        statement=statement,
     )
-
-
-def sql_preview(sql: str, *, max_chars: int = 240) -> str:
-    """
-    Return a compact, bounded preview of a SQL statement for logs/results.
-
-    - Normalizes all runs of whitespace to single spaces on one line.
-    - Truncates with an ellipsis when longer than max_chars.
-
-    The bound and formatting are executor reporting policy — the preview
-    lands in ``statement_preview`` on execution results and in log lines,
-    never back in SQL sent to the backend.
-    """
-    normalized = " ".join(sql.split())
-    return normalized if len(normalized) <= max_chars else (normalized[:max_chars] + "…")

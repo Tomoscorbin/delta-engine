@@ -227,7 +227,7 @@ def _existing_tag_drifted_table(fqn: str) -> TablePresent:
 def _ok_exec(statement_index: int = 0) -> ExecutionResult:
     return ExecutionSucceeded(
         statement_index=statement_index,
-        statement_preview="-- ok",
+        statement="-- ok",
     )
 
 
@@ -242,7 +242,7 @@ def _failed_exec(
             statement_index=statement_index,
             exception_type=exception_type,
             message=message,
-            statement_preview="-- bad sql",
+            statement="-- bad sql",
         ),
     )
 

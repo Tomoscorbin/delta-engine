@@ -65,7 +65,7 @@ The engine calls `compile` during planning on every run — dry or real — and 
                 self._run(statement)
                 results.append(ExecutionSucceeded(
                     statement_index=i,
-                    statement_preview=statement,
+                    statement=statement,
                 ))
             except Exception as exc:
                 results.append(ExecutionFailed(
@@ -73,7 +73,7 @@ The engine calls `compile` during planning on every run — dry or real — and 
                         statement_index=i,
                         exception_type=type(exc).__name__,
                         message=str(exc),
-                        statement_preview=statement,
+                        statement=statement,
                     ),
                 ))
                 break  # stop at first failure — the engine is non-transactional

@@ -2,18 +2,18 @@
 Spark-specific exception translation: prefer the underlying Java class name.
 
 The shared core (:mod:`delta_engine.adapters.databricks.errors`) records a
-Python class name and a bounded message. On Databricks/Spark the primary
+Python class name and the exact message. On Databricks/Spark the primary
 failure shape is ``Py4JJavaError``, where the JVM exception class is the
 informative fact — e.g. ``org.apache.spark.sql.AnalysisException`` rather
 than ``Py4JJavaError`` — so this backend overrides the type name only.
 """
 
-from delta_engine.adapters.databricks.errors import ExceptionDetails, bounded_message
+from delta_engine.adapters.databricks.errors import ExceptionDetails
 
 
 def translate_exception(exception: Exception) -> ExceptionDetails:
-    """Translate an exception using its most informative type name and message."""
-    return ExceptionDetails(_exception_type_name(exception), bounded_message(exception))
+    """Translate an exception using its most informative type name and exact message."""
+    return ExceptionDetails(_exception_type_name(exception), str(exception))
 
 
 def _exception_type_name(exception: Exception) -> str:

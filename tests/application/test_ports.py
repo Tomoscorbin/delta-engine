@@ -25,13 +25,13 @@ def _an_observed_table(partitioned_by=()):
 
 
 def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(statement_index=idx, statement_preview=preview)
+    return ExecutionSucceeded(statement_index=idx, statement=preview)
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
         failure=ExecutionFailure(
-            statement_index=idx, exception_type=exc, message=msg, statement_preview=preview
+            statement_index=idx, exception_type=exc, message=msg, statement=preview
         ),
     )
 
@@ -107,10 +107,10 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
 
 def test_execution_outcome_variants_carry_the_right_payload():
     # Given the two execution outcomes
-    succeeded = ExecutionSucceeded(statement_index=0, statement_preview="SQL")
+    succeeded = ExecutionSucceeded(statement_index=0, statement="SQL")
     failed = ExecutionFailed(
         failure=ExecutionFailure(
-            statement_index=1, exception_type="E", message="m", statement_preview="SQL"
+            statement_index=1, exception_type="E", message="m", statement="SQL"
         ),
     )
 
@@ -123,7 +123,7 @@ def test_execution_failed_carries_index_only_on_its_failure_detail():
     # Given a failed action
     failed = ExecutionFailed(
         failure=ExecutionFailure(
-            statement_index=3, exception_type="E", message="m", statement_preview="SQL"
+            statement_index=3, exception_type="E", message="m", statement="SQL"
         ),
     )
 
@@ -139,7 +139,7 @@ _EXECUTION_RESULT = st.one_of(
     st.builds(
         ExecutionSucceeded,
         statement_index=st.integers(min_value=0, max_value=100),
-        statement_preview=st.just("ALTER TABLE ..."),
+        statement=st.just("ALTER TABLE ..."),
     ),
     st.builds(
         ExecutionFailed,
@@ -148,7 +148,7 @@ _EXECUTION_RESULT = st.one_of(
             statement_index=st.integers(min_value=0, max_value=100),
             exception_type=st.just("SparkException"),
             message=st.text(max_size=40),
-            statement_preview=st.just("ALTER TABLE ..."),
+            statement=st.just("ALTER TABLE ..."),
         ),
     ),
 )

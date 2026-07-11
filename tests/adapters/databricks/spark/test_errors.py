@@ -1,4 +1,4 @@
-"""Tests for backend exception translation (type name + bounded message)."""
+"""Tests for backend exception translation (type name + exact message)."""
 
 from types import SimpleNamespace
 
@@ -14,17 +14,18 @@ def test_translate_reports_python_class_and_message_for_plain_exception():
     assert details.message == "nope"
 
 
-def test_translate_truncates_message_to_first_five_lines():
-    details = translate_exception(Exception("L1\nL2\nL3\nL4\nL5\nL6\nL7"))
+def test_translate_records_multiline_messages_in_full():
+    message = "L1\nL2\nL3\nL4\nL5\nL6\nL7"
+    details = translate_exception(Exception(message))
 
-    assert details.message == "L1\nL2\nL3\nL4\nL5"
+    assert details.message == message
 
 
 def test_type_name_reports_underlying_java_class_for_py4j_error():
     # Given a Py4JJavaError whose java_exception reports a known Java class.
     # The private helper is targeted directly: rendering a real Py4JJavaError's
     # message (str()) requires a live JVM gateway, which unit tests don't have;
-    # message bounding is covered by the plain-exception tests above.
+    # message capture is covered by the plain-exception tests above.
     java_exception = SimpleNamespace(
         _target_id="o1",
         getClass=lambda: SimpleNamespace(getName=lambda: "org.apache.spark.sql.AnalysisException"),

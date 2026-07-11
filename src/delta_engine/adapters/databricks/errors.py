@@ -2,8 +2,8 @@
 Translate backend exceptions into neutral details for typed failures.
 
 Both Databricks backends reduce heterogeneous backend exceptions to the same
-two facts a failure report needs: the most informative type name and a
-bounded message. This module is the backend-free core; backend-specific
+two facts a failure report needs: the most informative type name and the
+exact message. This module is the backend-free core; backend-specific
 refinements (the Spark backend prefers the underlying Java class name for
 py4j errors) layer their own ``translate_exception`` on top of it.
 """
@@ -20,10 +20,11 @@ class ExceptionDetails:
 
 
 def translate_exception(exception: Exception) -> ExceptionDetails:
-    """Translate an exception into its Python class name and bounded message."""
-    return ExceptionDetails(type(exception).__name__, bounded_message(exception))
+    """
+    Translate an exception into its Python class name and exact message.
 
-
-def bounded_message(exception: Exception) -> str:
-    """Return the first lines of an exception message, bounded for reports."""
-    return "\n".join(str(exception).splitlines()[:5])
+    The message is ``str(exception)`` in full: what the backend raised is
+    recorded verbatim, and bounding long text (a JVM stack trace can run to
+    hundreds of lines) is display policy owned by the failure renderers.
+    """
+    return ExceptionDetails(type(exception).__name__, str(exception))
