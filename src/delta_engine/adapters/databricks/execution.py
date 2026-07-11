@@ -1,16 +1,16 @@
 """
 Shared statement-execution loop for the Databricks backends.
 
-Both backends run compiled SQL statements one at a time, stop at the first
-failure, and record bounded single-line previews on the results. Only two
-facts differ per backend — how a statement is physically run, and how its
-exceptions are summarized — so both are injected as callables.
+Both backends execute compiled SQL statements one at a time, stop at the
+first failure, and record bounded single-line previews on the results. Only
+two facts differ per backend — how a statement is physically executed, and
+how its exceptions are translated — so both are injected as callables.
 """
 
 from collections.abc import Callable, Iterable
 import logging
 
-from delta_engine.adapters.databricks.errors import ExceptionSummary
+from delta_engine.adapters.databricks.errors import ExceptionDetails
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
     ExecutionFailed,
@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 def execute_statements(
-    run: Callable[[str], object],
+    execute: Callable[[str], object],
     statements: Iterable[str],
-    summarize: Callable[[Exception], ExceptionSummary],
+    translate: Callable[[Exception], ExceptionDetails],
 ) -> ExecutionSummary:
     """
-    Run each statement in order, stopping at the first failure.
+    Execute each statement in order, stopping at the first failure.
 
     Execution stops at the first failure: the statements form a dependency
     chain, and the engine is not transactional, so continuing past a failure
@@ -38,21 +38,21 @@ def execute_statements(
     """
     results: list[ExecutionResult] = []
     for statement_index, statement in enumerate(statements):
-        result = _run_statement(run, statement_index, statement, summarize)
+        result = _execute_statement(execute, statement_index, statement, translate)
         results.append(result)
         if isinstance(result, ExecutionFailed):
             break
     return ExecutionSummary(tuple(results))
 
 
-def _run_statement(
-    run: Callable[[str], object],
+def _execute_statement(
+    execute: Callable[[str], object],
     statement_index: int,
     statement: str,
-    summarize: Callable[[Exception], ExceptionSummary],
+    translate: Callable[[Exception], ExceptionDetails],
 ) -> ExecutionResult:
     """
-    Run a single statement and map its outcome to an ``ExecutionResult``.
+    Execute a single statement and map its outcome to an ``ExecutionResult``.
 
     The broad ``except`` is intentional: each backend raises a heterogeneous
     set of failures that varies across runtime environments, and the
@@ -63,15 +63,15 @@ def _run_statement(
     """
     preview = sql_preview(statement)
     try:
-        run(statement)
+        execute(statement)
     except Exception as exception:
-        summary = summarize(exception)
-        logger.warning("Statement failed: %s\nSQL: %s", summary.message, preview)
+        details = translate(exception)
+        logger.warning("Statement failed: %s\nSQL: %s", details.message, preview)
         return ExecutionFailed(
             failure=ExecutionFailure(
                 statement_index=statement_index,
-                exception_type=summary.type_name,
-                message=summary.message,
+                exception_type=details.type_name,
+                message=details.message,
                 statement_preview=preview,
             ),
         )

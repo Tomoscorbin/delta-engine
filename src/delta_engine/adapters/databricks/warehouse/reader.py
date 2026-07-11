@@ -24,7 +24,7 @@ import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from delta_engine.adapters.databricks.errors import summarize_exception
+from delta_engine.adapters.databricks.errors import translate_exception
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     columns_query,
@@ -83,8 +83,8 @@ class WarehouseReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            summary = summarize_exception(exception)
-            return ReadFailed(failure=ReadFailure(summary.type_name, summary.message))
+            details = translate_exception(exception)
+            return ReadFailed(failure=ReadFailure(details.type_name, details.message))
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""

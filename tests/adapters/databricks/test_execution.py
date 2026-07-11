@@ -3,7 +3,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.adapters.databricks.errors import summarize_exception
+from delta_engine.adapters.databricks.errors import translate_exception
 from delta_engine.adapters.databricks.execution import execute_statements, sql_preview
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 
@@ -25,7 +25,7 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
     statements = ("SELECT 1", "SELECT * FROM __nope__")
 
     # When executing them
-    summary = execute_statements(RecordingRunner(), statements, summarize_exception)
+    summary = execute_statements(RecordingRunner(), statements, translate_exception)
 
     # Then success and failure are mapped to execution results
     results = summary.results
@@ -37,7 +37,7 @@ def test_execute_maps_success_and_failure_without_leaking_backend_exception():
 
 def test_execute_failure_records_exception_details_and_sql_preview():
     summary = execute_statements(
-        RecordingRunner(), ("SELECT * FROM __nope__",), summarize_exception
+        RecordingRunner(), ("SELECT * FROM __nope__",), translate_exception
     )
 
     [result] = summary.results
@@ -54,7 +54,7 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
     statements = ("SELECT 1", "SELECT * FROM __nope__", "SELECT 2")
 
     # When executing them
-    summary = execute_statements(runner, statements, summarize_exception)
+    summary = execute_statements(runner, statements, translate_exception)
 
     # Then the third statement is never attempted
     assert runner.executed == ["SELECT 1", "SELECT * FROM __nope__"]
@@ -65,7 +65,7 @@ def test_execute_stops_at_first_failure_to_avoid_half_migrating():
 
 
 def test_execute_returns_empty_summary_for_no_statements():
-    summary = execute_statements(RecordingRunner(), (), summarize_exception)
+    summary = execute_statements(RecordingRunner(), (), translate_exception)
     assert summary.results == ()
     assert summary.failed is False
 

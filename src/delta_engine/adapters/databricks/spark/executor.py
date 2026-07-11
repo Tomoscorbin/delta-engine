@@ -3,13 +3,13 @@ Execute compiled statements on Databricks/Spark and capture results.
 
 Compiles an `ActionPlan` to SQL statements via the shared compiler, then runs
 them through the shared stop-on-first-failure loop with Spark as the runner
-and the py4j-aware exception summariser.
+and the py4j-aware exception translation.
 """
 
 from pyspark.sql import SparkSession
 
 from delta_engine.adapters.databricks.execution import execute_statements
-from delta_engine.adapters.databricks.spark.errors import summarize_exception
+from delta_engine.adapters.databricks.spark.errors import translate_exception
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionSummary
 from delta_engine.domain.model import QualifiedName
@@ -27,5 +27,5 @@ class SparkExecutor:
         return compile_plan(qualified_name, plan)
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
-        """Run each statement in order via the shared stop-on-first-failure loop."""
-        return execute_statements(self.spark.sql, statements, summarize_exception)
+        """Execute each statement in order via the shared stop-on-first-failure loop."""
+        return execute_statements(self.spark.sql, statements, translate_exception)

@@ -10,7 +10,7 @@ from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 from pyspark.sql.types import DataType as SparkType
 
-from delta_engine.adapters.databricks.spark.errors import summarize_exception
+from delta_engine.adapters.databricks.spark.errors import translate_exception
 from delta_engine.adapters.databricks.spark.types import domain_type_from_spark
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
@@ -164,8 +164,8 @@ class SparkReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            summary = summarize_exception(exception)
-            return ReadFailed(failure=ReadFailure(summary.type_name, summary.message))
+            details = translate_exception(exception)
+            return ReadFailed(failure=ReadFailure(details.type_name, details.message))
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""

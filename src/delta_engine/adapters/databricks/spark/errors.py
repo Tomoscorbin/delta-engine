@@ -1,5 +1,5 @@
 """
-Spark-specific exception summarising: prefer the underlying Java class name.
+Spark-specific exception translation: prefer the underlying Java class name.
 
 The shared core (:mod:`delta_engine.adapters.databricks.errors`) records a
 Python class name and a bounded message. On Databricks/Spark the primary
@@ -8,12 +8,12 @@ informative fact — e.g. ``org.apache.spark.sql.AnalysisException`` rather
 than ``Py4JJavaError`` — so this backend overrides the type name only.
 """
 
-from delta_engine.adapters.databricks.errors import ExceptionSummary, bounded_message
+from delta_engine.adapters.databricks.errors import ExceptionDetails, bounded_message
 
 
-def summarize_exception(exception: Exception) -> ExceptionSummary:
-    """Summarize an exception as its most informative type name and message head."""
-    return ExceptionSummary(_exception_type_name(exception), bounded_message(exception))
+def translate_exception(exception: Exception) -> ExceptionDetails:
+    """Translate an exception using its most informative type name and message."""
+    return ExceptionDetails(_exception_type_name(exception), bounded_message(exception))
 
 
 def _exception_type_name(exception: Exception) -> str:
