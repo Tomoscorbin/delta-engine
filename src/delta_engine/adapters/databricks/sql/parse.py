@@ -203,48 +203,37 @@ class _Parser:
 
     def _read_field_name(self) -> str:
         self._skip_whitespace()
-        if self._position < len(self._text) and self._text[self._position] == "`":
-            return self._read_backticked()
+        if self._peek_char() == "`":
+            return self._read_quoted("`", "backtick-quoted name")
         return self._read_word()
 
-    def _read_backticked(self) -> str:
-        # Inside backticks a literal backtick is doubled — the inverse of
-        # dialect.backtick().
-        self._position += 1  # opening backtick
-        parts: list[str] = []
-        while self._position < len(self._text):
-            char = self._text[self._position]
-            if char == "`":
-                if self._text[self._position + 1 : self._position + 2] == "`":
-                    parts.append("`")
-                    self._position += 2
-                    continue
-                self._position += 1  # closing backtick
-                return "".join(parts)
-            parts.append(char)
-            self._position += 1
-        raise _ParseError("unterminated backtick-quoted name")
-
     def _read_string_literal(self) -> str:
-        # A single-quoted literal with '' as the escaped quote — the inverse
-        # of dialect.quote_literal().
         self._skip_whitespace()
-        if self._position >= len(self._text) or self._text[self._position] != "'":
+        if self._peek_char() != "'":
             raise _ParseError("expected a string literal")
-        self._position += 1
+        return self._read_quoted("'", "string literal")
+
+    def _read_quoted(self, quote: str, description: str) -> str:
+        # Inside the quotes a literal quote character is doubled — the
+        # inverse of dialect.backtick() / dialect.quote_literal().
+        self._position += 1  # opening quote
         parts: list[str] = []
         while self._position < len(self._text):
             char = self._text[self._position]
-            if char == "'":
-                if self._text[self._position + 1 : self._position + 2] == "'":
-                    parts.append("'")
-                    self._position += 2
-                    continue
-                self._position += 1
-                return "".join(parts)
-            parts.append(char)
             self._position += 1
-        raise _ParseError("unterminated string literal")
+            if char != quote:
+                parts.append(char)
+            elif self._peek_char() == quote:  # doubled quote: escaped literal
+                parts.append(quote)
+                self._position += 1
+            else:
+                return "".join(parts)
+        raise _ParseError(f"unterminated {description}")
+
+    def _peek_char(self) -> str | None:
+        if self._position < len(self._text):
+            return self._text[self._position]
+        return None
 
     def _read_number(self) -> int:
         self._skip_whitespace()
