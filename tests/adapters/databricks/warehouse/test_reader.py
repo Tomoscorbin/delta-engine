@@ -57,7 +57,7 @@ class DetailRow(dict):
         return dict(self)
 
 
-def detail_row(properties: str = "{}", **extra) -> DetailRow:
+def detail_row(properties: str | None = "{}", **extra) -> DetailRow:
     return DetailRow(properties=properties, **extra)
 
 
@@ -196,6 +196,12 @@ def test_properties_parsed_from_json_and_filtered_to_registry():
     connection = routed_connection(detail=detail_row(properties=properties))
     observed = fetch_present(connection).table
     assert dict(observed.properties) == {"delta.columnMapping.mode": "name"}
+
+
+def test_null_properties_field_means_no_properties():
+    connection = routed_connection(detail=detail_row(properties=None))
+    observed = fetch_present(connection).table
+    assert dict(observed.properties) == {}
 
 
 def test_clustering_columns_parsed_from_json_and_casefolded():

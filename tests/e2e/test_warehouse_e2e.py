@@ -21,7 +21,7 @@ import pytest
 databricks_sql = pytest.importorskip("databricks.sql")
 
 from delta_engine.databricks import build_sql_engine  # noqa: E402
-from delta_engine.schema import Column, DeltaTable, Integer, String  # noqa: E402
+from delta_engine.schema import Column, DeltaTable, Integer, Property, String  # noqa: E402
 
 pytestmark = pytest.mark.databricks_e2e
 
@@ -58,8 +58,10 @@ def table_name(connection):
 
 
 def test_sync_creates_reads_back_and_is_idempotent(connection, table_name):
-    # Given a declared table with a comment and clustering (exercises the
-    # JSON detail fields on the read back)
+    # Given a declared table with a comment, clustering, a primary key, a
+    # managed property, and a table tag (exercises the JSON detail fields,
+    # primary_key_from_rows, table_tags_from_rows, and the properties
+    # registry filter on the read back)
     table = DeltaTable(
         catalog=os.environ["DELTA_ENGINE_E2E_CATALOG"],
         schema=os.environ["DELTA_ENGINE_E2E_SCHEMA"],
@@ -70,6 +72,9 @@ def test_sync_creates_reads_back_and_is_idempotent(connection, table_name):
         ),
         comment="warehouse e2e table",
         clustered_by=("id",),
+        primary_key=["id"],
+        properties={Property.CHANGE_DATA_FEED: "true"},
+        tags={"owner": "warehouse-e2e"},
     )
     engine = build_sql_engine(connection)
 
@@ -101,7 +106,9 @@ def test_dry_run_previews_sql_without_executing(connection, table_name):
 
     # Then the preview holds the CREATE TABLE statement
     [table_report] = list(report)
-    assert any("CREATE TABLE" in s.upper() for s in table_report.planned_sql_statements)
+    assert any(
+        "CREATE TABLE" in statement.upper() for statement in table_report.planned_sql_statements
+    )
 
     # And nothing was created: a second dry run still finds the same drift
     followup = engine.sync(table, dry_run=True)
