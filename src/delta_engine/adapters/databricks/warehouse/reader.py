@@ -10,16 +10,15 @@ manager with ``execute``/``fetchall``), so this backend imports nothing
 beyond the shared adapter core.
 
 Complex-typed DESCRIBE DETAIL fields (the ``properties`` map,
-``clusteringColumns``) arrive as JSON strings from the connector when
-pyarrow-native complex types are not enabled — the default, and the mode
-this reader requires.
+``clusteringColumns``) arrive as JSON strings from the connector by default;
+the shared detail-row mappers accept both that shape and native values, so
+either connection mode reads correctly.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-import json
 import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -37,10 +36,12 @@ from delta_engine.adapters.databricks.sql import (
 )
 from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.adapters.databricks.sql.rows import (
+    clustering_columns_from_detail_row,
     column_tags_from_rows,
     foreign_keys_from_rows,
     managed_properties_from_mapping,
     primary_key_from_rows,
+    properties_from_detail_row,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -108,10 +109,10 @@ class WarehouseReader:
                 qualified_name=qualified_name,
                 columns=columns,
                 comment=comment,
-                properties=managed_properties_from_mapping(_json_mapping(detail.properties)),
+                properties=managed_properties_from_mapping(properties_from_detail_row(detail)),
                 tags=table_tags_from_rows(_fetch_all(cursor, table_tags_query(qualified_name))),
                 partitioned_by=_partitioned_by(column_rows),
-                clustered_by=_clustering_columns(detail),
+                clustered_by=clustering_columns_from_detail_row(detail),
                 primary_key=primary_key_from_rows(
                     _fetch_all(cursor, primary_key_query(qualified_name))
                 ),
@@ -216,24 +217,3 @@ def _partitioned_by(column_rows: Sequence[Any]) -> tuple[str, ...]:
         key=lambda row: row.partition_index,
     )
     return tuple(row.column_name.casefold() for row in partition_rows)
-
-
-def _clustering_columns(detail_row: Any) -> tuple[str, ...]:
-    """
-    Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
-
-    ``clusteringColumns`` is read via ``asDict().get`` so its absence (older
-    Delta) yields no clustering rather than breaking the read; when present
-    it is a JSON-encoded array string from the connector.
-    """
-    raw = detail_row.asDict().get("clusteringColumns")
-    if not raw:
-        return ()
-    return tuple(name.casefold() for name in json.loads(raw))
-
-
-def _json_mapping(raw: str | None) -> dict[str, str]:
-    """Decode a connector JSON-string map field (``None``/empty means empty)."""
-    if not raw:
-        return {}
-    return json.loads(raw)

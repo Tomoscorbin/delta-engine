@@ -4,8 +4,8 @@ and fetch_state's totality.
 
 The fake connection routes cursor.execute() by EXACT query text (keyed by the
 same builders the reader uses), so no fake ever parses SQL. Rows are
-SimpleNamespace/dict stand-ins for databricks-sql Row objects, which support
-attribute access, item access, and asDict().
+attribute-style stand-ins for databricks-sql Row objects, matching how the
+shared mappers access them (attributes plus asDict()).
 """
 
 from types import SimpleNamespace
@@ -226,7 +226,7 @@ def test_empty_describe_detail_fails_the_read():
 def test_primary_key_and_tags_are_wired_through_the_shared_mappers():
     connection = routed_connection(
         columns=[column_row("id", is_nullable="NO")],
-        pk=[{"constraint_name": "PK_TBL", "column_name": "ID"}],
+        pk=[SimpleNamespace(constraint_name="PK_TBL", column_name="ID")],
         table_tags=[SimpleNamespace(tag_name="Owner", tag_value="Data")],
         column_tags=[
             SimpleNamespace(column_name="ID", tag_name="pii", tag_value="low"),

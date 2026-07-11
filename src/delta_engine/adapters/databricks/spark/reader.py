@@ -22,10 +22,12 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
+    clustering_columns_from_detail_row,
     column_tags_from_rows,
     foreign_keys_from_rows,
     managed_properties_from_mapping,
     primary_key_from_rows,
+    properties_from_detail_row,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -125,21 +127,6 @@ def _to_column_mapping(
     )
 
 
-def _clustering_columns_from_row(row: Row) -> tuple[str, ...]:
-    """
-    Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
-
-    ``clusteringColumns`` is a Delta 4.x DESCRIBE DETAIL field. Absence is handled
-    gracefully via ``asDict().get`` — DESCRIBE DETAIL is read for every table, so a
-    missing field (older Delta) must yield no clustering rather than break the read.
-    Names are casefolded to match the domain's lowercase columns.
-    """
-    columns = row.asDict().get("clusteringColumns")
-    if not columns:
-        return ()
-    return tuple(name.casefold() for name in columns)
-
-
 class SparkReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
@@ -193,14 +180,14 @@ class SparkReader:
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=managed_properties_from_mapping(dict(detail_row["properties"])),
+            properties=managed_properties_from_mapping(properties_from_detail_row(detail_row)),
             tags=table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
             partitioned_by=tuple(
                 mapping.column.name for mapping in mappings if mapping.is_partition
             ),
-            clustered_by=_clustering_columns_from_row(detail_row),
+            clustered_by=clustering_columns_from_detail_row(detail_row),
             primary_key=primary_key_from_rows(
                 self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),

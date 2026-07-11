@@ -1,10 +1,10 @@
 """
-Direct tests for the shared information_schema row -> domain mappers.
+Direct tests for the shared catalog row -> domain mappers.
 
-No Spark session, no fakes: mappers take plain rows (dicts for primary-key
-rows, attribute-style objects for FK/tag rows — matching how the real query
-results are accessed) and a plain mapping for properties, returning domain
-values.
+No Spark session, no fakes: mappers take plain attribute-style rows —
+matching how the real query results are accessed — and return domain values.
+DESCRIBE DETAIL rows use pyspark ``Row`` so the duck-typed contract
+(attribute access plus ``asDict()``) is pinned against a real Row type.
 """
 
 from types import SimpleNamespace
@@ -13,10 +13,12 @@ from pyspark.sql import Row
 import pytest
 
 from delta_engine.adapters.databricks.sql.rows import (
+    clustering_columns_from_detail_row,
     column_tags_from_rows,
     foreign_keys_from_rows,
     managed_properties_from_mapping,
     primary_key_from_rows,
+    properties_from_detail_row,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -56,8 +58,8 @@ def test_primary_key_mapper_returns_none_for_no_rows():
 
 def test_primary_key_mapper_lowercases_constraint_and_column_names():
     rows = [
-        {"constraint_name": "PK_T", "column_name": "TENANT_ID"},
-        {"constraint_name": "PK_T", "column_name": "Id"},
+        Row(constraint_name="PK_T", column_name="TENANT_ID"),
+        Row(constraint_name="PK_T", column_name="Id"),
     ]
     assert primary_key_from_rows(rows) == PrimaryKeyConstraint(
         columns=("tenant_id", "id"), constraint_name="pk_t"
@@ -201,3 +203,34 @@ def test_properties_mapper_returns_empty_read_only_mapping_for_empty_map():
     assert dict(properties) == {}
     with pytest.raises(TypeError):
         properties["x"] = "y"  # type: ignore[index]
+
+
+# ---------- DESCRIBE DETAIL: properties + clustering ----------
+
+
+def test_detail_properties_accepts_json_string_and_native_mapping():
+    native = Row(properties={"delta.enableChangeDataFeed": "true"})
+    encoded = Row(properties='{"delta.enableChangeDataFeed": "true"}')
+
+    expected = {"delta.enableChangeDataFeed": "true"}
+    assert properties_from_detail_row(native) == expected
+    assert properties_from_detail_row(encoded) == expected
+
+
+def test_detail_properties_null_or_empty_means_no_properties():
+    assert properties_from_detail_row(Row(properties=None)) == {}
+    assert properties_from_detail_row(Row(properties="{}")) == {}
+
+
+def test_detail_clustering_accepts_json_string_and_native_array_and_casefolds():
+    native = Row(clusteringColumns=["Region", "STORE"])
+    encoded = Row(clusteringColumns='["Region", "STORE"]')
+
+    assert clustering_columns_from_detail_row(native) == ("region", "store")
+    assert clustering_columns_from_detail_row(encoded) == ("region", "store")
+
+
+def test_detail_clustering_absent_field_or_empty_array_means_unclustered():
+    assert clustering_columns_from_detail_row(Row(properties={})) == ()
+    assert clustering_columns_from_detail_row(Row(clusteringColumns=[])) == ()
+    assert clustering_columns_from_detail_row(Row(clusteringColumns="[]")) == ()

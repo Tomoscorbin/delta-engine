@@ -1,11 +1,12 @@
 """
 Direct tests for the reader's Spark-specific row -> domain mappers.
 
-No fakes: ``_clustering_columns_from_row`` takes a plain DESCRIBE DETAIL row
-and returns a domain value directly.
+The clustering tests exercise the shared ``clustering_columns_from_detail_row``
+with real pyspark ``Row`` objects, pinning the duck-typed row contract against
+the genuine Spark shape.
 
-The column-mapping tests below are the exception: ``_to_column_mapping`` parses
-each Spark DDL type string through ``SparkType.fromDDL``, which needs a live
+The column-mapping tests below need more: ``_to_column_mapping`` parses each
+Spark DDL type string through ``SparkType.fromDDL``, which needs a live
 SparkSession, so those tests request the ``spark`` fixture directly.
 """
 
@@ -15,11 +16,8 @@ from pyspark.sql import Row
 from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
-from delta_engine.adapters.databricks.spark.reader import (
-    SparkReader,
-    _clustering_columns_from_row,
-    _to_column_mapping,
-)
+from delta_engine.adapters.databricks.spark.reader import SparkReader, _to_column_mapping
+from delta_engine.adapters.databricks.sql.rows import clustering_columns_from_detail_row
 from delta_engine.application.ports import ReadFailed
 from delta_engine.domain.model import QualifiedName
 
@@ -28,17 +26,17 @@ def test_clustering_columns_mapper_returns_empty_when_field_absent():
     # Given a DESCRIBE DETAIL row from an older Delta without the field
     row = Row(properties={})
     # Then no clustering is reported (must not break reads of non-clustered tables)
-    assert _clustering_columns_from_row(row) == ()
+    assert clustering_columns_from_detail_row(row) == ()
 
 
 def test_clustering_columns_mapper_returns_empty_for_empty_array():
     row = Row(clusteringColumns=[])
-    assert _clustering_columns_from_row(row) == ()
+    assert clustering_columns_from_detail_row(row) == ()
 
 
 def test_clustering_columns_mapper_lowercases_names():
     row = Row(clusteringColumns=["Region", "STORE"])
-    assert _clustering_columns_from_row(row) == ("region", "store")
+    assert clustering_columns_from_detail_row(row) == ("region", "store")
 
 
 # ---------- column mapping ----------

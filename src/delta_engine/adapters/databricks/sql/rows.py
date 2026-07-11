@@ -1,12 +1,13 @@
 """
-Map information_schema rows to domain values.
+Map catalog result rows to domain values.
 
-The row-mapping counterpart of :mod:`queries`: each query builder there has
+The row-mapping counterpart of :mod:`queries`, covering information_schema
+queries and DESCRIBE DETAIL: each query builder there has
 its mapper here, so the row shape a query produces and the domain value it
 becomes are defined in one shared place. Rows are duck-typed catalog rows —
-pyspark ``Row`` or databricks-sql ``Row`` — accessed only by attribute and
-``row["name"]`` item lookups, which both support; this module stays
-PySpark-free like the rest of the package.
+pyspark ``Row`` or databricks-sql ``Row`` — accessed only by attribute
+lookups and ``asDict()``, which both support; this module stays PySpark-free
+like the rest of the package.
 
 Identifier fields (constraint, column, table names) are casefolded here:
 the domain model requires lowercase identifiers, and normalising at the
@@ -16,6 +17,7 @@ and values are case-sensitive and preserved verbatim.
 
 from collections.abc import Iterable, Mapping, Sequence
 from itertools import groupby
+import json
 from types import MappingProxyType
 from typing import Any
 
@@ -35,10 +37,10 @@ def primary_key_from_rows(rows: Sequence[Any]) -> PrimaryKeyConstraint | None:
     The query orders rows by ordinal_position, so the columns tuple is in
     key order.
     """
-    columns = tuple(row["column_name"].casefold() for row in rows)
+    columns = tuple(row.column_name.casefold() for row in rows)
     if not columns:
         return None
-    constraint_name = rows[0]["constraint_name"].casefold()
+    constraint_name = rows[0].constraint_name.casefold()
     return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
 
 
@@ -125,3 +127,40 @@ def managed_properties_from_mapping(properties: Mapping[str, str]) -> MappingPro
     """
     managed = {name: value for name, value in properties.items() if name in DELTA_PROPERTY_REGISTRY}
     return MappingProxyType(managed)
+
+
+def properties_from_detail_row(row: Any) -> dict[str, str]:
+    """
+    Return the ``properties`` map from a DESCRIBE DETAIL row.
+
+    Accepts both physical shapes the field arrives in: a native mapping
+    (Spark rows, arrow-native connector results) or a JSON-encoded object
+    string (databricks-sql-connector without arrow-native complex types).
+    A NULL/empty field means no properties; a *missing* field raises,
+    because DESCRIBE DETAIL always carries ``properties`` for a Delta table
+    and its absence is a read gone wrong, not an empty map.
+    """
+    raw = row.properties
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return dict(raw)
+
+
+def clustering_columns_from_detail_row(row: Any) -> tuple[str, ...]:
+    """
+    Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
+
+    ``clusteringColumns`` is read via ``asDict().get`` so its absence (older
+    Delta) yields no clustering rather than breaking the read. The value
+    arrives as a native array (Spark rows, arrow-native connector results)
+    or a JSON-encoded array string (databricks-sql-connector without
+    arrow-native complex types); both are accepted. Names are casefolded to
+    match the domain's lowercase columns.
+    """
+    raw = row.asDict().get("clusteringColumns")
+    if not raw:
+        return ()
+    names = json.loads(raw) if isinstance(raw, str) else raw
+    return tuple(name.casefold() for name in names)
