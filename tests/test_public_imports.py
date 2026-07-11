@@ -117,18 +117,25 @@ def test_databricks_import_path_exposes_backend_entry_points():
     assert isinstance(engine, Engine)
     assert set(databricks.__all__) == {
         "build_spark_engine",
+        "build_sql_engine",
         "configure_logging",
     }
+
+    class _DummyConnection:
+        """Stand-in for a databricks.sql Connection; only stored by the factory."""
+
+    sql_engine = databricks.build_sql_engine(_DummyConnection())
+    assert isinstance(sql_engine, Engine)
 
 
 def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pyspark():
     # Given an interpreter where pyspark cannot be imported
     program = (
-        "import sys; sys.modules['pyspark'] = None\n"
+        "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
         "from delta_engine.schema import Column, DeltaTable, Integer\n"
         "from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus\n"
         "from delta_engine.databricks import (\n"
-        "    build_spark_engine, configure_logging,\n"
+        "    build_spark_engine, build_sql_engine, configure_logging,\n"
         ")\n"
         "print('ok')\n"
     )
@@ -140,6 +147,24 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     # Then no PySpark import is required until a Databricks factory is called
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+
+
+def test_build_sql_engine_does_not_require_the_connector_or_pyspark():
+    # Given an interpreter where neither pyspark nor databricks-sql can be imported
+    program = (
+        "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
+        "from delta_engine.databricks import build_sql_engine\n"
+        "class DummyConnection: pass\n"
+        "engine = build_sql_engine(DummyConnection())\n"
+        "print(type(engine).__name__)\n"
+    )
+
+    # When building a warehouse engine around a duck-typed connection
+    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
+
+    # Then the whole warehouse backend imports and wires without either dependency
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "Engine"
 
 
 def test_logging_configuration_imports_and_runs_without_pyspark_installed():

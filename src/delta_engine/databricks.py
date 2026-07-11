@@ -2,8 +2,9 @@
 Public Databricks entry points.
 
 The implementation lives in ``delta_engine.adapters.databricks``. This module
-keeps the user-facing Databricks import path short while preserving lazy PySpark
-imports for code that only declares schemas or inspects result types.
+keeps the user-facing Databricks import path short while preserving lazy
+backend imports (PySpark, databricks-sql-connector) for code that only
+declares schemas or inspects result types.
 """
 
 from __future__ import annotations
@@ -14,9 +15,10 @@ from typing import TYPE_CHECKING, TextIO
 from delta_engine.application.engine import Engine
 
 if TYPE_CHECKING:
+    from databricks.sql.client import Connection
     from pyspark.sql import SparkSession
 
-__all__ = ["build_spark_engine", "configure_logging"]
+__all__ = ["build_spark_engine", "build_sql_engine", "configure_logging"]
 
 
 def build_spark_engine(spark: SparkSession) -> Engine:
@@ -24,6 +26,19 @@ def build_spark_engine(spark: SparkSession) -> Engine:
     from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
 
     return _build_engine(spark)
+
+
+def build_sql_engine(connection: Connection) -> Engine:
+    """
+    Create an engine that syncs through a Databricks SQL warehouse connection.
+
+    PySpark-free: pass a connection from ``databricks.sql.connect(...)``
+    (the ``delta-engine[sql]`` extra) and syncs run from any plain Python
+    environment. Unity Catalog only.
+    """
+    from delta_engine.adapters.databricks.warehouse.factory import build_engine as _build_engine
+
+    return _build_engine(connection)
 
 
 def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:
