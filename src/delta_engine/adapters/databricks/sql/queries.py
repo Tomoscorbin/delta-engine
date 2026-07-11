@@ -179,3 +179,42 @@ def information_schema_probe_query(catalog: str) -> str:
     keeps it free — the planner still resolves the view, which is the test.
     """
     return f"SELECT 1 FROM {backtick(catalog)}.information_schema.schemata WHERE 1 = 0"
+
+
+def table_row_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema query for a table's ``tables`` row.
+
+    One row when the table exists — carrying its comment — and no rows when
+    it does not: the warehouse reader's existence probe and comment fetch in
+    a single query. Views also have a ``tables`` row; the warehouse reader
+    inherits the Spark reader's behaviour of discovering them later in the
+    read (DESCRIBE DETAIL fails), pending the roadmap's read-guard item.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT comment"
+        f" FROM {catalog}.information_schema.tables"
+        f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND table_name = {quote_literal(qualified_name.name)}"
+    )
+
+
+def columns_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema query for a table's columns.
+
+    ``full_data_type`` is the DDL string the shared type parser consumes;
+    ``partition_index`` (1-based, NULL for non-partition columns) recovers
+    partition order without a DESCRIBE round trip. Ordered by
+    ``ordinal_position`` so the observed column tuple preserves the table's
+    column order.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT column_name, full_data_type, is_nullable, comment, partition_index"
+        f" FROM {catalog}.information_schema.columns"
+        f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND table_name = {quote_literal(qualified_name.name)}"
+        f" ORDER BY ordinal_position"
+    )

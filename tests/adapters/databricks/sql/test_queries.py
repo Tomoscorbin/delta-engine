@@ -2,11 +2,13 @@
 
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
+    columns_query,
     describe_detail_query,
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    table_row_query,
     table_tags_query,
 )
 from delta_engine.domain.model import QualifiedName
@@ -136,3 +138,29 @@ def test_information_schema_probe_query_golden():
     assert information_schema_probe_query("cat") == (
         "SELECT 1 FROM `cat`.information_schema.schemata WHERE 1 = 0"
     )
+
+
+def test_table_row_query_golden():
+    assert table_row_query(QN) == (
+        "SELECT comment"
+        " FROM `cat`.information_schema.tables"
+        " WHERE table_schema = 'sch'"
+        " AND table_name = 'tbl'"
+    )
+
+
+def test_columns_query_golden():
+    assert columns_query(QN) == (
+        "SELECT column_name, full_data_type, is_nullable, comment, partition_index"
+        " FROM `cat`.information_schema.columns"
+        " WHERE table_schema = 'sch'"
+        " AND table_name = 'tbl'"
+        " ORDER BY ordinal_position"
+    )
+
+
+def test_new_queries_quote_identifiers_and_escape_literals():
+    tricky = QualifiedName("c`at", "s'ch", "t'bl")
+    assert "`c``at`" in table_row_query(tricky)
+    assert "'s''ch'" in columns_query(tricky)
+    assert "'t''bl'" in columns_query(tricky)

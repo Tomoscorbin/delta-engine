@@ -17,11 +17,13 @@ from delta_engine.adapters.databricks.sql.dialect import (
 from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
+    columns_query,
     describe_detail_query,
     foreign_keys_query,
     information_schema_probe_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    table_row_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
@@ -30,6 +32,7 @@ __all__ = [
     "backtick",
     "backtick_qualified_name",
     "column_tags_query",
+    "columns_query",
     "compile_plan",
     "describe_detail_query",
     "foreign_keys_query",
@@ -39,5 +42,6 @@ __all__ = [
     "quote_literal",
     "referencing_foreign_keys_query",
     "sql_type_for_data_type",
+    "table_row_query",
     "table_tags_query",
 ]
