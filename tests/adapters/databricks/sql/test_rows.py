@@ -16,9 +16,8 @@ from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
     column_tags_from_rows,
     foreign_keys_from_rows,
-    managed_properties_from_mapping,
+    managed_properties_from_detail_row,
     primary_key_from_rows,
-    properties_from_detail_row,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -186,26 +185,18 @@ def test_column_tags_mapper_lowercases_column_names_but_preserves_tag_case():
     assert dict(tags["id"]) == {"key": "primary"}
 
 
-# ---------- properties ----------
-
-
-def test_properties_mapper_filters_to_registered_keys():
-    properties = {
-        "delta.columnMapping.mode": "name",
-        "delta.minReaderVersion": "2",
-        "custom.unlisted": "dropped",
-    }
-    assert dict(managed_properties_from_mapping(properties)) == {"delta.columnMapping.mode": "name"}
-
-
-def test_properties_mapper_returns_empty_read_only_mapping_for_empty_map():
-    properties = managed_properties_from_mapping({})
-    assert dict(properties) == {}
-    with pytest.raises(TypeError):
-        properties["x"] = "y"  # type: ignore[index]
-
-
 # ---------- DESCRIBE DETAIL: properties + clustering ----------
+
+
+def test_detail_properties_filter_to_registered_keys():
+    row = Row(
+        properties={
+            "delta.columnMapping.mode": "name",
+            "delta.minReaderVersion": "2",
+            "custom.unlisted": "dropped",
+        }
+    )
+    assert dict(managed_properties_from_detail_row(row)) == {"delta.columnMapping.mode": "name"}
 
 
 def test_detail_properties_accepts_json_string_and_native_mapping():
@@ -213,13 +204,16 @@ def test_detail_properties_accepts_json_string_and_native_mapping():
     encoded = Row(properties='{"delta.enableChangeDataFeed": "true"}')
 
     expected = {"delta.enableChangeDataFeed": "true"}
-    assert properties_from_detail_row(native) == expected
-    assert properties_from_detail_row(encoded) == expected
+    assert dict(managed_properties_from_detail_row(native)) == expected
+    assert dict(managed_properties_from_detail_row(encoded)) == expected
 
 
 def test_detail_properties_null_or_empty_means_no_properties():
-    assert properties_from_detail_row(Row(properties=None)) == {}
-    assert properties_from_detail_row(Row(properties="{}")) == {}
+    properties = managed_properties_from_detail_row(Row(properties=None))
+    assert dict(properties) == {}
+    assert dict(managed_properties_from_detail_row(Row(properties="{}"))) == {}
+    with pytest.raises(TypeError):
+        properties["x"] = "y"  # type: ignore[index]
 
 
 def test_detail_clustering_accepts_json_string_and_native_array_and_casefolds():

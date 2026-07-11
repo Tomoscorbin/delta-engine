@@ -25,9 +25,8 @@ from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
     column_tags_from_rows,
     foreign_keys_from_rows,
-    managed_properties_from_mapping,
+    managed_properties_from_detail_row,
     primary_key_from_rows,
-    properties_from_detail_row,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -179,7 +178,7 @@ class SparkReader:
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=managed_properties_from_mapping(properties_from_detail_row(detail_row)),
+            properties=managed_properties_from_detail_row(detail_row),
             tags=table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),

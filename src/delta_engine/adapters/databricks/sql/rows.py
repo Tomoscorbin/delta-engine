@@ -15,7 +15,7 @@ adapter boundary keeps that impedance mismatch out of the domain. Tag keys
 and values are case-sensitive and preserved verbatim.
 """
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from itertools import groupby
 import json
 from types import MappingProxyType
@@ -116,30 +116,30 @@ def column_tags_from_rows(
     return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})
 
 
-def managed_properties_from_mapping(properties: Mapping[str, str]) -> MappingProxyType[str, str]:
+def managed_properties_from_detail_row(row: Any) -> MappingProxyType[str, str]:
     """
-    Filter observed table properties to the managed registry keys.
+    Return a DESCRIBE DETAIL row's properties, filtered to the managed registry keys.
 
     Platform-written keys (protocol bookkeeping, auto-enabled features,
     internal counters) never reach the domain, so they can neither trip
     validation nor churn plans. This is backend normalization, owned at the
     adapter boundary like identifier lowercasing and type parsing.
+
+    The ``properties`` field is accepted in both physical shapes it arrives
+    in: a native mapping (Spark rows, arrow-native connector results) or a
+    JSON-encoded object string (databricks-sql-connector without
+    arrow-native complex types). A NULL/empty field means no properties; a
+    *missing* field raises, because DESCRIBE DETAIL always carries
+    ``properties`` for a Delta table and its absence is a read gone wrong,
+    not an empty map.
     """
+    properties = _properties_from_detail_row(row)
     managed = {name: value for name, value in properties.items() if name in DELTA_PROPERTY_REGISTRY}
     return MappingProxyType(managed)
 
 
-def properties_from_detail_row(row: Any) -> dict[str, str]:
-    """
-    Return the ``properties`` map from a DESCRIBE DETAIL row.
-
-    Accepts both physical shapes the field arrives in: a native mapping
-    (Spark rows, arrow-native connector results) or a JSON-encoded object
-    string (databricks-sql-connector without arrow-native complex types).
-    A NULL/empty field means no properties; a *missing* field raises,
-    because DESCRIBE DETAIL always carries ``properties`` for a Delta table
-    and its absence is a read gone wrong, not an empty map.
-    """
+def _properties_from_detail_row(row: Any) -> dict[str, str]:
+    """Return the raw ``properties`` map from a DESCRIBE DETAIL row."""
     raw = row.properties
     if not raw:
         return {}
