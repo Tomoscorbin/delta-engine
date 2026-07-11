@@ -1,8 +1,8 @@
 import io
 import logging
 
-from delta_engine.adapters.databricks.spark.factory import build_engine
 from delta_engine.adapters.databricks.log_config import LevelColorFormatter, configure_logging
+from delta_engine.adapters.databricks.spark.factory import build_engine
 from delta_engine.application.engine import Engine
 
 

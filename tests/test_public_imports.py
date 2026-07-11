@@ -113,10 +113,10 @@ def test_databricks_import_path_exposes_backend_entry_points():
     from delta_engine.application import Engine
 
     # Then the shorter factory name builds the same wired Engine
-    engine = databricks.build_engine(_DummySpark())
+    engine = databricks.build_spark_engine(_DummySpark())
     assert isinstance(engine, Engine)
     assert set(databricks.__all__) == {
-        "build_engine",
+        "build_spark_engine",
         "configure_logging",
     }
 
@@ -128,7 +128,7 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
         "from delta_engine.schema import Column, DeltaTable, Integer\n"
         "from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus\n"
         "from delta_engine.databricks import (\n"
-        "    build_engine, configure_logging,\n"
+        "    build_spark_engine, configure_logging,\n"
         ")\n"
         "print('ok')\n"
     )
