@@ -109,6 +109,16 @@ def test_struct_field_names_may_be_backticked():
     )
 
 
+def test_pathologically_nested_type_is_unmappable_rather_than_raising():
+    assert parse_data_type("array<" * 10_000 + "int" + ">" * 10_000) is None
+
+
+def test_backticked_field_names_unescape_doubled_backticks():
+    assert parse_data_type("struct<`weird``name`: int>") == Struct(
+        (StructField("weird`name", Integer()),)
+    )
+
+
 def test_struct_tolerates_and_discards_not_null_and_comment_clauses():
     # Field nullability and comments are deliberately not modeled (StructField).
     assert parse_data_type("struct<a int NOT NULL COMMENT 'primary id', b string>") == Struct(

@@ -87,12 +87,13 @@ def parse_data_type(ddl: str) -> DataType | None:
     same treatment (skip with a warning). Domain constructor rejections —
     e.g. a decimal precision over the Delta limit — also yield ``None``:
     a type the domain refuses to represent is unmappable, not a crash.
+    Pathological nesting depth is also treated as unmappable.
     """
     parser = _Parser(ddl)
     try:
         data_type = parser.parse_type()
         parser.expect_end()
-    except (_ParseError, ValueError):
+    except (_ParseError, ValueError, RecursionError):
         return None
     return data_type
 
