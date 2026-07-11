@@ -31,7 +31,11 @@ class WarehouseExecutor:
         self._connection = connection
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-        """Compile ``plan`` to its SQL statements in execution order, without touching the warehouse."""
+        """
+        Compile ``plan`` to its SQL statements in execution order.
+
+        Does not touch the warehouse.
+        """
         return compile_plan(qualified_name, plan)
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
