@@ -24,7 +24,7 @@ dynamic = ["version"]
 dependencies = []
 
 [project.optional-dependencies]
-databricks = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
+spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
@@ -190,7 +190,7 @@ layers = ["databricks | schema | adapters | api", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
-  "delta_engine.databricks -> delta_engine.adapters.databricks.factory",
+  "delta_engine.databricks -> delta_engine.adapters.databricks.spark.factory",
   "delta_engine.databricks -> delta_engine.adapters.databricks.log_config",
   # Public schema facade: DeltaTable/ForeignKey/Self live in api.delta_table
   # (same layer, so the facade edge is exempted). Property is imported downward
@@ -209,6 +209,20 @@ source_modules = [
   "delta_engine.domain",
 ]
 forbidden_modules = ["delta", "pyspark"]
+
+[[tool.importlinter.contracts]]
+id = "shared-sql-core-is-backend-free"
+name = "Shared SQL core stays PySpark-free"
+type = "forbidden"
+source_modules = ["delta_engine.adapters.databricks.sql"]
+forbidden_modules = ["delta", "pyspark", "py4j"]
+
+[[tool.importlinter.contracts]]
+id = "databricks-backends-above-shared-sql"
+name = "Databricks backends sit above the shared SQL core"
+type = "layers"
+containers = ["delta_engine.adapters.databricks"]
+layers = ["spark", "sql"]
 
 
 # -------------------- MyPy --------------------

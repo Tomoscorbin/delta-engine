@@ -1,5 +1,5 @@
 """
-SQL generation and type mapping for the Databricks adapter.
+SQL generation and type rendering for the Databricks adapter.
 
 This package's adapter-internal surface is re-exported here: callers such as
 ``reader`` and ``executor`` import from ``delta_engine.adapters.databricks.sql``
@@ -23,10 +23,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     referencing_foreign_keys_query,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.types import (
-    domain_type_from_spark,
-    sql_type_for_data_type,
-)
+from delta_engine.adapters.databricks.sql.types import sql_type_for_data_type
 
 __all__ = [
     "backtick",
@@ -34,7 +31,6 @@ __all__ = [
     "column_tags_query",
     "compile_plan",
     "describe_detail_query",
-    "domain_type_from_spark",
     "foreign_keys_query",
     "information_schema_probe_query",
     "primary_key_query",

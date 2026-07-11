@@ -16,12 +16,12 @@ from delta_engine.application.engine import Engine
 if TYPE_CHECKING:
     from pyspark.sql import SparkSession
 
-__all__ = ["build_engine", "configure_logging"]
+__all__ = ["build_spark_engine", "configure_logging"]
 
 
-def build_engine(spark: SparkSession) -> Engine:
-    """Create an engine configured for Databricks."""
-    from delta_engine.adapters.databricks.factory import build_engine as _build_engine
+def build_spark_engine(spark: SparkSession) -> Engine:
+    """Create an engine that syncs through an active Spark session."""
+    from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
 
     return _build_engine(spark)
 

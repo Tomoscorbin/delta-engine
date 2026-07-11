@@ -22,7 +22,7 @@ myst_fence_as_directive = ["mermaid"]
 html_theme = "furo"
 html_title = "delta-engine"
 
-# Show object titles as short names (build_engine, class Engine) rather than
+# Show object titles as short names (build_spark_engine, class Engine) rather than
 # the fully-qualified definition path. This does not shorten type annotations
 # that resolve to hidden internal modules; those still show their full path.
 add_module_names = False

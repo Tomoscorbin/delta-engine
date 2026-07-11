@@ -6,7 +6,7 @@ computes the difference, checks that the difference is safe to apply, and runs
 exactly the DDL needed to close the gap.
 
 ```python
-from delta_engine.databricks import build_engine
+from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
 
 customers = DeltaTable(
@@ -19,7 +19,7 @@ customers = DeltaTable(
     ],
 )
 
-engine = build_engine(spark)
+engine = build_spark_engine(spark)
 engine.sync(customers)  # creates the table, or no-ops if it already matches
 ```
 
@@ -34,7 +34,7 @@ pip install delta-engine
 
 Declaring and planning schemas is pure Python; running a sync needs a Databricks
 environment, which provides Spark and Delta. See [Installation](installation.md)
-for the `[databricks]` extra used for local development.
+for the `[spark]` extra used for local development.
 
 ## What a sync does
 

@@ -4,8 +4,8 @@ from uuid import uuid4
 import pyspark.sql.types as T
 import pytest
 
-from delta_engine.adapters.databricks.executor import DatabricksExecutor
-from delta_engine.adapters.databricks.reader import DatabricksReader
+from delta_engine.adapters.databricks.spark.executor import SparkExecutor
+from delta_engine.adapters.databricks.spark.reader import SparkReader
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import SyncFailedError
 from delta_engine.application.failures import ValidationFailure
@@ -20,7 +20,7 @@ def test_engine_sync_happy_path(spark, temp_schema):
     # Given a desired table definition in an empty temp schema
     table_name = f"e2e_happy_{uuid4().hex[:8]}"
 
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When we sync
     report = engine.sync(
@@ -68,7 +68,7 @@ def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, temp_sche
     )
 
     # And a desired definition that drops `to_remove` and adds `age` (nullable)
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When we sync desired -> observed
     engine.sync(
@@ -122,7 +122,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, temp_schema):
     )
 
     # And a desired definition that adds a NOT NULL column 'age' (should fail validation)
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When we sync desired -> observed
     with pytest.raises(SyncFailedError) as excinfo:
@@ -166,7 +166,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
             comment="idempotency test",
         )
     ]
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     engine.sync(*tables)
 
@@ -181,7 +181,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
 def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp_schema):
     table_name = f"lifecycle_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     initial = DeltaTable(
         TEST_CATALOG,
@@ -244,7 +244,7 @@ def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, 
         tblprops={"delta.columnMapping.mode": "name"},
     )
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
     engine.sync(
         DeltaTable(
             TEST_CATALOG,
@@ -265,7 +265,7 @@ def test_engine_creates_partitioned_table_with_expected_partitions(spark, temp_s
     table_name = f"part_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
     engine.sync(
         DeltaTable(
             TEST_CATALOG,
@@ -303,7 +303,7 @@ def test_engine_isolates_failures_and_applies_successful_tables(spark, temp_sche
         " USING DELTA TBLPROPERTIES ('delta.columnMapping.mode'='name')"
     )
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(
             DeltaTable(
@@ -344,7 +344,7 @@ def test_engine_metadata_scope_applies_comments_when_schema_matches(spark, temp_
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(f"CREATE TABLE {fq} (id INT) USING DELTA")
 
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When syncing a metadata-only definition
     report = engine.sync(
@@ -373,7 +373,7 @@ def test_engine_metadata_scope_fails_when_column_type_has_drifted(spark, temp_sc
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(f"CREATE TABLE {fq} (id BIGINT) USING DELTA")  # BIGINT, declared as INT
 
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When syncing a metadata-only definition that declares id as Integer
     with pytest.raises(SyncFailedError) as exc_info:
@@ -402,7 +402,7 @@ def test_engine_unsets_property_declared_absent(spark, temp_schema):
         " TBLPROPERTIES ('delta.enableChangeDataFeed'='true')"
     )
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     # When syncing a declaration stating the key must be absent
     engine.sync(
@@ -429,7 +429,7 @@ def test_engine_fails_loud_on_undeclared_column_mapping(spark, temp_schema):
         " TBLPROPERTIES ('delta.columnMapping.mode'='name')"
     )
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     # When / Then the sync fails at validation, naming the property
     with pytest.raises(SyncFailedError) as excinfo:
@@ -455,7 +455,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
         " TBLPROPERTIES ('delta.appendOnly'='false')"
     )
 
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     # When syncing a declaration that says nothing about properties
     report = engine.sync(
@@ -488,7 +488,7 @@ def test_engine_property_sync_is_idempotent(spark, temp_schema):
             "delta.logRetentionDuration": "interval 30 days",
         },
     )
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
     engine.sync(declaration)
     detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
     assert detail["properties"].get("delta.enableChangeDataFeed") == "true"
@@ -505,7 +505,7 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
     # Given a clustered table declaration
     table_name = f"cluster_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
-    engine = Engine(DatabricksReader(spark), DatabricksExecutor(spark))
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
 
     def _clustering_columns() -> list[str]:
         detail = spark.sql(f"DESCRIBE DETAIL {fq}").collect()[0]
@@ -560,7 +560,7 @@ def test_engine_sync_widens_column_types_with_type_widening_declared(spark, temp
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     spark.sql(f"CREATE TABLE {fq} (id INT, amount DECIMAL(10,2), ratio INT) USING DELTA")
 
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When we sync a declaration widening each column, enabling widening in the same sync
     # (amount grows scale with precision; ratio crosses to Double)
@@ -591,7 +591,7 @@ def test_dry_run_report_is_ci_consumable(spark, temp_schema):
     table_name = f"e2e_dry_ci_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
 
-    engine = Engine(reader=DatabricksReader(spark), executor=DatabricksExecutor(spark))
+    engine = Engine(reader=SparkReader(spark), executor=SparkExecutor(spark))
 
     # When we sync as a dry run
     report = engine.sync(

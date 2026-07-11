@@ -10,7 +10,7 @@ import logging
 
 from pyspark.sql import SparkSession
 
-from delta_engine.adapters.databricks.errors import summarize_exception
+from delta_engine.adapters.databricks.spark.errors import summarize_exception
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
@@ -25,7 +25,7 @@ from delta_engine.domain.plan import ActionPlan
 logger = logging.getLogger(__name__)
 
 
-class DatabricksExecutor:
+class SparkExecutor:
     """Plan executor that compiles plans to SQL and runs them via a Spark session."""
 
     def __init__(self, spark: SparkSession) -> None:

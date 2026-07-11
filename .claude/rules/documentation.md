@@ -79,7 +79,7 @@ Use public import paths in user-facing examples:
 
 ```python
 from delta_engine.schema import DeltaTable
-from delta_engine.databricks import build_engine
+from delta_engine.databricks import build_spark_engine
 ```
 
 Avoid examples that import from internal modules unless the doc is explicitly for contributors.

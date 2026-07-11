@@ -340,7 +340,7 @@ name = "delta-engine"
 source = { editable = "." }
 
 [package.optional-dependencies]
-databricks = [
+spark = [
     { name = "delta-spark" },
     { name = "pyspark" },
 ]
@@ -370,10 +370,10 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "delta-spark", marker = "extra == 'databricks'", specifier = ">=4.0.0" },
-    { name = "pyspark", marker = "extra == 'databricks'", specifier = ">=4.0.0" },
+    { name = "delta-spark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
+    { name = "pyspark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
 ]
-provides-extras = ["databricks"]
+provides-extras = ["spark"]
 
 [package.metadata.requires-dev]
 dev = [

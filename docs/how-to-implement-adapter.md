@@ -112,6 +112,14 @@ for action in plan.actions:
 
 See `delta_engine/adapters/databricks/sql/compile.py` for a complete example using `functools.singledispatch`.
 
+For a backend that targets Databricks itself (for example over a SQL
+warehouse connection instead of a Spark session), do not reimplement the SQL
+layer: `delta_engine.adapters.databricks.sql` — the compiler, identifier
+quoting, and `information_schema` queries — is PySpark-free by contract and is
+meant to be shared. The Spark backend in
+`delta_engine.adapters.databricks.spark` shows what remains per backend: a
+reader, an executor, and backend-specific error translation.
+
 ## Adding a genuinely different backend
 
 The two ports are import-clean: the `domain` and `application` layers never import `pyspark` or `delta`, and your adapter adds no backend imports to them. But import purity is not the whole story. The application layer still encodes Delta-specific policy in ordinary Python — the Delta table-property registry in `application/properties.py`, and validation rules such as `ColumnMappingRequiredForDrop` that exist only because of how Delta handles column drops.

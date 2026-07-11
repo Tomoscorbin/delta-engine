@@ -16,8 +16,8 @@ from pyspark.sql import Row
 from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
-from delta_engine.adapters.databricks.reader import (
-    DatabricksReader,
+from delta_engine.adapters.databricks.spark.reader import (
+    SparkReader,
     _clustering_columns_from_row,
     _column_tags_from_rows,
     _foreign_keys_from_rows,
@@ -280,7 +280,7 @@ def test_fetch_state_returns_read_failed_for_unmappable_partition_column(spark) 
     )
 
     # When fetching state through the port
-    state = DatabricksReader(stub_spark).fetch_state(QualifiedName("dev", "silver", "orders"))
+    state = SparkReader(stub_spark).fetch_state(QualifiedName("dev", "silver", "orders"))
 
     # Then the mapper's refusal surfaces as a typed ReadFailed, not an exception
     assert isinstance(state, ReadFailed)

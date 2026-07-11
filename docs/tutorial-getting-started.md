@@ -40,9 +40,9 @@ customers = DeltaTable(
 Build an engine and pass your table definitions straight to `sync`. The engine reads the current catalog state, computes a plan, validates it, and executes any DDL needed:
 
 ```python
-from delta_engine.databricks import build_engine
+from delta_engine.databricks import build_spark_engine
 
-engine = build_engine(spark)
+engine = build_spark_engine(spark)
 engine.sync(customers)
 ```
 
