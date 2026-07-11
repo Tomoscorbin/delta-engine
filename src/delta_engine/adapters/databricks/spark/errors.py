@@ -1,33 +1,19 @@
 """
-Translate backend exceptions into neutral summaries for typed failures.
+Spark-specific exception summarising: prefer the underlying Java class name.
 
-Spark raises a heterogeneous set of failures (``Py4JJavaError``,
-``AnalysisException``, plain Python errors) that varies across runtime
-environments. Both adapter boundaries (reader and executor) reduce any of
-them to the same two facts a failure report needs: the most informative type
-name and a bounded message.
+The shared core (:mod:`delta_engine.adapters.databricks.errors`) records a
+Python class name and a bounded message. On Databricks/Spark the primary
+failure shape is ``Py4JJavaError``, where the JVM exception class is the
+informative fact — e.g. ``org.apache.spark.sql.AnalysisException`` rather
+than ``Py4JJavaError`` — so this backend overrides the type name only.
 """
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True, slots=True)
-class ExceptionSummary:
-    """The two facts a typed failure records about a backend exception."""
-
-    type_name: str
-    message: str
+from delta_engine.adapters.databricks.errors import ExceptionSummary, bounded_message
 
 
 def summarize_exception(exception: Exception) -> ExceptionSummary:
     """Summarize an exception as its most informative type name and message head."""
-    return ExceptionSummary(_exception_type_name(exception), _message_preview(exception))
-
-
-def _message_preview(exception: Exception) -> str:
-    """Return the first lines of an exception message, bounded for reports."""
-    message_head = str(exception)
-    return "\n".join(message_head.splitlines()[:5])
+    return ExceptionSummary(_exception_type_name(exception), bounded_message(exception))
 
 
 def _exception_type_name(exception: Exception) -> str:
