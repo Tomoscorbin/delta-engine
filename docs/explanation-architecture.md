@@ -336,10 +336,13 @@ session (the reader, the executor, and py4j error translation), and the
 `warehouse` subpackage syncs through a Databricks SQL warehouse connection
 over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview
-does not depend on which one ran it; they differ only in transport (a Spark
-session versus a warehouse connection) and in how they source read rows
-(Spark catalog calls versus `information_schema` and `DESCRIBE DETAIL` over a
-cursor).
+does not depend on which one ran it, and both read mostly the same shared
+`information_schema` and `DESCRIBE DETAIL` queries — differing in the
+transport those queries run over: in-process Spark SQL versus the warehouse
+connection's cursor. The read-side split is narrow: the Spark backend takes
+table existence, column listing, and the table comment from Spark catalog
+calls instead of `information_schema`, which is why only the Spark backend
+can read catalogs without one, such as `hive_metastore`.
 
 ## Diff-first planning
 
