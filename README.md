@@ -23,12 +23,12 @@ The base package is pure Python with no runtime dependencies: declaring and
 planning schemas needs no PySpark. Running a sync needs a Databricks
 environment, which provides Spark and Delta. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
-for the `[databricks]` extra used for local development.
+for the `[spark]` extra used for local development.
 
 ## Quickstart
 
 ```python
-from delta_engine.databricks import build_engine
+from delta_engine.databricks import build_spark_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String
 
 customers = DeltaTable(
@@ -41,7 +41,7 @@ customers = DeltaTable(
     ],
 )
 
-engine = build_engine(spark)  # `spark` is provided by your Databricks notebook
+engine = build_spark_engine(spark)  # `spark` is provided by your Databricks notebook
 engine.sync(customers)         # creates the table, or no-ops if it already matches
 ```
 

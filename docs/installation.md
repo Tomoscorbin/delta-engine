@@ -32,14 +32,14 @@ In a Databricks notebook:
 Databricks provides Spark and Delta at runtime, so the base package is all you
 need there.
 
-## Local development against the Databricks adapter
+## Local development against the Spark backend
 
-To use the Databricks adapter outside Databricks — for example, running local
-Spark in tests — install the `databricks` extra, which adds PySpark and
+To use the Spark backend outside Databricks — for example, running local
+Spark in tests — install the `spark` extra, which adds PySpark and
 Delta:
 
 ```bash
-pip install "delta-engine[databricks]"
+pip install "delta-engine[spark]"
 ```
 
 ## Verify

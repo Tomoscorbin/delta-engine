@@ -17,11 +17,11 @@ to act on.
 import json
 import sys
 
-from delta_engine.databricks import build_engine
+from delta_engine.databricks import build_spark_engine
 
 from myproject.tables import all_tables  # your DeltaTable declarations
 
-report = build_engine(spark).sync(*all_tables, dry_run=True)
+report = build_spark_engine(spark).sync(*all_tables, dry_run=True)
 
 print(json.dumps(report.to_dict(), indent=2))
 

@@ -33,11 +33,11 @@ for what that means for adding a new backend.
 flowchart TB
     User[User declarations<br/>DeltaTable, Column, ForeignKey]
     Desired[Desired snapshot<br/>DesiredTable]
-    Reader[Reader adapter<br/>DatabricksReader]
+    Reader[Reader adapter<br/>SparkReader]
     Observed[Observed snapshot<br/>ObservedTable]
     Engine[Application engine<br/>diff, validate, plan, resolve, report]
     Plan[Action plan<br/>ActionPlan]
-    Executor[Executor adapter<br/>DatabricksExecutor]
+    Executor[Executor adapter<br/>SparkExecutor]
     Backend[Backend catalog<br/>Unity Catalog and Spark SQL]
     Report[SyncReport]
 
@@ -90,8 +90,8 @@ flowchart LR
     Engine[Engine]
     ReaderPort[CatalogStateReader<br/>fetch_state]
     ExecutorPort[PlanExecutor<br/>execute]
-    Reader[DatabricksReader]
-    Executor[DatabricksExecutor]
+    Reader[SparkReader]
+    Executor[SparkExecutor]
     Catalog[Unity Catalog<br/>Spark catalog APIs]
     Compiler[Databricks SQL compiler]
     Spark[Spark SQL]
@@ -293,7 +293,7 @@ skipped during execution. The engine still processes other tables.
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                               |
-| `delta_engine.adapters`    | Backend integration and translation                                                 | `DatabricksReader`, `DatabricksExecutor`, SQL compiler                                   |
+| `delta_engine.adapters`    | Backend integration and translation                                                 | `SparkReader`, `SparkExecutor`, SQL compiler                                   |
 
 ```mermaid
 flowchart TB
@@ -326,6 +326,14 @@ require PySpark.
 `delta_engine.schema` and `delta_engine.databricks` are the public import paths
 for users. Their implementations still live in `delta_engine.api` and
 `delta_engine.adapters.databricks`, respectively.
+
+Inside `delta_engine.adapters.databricks`, the code is split by what it needs
+at import time. The `sql` subpackage is the shared SQL-text core — DDL
+compilation, identifier quoting, and `information_schema` queries — and is
+PySpark-free, enforced by an import-linter contract. The `spark` subpackage is
+the Spark backend: the reader, the executor, and py4j error translation, built
+on that core. A future backend that reaches Databricks without a Spark session
+reuses the `sql` core and adds only its own reader and executor.
 
 ## Diff-first planning
 
@@ -634,10 +642,10 @@ Databricks helpers live in the adapter package and import PySpark. The
 preferred import path is `delta_engine.databricks`, whose public functions
 import the real adapter only when called:
 
-- `build_engine`
+- `build_spark_engine`
 - `configure_logging`
 
-Calling the Databricks factory imports `delta_engine.adapters.databricks` on
+Calling the Spark factory imports `delta_engine.adapters.databricks.spark` on
 demand. Plain table declarations and schema-only tests do not pay that
 dependency cost.
 
