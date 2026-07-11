@@ -302,7 +302,7 @@ def test_metadata_only_declaration_carries_properties_without_deploying_them():
 
 ### Outgoing Interaction Test
 
-Use a fake only when the behaviour is the outgoing interaction — here, the executor handing compiled SQL to Spark. This project's own adapter tests use exactly this pattern (see `tests/adapters/databricks/test_executor.py`).
+Use a fake only when the behaviour is the outgoing interaction — here, the executor handing compiled SQL to Spark. This project's own adapter tests use exactly this pattern (see `tests/adapters/databricks/spark/test_executor.py`).
 
 ```python
 class _FakeSpark:
@@ -318,11 +318,12 @@ class _FakeSpark:
 def test_executor_runs_the_compiled_statement_against_spark():
     # given
     spark = _FakeSpark()
-    executor = DatabricksExecutor(spark)
+    executor = SparkExecutor(spark)
     plan = ActionPlan((SetTableComment("new comment"),))
 
     # when
-    executor.execute(QualifiedName("catalog", "schema", "table"), plan)
+    statements = executor.compile(QualifiedName("catalog", "schema", "table"), plan)
+    executor.execute(statements)
 
     # then
     assert len(spark.executed) == 1

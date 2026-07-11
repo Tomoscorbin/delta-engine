@@ -1,5 +1,5 @@
 """
-SQL generation and type mapping for the Databricks adapter.
+SQL generation and type rendering for the Databricks adapter.
 
 This package's adapter-internal surface is re-exported here: callers such as
 ``reader`` and ``executor`` import from ``delta_engine.adapters.databricks.sql``
