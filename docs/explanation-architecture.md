@@ -33,12 +33,12 @@ for what that means for adding a new backend.
 flowchart TB
     User[User declarations<br/>DeltaTable, Column, ForeignKey]
     Desired[Desired snapshot<br/>DesiredTable]
-    Reader[Reader adapter<br/>SparkReader]
+    Reader[Reader adapter<br/>SparkReader / WarehouseReader]
     Observed[Observed snapshot<br/>ObservedTable]
     Engine[Application engine<br/>diff, validate, plan, resolve, report]
     Plan[Action plan<br/>ActionPlan]
-    Executor[Executor adapter<br/>SparkExecutor]
-    Backend[Backend catalog<br/>Unity Catalog and Spark SQL]
+    Executor[Executor adapter<br/>SparkExecutor / WarehouseExecutor]
+    Backend[Backend catalog<br/>Unity Catalog, via Spark SQL or a SQL warehouse]
     Report[SyncReport]
 
     User --> Desired
@@ -90,11 +90,11 @@ flowchart LR
     Engine[Engine]
     ReaderPort[CatalogStateReader<br/>fetch_state]
     ExecutorPort[PlanExecutor<br/>execute]
-    Reader[SparkReader]
-    Executor[SparkExecutor]
-    Catalog[Unity Catalog<br/>Spark catalog APIs]
+    Reader[SparkReader / WarehouseReader]
+    Executor[SparkExecutor / WarehouseExecutor]
+    Catalog[Unity Catalog<br/>Spark catalog APIs or information_schema]
     Compiler[Databricks SQL compiler]
-    Spark[Spark SQL]
+    Spark[Spark SQL, or a SQL warehouse connection]
 
     Engine --> ReaderPort
     Engine --> ExecutorPort
@@ -126,11 +126,20 @@ the engine keeps processing the rest of the run and returns a complete report.
 `compile` is the exception: it is pure and local, cannot fail against a
 backend, and an exception from it is a programming error that propagates.
 
-The Databricks adapter also owns backend normalization. It lowercases catalog
-identifiers returned from Spark where needed, parses Spark DDL type strings into
-domain data types, reads Unity Catalog constraints and tags, quotes SQL
-identifiers, and turns Spark/Py4J exceptions into `ReadFailure` or
-`ExecutionFailure` values.
+The Databricks adapters also own backend normalization, most of it shared
+between the two backends through the `sql` core: lowercasing catalog
+identifiers, reading Unity Catalog constraints and tags through the same
+information_schema queries and row mappers, and quoting SQL identifiers.
+DDL type-string parsing is shared too — `sql/parse.py` turns catalog type
+text into domain data types, and the warehouse backend calls it directly.
+The Spark backend instead lets PySpark parse that same DDL text into a
+`pyspark.sql.types.DataType` instance, then maps the instance to a domain
+type in `spark/types.py`. Exception translation is where the backends
+genuinely diverge: the Spark backend unwraps `Py4JJavaError` to report the
+underlying JVM exception class, while the warehouse backend has no such
+wrapper to unwrap and calls the shared, generic summarizer directly. Both
+paths turn backend exceptions into `ReadFailure` or `ExecutionFailure`
+values.
 
 ### Type-model fidelity
 
@@ -647,15 +656,21 @@ PySpark installed. It eagerly exports backend-neutral runtime objects,
 including `Engine`, `SyncReport`, and `SyncFailedError`. Schema declarations
 live in `delta_engine.schema`, which is also PySpark-free.
 
-Databricks helpers live in the adapter package and import PySpark. The
-preferred import path is `delta_engine.databricks`, whose public functions
-import the real adapter only when called:
+Databricks helpers live in the adapter package. Importing
+`delta_engine.databricks` itself imports neither PySpark nor
+`databricks-sql-connector`; each of its public functions lazy-imports only
+the backend it needs when called:
 
-- `build_spark_engine`
-- `configure_logging`
+- `build_spark_engine` imports `delta_engine.adapters.databricks.spark` on
+  demand, which requires PySpark.
+- `build_sql_engine` imports `delta_engine.adapters.databricks.warehouse` on
+  demand. That backend runs without PySpark entirely, and does not import
+  `databricks-sql-connector` either — it only takes a connection the caller
+  already opened.
+- `configure_logging` imports the shared `log_config` module, which needs
+  neither.
 
-Calling the Spark factory imports `delta_engine.adapters.databricks.spark` on
-demand. Plain table declarations and schema-only tests do not pay that
+Plain table declarations and schema-only tests do not pay any backend's
 dependency cost.
 
 ## Where to make changes

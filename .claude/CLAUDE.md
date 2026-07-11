@@ -10,16 +10,16 @@ This file contains project-level instructions that should be available in every 
 
 Main source layout:
 
-* `src/delta_engine/domain`: backend-free domain model, table snapshots, diffs, actions, and deterministic plans.
-* `src/delta_engine/application`: orchestration, ports, validation, dependency resolution, reporting, and errors.
-* `src/delta_engine/adapters`: backend integration. The current adapter is Databricks/Spark.
-* `src/delta_engine/api`: implementation of public declaration objects.
-* `src/delta_engine/schema.py`: public schema declaration import surface.
-* `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
-* `tests`: unit, integration, adapter, and end-to-end tests.
-* `docs`: Sphinx/MyST documentation.
+- `src/delta_engine/domain`: backend-free domain model, table snapshots, diffs, actions, and deterministic plans.
+- `src/delta_engine/application`: orchestration, ports, validation, dependency resolution, reporting, and errors.
+- `src/delta_engine/adapters`: backend integration. The Databricks adapter has two backends: Spark and SQL warehouse.
+- `src/delta_engine/api`: implementation of public declaration objects.
+- `src/delta_engine/schema.py`: public schema declaration import surface.
+- `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
+- `tests`: unit, integration, adapter, and end-to-end tests.
+- `docs`: Sphinx/MyST documentation.
 
-The library should remain importable for schema declaration and planning without requiring PySpark unless the Databricks adapter is actually used.
+The library should remain importable for schema declaration and planning without requiring PySpark unless the Spark backend is used; the SQL warehouse backend runs without PySpark entirely.
 
 ## Commands
 
@@ -100,12 +100,12 @@ The import architecture is enforced by `import-linter` in `pyproject.toml`. Do n
 
 Rules:
 
-* `domain` must stay backend-free, immutable, and deterministic.
-* `application` owns orchestration, ports, safety policy, dependency resolution, reports, and failure propagation.
-* `adapters` own backend integration, SQL compilation, Spark/Databricks parsing, identifier quoting, and backend exception translation.
-* `api` owns public declaration implementation and lowers declarations into domain snapshots.
-* `schema.py` and `databricks.py` are user-facing facades; keep them thin.
-* PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
+- `domain` must stay backend-free, immutable, and deterministic.
+- `application` owns orchestration, ports, safety policy, dependency resolution, reports, and failure propagation.
+- `adapters` own backend integration, SQL compilation, Spark/Databricks parsing, identifier quoting, and backend exception translation.
+- `api` owns public declaration implementation and lowers declarations into domain snapshots.
+- `schema.py` and `databricks.py` are user-facing facades; keep them thin.
+- PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
 
 Expected dependency direction:
 
@@ -134,8 +134,8 @@ A table that fails an early phase keeps that failure in its report and is skippe
 
 Both application ports are total from the engine's perspective:
 
-* `CatalogStateReader.fetch_state(...)` returns `TablePresent`, `TableAbsent`, or `ReadFailed`.
-* `PlanExecutor.execute(...)` returns `ExecutionSummary`.
+- `CatalogStateReader.fetch_state(...)` returns `TablePresent`, `TableAbsent`, or `ReadFailed`.
+- `PlanExecutor.execute(...)` returns `ExecutionSummary`.
 
 Adapters should catch backend exceptions and convert them into typed failures rather than raising backend-specific exceptions through the port.
 
@@ -153,8 +153,8 @@ Action ordering is defined by `ActionPhase` and then by action `subject`.
 
 Properties and tags intentionally use different semantics:
 
-* Properties use exact-declaration semantics. A declared `None` asserts absence and plans an unset when present.
-* Tags use full-state semantics. An observed-only tag is drift and should be unset when tags are managed.
+- Properties use exact-declaration semantics. A declared `None` asserts absence and plans an unset when present.
+- Tags use full-state semantics. An observed-only tag is drift and should be unset when tags are managed.
 
 `managed_aspects` is part of the safety model. Drift outside the aspects managed by a declaration should fail validation rather than be silently reconciled.
 
@@ -182,12 +182,12 @@ Foreign-key declarations reference the target `DeltaTable` object, or `Self`, ra
 
 Before changing architecture, action planning, validation, adapters, or public behaviour, read the relevant docs instead of guessing:
 
-* `docs/explanation-architecture.md`
-* `docs/how-to-implement-adapter.md`
-* `docs/how-to-add-action-type.md`
-* `docs/reference-safe-change-rules.md`
-* `docs/how-to-handle-sync-failures.md`
-* `docs/how-to-deploy-metadata-only.md`
+- `docs/explanation-architecture.md`
+- `docs/how-to-implement-adapter.md`
+- `docs/how-to-add-action-type.md`
+- `docs/reference-safe-change-rules.md`
+- `docs/how-to-handle-sync-failures.md`
+- `docs/how-to-deploy-metadata-only.md`
 
 ## Documentation
 
@@ -209,6 +209,6 @@ When a change touches domain, application, adapter, and docs, keep the conceptua
 
 Before finishing, state:
 
-* what changed
-* what checks were run
-* what risks or follow-ups remain
+- what changed
+- what checks were run
+- what risks or follow-ups remain

@@ -2,8 +2,11 @@
 Render domain ``DataType`` values as Spark SQL DDL type strings.
 
 The write half of the adapter's type mapping, and PySpark-free: the compiler
-renders domain types into DDL text. The read half (parsed ``pyspark`` type
-instances to domain types) lives in
+renders domain types into DDL text. The shared read half — parsing catalog
+DDL type text into domain types — lives in
+:mod:`delta_engine.adapters.databricks.sql.parse`, used directly by the
+warehouse backend. The Spark backend has its own read-side mapping instead,
+from parsed ``pyspark`` type instances to domain types, in
 :mod:`delta_engine.adapters.databricks.spark.types`.
 
 Uses ``match``/``case`` rather than ``functools.singledispatch`` (which the plan
