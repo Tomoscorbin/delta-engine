@@ -117,5 +117,5 @@ workspace, runtime, table protocol, and privileges support that feature.
 
 When Databricks rejects a statement because the runtime or Delta table version is
 too old, the engine reports it as an `EXECUTION_FAILED` table with the original
-exception type, message, and SQL preview. Upgrade or configure the Databricks
+exception type, message, and SQL. Upgrade or configure the Databricks
 environment, then re-run `sync`.

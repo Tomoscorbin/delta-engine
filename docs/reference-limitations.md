@@ -10,11 +10,12 @@ the page with the detail.
 
 ## Platform
 
-| Requirement | Supported                                                                                                                                                |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend     | Delta Lake tables on Databricks with Unity Catalog — the only adapter today; the core is designed for more ([architecture](explanation-architecture.md)) |
-| Python      | 3.12 or later                                                                                                                                            |
-| PySpark     | Only needed to run syncs; declaring and planning are pure Python ([installation](installation.md))                                                       |
+| Requirement           | Supported                                                                                                                                                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend               | Delta Lake tables on Databricks with Unity Catalog — the only adapter today; the core is designed for more ([architecture](explanation-architecture.md))                                                              |
+| Python                | 3.12 or later                                                                                                                                                                                                         |
+| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                          |
+| SQL warehouse backend | Unity Catalog only — every read runs through `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md)) |
 
 ## What a sync manages
 

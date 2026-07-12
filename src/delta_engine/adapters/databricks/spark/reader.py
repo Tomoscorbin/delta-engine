@@ -1,26 +1,29 @@
 """Reader adapter for Databricks Unity Catalog."""
 
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
-from itertools import groupby
-import logging
 from types import MappingProxyType
 from typing import Final
 
 from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
-from pyspark.sql.types import DataType as SparkType
 
-from delta_engine.adapters.databricks.spark.errors import summarize_exception
-from delta_engine.adapters.databricks.spark.types import domain_type_from_spark
+from delta_engine.adapters.databricks.errors import exception_type_name
 from delta_engine.adapters.databricks.sql import (
+    clustering_columns_from_detail_row,
+    column_from_catalog,
+    column_tags_from_rows,
     column_tags_query,
     describe_detail_query,
+    foreign_keys_from_rows,
     foreign_keys_query,
     information_schema_probe_query,
+    managed_properties_from_detail_row,
+    primary_key_from_rows,
     primary_key_query,
+    referencing_foreign_keys_from_rows,
     referencing_foreign_keys_query,
+    table_tags_from_rows,
     table_tags_query,
 )
 from delta_engine.application.failures import ReadFailure
@@ -30,17 +33,11 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
     Column as DomainColumn,
-    ForeignKeyConstraint,
-    ForeignKeyReference,
     ObservedTable,
-    PrimaryKeyConstraint,
     QualifiedName,
 )
-
-logger = logging.getLogger(__name__)
 
 # AnalysisException conditions that mean a catalog has no information_schema
 # (plain Spark, Hive metastore). TABLE_OR_VIEW_NOT_FOUND is what Spark raises
@@ -64,189 +61,31 @@ def _to_column_mapping(
     """
     Convert a Spark catalog column into a domain ``Column`` and its partition flag.
 
-    Returns ``None`` for columns whose Spark type has no domain mapping yet,
-    logging a warning so operators can track gaps as new Spark types are released.
-    A partition column with no domain mapping instead raises: skipping it would
-    leave ``ObservedTable.partitioned_by`` silently incomplete, and the differ
-    would fabricate a false ``PartitioningChanged`` from the gap. Raising here
-    lets ``fetch_state``'s exception boundary turn it into ``ReadFailed`` — the
-    honest "could not determine state" — rather than a wrong diff.
+    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``),
+    the same shape information_schema gives the warehouse backend, so both
+    readers share one type parser and one unmappable-column policy through
+    ``column_from_catalog`` (skip and warn; raise for partition columns).
 
-    The column name is lowercased here: the domain model requires lowercase
-    identifiers, and case-preserving catalogs (e.g. Hive Metastore) can return
-    mixed-case names. Normalising at the adapter boundary keeps that impedance
-    mismatch out of the domain. The partition name in ``_ColumnMapping`` is
-    therefore derived from the already-normalised domain column name, not from
-    the raw Spark object.
-
-    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``);
-    parsing that into a ``SparkType`` is this adapter's job, so the domain-type
-    mapper receives a parsed instance.
+    The partition name in ``_ColumnMapping`` is derived from the
+    already-normalised domain column name, not from the raw Spark object,
+    because case-preserving catalogs (e.g. Hive Metastore) can return
+    mixed-case names.
     """
     # Catalog column objects are duck-typed: some catalog implementations omit
     # the nullable/isPartition flags, so a missing flag means "nullable" /
     # "not a partition" rather than an error.
     is_partition = bool(getattr(spark_column, "isPartition", False))
-    domain_data_type = domain_type_from_spark(SparkType.fromDDL(spark_column.dataType))
-    if domain_data_type is None:
-        if is_partition:
-            raise RuntimeError(
-                f"Partition column {spark_column.name!r} in {qualified_name} has"
-                f" type {spark_column.dataType!r}, which this version of"
-                " delta-engine has no mapping for (catalogs gain new types"
-                " before engines that pin a type model); the observed"
-                " partitioning cannot be determined, so the table cannot be"
-                " read safely."
-            )
-        logger.warning(
-            "Skipping column %r in %s: unrecognised Spark type %r"
-            " — the column is invisible to this sync; if a declaration includes"
-            " it, the planned ADD COLUMN will fail at execution because the"
-            " column already exists",
-            spark_column.name,
-            qualified_name,
-            spark_column.dataType,
-        )
-        return None
-
-    nullable = bool(getattr(spark_column, "nullable", True))
-    comment = spark_column.description or ""
-
-    return _ColumnMapping(
-        column=DomainColumn(
-            name=spark_column.name.casefold(),
-            data_type=domain_data_type,
-            nullable=nullable,
-            comment=comment,
-        ),
+    column = column_from_catalog(
+        name=spark_column.name,
+        type_text=spark_column.dataType,
+        nullable=bool(getattr(spark_column, "nullable", True)),
+        comment=spark_column.description or "",
         is_partition=is_partition,
+        qualified_name=qualified_name,
     )
-
-
-def _primary_key_from_rows(rows: Sequence[Row]) -> PrimaryKeyConstraint | None:
-    """
-    Build the primary key from its information_schema rows, or ``None``.
-
-    The query orders rows by ordinal_position, so the columns tuple is in
-    key order. Constraint and column names are normalised to lowercase at
-    the adapter boundary.
-    """
-    columns = tuple(row["column_name"].casefold() for row in rows)
-    if not columns:
+    if column is None:
         return None
-    constraint_name = rows[0]["constraint_name"].casefold()
-    return PrimaryKeyConstraint(columns=columns, constraint_name=constraint_name)
-
-
-def _foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyConstraint, ...]:
-    """
-    Build all foreign keys from information_schema rows.
-
-    The query orders by (constraint_name, ordinal_position), so each
-    constraint's rows are contiguous and already in column order. groupby
-    yields one contiguous run per constraint without a manual accumulator.
-    """
-    return tuple(
-        _foreign_key_from_rows(constraint_name, list(constraint_rows))
-        for constraint_name, constraint_rows in groupby(rows, key=lambda row: row.constraint_name)
-    )
-
-
-def _foreign_key_from_rows(constraint_name: str, rows: list[Row]) -> ForeignKeyConstraint:
-    """
-    Build one foreign key constraint from its key_column_usage rows.
-
-    ``rows`` are all rows for a single constraint, ordered by
-    ordinal_position, so local and referenced columns stay positionally
-    aligned. The referenced table is identical on every row, so it is read
-    from the first. Column and table names are lowercased at the adapter
-    boundary, consistent with the rest of this reader. Constraint names are
-    read from the catalog so observed-only constraints can be dropped by
-    their real names.
-    """
-    first = rows[0]
-    return ForeignKeyConstraint(
-        local_columns=tuple(row.local_column.casefold() for row in rows),
-        referenced_table=QualifiedName(
-            first.ref_catalog.casefold(),
-            first.ref_schema.casefold(),
-            first.ref_table.casefold(),
-        ),
-        referenced_columns=tuple(row.ref_column.casefold() for row in rows),
-        constraint_name=constraint_name.casefold(),
-    )
-
-
-def _referencing_foreign_keys_from_rows(rows: Iterable[Row]) -> tuple[ForeignKeyReference, ...]:
-    """
-    Build the inbound foreign key references from information_schema rows.
-
-    Names are casefolded at the adapter boundary, consistent with the rest of
-    this reader.
-    """
-    return tuple(
-        ForeignKeyReference(
-            constraint_name=row.constraint_name.casefold(),
-            referencing_table=QualifiedName(
-                row.referencing_catalog.casefold(),
-                row.referencing_schema.casefold(),
-                row.referencing_table.casefold(),
-            ),
-        )
-        for row in rows
-    )
-
-
-def _table_tags_from_rows(rows: Iterable[Row]) -> MappingProxyType[str, str]:
-    """Map table-tag rows to a read-only mapping; tag case is preserved verbatim."""
-    return MappingProxyType({row.tag_name: row.tag_value for row in rows})
-
-
-def _column_tags_from_rows(
-    rows: Iterable[Row],
-) -> MappingProxyType[str, MappingProxyType[str, str]]:
-    """
-    Map column-tag rows to ``{column_name: {tag: value}}``.
-
-    Column names are casefolded to match the domain's lowercase columns; tag
-    keys and values are case-sensitive and returned verbatim — never casefolded.
-    """
-    grouped: dict[str, dict[str, str]] = {}
-    for row in rows:
-        grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
-    return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})
-
-
-def _managed_properties_from_row(row: Row) -> MappingProxyType[str, str]:
-    """
-    Filter a DESCRIBE DETAIL row's properties to the managed registry keys.
-
-    Platform-written keys (protocol bookkeeping, auto-enabled features,
-    internal counters) never reach the domain, so they can neither trip
-    validation nor churn plans. This is backend normalization, owned here
-    like identifier lowercasing and type parsing.
-    """
-    observed_properties = {
-        name: value
-        for name, value in dict(row["properties"]).items()
-        if name in DELTA_PROPERTY_REGISTRY
-    }
-    return MappingProxyType(observed_properties)
-
-
-def _clustering_columns_from_row(row: Row) -> tuple[str, ...]:
-    """
-    Clustering key column names from a DESCRIBE DETAIL row (empty when unclustered).
-
-    ``clusteringColumns`` is a Delta 4.x DESCRIBE DETAIL field. Absence is handled
-    gracefully via ``asDict().get`` — DESCRIBE DETAIL is read for every table, so a
-    missing field (older Delta) must yield no clustering rather than break the read.
-    Names are casefolded to match the domain's lowercase columns.
-    """
-    columns = row.asDict().get("clusteringColumns")
-    if not columns:
-        return ()
-    return tuple(name.casefold() for name in columns)
+    return _ColumnMapping(column=column, is_partition=is_partition)
 
 
 class SparkReader:
@@ -273,8 +112,7 @@ class SparkReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            summary = summarize_exception(exception)
-            return ReadFailed(failure=ReadFailure(summary.type_name, summary.message))
+            return ReadFailed(failure=ReadFailure(exception_type_name(exception), str(exception)))
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""
@@ -287,7 +125,7 @@ class SparkReader:
             for spark_column in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(mapping for mapping in candidate_mappings if mapping is not None)
-        column_tags = _column_tags_from_rows(
+        column_tags = column_tags_from_rows(
             self._information_schema_rows(catalog, column_tags_query(qualified_name))
         )
         columns = tuple(
@@ -302,21 +140,21 @@ class SparkReader:
             qualified_name=qualified_name,
             columns=columns,
             comment=self._fetch_table_comment(qualified_name),
-            properties=_managed_properties_from_row(detail_row),
-            tags=_table_tags_from_rows(
+            properties=managed_properties_from_detail_row(detail_row),
+            tags=table_tags_from_rows(
                 self._information_schema_rows(catalog, table_tags_query(qualified_name))
             ),
             partitioned_by=tuple(
                 mapping.column.name for mapping in mappings if mapping.is_partition
             ),
-            clustered_by=_clustering_columns_from_row(detail_row),
-            primary_key=_primary_key_from_rows(
+            clustered_by=clustering_columns_from_detail_row(detail_row),
+            primary_key=primary_key_from_rows(
                 self._information_schema_rows(catalog, primary_key_query(qualified_name))
             ),
-            foreign_keys=_foreign_keys_from_rows(
+            foreign_keys=foreign_keys_from_rows(
                 self._information_schema_rows(catalog, foreign_keys_query(qualified_name))
             ),
-            referencing_foreign_keys=_referencing_foreign_keys_from_rows(
+            referencing_foreign_keys=referencing_foreign_keys_from_rows(
                 self._information_schema_rows(
                     catalog, referencing_foreign_keys_query(qualified_name)
                 )

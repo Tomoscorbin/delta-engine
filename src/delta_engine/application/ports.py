@@ -76,13 +76,13 @@ class ExecutionSucceeded:
     A single statement that executed without error.
 
     ``statement_index`` is the statement's position in the run and
-    ``statement_preview`` is its truncated SQL; neither is rendered by the
+    ``statement`` is its SQL exactly as executed; neither is rendered by the
     engine's own reports — they are carried for callers that inspect
     ``ExecutionSummary.results`` directly.
     """
 
     statement_index: int
-    statement_preview: str
+    statement: str
 
 
 @dataclass(frozen=True, slots=True)

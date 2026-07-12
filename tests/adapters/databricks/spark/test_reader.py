@@ -47,11 +47,18 @@ class FakeDetailRow(dict):
     """
     Duck-typed DESCRIBE DETAIL row.
 
-    A real Spark ``Row`` supports both ``row["properties"]`` and
-    ``row.asDict()``; a plain dict only supports the former. The reader reads
-    ``clusteringColumns`` via ``asDict().get(...)`` to tolerate the field's
-    absence on older Delta versions, so detail-row fakes need ``asDict`` too.
+    A real Spark ``Row`` supports attribute access (``row.properties``) and
+    ``row.asDict()``; a plain dict supports neither. The shared detail-row
+    mappers read ``properties`` by attribute and ``clusteringColumns`` via
+    ``asDict().get(...)`` to tolerate the field's absence on older Delta
+    versions, so detail-row fakes need both.
     """
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
     def asDict(self):
         return dict(self)
@@ -208,18 +215,6 @@ def referencing_fk_row(
 
 
 # ---------- shared fixtures ----------
-
-
-@pytest.fixture(autouse=True)
-def _active_spark_session(spark):
-    """
-    Keep a live SparkSession up for every test in this module.
-
-    The reader maps each catalog column's DDL type string through
-    ``SparkType.fromDDL``, and that parser needs an active session. Production
-    always has one; requesting the session fixture here exercises the
-    column-mapping path against the same DDL strings Unity Catalog reports.
-    """
 
 
 @pytest.fixture
@@ -410,7 +405,7 @@ def test_fetch_state_returns_failed_when_describe_detail_raises(qn):
 
 def test_fetch_state_includes_primary_key_in_observed_table(qn):
     pk_rows = [
-        {"constraint_name": "pk_t", "column_name": "id"},
+        SimpleNamespace(constraint_name="pk_t", column_name="id"),
     ]
     spark = routed_spark(qn, catalog=single_column_catalog(qn), pk=pk_rows)
     result = SparkReader(spark).fetch_state(qn)

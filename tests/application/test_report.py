@@ -53,13 +53,13 @@ def _t1():
 
 
 def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(statement_index=idx, statement_preview=preview)
+    return ExecutionSucceeded(statement_index=idx, statement=preview)
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailed(
         failure=ExecutionFailure(
-            statement_index=idx, exception_type=exc, message=msg, statement_preview=preview
+            statement_index=idx, exception_type=exc, message=msg, statement=preview
         ),
     )
 
@@ -104,7 +104,7 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
                 statement_index=0,
                 exception_type="ValueError",
                 message="boom",
-                statement_preview="ALTER TABLE ...",
+                statement="ALTER TABLE ...",
             ),
         ),
     )
@@ -304,9 +304,7 @@ def test_status_reflects_the_earliest_failing_phase():
         read=read,
         execution=ExecutionSummary((_failed_exec(0),)),
         failures=(
-            ExecutionFailure(
-                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
-            ),
+            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
         ),
     )
     # Then it is EXECUTION_FAILED
@@ -319,9 +317,7 @@ def test_status_reflects_the_earliest_failing_phase():
         read=ReadFailed(ReadFailure("IOError", "boom")),
         failures=(
             ReadFailure("IOError", "boom"),
-            ExecutionFailure(
-                statement_index=0, exception_type="E", message="m", statement_preview="SQL"
-            ),
+            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
         ),
     )
     # Then READ_FAILED wins (earliest phase)

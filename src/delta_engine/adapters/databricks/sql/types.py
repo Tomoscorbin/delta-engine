@@ -2,9 +2,12 @@
 Render domain ``DataType`` values as Spark SQL DDL type strings.
 
 The write half of the adapter's type mapping, and PySpark-free: the compiler
-renders domain types into DDL text. The read half (parsed ``pyspark`` type
-instances to domain types) lives in
-:mod:`delta_engine.adapters.databricks.spark.types`.
+renders domain types into DDL text. The read half — parsing catalog DDL
+type text into domain types — lives in
+:mod:`delta_engine.adapters.databricks.sql.parse` and is shared by both
+backends: Unity Catalog reports column types as DDL strings on the Spark
+path (``listColumns``) and the warehouse path (``information_schema``)
+alike.
 
 Uses ``match``/``case`` rather than ``functools.singledispatch`` (which the plan
 compiler uses): ``DataType`` is a closed set and the mapping is a leaf lookup,
@@ -37,7 +40,7 @@ from delta_engine.domain.model import (
 )
 
 
-def sql_type_for_data_type(data_type: DataType) -> str:
+def render_data_type(data_type: DataType) -> str:
     """Return a Spark SQL type string for a domain :class:`DataType`."""
     match data_type:
         case Integer():
@@ -59,9 +62,9 @@ def sql_type_for_data_type(data_type: DataType) -> str:
         case Decimal(precision, scale):
             return f"DECIMAL({precision},{scale})"
         case Array(element):
-            return f"ARRAY<{sql_type_for_data_type(element)}>"
+            return f"ARRAY<{render_data_type(element)}>"
         case Map(key, value):
-            return f"MAP<{sql_type_for_data_type(key)},{sql_type_for_data_type(value)}>"
+            return f"MAP<{render_data_type(key)},{render_data_type(value)}>"
         case Byte():
             return "TINYINT"
         case Short():
@@ -74,8 +77,7 @@ def sql_type_for_data_type(data_type: DataType) -> str:
             return "VARIANT"
         case Struct(fields):
             rendered = ", ".join(
-                f"{backtick(field.name)}: {sql_type_for_data_type(field.data_type)}"
-                for field in fields
+                f"{backtick(field.name)}: {render_data_type(field.data_type)}" for field in fields
             )
             return f"STRUCT<{rendered}>"
         case _:

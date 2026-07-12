@@ -1,14 +1,8 @@
-from hypothesis import given, strategies as st
 import pyspark.sql.types as T
-import pytest
 
-from delta_engine.adapters.databricks.spark.executor import (
-    SparkExecutor,
-    _execute_statements,
-    _sql_preview,
-)
+from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
-from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
+from delta_engine.application.ports import ExecutionSucceeded
 from delta_engine.domain.model import Column, DesiredTable, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
@@ -99,59 +93,6 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
     ]
 
 
-def test_execute_maps_success_and_failure_without_leaking_backend_exception():
-    # Given statements where the second one fails
-    statements = ("SELECT 1", "SELECT * FROM __nope__")
-
-    # When executing them
-    summary = _execute_statements(_FakeSpark(), statements)
-
-    # Then success and failure are mapped to execution results
-    results = summary.results
-
-    assert isinstance(results[0], ExecutionSucceeded)
-    assert isinstance(results[1], ExecutionFailed)
-    assert results[0].statement_index == 0
-    assert results[1].failure.statement_index == 1
-
-
-def test_execute_failure_records_exception_details_and_sql_preview():
-    # Given a failing statement
-    statements = ("SELECT * FROM __nope__",)
-
-    # When executing it
-    summary = _execute_statements(_FakeSpark(), statements)
-
-    # Then useful debugging details are captured
-    [result] = summary.results
-
-    assert isinstance(result, ExecutionFailed)
-    assert result.failure.statement_index == 0
-    assert result.failure.exception_type == "Exception"
-    assert "boom: table not found" in result.failure.message
-    assert result.failure.statement_preview == "SELECT * FROM __nope__"
-
-
-def test_execute_stops_at_first_failure_to_avoid_half_migrating():
-    # Given three statements whose middle one fails
-    spark = _FakeSpark()
-    statements = ("SELECT 1", "SELECT * FROM __nope__", "SELECT 2")
-
-    # When executing them
-    summary = _execute_statements(spark, statements)
-
-    # Then the third statement is never attempted
-    assert spark.executed == ["SELECT 1", "SELECT * FROM __nope__"]
-
-    results = summary.results
-    assert [type(result) for result in results] == [
-        ExecutionSucceeded,
-        ExecutionFailed,
-    ]
-    assert results[0].statement_index == 0
-    assert results[1].failure.statement_index == 1
-
-
 def test_execute_returns_empty_summary_for_empty_plan():
     # Given an empty plan
     plan = ActionPlan(actions=())
@@ -164,53 +105,6 @@ def test_execute_returns_empty_summary_for_empty_plan():
     assert spark.executed == []
     assert summary.results == ()
     assert summary.failed is False
-
-
-# ----------- _sql_preview: bounded single-line statement previews for results/logs
-
-
-def test_sql_preview_single_line_normalization_and_no_truncation():
-    sql = " \nSELECT   *\nFROM  foo\tWHERE  a = 1  \n"
-    assert _sql_preview(sql, max_chars=10_000) == "SELECT * FROM foo WHERE a = 1"
-
-
-def test_sql_preview_truncates_and_appends_unicode_ellipsis():
-    sql = "SELECT " + "x" * 300 + " FROM t"
-    out = _sql_preview(sql, max_chars=50)
-    assert out.endswith("…")
-    assert len(out) > 50  # because the ellipsis is appended after slicing
-    assert out.startswith("SELECT ")
-
-
-@pytest.mark.parametrize(
-    ("length", "truncated"),
-    [
-        (9, False),  # below the limit: unchanged
-        (10, False),  # exactly at the limit: unchanged (the boundary that pins <=)
-        (11, True),  # one over: truncated to max_chars + ellipsis
-    ],
-    ids=["below", "at-limit", "over"],
-)
-def test_sql_preview_truncates_only_beyond_max_chars(length: int, truncated: bool):
-    # Given a single-line SQL string of a known length around max_chars=10
-    sql = "x" * length
-
-    # When previewing it with max_chars=10
-    out = _sql_preview(sql, max_chars=10)
-
-    # Then it is left intact at or below the limit, and truncated only beyond it
-    if truncated:
-        assert out == "x" * 10 + "…"
-    else:
-        assert out == sql
-
-
-@given(st.text(), st.integers(min_value=1, max_value=500))
-def test_sql_preview_single_line_output_never_contains_newline(sql: str, max_chars: int):
-    # Given: any SQL string and any max_chars
-    result = _sql_preview(sql, max_chars=max_chars)
-    # Then: the output never contains a newline regardless of input content
-    assert "\n" not in result
 
 
 # ----------- Tests against real local Spark/Delta (auto-marked local_e2e via the

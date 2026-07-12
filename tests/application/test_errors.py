@@ -111,14 +111,14 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
     assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 
-def test_message_renders_execution_failure_detail_with_sql_preview():
+def test_message_renders_execution_failure_detail_with_sql():
     # Given a table whose execution phase failed on one action
     failed_result = ExecutionFailed(
         failure=ExecutionFailure(
             statement_index=2,
             exception_type="SparkException",
             message="boom",
-            statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
+            statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
         ),
     )
     report = _table_report(
@@ -129,7 +129,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
                 statement_index=2,
                 exception_type="SparkException",
                 message="boom",
-                statement_preview="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
+                statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
             ),
         ),
     )
@@ -137,7 +137,7 @@ def test_message_renders_execution_failure_detail_with_sql_preview():
     # When building the error message
     message = _message_for(report)
 
-    # Then both the failure line and the SQL preview are present
+    # Then both the failure line and the SQL statement is present
     assert "cat.sch.tbl [EXECUTION_FAILED]" in message
     assert "Execution failed at statement 2: SparkException - boom" in message
     assert "ALTER TABLE cat.sch.tbl ADD COLUMN x INT" in message

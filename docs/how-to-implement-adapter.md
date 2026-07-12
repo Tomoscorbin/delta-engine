@@ -5,7 +5,7 @@ tags:
 
 # How to implement a custom adapter
 
-delta-engine ships with a single backend today: Delta Lake on Databricks. A backend is defined by two port protocols — `CatalogStateReader` and `PlanExecutor`, in `delta_engine.application.ports` — and this guide shows how to implement them. See [the hexagonal boundary](explanation-architecture.md#the-hexagonal-boundary) for how the ports fit.
+delta-engine ships with two backends today, both for Delta Lake on Databricks: a Spark session backend and a Databricks SQL warehouse backend. A backend is defined by two port protocols — `CatalogStateReader` and `PlanExecutor`, in `delta_engine.application.ports` — and this guide shows how to implement them. See [the hexagonal boundary](explanation-architecture.md#the-hexagonal-boundary) for how the ports fit.
 
 Implementing the two ports is enough for a backend that shares Delta's semantics. A genuinely different table format needs more — see [Adding a genuinely different backend](#adding-a-genuinely-different-backend) below before you start.
 
@@ -65,7 +65,7 @@ The engine calls `compile` during planning on every run — dry or real — and 
                 self._run(statement)
                 results.append(ExecutionSucceeded(
                     statement_index=i,
-                    statement_preview=statement,
+                    statement=statement,
                 ))
             except Exception as exc:
                 results.append(ExecutionFailed(
@@ -73,7 +73,7 @@ The engine calls `compile` during planning on every run — dry or real — and 
                         statement_index=i,
                         exception_type=type(exc).__name__,
                         message=str(exc),
-                        statement_preview=statement,
+                        statement=statement,
                     ),
                 ))
                 break  # stop at first failure — the engine is non-transactional
@@ -112,13 +112,15 @@ for action in plan.actions:
 
 See `delta_engine/adapters/databricks/sql/compile.py` for a complete example using `functools.singledispatch`.
 
-For a backend that targets Databricks itself (for example over a SQL
-warehouse connection instead of a Spark session), do not reimplement the SQL
-layer: `delta_engine.adapters.databricks.sql` — the compiler, identifier
-quoting, and `information_schema` queries — is PySpark-free by contract and is
-meant to be shared. The Spark backend in
-`delta_engine.adapters.databricks.spark` shows what remains per backend: a
-reader, an executor, and backend-specific error translation.
+A backend that targets Databricks itself, over a SQL warehouse connection
+instead of a Spark session, does not need to reimplement the SQL layer:
+`delta_engine.adapters.databricks.sql` — the compiler, identifier quoting, and
+`information_schema` queries — is PySpark-free by contract and is shared
+between backends. `delta_engine.adapters.databricks.warehouse` is the live
+example: its reader and executor are the only backend-specific code it adds,
+built entirely on that shared core. The Spark backend in
+`delta_engine.adapters.databricks.spark` is the other consumer, adding its own
+reader, executor, and backend-specific error translation.
 
 ## Adding a genuinely different backend
 

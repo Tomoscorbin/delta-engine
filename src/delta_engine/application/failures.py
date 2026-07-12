@@ -10,7 +10,7 @@ together rather than being scattered across its producers.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import ClassVar, assert_never
+from typing import ClassVar, Final, assert_never
 
 from delta_engine.domain.model import QualifiedName
 
@@ -50,6 +50,16 @@ class ForeignKeyFailureReason(StrEnum):
 
 # ---------- Failure value objects ----------
 
+# Failure messages are recorded in full (a backend stack trace can run to
+# hundreds of lines); rendered reports show only this many leading lines.
+# The complete text stays on the failure's ``message`` field.
+_MESSAGE_HEAD_LINES: Final = 5
+
+
+def _message_head(message: str) -> str:
+    """Return the first lines of a failure message, bounded for display."""
+    return "\n".join(message.splitlines()[:_MESSAGE_HEAD_LINES])
+
 
 class Failure(ABC):
     """A failure that can render itself as display lines, tagged with its phase."""
@@ -76,7 +86,7 @@ class ReadFailure(Failure):
     message: str
 
     def format_lines(self) -> tuple[str, ...]:
-        return (f"Read error: {self.exception_type} - {self.message}",)
+        return (f"Read error: {self.exception_type} - {_message_head(self.message)}",)
 
     def headline(self) -> str:
         return f"Read error: {self.exception_type}"
@@ -105,13 +115,13 @@ class ExecutionFailure(Failure):
     statement_index: int
     exception_type: str
     message: str
-    statement_preview: str
+    statement: str
 
     def format_lines(self) -> tuple[str, ...]:
         return (
             f"Execution failed at statement {self.statement_index}: "
-            f"{self.exception_type} - {self.message}",
-            f"    SQL preview: {self.statement_preview}",
+            f"{self.exception_type} - {_message_head(self.message)}",
+            f"    SQL: {self.statement}",
         )
 
     def headline(self) -> str:
