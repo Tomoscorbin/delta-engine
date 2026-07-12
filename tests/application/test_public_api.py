@@ -19,6 +19,7 @@ def test_public_api_exposes_the_intended_names():
         TableRunStatus,
         ValidationFailure,
         render_diff,
+        render_planned_sql,
         render_report,
     )
     from delta_engine.application.engine import Engine as EngineImpl
@@ -33,6 +34,7 @@ def test_public_api_exposes_the_intended_names():
     )
     from delta_engine.application.rendering import (
         render_diff as render_diff_impl,
+        render_planned_sql as render_planned_sql_impl,
         render_report as render_report_impl,
     )
     from delta_engine.application.report import (
@@ -54,6 +56,7 @@ def test_public_api_exposes_the_intended_names():
         "TableRunStatus",
         "ValidationFailure",
         "render_diff",
+        "render_planned_sql",
         "render_report",
     }
     # And each name resolves to the real type (single identity, not a shadow copy)
@@ -69,4 +72,5 @@ def test_public_api_exposes_the_intended_names():
     assert ForeignKeyFailure is ForeignKeyFailureImpl
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
+    assert render_planned_sql is render_planned_sql_impl
     assert render_report is render_report_impl

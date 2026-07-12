@@ -23,6 +23,7 @@ _EAGER = {
     "ForeignKeyFailure",
     "TableRunStatus",
     "render_diff",
+    "render_planned_sql",
     "render_report",
 }
 
@@ -43,6 +44,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         TableRunStatus,
         ValidationFailure,
         render_diff,
+        render_planned_sql,
         render_report,
     )
     from delta_engine.application import (
@@ -58,6 +60,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         TableRunStatus as TableRunStatusImpl,
         ValidationFailure as ValidationFailureImpl,
         render_diff as render_diff_impl,
+        render_planned_sql as render_planned_sql_impl,
         render_report as render_report_impl,
     )
 
@@ -73,6 +76,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     assert TableRunReport is TableRunReportImpl
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
+    assert render_planned_sql is render_planned_sql_impl
     assert render_report is render_report_impl
 
 
