@@ -51,7 +51,9 @@ For Databricks executor changes, assert execution summaries, successful action r
 
 Do not require real Databricks for ordinary unit tests.
 
-This repo carries no tests that need Databricks credentials. Do not add tests that require a real workspace; live verification against Unity Catalog happens in a separate project outside this repo.
+This repo carries no tests that need Databricks credentials; live verification against Unity Catalog happens in a separate project outside this repo.
+
+If a credentialed Databricks test is ever added, it must be opt-in through the `databricks_e2e` marker and must not run in default CI.
 
 Local Spark/Delta end-to-end tests should stay marked with `local_e2e`.
 

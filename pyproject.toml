@@ -160,6 +160,7 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
 testpaths = ["tests"]
 markers = [
   "local_e2e: local Spark/Delta end-to-end tests that run in default CI",
+  "databricks_e2e: credentialed Databricks/Unity Catalog end-to-end tests",
 ]
 addopts = """
 --cov
