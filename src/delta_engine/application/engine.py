@@ -121,7 +121,8 @@ class Engine:
 
         Args:
             *tables: The table specifications to synchronize. Duplicate
-                qualified names raise ``ValueError`` before any phase runs.
+                qualified names raise ``DuplicateTableDefinitionError`` before
+                any phase runs.
             dry_run: When True, run read → diff → validate → plan → resolve
                 but skip execution (zero catalog mutations). Every run's
                 ``execution`` stays ``None`` while its ``plan`` still records
@@ -133,6 +134,8 @@ class Engine:
             The aggregate :class:`SyncReport` for the run.
 
         Raises:
+            DuplicateTableDefinitionError: If two table specifications have
+                the same qualified name. No phase has run when this is raised.
             SyncFailedError: On a real run (``dry_run=False``), if any table
                 fails to read, validate, resolve foreign keys, or execute. The
                 report is available on the exception's ``report`` attribute. A

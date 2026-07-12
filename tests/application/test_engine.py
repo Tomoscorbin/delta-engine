@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.application.engine import Engine
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import (
     ExecutionFailure,
     ForeignKeyFailure,
@@ -1033,7 +1033,7 @@ def test_sync_rejects_duplicate_table_names_before_reading():
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
-    with pytest.raises(ValueError):
+    with pytest.raises(DuplicateTableDefinitionError):
         engine.sync(
             _spec("cat.sch.orders"),
             _spec("cat.sch.orders"),

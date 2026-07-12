@@ -2,6 +2,7 @@ from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.application.desired_tables import prepare_desired_tables
+from delta_engine.application.errors import DuplicateTableDefinitionError
 from delta_engine.domain.model import Column, DesiredTable, Integer, QualifiedName
 from delta_engine.schema import DeltaTable, String
 
@@ -57,9 +58,11 @@ def test_rejects_duplicate_qualified_name_in_one_call():
     t1 = _tbl("cat.a.users")
     t2 = _tbl("cat.a.users")
 
-    # When/Then preparing them raises ValueError
-    with pytest.raises(ValueError):
+    # When/Then preparing them raises the public typed ValueError subclass
+    with pytest.raises(DuplicateTableDefinitionError) as excinfo:
         prepare_desired_tables(t1, t2)
+
+    assert str(excinfo.value.qualified_name) == "cat.a.users"
 
 
 def test_orders_result_by_qualified_name():

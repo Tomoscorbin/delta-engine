@@ -10,6 +10,7 @@ order never depend on the order tables were passed.
 
 from typing import Protocol
 
+from delta_engine.application.errors import DuplicateTableDefinitionError
 from delta_engine.domain.model import DesiredTable
 
 
@@ -37,7 +38,7 @@ def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, .
         The desired tables, deduplicated and sorted by qualified name.
 
     Raises:
-        ValueError: If two sources share a qualified name.
+        DuplicateTableDefinitionError: If two sources share a qualified name.
 
     """
     desired_by_name: dict[str, DesiredTable] = {}
@@ -45,6 +46,6 @@ def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, .
         desired = source.to_desired_table()
         key = str(desired.qualified_name)
         if key in desired_by_name:
-            raise ValueError(f"Duplicate table definition: {desired.qualified_name}")
+            raise DuplicateTableDefinitionError(desired.qualified_name)
         desired_by_name[key] = desired
     return tuple(desired_by_name[key] for key in sorted(desired_by_name))

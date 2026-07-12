@@ -7,6 +7,16 @@ SQL previews for any failed actions.
 """
 
 from delta_engine.application.report import SyncReport, TableRunReport
+from delta_engine.domain.model import QualifiedName
+
+
+class DuplicateTableDefinitionError(ValueError):
+    """Raised when one sync receives two definitions for the same table."""
+
+    def __init__(self, qualified_name: QualifiedName) -> None:
+        """Name the duplicated table while preserving the ``ValueError`` contract."""
+        self.qualified_name = qualified_name
+        super().__init__(f"Duplicate table definition: {qualified_name}")
 
 
 class SyncFailedError(Exception):
