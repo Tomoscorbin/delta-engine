@@ -6,7 +6,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.column import Column, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -56,7 +56,7 @@ ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
 @dataclass(frozen=True, slots=True)
-class TableSnapshot:
+class TableSnapshot[ColumnT: (Column, ObservedColumn)]:
     """
     Immutable snapshot of a table schema.
 
@@ -76,7 +76,7 @@ class TableSnapshot:
     """
 
     qualified_name: QualifiedName
-    columns: tuple[Column, ...]
+    columns: tuple[ColumnT, ...]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()
@@ -135,7 +135,7 @@ class TableSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class DesiredTable(TableSnapshot):
+class DesiredTable(TableSnapshot[Column]):
     """
     Desired definition authored by users (target state).
 
@@ -221,7 +221,7 @@ class DesiredTable(TableSnapshot):
 
 
 @dataclass(frozen=True, slots=True)
-class ObservedTable(TableSnapshot):
+class ObservedTable(TableSnapshot[ObservedColumn]):
     """
     Observed definition derived from the catalog (current state).
 

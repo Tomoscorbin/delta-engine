@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.column import Column, ObservedColumn
 from delta_engine.domain.model.data_type import Integer
 
 
@@ -57,3 +57,16 @@ def test_raises_when_tag_key_is_blank(blank: str) -> None:
     # When/Then: constructing a Column fails
     with pytest.raises(ValueError, match="Tag key must not be blank"):
         Column("id", Integer(), tags={blank: "v"})
+
+
+def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
+    # Given/Then: blank and non-lowercase names are rejected, like Column
+    with pytest.raises(ValueError, match="blank"):
+        ObservedColumn("  ", Integer())
+    with pytest.raises(ValueError, match="lowercase"):
+        ObservedColumn("Amount", Integer())
+
+    # And a well-formed observed column carries the observable fields
+    column = ObservedColumn("amount", Integer(), nullable=False, comment="c", tags={"k": "v"})
+    assert (column.name, column.nullable, column.comment) == ("amount", False, "c")
+    assert dict(column.tags) == {"k": "v"}

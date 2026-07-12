@@ -7,10 +7,21 @@ from types import MappingProxyType
 from delta_engine.domain.model.data_type import DataType
 
 
+def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
+    """Invariants shared by declared and observed columns."""
+    if not name.strip():
+        raise ValueError(f"Column name must not be blank: {name!r}")
+    if name != name.casefold():
+        raise ValueError(f"Column name must be lowercase: {name!r}")
+    for tag_key in tags:
+        if not tag_key.strip():
+            raise ValueError(f"Tag key must not be blank: {tag_key!r}")
+
+
 @dataclass(frozen=True, slots=True)
 class Column:
     """
-    Immutable, case-insensitive column definition.
+    Immutable, case-insensitive column declaration (desired state).
 
     Attributes:
         name: Column name (normalized to lowercase).
@@ -31,13 +42,25 @@ class Column:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
+        _validate_column_fields(self.name, self.tags)
 
-        if not self.name.strip():
-            raise ValueError(f"Column name must not be blank: {self.name!r}")
 
-        if self.name != self.name.casefold():
-            raise ValueError(f"Column name must be lowercase: {self.name!r}")
+@dataclass(frozen=True, slots=True)
+class ObservedColumn:
+    """
+    Immutable column as observed in the catalog (current state).
 
-        for tag_key in self.tags:
-            if not tag_key.strip():
-                raise ValueError(f"Tag key must not be blank: {tag_key!r}")
+    The observed counterpart of :class:`Column`: the same observable fields,
+    and none of the declaration-only syntax, so catalog state cannot carry
+    declaration history by construction. Only reader adapters build these.
+    """
+
+    name: str
+    data_type: DataType
+    nullable: bool = True
+    comment: str = ""
+    tags: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
+        _validate_column_fields(self.name, self.tags)
