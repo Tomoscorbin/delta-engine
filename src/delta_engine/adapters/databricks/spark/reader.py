@@ -34,7 +34,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.domain.model import (
-    Column as DomainColumn,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
 )
@@ -51,7 +51,7 @@ _INFORMATION_SCHEMA_MISSING_CONDITIONS: Final[frozenset[str]] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class _ColumnMapping:
-    column: DomainColumn
+    column: ObservedColumn
     is_partition: bool
 
 
