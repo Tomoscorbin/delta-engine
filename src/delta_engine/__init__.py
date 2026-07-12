@@ -26,6 +26,7 @@ from delta_engine.application import (
     TableRunStatus,
     ValidationFailure,
     render_diff,
+    render_planned_sql,
     render_report,
 )
 
@@ -49,5 +50,6 @@ __all__ = [
     "TableRunStatus",
     "ValidationFailure",
     "render_diff",
+    "render_planned_sql",
     "render_report",
 ]

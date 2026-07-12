@@ -185,3 +185,12 @@ def render_diff(report: SyncReport) -> str:
     """Render every table's planned changes as +/-/~ blocks, under a DIFF title."""
     blocks = [render_diff_block(table_report) for table_report in report.table_reports]
     return "\n\n".join([_heading("DIFF"), *blocks])
+
+
+def render_planned_sql(report: SyncReport) -> str:
+    """Render each table's planned SQL under a PLANNED SQL title; empty when none planned."""
+    planned = report.planned_sql_statements
+    if not planned:
+        return ""
+    blocks = ["\n".join([f"-- {name}", *statements]) for name, statements in planned.items()]
+    return "\n\n".join([_heading("PLANNED SQL"), *blocks])
