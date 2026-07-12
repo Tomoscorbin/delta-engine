@@ -226,10 +226,15 @@ type = "forbidden"
 source_modules = ["delta_engine.cli"]
 forbidden_modules = ["delta", "pyspark"]
 ignore_imports = [
-  # The facade lazily reaches the Spark backend; the CLI itself must not.
-  # Ignoring this one edge keeps indirect-import checking on for every other
-  # path (e.g. a future direct cli -> adapters.databricks.spark import).
+  # The facade lazily reaches the Spark backend at runtime; the CLI itself
+  # must not. Also ignore the facade's TYPE_CHECKING-only SparkSession import
+  # (never executes; it exists only for build_spark_engine's type hint, but
+  # grimp's static analysis cannot tell that from a real import). Together
+  # these exempt exactly the facade's two static edges to Spark, keeping
+  # indirect-import checking on for every other path (e.g. a future direct
+  # cli -> adapters.databricks.spark import).
   "delta_engine.databricks -> delta_engine.adapters.databricks.spark.factory",
+  "delta_engine.databricks -> pyspark",
 ]
 
 [[tool.importlinter.contracts]]

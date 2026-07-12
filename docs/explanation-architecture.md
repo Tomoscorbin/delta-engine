@@ -308,6 +308,7 @@ skipped during execution. The engine still processes other tables.
 
 ```mermaid
 flowchart TB
+    CLI[delta_engine.cli<br/>plan / apply commands]
     Public[delta_engine.__init__<br/>runtime exports]
     Schema[delta_engine.schema<br/>public declarations]
     Databricks[delta_engine.databricks<br/>public Databricks helpers]
@@ -316,6 +317,9 @@ flowchart TB
     Domain[domain<br/>snapshots, diffs, actions]
     Adapters[adapters<br/>Databricks reader, executor, SQL compiler]
 
+    CLI --> Schema
+    CLI --> Databricks
+    CLI --> App
     Public --> App
     Schema --> API
     Schema --> App
@@ -333,6 +337,11 @@ depends inward on the application ports and domain vocabulary. The top-level
 `delta_engine` package eagerly exposes backend-neutral runtime types such as
 `Engine`, `SyncReport`, and `SyncFailedError`, so `import delta_engine` does not
 require PySpark.
+
+`delta_engine.cli` sits above the hexagon as a driving adapter: a thin Typer
+layer (the `cli` extra) that loads declarations, opens a warehouse connection
+through unified authentication, and calls the same `Engine.sync` any other
+caller does. It holds no planning or validation policy of its own.
 
 `delta_engine.schema` and `delta_engine.databricks` are the public import paths
 for users. Their implementations still live in `delta_engine.api` and
@@ -688,6 +697,7 @@ dependency cost.
 | Change FK ordering or blocking | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                                                               |
 | Change report output           | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                                                                      |
 | Change Databricks SQL          | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                                                               |
+| Change CLI commands or output  | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                                                             |
 
 ## Architectural rules
 

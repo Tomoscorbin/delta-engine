@@ -114,7 +114,7 @@ Expected dependency direction:
 cli -> databricks | schema | adapters | api -> application -> domain
 ```
 
-A separate import-linter contract forbids `delta` and `pyspark` imports from `cli`, `schema`, `api`, `application`, and `domain`, and another confines `typer`/`click`/`rich` imports to `cli`.
+Two more import-linter contracts forbid `delta` and `pyspark` imports: one covering `schema`, `api`, `application`, and `domain`; another covering `cli`, with a carve-out for the one legitimate edge (the lazy Spark facade import). A further contract confines `typer`/`click`/`rich` imports to `cli`.
 
 ## Sync lifecycle
 
