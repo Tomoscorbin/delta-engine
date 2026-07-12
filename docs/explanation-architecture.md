@@ -343,7 +343,7 @@ at import time. The `sql` subpackage is the shared SQL-text core — DDL
 compilation, identifier quoting, and `information_schema` queries — and is
 PySpark-free, enforced by an import-linter contract. Two backends build on
 that core today: the `spark` subpackage syncs through an active Spark
-session (the reader, the executor, and py4j error translation), and the
+session (the reader and the executor), and the
 `warehouse` subpackage syncs through a Databricks SQL warehouse connection
 over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview

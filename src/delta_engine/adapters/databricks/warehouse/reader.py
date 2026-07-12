@@ -22,6 +22,7 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+from delta_engine.adapters.databricks.errors import exception_type_name
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     columns_query,
@@ -79,7 +80,7 @@ class WarehouseReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            return ReadFailed(failure=ReadFailure(type(exception).__name__, str(exception)))
+            return ReadFailed(failure=ReadFailure(exception_type_name(exception), str(exception)))
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""

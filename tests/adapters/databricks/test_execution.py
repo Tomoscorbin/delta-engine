@@ -1,5 +1,7 @@
 """Shared statement-execution loop used by both Databricks backends."""
 
+from types import SimpleNamespace
+
 from delta_engine.adapters.databricks.execution import execute_statements
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 
@@ -37,23 +39,29 @@ def test_execute_failure_records_exception_details_and_the_statement():
     [result] = summary.results
     assert isinstance(result, ExecutionFailed)
     assert result.failure.statement_index == 0
-    assert result.failure.exception_type == "Exception"  # default Python-class naming
+    assert result.failure.exception_type == "Exception"
     assert "boom: table not found" in result.failure.message
     assert result.failure.statement == "SELECT * FROM __nope__"
 
 
-def test_execute_failure_uses_the_injected_exception_type_naming():
-    # Given a backend that names exception types its own way (as Spark does for py4j)
-    summary = execute_statements(
-        RecordingRunner(),
-        ("SELECT * FROM __nope__",),
-        lambda exception: "org.example.BackendError",
-    )
+def test_execute_failure_names_wrapped_jvm_exceptions_by_java_class():
+    # Given a backend failure that wraps a JVM exception, py4j-style
+    class WrappingRunner:
+        def __call__(self, statement: str) -> None:
+            error = Exception("boom")
+            error.java_exception = SimpleNamespace(  # type: ignore[attr-defined]
+                getClass=lambda: SimpleNamespace(
+                    getName=lambda: "org.apache.spark.sql.AnalysisException"
+                )
+            )
+            raise error
 
-    # Then the failure carries the backend's name for the type
+    summary = execute_statements(WrappingRunner(), ("SELECT 1",))
+
+    # Then the failure carries the Java class, not the wrapper's Python class
     [result] = summary.results
     assert isinstance(result, ExecutionFailed)
-    assert result.failure.exception_type == "org.example.BackendError"
+    assert result.failure.exception_type == "org.apache.spark.sql.AnalysisException"
 
 
 def test_execute_records_statements_verbatim_on_results():

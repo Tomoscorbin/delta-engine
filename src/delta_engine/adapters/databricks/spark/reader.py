@@ -8,7 +8,7 @@ from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
-from delta_engine.adapters.databricks.spark.errors import exception_type_name
+from delta_engine.adapters.databricks.errors import exception_type_name
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_detail_query,
