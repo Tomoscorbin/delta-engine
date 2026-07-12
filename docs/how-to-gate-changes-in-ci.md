@@ -5,54 +5,116 @@ tags:
 
 # How to gate schema changes in CI
 
-Run a dry run against the live catalog when a pull request opens, fail the job
-when the declarations and the catalog disagree, and surface the exact changes —
-including the SQL that would run — in the job output. A dry run makes no catalog
-changes and never raises, so the whole result is available as data for the gate
-to act on.
+Run `delta-engine plan` against the live catalog when a pull request opens: it
+dry-runs your declarations, prints the drift, and exits non-zero when the
+declarations and the catalog disagree. A dry run makes no catalog changes, so
+the gate is safe to run on every push.
 
 ## The gate
 
-```python
-import json
-import sys
-
-from delta_engine.databricks import build_spark_engine
-
-from myproject.tables import all_tables  # your DeltaTable declarations
-
-report = build_spark_engine(spark).sync(*all_tables, dry_run=True)
-
-print(json.dumps(report.to_dict(), indent=2))
-
-if report.has_failures or report.has_changes:
-    sys.exit(1)
+```bash
+pip install "delta-engine[cli]"
+delta-engine plan myproject.tables
 ```
 
-The two booleans state different facts:
+`myproject.tables` is a module containing your `DeltaTable` declarations —
+every table bound at the module's top level is included. Target an explicit
+aggregate with `myproject.tables:all_tables`, or pass several modules.
 
-- `report.has_failures` — a table could not be read, failed validation, or was
-  blocked by a foreign-key dependency. Its drift was **not** planned.
-- `report.has_changes` — at least one table has a validated, planned change
-  waiting to apply.
+The exit code tells the story:
 
-A green job means the catalog already matches the declarations. Fail on
-`has_failures` to catch declarations that cannot apply; fail on `has_changes` to
-require that changes are reviewed and applied deliberately rather than drifting
-in.
+| Exit code | Meaning                                                       |
+| --------- | ------------------------------------------------------------- |
+| 0         | The catalog already matches the declarations                  |
+| 1         | A table failed — unreadable, invalid drift, or a config error |
+| 2         | Validated changes are pending, waiting to be applied          |
 
-## The warehouse variant
+Failing on any non-zero code means a green job guarantees no drift. A pipeline
+that wants to treat "changes pending" differently from "broken" can branch on
+the two codes.
 
-The example above needs a live Spark session, which usually means a cluster
-sitting around for the job. Most CI runners have neither. Open a
-`databricks.sql` connection to a SQL warehouse instead, and the same dry run
-runs from a plain Python job — no Spark session or cluster required:
+Connection settings come from the environment: `DATABRICKS_SERVER_HOSTNAME`,
+`DATABRICKS_HTTP_PATH`, and `DATABRICKS_TOKEN`. The token is env-only by
+design; `--server-hostname` and `--http-path` flags override their variables.
+
+## A complete GitHub Actions workflow
+
+Gate pull requests, apply on merge to main:
+
+````yaml
+name: schema
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  DATABRICKS_SERVER_HOSTNAME: ${{ vars.DATABRICKS_SERVER_HOSTNAME }}
+  DATABRICKS_HTTP_PATH: ${{ vars.DATABRICKS_HTTP_PATH }}
+  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "delta-engine[cli]"
+      - name: Plan
+        run: |
+          { echo '```'; delta-engine plan myproject.tables; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "delta-engine[cli]"
+      - run: delta-engine apply myproject.tables
+````
+
+The plan step writes the report into the job's step summary, so the drift is
+readable from the PR checks page. The pipe preserves the CLI's exit code, so
+pending changes still fail the gate.
+
+## Show the SQL that would run
+
+`--show-sql` appends each table's exact planned statements to the text report:
+
+```bash
+delta-engine plan myproject.tables --show-sql
+```
+
+## Machine-readable output
+
+`--output json` prints the full run report — the same
+[`to_dict()` payload](reference-run-report.md) the Python API returns — as the
+only thing on stdout:
+
+```bash
+delta-engine plan myproject.tables --output json | jq '.tables[] | {name, status}'
+```
+
+## The Python API, for custom gates
+
+The CLI covers the common gate. For custom policy — tolerating a flaky read
+while hard-failing unsafe drift, say — call the engine directly and inspect
+the report:
 
 ```python
 import os
+import sys
 
 from databricks import sql
 
+from delta_engine import ValidationFailure
 from delta_engine.databricks import build_sql_engine
 
 from myproject.tables import all_tables  # your DeltaTable declarations
@@ -62,53 +124,20 @@ with sql.connect(
     http_path=os.environ["DATABRICKS_HTTP_PATH"],
     access_token=os.environ["DATABRICKS_TOKEN"],
 ) as connection:
-    engine = build_sql_engine(connection)
-    report = engine.sync(*all_tables, dry_run=True)
-```
-
-`report` is the same `SyncReport` either way: the `has_failures`/`has_changes`
-gate above, the SQL preview below, and failure discrimination all apply
-unchanged. The warehouse backend compiles the same statements the Spark
-backend does, so a gate written against one works against the other
-untouched. This path needs the `delta-engine[sql]` extra
-([installation](installation.md)) and Unity Catalog
-([limitations](reference-limitations.md)).
-
-## Show the SQL that would run
-
-`report.planned_sql_statements` maps each table's dotted name to the exact statements a
-real sync would execute — full text, in execution order, untruncated:
-
-```python
-for name, statements in report.planned_sql_statements.items():
-    print(f"-- {name}")
-    for statement in statements:
-        print(statement)
-```
-
-The same statements appear per table in `report.to_dict()`, so a single JSON
-payload carries the status, the planned actions, and the DDL together.
-
-## Discriminate failures by type
-
-The concrete failure types are importable, so a gate can treat failure classes
-differently — for example tolerating a flaky read while hard-failing unsafe
-drift:
-
-```python
-from delta_engine import ReadFailure, ValidationFailure
+    report = build_sql_engine(connection).sync(*all_tables, dry_run=True)
 
 for table_report in report:
     for failure in table_report.failures:
         if isinstance(failure, ValidationFailure):
             sys.exit(1)  # never merge an unsafe change
-        if isinstance(failure, ReadFailure):
-            print(f"transient read failure on {table_report.qualified_name}")
 ```
+
+On a Databricks cluster the same gate runs through the Spark backend: build
+the engine with `build_spark_engine(spark)` and everything else — the report,
+the booleans, the failure types — is identical.
 
 ## Render the report yourself
 
-delta-engine deliberately ships no PR-comment or markdown renderer. `to_dict()`
-is stable, JSON-serialisable data (see
-[the run report schema](reference-run-report.md)); formatting it into a PR
-comment, a Slack message, or a log line is your pipeline's job.
+The CLI emits text and JSON; formatting a PR comment, a Slack message, or a
+log line from the JSON remains your pipeline's job. `to_dict()` is stable,
+JSON-serialisable data — see [the run report schema](reference-run-report.md).

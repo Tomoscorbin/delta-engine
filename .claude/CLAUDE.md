@@ -16,6 +16,7 @@ Main source layout:
 - `src/delta_engine/api`: implementation of public declaration objects.
 - `src/delta_engine/schema.py`: public schema declaration import surface.
 - `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
+- `src/delta_engine/cli`: Typer command-line interface (`plan`/`apply`) over the warehouse backend; requires the `cli` extra.
 - `tests`: unit, integration, adapter, and end-to-end tests.
 - `docs`: Sphinx/MyST documentation.
 
@@ -110,10 +111,10 @@ Rules:
 Expected dependency direction:
 
 ```text
-databricks | schema | adapters | api -> application -> domain
+cli -> databricks | schema | adapters | api -> application -> domain
 ```
 
-A separate import-linter contract forbids `delta` and `pyspark` imports from `schema`, `api`, `application`, and `domain`.
+A separate import-linter contract forbids `delta` and `pyspark` imports from `cli`, `schema`, `api`, `application`, and `domain`, and another confines `typer`/`click`/`rich` imports to `cli`.
 
 ## Sync lifecycle
 
@@ -178,6 +179,7 @@ Foreign-key declarations reference the target `DeltaTable` object, or `Self`, ra
 | Report/output formatting             | `src/delta_engine/application/report.py` and `src/delta_engine/application/rendering.py` |
 | Databricks SQL generation            | `src/delta_engine/adapters/databricks/sql`                                               |
 | Public Databricks helper             | `src/delta_engine/databricks.py`                                                         |
+| CLI commands, output, exit codes     | `src/delta_engine/cli`                                                                   |
 | Documentation                        | `docs`                                                                                   |
 
 Before changing architecture, action planning, validation, adapters, or public behaviour, read the relevant docs instead of guessing:

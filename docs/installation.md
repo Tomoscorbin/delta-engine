@@ -63,6 +63,21 @@ This path requires Unity Catalog: every read runs through
 `information_schema`, which a catalog such as `hive_metastore` does not
 expose (see [limitations](reference-limitations.md)).
 
+## Installing the CLI
+
+The `cli` extra adds the `delta-engine` command on top of the SQL warehouse
+backend:
+
+```bash
+pip install "delta-engine[cli]"
+```
+
+`delta-engine plan` dry-runs your declarations against the catalog and
+`delta-engine apply` syncs them, both over a Databricks SQL warehouse
+connection configured through `DATABRICKS_SERVER_HOSTNAME`,
+`DATABRICKS_HTTP_PATH`, and `DATABRICKS_TOKEN`. See
+[how to gate schema changes in CI](how-to-gate-changes-in-ci.md).
+
 ## Verify
 
 ```python
