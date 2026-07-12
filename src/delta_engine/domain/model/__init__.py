@@ -1,4 +1,4 @@
-from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.column import Column, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -52,6 +52,7 @@ __all__ = [
     "Integer",
     "Long",
     "Map",
+    "ObservedColumn",
     "ObservedTable",
     "PrimaryKeyConstraint",
     "QualifiedName",

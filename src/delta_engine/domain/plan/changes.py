@@ -71,7 +71,7 @@ class ColumnAdded:
 class ColumnRemoved:
     """A column present in the catalog but absent from the declaration."""
 
-    column: Column
+    column: ObservedColumn
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
