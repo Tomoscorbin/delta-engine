@@ -34,6 +34,9 @@ Repository = "https://github.com/Tomoscorbin/delta-engine"
 Documentation = "https://tomoscorbin.github.io/delta-engine/"
 Issues = "https://github.com/Tomoscorbin/delta-engine/issues"
 
+[project.scripts]
+delta-engine = "delta_engine.cli:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8.4.1",
