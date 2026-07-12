@@ -625,3 +625,38 @@ def test_dry_run_report_is_ci_consumable(spark, temp_schema):
 
     # And nothing was created
     assert spark.catalog.tableExists(fq) is False
+
+
+def test_engine_renames_column_preserving_data_and_is_idempotent(spark, temp_schema):
+    # Given a column-mapped table with data under the old column name
+    table_name = f"rename_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    spark.sql(
+        f"CREATE TABLE {fq} (id INT NOT NULL, customer_nm STRING) USING DELTA"
+        " TBLPROPERTIES ('delta.columnMapping.mode'='name')"
+    )
+    spark.sql(f"INSERT INTO {fq} VALUES (1, 'Ada')")
+
+    engine = Engine(SparkReader(spark), SparkExecutor(spark))
+    declaration = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        ),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+
+    # When we sync, the column is renamed in place and its data is preserved
+    report = engine.sync(declaration)
+    assert report.has_failures is False
+
+    rows = spark.sql(f"SELECT id, customer_name FROM {fq}").collect()
+    assert [(r.id, r.customer_name) for r in rows] == [(1, "Ada")]
+
+    # And a second sync sees no drift — the hint is inert once applied
+    second = engine.sync(declaration)
+    assert second.has_failures is False
+    assert second.has_changes is False
