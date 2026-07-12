@@ -6,7 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["delta-lake", "databricks", "schema", "migrations", "ddl", "data-engineering"]
+keywords = [
+  "delta-lake",
+  "databricks",
+  "schema",
+  "migrations",
+  "ddl",
+  "data-engineering",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -46,6 +53,7 @@ dev = [
   "commitizen>=4.0",
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
+  "databricks-sdk>=0.70.0",
 ]
 docs = [
   "sphinx>=8.0",
