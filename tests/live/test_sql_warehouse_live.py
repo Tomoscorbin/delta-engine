@@ -5,10 +5,13 @@ import pytest
 pytest.importorskip("databricks.sql")
 
 from delta_engine.databricks import build_sql_engine
-from delta_engine.schema import Column, DeltaTable, Integer, Property, String
+from delta_engine.schema import Column, DeltaTable, Integer, Long, Property, String
 from tests.live.sql_warehouse_live_helpers import (
+    execute_sql,
+    fetch_rows,
     live_catalog,
     live_schema,
+    qualified_table,
     read_live_table,
     table_exists,
 )
@@ -147,6 +150,9 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
     assert state["table_tags"] == {"owner": "data-platform", "lifecycle": "v2"}
     assert state["column_tags"] == {("account_code", "classification"): "public"}
     assert state["primary_key"] == ("id",)
+    # The reader must round-trip every aspect the executor just wrote: a
+    # resync of the evolved declaration finds nothing left to do.
+    assert engine.sync(evolved).has_changes is False
 
 
 def test_identical_sync_does_not_alter_live_catalog(live_connection, live_tables):
@@ -219,6 +225,56 @@ def test_dry_run_previews_alterations_without_changing_the_live_table(live_conne
     assert "ADD COLUMN" in joined
     assert "COMMENT ON TABLE" in joined
     assert read_live_table(live_connection, table_name) == before
+
+
+def test_sync_alters_preserve_existing_rows(live_connection, live_tables):
+    table_name = live_tables("data_preserved")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("amount", Integer()),
+            ),
+            properties={Property.TYPE_WIDENING: "true"},
+        )
+    )
+    execute_sql(
+        live_connection,
+        f"INSERT INTO {qualified_table(table_name)} VALUES (1, 10), (2, 20), (3, 30)",
+    )
+
+    # Widening a populated column, adding a column, and re-layouting the
+    # table are metadata operations: the loaded rows must survive untouched.
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(
+                Column("id", Integer(), nullable=False),
+                Column("amount", Long()),
+                Column("note", String(), comment="added after load"),
+            ),
+            clustered_by=("id",),
+            properties={Property.TYPE_WIDENING: "true"},
+        )
+    )
+
+    state = read_live_table(live_connection, table_name)
+    assert state["columns"][1]["full_data_type"].casefold() == "bigint"
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT id, amount, note FROM {qualified_table(table_name)} ORDER BY id",
+    )
+    assert rows == [
+        {"id": 1, "amount": 10, "note": None},
+        {"id": 2, "amount": 20, "note": None},
+        {"id": 3, "amount": 30, "note": None},
+    ]
 
 
 def test_sync_round_trips_quoted_identifiers_and_unicode_metadata(live_connection, live_tables):

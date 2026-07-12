@@ -153,6 +153,30 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
     assert not set(properties) & {str(key) for key in Property}
 
 
+def test_unregistered_properties_are_invisible_to_a_full_sync(live_connection, live_tables):
+    # The reader filters unregistered keys out of observed state, so keys
+    # owned by other tooling or the platform are neither drift nor unset.
+    table_name = live_tables("custom_properties")
+    declaration = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer()),),
+    )
+    engine = build_sql_engine(live_connection)
+    engine.sync(declaration)
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} SET TBLPROPERTIES ('team.owner'='governance')",
+    )
+
+    report = engine.sync(declaration)
+
+    assert report.has_failures is False
+    assert report.has_changes is False
+    assert read_live_table(live_connection, table_name)["properties"]["team.owner"] == "governance"
+
+
 def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_tables):
     # The engine does not model platform restrictions on which column roles
     # may widen; Unity Catalog imposes none for these roles, so the plain

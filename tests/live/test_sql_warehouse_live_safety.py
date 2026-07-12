@@ -6,6 +6,8 @@ pytest.importorskip("databricks.sql")
 
 from delta_engine import (
     ExecutionFailure,
+    ForeignKeyFailure,
+    ReadFailure,
     SyncFailedError,
     TableRunStatus,
     ValidationFailure,
@@ -368,3 +370,126 @@ def test_server_rejected_statement_surfaces_as_typed_execution_failure(
     assert "ALTER COLUMN" in failure.statement
     assert failure.message
     assert read_live_table(live_connection, table_name) == before
+
+
+def test_widening_without_the_type_widening_property_is_rejected_without_catalog_change(
+    live_connection, live_tables
+):
+    table_name = live_tables("reject_widen")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer()),),
+        )
+    )
+
+    _assert_rejected_without_catalog_change(
+        live_connection,
+        table_name,
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Long()),),
+        ),
+    )
+
+
+def test_undeclared_managed_property_is_rejected_without_catalog_change(
+    live_connection, live_tables
+):
+    # Exact-declaration semantics: a managed key set outside the declaration
+    # is drift the sync must refuse to reconcile silently, not quietly unset.
+    table_name = live_tables("reject_undeclared")
+    declaration = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer()),),
+    )
+    engine = build_sql_engine(live_connection)
+    engine.sync(declaration)
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} "
+        "SET TBLPROPERTIES ('delta.logRetentionDuration'='interval 9 days')",
+    )
+
+    _assert_rejected_without_catalog_change(live_connection, table_name, declaration)
+
+
+def test_child_with_foreign_key_is_blocked_when_its_parent_is_rejected(
+    live_connection, live_tables
+):
+    parent_name = live_tables("blocked_parent")
+    child_name = live_tables("blocked_child")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            parent_name,
+            columns=(Column("id", Integer(), nullable=False),),
+            primary_key=("id",),
+        )
+    )
+    parent_before = read_live_table(live_connection, parent_name)
+    unsafe_parent = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        parent_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("required", String(), nullable=False),
+        ),
+        primary_key=("id",),
+    )
+    child = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        child_name,
+        columns=(Column("id", Integer(), nullable=False), Column("parent_id", Integer())),
+        foreign_keys=(ForeignKey(columns={"parent_id": "id"}, references=unsafe_parent),),
+    )
+
+    with pytest.raises(SyncFailedError) as error:
+        engine.sync(child, unsafe_parent)
+
+    # The child was individually safe to create, but its foreign key depends
+    # on a table whose own change was rejected — dependency resolution must
+    # block it rather than create it against an unreconciled parent.
+    [child_report] = [
+        table_report
+        for table_report in error.value.report.table_reports
+        if table_report.qualified_name.name == child_name
+    ]
+    assert child_report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    [failure] = child_report.failures
+    assert isinstance(failure, ForeignKeyFailure)
+    assert failure.reason == "BLOCKED_BY_FAILED_DEPENDENCY"
+    assert table_exists(live_connection, child_name) is False
+    assert read_live_table(live_connection, parent_name) == parent_before
+
+
+def test_unreadable_catalog_surfaces_as_typed_read_failure(live_connection):
+    declaration = DeltaTable(
+        "de_live_nonexistent_catalog",
+        live_schema(),
+        "de_live_unreadable",
+        columns=(Column("id", Integer()),),
+    )
+
+    with pytest.raises(SyncFailedError) as error:
+        build_sql_engine(live_connection).sync(declaration)
+
+    # The reader port is total: a backend error reading state must come back
+    # as a typed read failure in the report, not a raw connector exception.
+    [table_report] = error.value.report.table_reports
+    assert table_report.status is TableRunStatus.READ_FAILED
+    [failure] = table_report.failures
+    assert isinstance(failure, ReadFailure)
+    assert failure.exception_type
+    assert failure.message

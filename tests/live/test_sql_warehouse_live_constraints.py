@@ -146,6 +146,44 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
     )
 
 
+def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
+    live_connection, live_tables
+):
+    # Constraint identity is structural: a live PK/FK created under names the
+    # engine would never generate is still the declared constraint, so a sync
+    # finds no drift and the foreign names survive.
+    table_name = live_tables("adopted_names")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (id INT NOT NULL, manager_id INT, "
+        f"CONSTRAINT {table_name}_legacy_pk PRIMARY KEY (id)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} ADD CONSTRAINT {table_name}_legacy_fk "
+        f"FOREIGN KEY (manager_id) REFERENCES {qualified_table(table_name)} (id)",
+    )
+    declaration = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("manager_id", Integer()),
+        ),
+        primary_key=("id",),
+        foreign_keys=(ForeignKey(columns={"manager_id": "id"}, references=Self),),
+    )
+
+    report = build_sql_engine(live_connection).sync(declaration)
+
+    assert report.has_failures is False
+    assert report.has_changes is False
+    state = read_live_table(live_connection, table_name)
+    assert state["primary_key_name"] == f"{table_name}_legacy_pk"
+    assert state["foreign_keys"] == ((f"{table_name}_legacy_fk", "manager_id", table_name, "id"),)
+
+
 def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     live_connection, live_tables
 ):
