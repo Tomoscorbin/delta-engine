@@ -185,6 +185,27 @@ def _validate_layout(
         )
 
 
+def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str | None]) -> None:
+    """
+    Reject rename hints the declared properties make undeployable.
+
+    RENAME COLUMN requires column mapping, and a rename hint is
+    declaration-visible, so this fails at construction — unlike a drop, which
+    exists only as a diff fact against the observed catalog and is judged at
+    sync time (see ``ColumnMappingRequiredForDrop``). Enforcing it here gives
+    the author the error at import time rather than per-table on the next sync.
+    """
+    hinted = [column.name for column in columns if column.renamed_from is not None]
+    if not hinted:
+        return
+    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+        raise ValueError(
+            f"Columns {hinted} declare renamed_from, which requires"
+            f" {Property.COLUMN_MAPPING_MODE}='name'. Declare"
+            f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}} on this table."
+        )
+
+
 def _validate_column_names(
     columns: tuple[Column, ...],
     properties: Mapping[str, str | None],
@@ -456,6 +477,7 @@ class DeltaTable:
         clustered_by = tuple(clustered_by)
         _validate_layout(columns, partitioned_by, clustered_by)
         _validate_column_names(columns, user_properties, managed_aspects)
+        _validate_renames(columns, user_properties)
 
         table_tags = dict(tags or {})
         _validate_tags(f"table '{name}'", table_tags)

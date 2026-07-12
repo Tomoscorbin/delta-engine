@@ -1050,3 +1050,30 @@ def test_delta_table_accepts_tags_at_the_limits() -> None:
         tags=at_limit,
     )
     assert len(table.to_desired_table().tags) == 50
+
+
+def test_delta_table_rejects_rename_hint_without_column_mapping():
+    with pytest.raises(ValueError, match="delta.columnMapping.mode"):
+        DeltaTable(
+            "dev",
+            "silver",
+            "customers",
+            columns=[
+                Column("id", Integer(), nullable=False),
+                Column("customer_name", String(), renamed_from="customer_nm"),
+            ],
+        )
+
+
+def test_delta_table_accepts_rename_hint_with_column_mapping_declared():
+    table = DeltaTable(
+        "dev",
+        "silver",
+        "customers",
+        columns=[
+            Column("id", Integer(), nullable=False),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        ],
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    assert table.columns[1].renamed_from == "customer_nm"
