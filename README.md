@@ -90,7 +90,7 @@ for the model, or jump to what you need:
 - [Configure a table](https://tomoscorbin.github.io/delta-engine/how-to-configure-table.html) — properties, tags, comments, keys, and partitioning
 - [Deploy metadata only](https://tomoscorbin.github.io/delta-engine/how-to-deploy-metadata-only.html) — roll out governance metadata with no schema change
 - [Preview changes with a dry run](https://tomoscorbin.github.io/delta-engine/how-to-preview-changes.html)
-- [Gate schema changes in CI](https://tomoscorbin.github.io/delta-engine/how-to-gate-changes-in-ci.html) — fail a pull request when declarations and the catalog disagree
+- [Gate schema changes in CI](https://tomoscorbin.github.io/delta-engine/how-to-gate-changes-in-ci.html) — report planned changes and fail unreadable or unsafe plans
 - [Handle sync failures](https://tomoscorbin.github.io/delta-engine/how-to-handle-sync-failures.html) — inspect `SyncReport` and act on each status
 
 **Reference**

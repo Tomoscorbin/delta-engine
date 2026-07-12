@@ -208,3 +208,27 @@ def test_loads_from_the_working_directory_without_installation(tmp_path, monkeyp
     assert _dotted_names(tables) == ["dev.silver.orders"]
     sys.modules.pop("decl_cwd_tables", None)
     sys.path.remove(str(tmp_path))
+
+
+def test_working_directory_takes_precedence_when_already_later_on_path(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    shadow = tmp_path / "shadow"
+    project.mkdir()
+    shadow.mkdir()
+    module_name = "decl_path_precedence"
+    source = """
+        from delta_engine.schema import Column, DeltaTable, String
+        orders = DeltaTable(
+            "{catalog}", "silver", "orders", columns=(Column("id", String()),)
+        )
+    """
+    (project / f"{module_name}.py").write_text(dedent(source.format(catalog="dev")))
+    (shadow / f"{module_name}.py").write_text(dedent(source.format(catalog="wrong")))
+    monkeypatch.chdir(project)
+    monkeypatch.syspath_prepend(str(project))
+    monkeypatch.syspath_prepend(str(shadow))
+
+    tables = load_declarations([f"{module_name}:orders"])
+
+    assert _dotted_names(tables) == ["dev.silver.orders"]
+    sys.modules.pop(module_name, None)

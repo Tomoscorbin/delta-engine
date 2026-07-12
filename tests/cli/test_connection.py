@@ -100,31 +100,21 @@ def test_all_unified_auth_types_use_the_sdk_credential_provider(
     assert authenticate() == {"Authorization": "Bearer resolved"}
 
 
-def test_missing_http_path_is_a_config_error(fake_dependencies):
+def test_missing_http_path_is_reported_before_loading_backends(monkeypatch):
+    # Given the backend packages cannot be imported at all: if the CLI tried
+    # to load them before checking the HTTP path, it would report a missing
+    # dependency instead of the missing setting
+    import databricks
+
+    monkeypatch.delattr(databricks, "sql", raising=False)
+    monkeypatch.setitem(sys.modules, "databricks.sql", None)
+    monkeypatch.setitem(sys.modules, "databricks.sdk.core", None)
+
+    # When opening a connection with no HTTP path configured
+    # Then the missing setting is the reported error
     with pytest.raises(ConfigError, match="DATABRICKS_HTTP_PATH"):
         with open_connection(None, None, None, environ={}):
             pass
-
-
-def test_missing_auth_and_http_path_are_reported_in_one_error(monkeypatch):
-    # Given neither authentication nor an HTTP path is configured
-    from databricks.sdk import core as sdk_core
-
-    class BrokenConfig:
-        def __init__(self, **kwargs) -> None:
-            raise ValueError("cannot configure default credentials")
-
-    monkeypatch.setattr(sdk_core, "Config", BrokenConfig)
-
-    # When opening a connection
-    with pytest.raises(ConfigError) as excinfo:
-        with open_connection(None, None, None, environ={}):
-            pass
-
-    # Then one error names both gaps, so a misconfigured CI job is fixed in one round trip
-    message = str(excinfo.value)
-    assert "authentication" in message
-    assert "DATABRICKS_HTTP_PATH" in message
 
 
 def test_sdk_configuration_error_is_a_config_error(monkeypatch):

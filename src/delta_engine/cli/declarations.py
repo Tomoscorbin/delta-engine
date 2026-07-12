@@ -58,9 +58,10 @@ def load_declarations(spec_texts: Sequence[str]) -> tuple[DeltaTable, ...]:
 
 
 def _ensure_working_directory_on_path() -> None:
+    """Place the working directory first, even when it already appears later."""
     working_directory = os.getcwd()
-    if working_directory not in sys.path:
-        sys.path.insert(0, working_directory)
+    sys.path[:] = [entry for entry in sys.path if entry != working_directory]
+    sys.path.insert(0, working_directory)
 
 
 def _parse_spec(text: str) -> _DeclarationSpec:

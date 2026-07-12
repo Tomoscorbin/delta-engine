@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 _HTTP_PATH_VAR = "DATABRICKS_HTTP_PATH"
 _INSTALL_HINT = 'pip install "delta-engine[cli]"'
+_CANNOT_CONNECT = "cannot connect to Databricks"
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ def open_connection(
     :class:`Config`; otherwise it resolves environment variables and Databricks
     configuration profiles itself. ``http_path`` falls back to
     ``DATABRICKS_HTTP_PATH`` because the warehouse path is a connector setting,
-    not an SDK authentication field. Every configuration gap found up front —
-    authentication and HTTP path — is reported in one error.
+    not an SDK authentication field. A missing HTTP path is reported before
+    importing the connector or asking the SDK to resolve authentication.
 
     Connection-close errors are logged and suppressed so they never replace a
     completed report or the primary exception raised by a sync.
@@ -48,16 +49,12 @@ def open_connection(
 
     """
     environment = os.environ if environ is None else environ
-    databricks_sql, config_class = _import_backends()
-
-    problems: list[str] = []
-    config = _build_config(config_class, host, profile, problems)
     resolved_http_path = http_path if http_path is not None else environment.get(_HTTP_PATH_VAR)
     if not resolved_http_path:
-        problems.append(f"missing {_HTTP_PATH_VAR} (or --http-path)")
-    if problems:
-        raise ConfigError("cannot connect to Databricks: " + "; ".join(problems))
-    assert config is not None and resolved_http_path  # narrowed by the problems check
+        raise ConfigError(f"{_CANNOT_CONNECT}: missing {_HTTP_PATH_VAR} (or --http-path)")
+
+    databricks_sql, config_class = _import_backends()
+    config = _build_config(config_class, host, profile)
 
     # The connector re-raises connect-time failures unchanged and of many
     # types (urllib3 transport errors, SDK auth ValueErrors), so this boundary
@@ -126,9 +123,8 @@ def _build_config(
     config_class: type["Config"],
     host: str | None,
     profile: str | None,
-    problems: list[str],
-) -> "Config | None":
-    """Build the SDK config, recording a failure instead of raising."""
+) -> "Config":
+    """Build the SDK config, translating authentication failures."""
     try:
         if host is not None and profile is not None:
             return config_class(host=host, profile=profile)
@@ -138,5 +134,4 @@ def _build_config(
             return config_class(profile=profile)
         return config_class()
     except ValueError as error:
-        problems.append(f"authentication: {error}")
-        return None
+        raise ConfigError(f"{_CANNOT_CONNECT}: authentication: {error}") from error

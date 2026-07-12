@@ -170,12 +170,13 @@ delta-engine plan myproject.tables:all_tables
 
 Prefer short-lived OAuth or OIDC credentials for automation.
 
-Configuration failures found before connecting — unresolvable authentication
-and a missing HTTP path — are reported together in one error. Failures while
-establishing the connection (unreachable host, rejected credentials) are also
-rendered as one-line configuration errors rather than tracebacks. If a file in
-the working directory shadows the installed `databricks` packages (a project
-file named `databricks.py`, say), the error names that file.
+A missing HTTP path is reported before the CLI imports the Databricks packages,
+reads authentication profiles, or contacts a host. Once a path is available,
+unresolvable authentication and failures while establishing the connection
+(unreachable host, rejected credentials) are rendered as one-line configuration
+errors rather than tracebacks. If a file in the working directory shadows the
+installed `databricks` packages (a project file named `databricks.py`, say), the
+error names that file.
 
 ## Output streams and planned SQL
 

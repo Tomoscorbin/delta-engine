@@ -106,6 +106,8 @@ Rules:
 - `adapters` own backend integration, SQL compilation, Spark/Databricks parsing, identifier quoting, and backend exception translation.
 - `api` owns public declaration implementation and lowers declarations into domain snapshots.
 - `schema.py` and `databricks.py` are user-facing facades; keep them thin.
+- `cli.connection` may import the Databricks SDK and SQL connector only to resolve
+  authentication and own a connection; backend reads and execution stay in adapters.
 - PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
 
 Expected dependency direction:
