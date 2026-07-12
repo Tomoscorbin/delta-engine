@@ -4,6 +4,8 @@ from contextlib import contextmanager
 import json
 import logging
 
+import pytest
+
 import delta_engine.cli.app as cli_app
 from delta_engine.cli.app import app
 from delta_engine.cli.connection import open_connection as real_open_connection
@@ -150,6 +152,47 @@ def test_json_redirects_declaration_authentication_and_sync_stdout_to_stderr(
     assert "declaration noise" in result.stderr
     assert "authentication noise" in result.stderr
     assert "sync noise" in result.stderr
+
+
+@pytest.mark.parametrize("command", ["plan", "apply"])
+def test_host_http_path_and_profile_flags_configure_the_connection(
+    command, runner, fake_engine, databricks_env, write_module, monkeypatch
+):
+    # The three values travel positionally from each command to
+    # open_connection, and all share one type, so only this assertion would
+    # catch a transposition.
+    module = write_module(f"{command}_connection_flags", ORDERS_ONLY)
+    received = {}
+
+    @contextmanager
+    def recording_connection(host, http_path, profile):
+        received["host"] = host
+        received["http_path"] = http_path
+        received["profile"] = profile
+        yield object()
+
+    monkeypatch.setattr(cli_app, "open_connection", recording_connection)
+
+    result = runner.invoke(
+        app,
+        [
+            command,
+            f"{module}:orders",
+            "--host",
+            "https://flag.cloud.databricks.com",
+            "--http-path",
+            "/sql/1.0/warehouses/flag",
+            "--profile",
+            "production",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert received == {
+        "host": "https://flag.cloud.databricks.com",
+        "http_path": "/sql/1.0/warehouses/flag",
+        "profile": "production",
+    }
 
 
 def test_click_usage_errors_keep_exit_code_two(runner):
