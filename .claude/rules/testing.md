@@ -1,9 +1,6 @@
 ---
-
 paths:
-
-- "tests/**/*.py"
-
+  - "tests/**/*.py"
 ---
 
 # Testing rules
@@ -54,7 +51,7 @@ For Databricks executor changes, assert execution summaries, successful action r
 
 Do not require real Databricks for ordinary unit tests.
 
-Credentialed Databricks tests must remain opt-in through the `databricks_e2e` marker.
+This repo carries no tests that need Databricks credentials. Do not add tests that require a real workspace; live verification against Unity Catalog happens in a separate project outside this repo.
 
 Local Spark/Delta end-to-end tests should stay marked with `local_e2e`.
 
@@ -81,4 +78,4 @@ To skip local Spark/Delta end-to-end tests:
 uv run pytest -m "not local_e2e"
 ```
 
-Do not run credentialed Databricks tests unless explicitly asked.
+Every test in this repo runs locally without Databricks credentials.
