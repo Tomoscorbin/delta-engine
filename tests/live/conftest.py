@@ -7,8 +7,9 @@ new file cannot leak into default runs by forgetting a marker line. The
 addopts marker filter excludes the suite from every default pytest run; it
 only runs when requested explicitly (a manual run or the live CI job):
 
-    export DATABRICKS_SERVER_HOSTNAME=... DATABRICKS_HTTP_PATH=...
-    export DATABRICKS_TOKEN=...            # or profile/OIDC, see databricks_connection.py
+    databricks auth login --host https://<workspace>   # once (OAuth), or set
+                                                       # DATABRICKS_CONFIG_PROFILE
+    export DATABRICKS_HTTP_PATH=...
     export DELTA_ENGINE_E2E_CATALOG=... DELTA_ENGINE_E2E_SCHEMA=...
     uv run pytest tests/live -m databricks_e2e --no-cov
 
