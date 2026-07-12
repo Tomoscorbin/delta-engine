@@ -1,7 +1,14 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    QualifiedName,
+    TableAspect,
+)
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPhase,
@@ -13,6 +20,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -25,6 +33,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
+from delta_engine.domain.plan.changes import ColumnRenamed
 
 # ----- builders
 
@@ -325,3 +334,27 @@ def test_plan_reclusters_before_dropping_a_column():
     # Then clustering is changed off the old key before that column is dropped,
     # so the drop never targets a live clustering key
     assert [type(a) for a in plan] == [AlterClustering, DropColumn]
+
+
+def test_rename_column_orders_after_constraint_drops_and_before_column_adds():
+    plan = ActionPlan(
+        (
+            AddColumn(column=Column("b", Integer())),
+            RenameColumn(old_name="a", new_name="c"),
+            DropPrimaryKey(),
+        )
+    )
+    # Then the rename runs after the PK drop (a key on the old name is dropped
+    # first) and before any action targeting the new name
+    assert [type(action) for action in plan] == [DropPrimaryKey, RenameColumn, AddColumn]
+
+
+def test_column_renamed_lowers_to_a_rename_action():
+    change = ColumnRenamed(old_name="customer_nm", new_name="customer_name")
+    assert change.actions() == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
+    assert change.aspect is TableAspect.COLUMN_STRUCTURE
+
+
+def test_column_renamed_rejects_no_difference():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnRenamed(old_name="same", new_name="same")
