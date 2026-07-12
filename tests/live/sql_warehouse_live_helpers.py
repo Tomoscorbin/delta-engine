@@ -1,16 +1,10 @@
 """
 Independent catalog readers for live SQL Warehouse tests.
 
-Run manually against a real SQL warehouse (never in default CI):
-
-    export DATABRICKS_SERVER_HOSTNAME=... DATABRICKS_HTTP_PATH=...
-    export DATABRICKS_TOKEN=...            # or profile/OIDC, see databricks_connection.py
-    export DELTA_ENGINE_E2E_CATALOG=... DELTA_ENGINE_E2E_SCHEMA=...
-    uv run pytest -m databricks_e2e tests/e2e --no-cov
-
-The ``live_connection`` and ``live_tables`` fixtures live in ``conftest.py``.
-Every test allocates uniquely named tables through the ``live_tables`` factory
-and drops them afterwards, so runs are safe to repeat against a shared schema.
+These read observed table state straight from information_schema and
+DESCRIBE DETAIL so assertions do not depend on the engine's own reader.
+Run instructions and the ``live_connection``/``live_tables`` fixtures live
+in ``conftest.py``.
 """
 
 from collections.abc import Mapping

@@ -22,7 +22,7 @@ from delta_engine.schema import (
     String,
     TimestampNtz,
 )
-from tests.e2e.sql_warehouse_live_helpers import (
+from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     live_catalog,
     live_schema,

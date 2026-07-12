@@ -13,7 +13,7 @@ from delta_engine.schema import (
     Self,
     String,
 )
-from tests.e2e.sql_warehouse_live_helpers import (
+from tests.live.sql_warehouse_live_helpers import (
     live_catalog,
     live_schema,
     read_live_table,

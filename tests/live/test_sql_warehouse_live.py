@@ -6,7 +6,7 @@ pytest.importorskip("databricks.sql")
 
 from delta_engine.databricks import build_sql_engine
 from delta_engine.schema import Column, DeltaTable, Integer, Property, String
-from tests.e2e.sql_warehouse_live_helpers import (
+from tests.live.sql_warehouse_live_helpers import (
     live_catalog,
     live_schema,
     read_live_table,
