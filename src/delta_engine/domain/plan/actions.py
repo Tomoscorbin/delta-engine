@@ -28,6 +28,7 @@ class ActionPhase(IntEnum):
     UNSET_TABLE_TAG = auto()
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
+    RENAME_COLUMN = auto()
     ADD_COLUMN = auto()
     ALTER_COLUMN_TYPE = auto()
     SET_CLUSTERING = auto()
@@ -104,6 +105,27 @@ class DropColumn(Action):
     @property
     def subject(self) -> str:
         return self.column_name
+
+
+@dataclass(frozen=True, slots=True)
+class RenameColumn(Action):
+    """
+    Rename a column in place.
+
+    Runs after constraint drops (a key on the old name is dropped first) and
+    before every action that targets the new name. Requires column mapping;
+    the declaration-time check on ``DeltaTable`` guarantees a hint-carrying
+    declaration states it.
+    """
+
+    old_name: str
+    new_name: str
+
+    phase: ClassVar[ActionPhase] = ActionPhase.RENAME_COLUMN
+
+    @property
+    def subject(self) -> str:
+        return self.old_name
 
 
 @dataclass(frozen=True, slots=True)

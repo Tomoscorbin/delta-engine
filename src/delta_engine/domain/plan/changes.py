@@ -40,6 +40,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -78,6 +79,24 @@ class ColumnRemoved:
     def actions(self) -> tuple[Action, ...]:
         """Drop the observed column."""
         return (DropColumn(column_name=self.column.name),)
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnRenamed:
+    """A column observed under an old name that the declaration renames."""
+
+    old_name: str
+    new_name: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+
+    def __post_init__(self) -> None:
+        if self.old_name == self.new_name:
+            raise ValueError(f"ColumnRenamed carries no difference: {self.old_name!r}")
+
+    def actions(self) -> tuple[Action, ...]:
+        """Rename the observed column to its declared name."""
+        return (RenameColumn(old_name=self.old_name, new_name=self.new_name),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +462,7 @@ class ForeignKeyRemoved:
 type Change = (
     ColumnAdded
     | ColumnRemoved
+    | ColumnRenamed
     | ColumnDataTypeChanged
     | ColumnNullabilityChanged
     | ColumnCommentChanged
