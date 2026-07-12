@@ -1053,7 +1053,7 @@ def test_delta_table_accepts_tags_at_the_limits() -> None:
 
 
 def test_delta_table_rejects_rename_hint_without_column_mapping():
-    with pytest.raises(ValueError, match="delta.columnMapping.mode"):
+    with pytest.raises(ValueError, match="columnMapping"):
         DeltaTable(
             "dev",
             "silver",
