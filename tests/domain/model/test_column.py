@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.domain.model.column import Column, ObservedColumn
-from delta_engine.domain.model.data_type import Integer
+from delta_engine.domain.model.data_type import Integer, String
 
 
 def test_defaults_to_nullable_true() -> None:
@@ -57,6 +57,24 @@ def test_raises_when_tag_key_is_blank(blank: str) -> None:
     # When/Then: constructing a Column fails
     with pytest.raises(ValueError, match="Tag key must not be blank"):
         Column("id", Integer(), tags={blank: "v"})
+
+
+def test_column_accepts_a_lowercase_renamed_from_hint() -> None:
+    column = Column("customer_name", String(), renamed_from="customer_nm")
+    assert column.renamed_from == "customer_nm"
+
+
+def test_column_defaults_to_no_rename_hint() -> None:
+    assert Column("customer_name", String()).renamed_from is None
+
+
+def test_column_rejects_malformed_renamed_from() -> None:
+    with pytest.raises(ValueError, match="lowercase"):
+        Column("customer_name", String(), renamed_from="Customer_NM")
+    with pytest.raises(ValueError, match="blank"):
+        Column("customer_name", String(), renamed_from="  ")
+    with pytest.raises(ValueError, match="itself"):
+        Column("customer_name", String(), renamed_from="customer_name")
 
 
 def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
