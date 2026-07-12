@@ -160,8 +160,6 @@ def _(action: UnsetColumnTag, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetColumnComment, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
-    if not action.comment:
-        return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} UNSET COMMENT"
     comment = quote_literal(action.comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
