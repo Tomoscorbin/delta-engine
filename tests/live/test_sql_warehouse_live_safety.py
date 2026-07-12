@@ -156,6 +156,29 @@ def test_partitioning_change_is_rejected_without_catalog_change(live_connection,
     )
 
 
+def test_partitioned_to_clustered_conversion_is_rejected_without_catalog_change(
+    live_connection, live_tables
+):
+    table_name = live_tables("reject_convert")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} "
+        "(id INT, region STRING) USING DELTA PARTITIONED BY (region)",
+    )
+
+    _assert_rejected_without_catalog_change(
+        live_connection,
+        table_name,
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer()), Column("region", String())),
+            clustered_by=("id",),
+        ),
+    )
+
+
 def test_permanent_column_mapping_transition_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):

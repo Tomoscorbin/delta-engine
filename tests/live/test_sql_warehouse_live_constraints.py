@@ -14,8 +14,11 @@ from delta_engine.schema import (
     String,
 )
 from tests.live.sql_warehouse_live_helpers import (
+    execute_sql,
+    fetch_rows,
     live_catalog,
     live_schema,
+    qualified_table,
     read_live_table,
 )
 
@@ -140,4 +143,57 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
 
     assert read_live_table(live_connection, table_name)["foreign_keys"] == (
         (f"{table_name}_manager_id_fk", "manager_id", table_name, "id"),
+    )
+
+
+def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
+    live_connection, live_tables
+):
+    # given a parent whose primary key has no referencing foreign keys, but
+    # whose UNIQUE constraint backs one (UNIQUE constraints are DBR 18.2+
+    # Public Preview and outside the engine's model)
+    parent_name = live_tables("uq_parent")
+    child_name = live_tables("uq_child")
+    parent_columns = (
+        Column("id", Integer(), nullable=False),
+        Column("email", String(), nullable=False),
+    )
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            parent_name,
+            columns=parent_columns,
+            primary_key=("id",),
+        )
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(parent_name)} "
+        f"ADD CONSTRAINT {parent_name}_uq UNIQUE (email)",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (parent_email STRING, "
+        f"CONSTRAINT {child_name}_fk FOREIGN KEY (parent_email) "
+        f"REFERENCES {qualified_table(parent_name)} (email)) USING DELTA",
+    )
+    constraint_types = {
+        row["constraint_type"]
+        for row in fetch_rows(
+            live_connection,
+            f"SELECT constraint_type FROM `{live_catalog()}`.information_schema.table_constraints"
+            f" WHERE table_schema = '{live_schema()}' AND table_name = '{parent_name}'",
+        )
+    }
+    assert constraint_types == {"PRIMARY KEY", "UNIQUE"}
+
+    # when the declaration drops the primary key
+    engine.sync(DeltaTable(live_catalog(), live_schema(), parent_name, columns=parent_columns))
+
+    # then the unique-backed foreign key neither blocked the drop nor was harmed
+    assert read_live_table(live_connection, parent_name)["primary_key"] == ()
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (f"{child_name}_fk", "parent_email", parent_name, "email"),
     )

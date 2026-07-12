@@ -135,6 +135,81 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
     assert {property_name: properties[property_name] for property_name in declared} == declared
 
 
+def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tables):
+    # Registry admission policy: a key belongs in the managed registry only
+    # if Databricks does not auto-write it, otherwise every undeclared table
+    # would fail validation on resync.
+    table_name = live_tables("fresh_properties")
+    build_sql_engine(live_connection).sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer()),),
+        )
+    )
+
+    properties = read_live_table(live_connection, table_name)["properties"]
+    assert not set(properties) & {str(key) for key in Property}
+
+
+def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_tables):
+    # The engine does not model platform restrictions on which column roles
+    # may widen; Unity Catalog imposes none for these roles, so the plain
+    # widening path must succeed on partition, clustering, and key columns.
+    partitioned_name = live_tables("widen_partition_role")
+    clustered_name = live_tables("widen_cluster_role")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            partitioned_name,
+            columns=(Column("id", Short(), nullable=False), Column("bucket", Short())),
+            partitioned_by=("bucket",),
+            primary_key=("id",),
+            properties={Property.TYPE_WIDENING: "true"},
+        ),
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            clustered_name,
+            columns=(Column("id", Short()), Column("payload", String())),
+            clustered_by=("id",),
+            properties={Property.TYPE_WIDENING: "true"},
+        ),
+    )
+
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            partitioned_name,
+            columns=(Column("id", Integer(), nullable=False), Column("bucket", Integer())),
+            partitioned_by=("bucket",),
+            primary_key=("id",),
+            properties={Property.TYPE_WIDENING: "true"},
+        ),
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            clustered_name,
+            columns=(Column("id", Integer()), Column("payload", String())),
+            clustered_by=("id",),
+            properties={Property.TYPE_WIDENING: "true"},
+        ),
+    )
+
+    assert _types(read_live_table(live_connection, partitioned_name)) == {
+        "id": "int",
+        "bucket": "int",
+    }
+    assert _types(read_live_table(live_connection, clustered_name)) == {
+        "id": "int",
+        "payload": "string",
+    }
+
+
 def test_sync_creates_partitioned_table_with_ordered_partition_columns(
     live_connection, live_tables
 ):
