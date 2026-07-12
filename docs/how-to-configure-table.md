@@ -145,6 +145,47 @@ declaring it `None` (a removal is a transition to absence, judged by the
 same `PropertyTransitionNotSupported` rule). Once a table has column
 mapping, its declaration must carry `Property.COLUMN_MAPPING_MODE: "name"`.
 
+### Renaming a column
+
+To rename a column, keep it in the declaration under its new name and add a
+`renamed_from` hint pointing at the old name:
+
+```python
+from delta_engine.schema import Column, DeltaTable, Integer, String
+
+customers = DeltaTable(
+    "dev",
+    "silver",
+    "customers",
+    columns=[
+        Column("id", Integer(), nullable=False),
+        Column("customer_name", String(), renamed_from="customer_nm"),
+    ],
+    properties={"delta.columnMapping.mode": "name"},
+)
+```
+
+The engine renames the column in place with `ALTER TABLE ... RENAME COLUMN`,
+preserving its data — as opposed to editing the name directly, which reads as
+a drop plus an add and would destroy the column's data. Renaming requires
+`delta.columnMapping.mode='name'`; a hint without it is rejected when the
+`DeltaTable` is constructed (the requirement is visible at declaration time,
+so it fails early rather than at sync).
+
+The hint applies exactly once — when the old name is observed and the new one
+is not. After the rename, the old name is gone, so the hint matches nothing
+and the sync is a no-op: it is safe to keep as history, and the same
+declaration deploys correctly into a fresh catalog. If both the old and new
+names exist on the table the rename cannot apply and the sync fails
+(`AmbiguousColumnRename`); if the old column should instead be dropped, remove
+the hint and drop it in its own sync.
+
+A primary or foreign key on the renamed column is dropped and re-created
+around the rename. If **another** table's foreign key references the column,
+sync that table without the foreign key first — an inbound reference blocks
+the change. Partition columns cannot be renamed (a partition change is not
+supported in place). Struct fields cannot be renamed.
+
 ### When something else writes a managed key
 
 Two platform mechanisms can write managed keys without your action:

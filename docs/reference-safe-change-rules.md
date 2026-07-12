@@ -17,6 +17,7 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `PropertyTransitionNotSupported`        | A property transition the catalog rejects — a value change (e.g. `delta.columnMapping.mode` `name` → `none`) or a removal of a key that cannot be unset | Update the declaration to match the catalog value                                                      |
 | `PropertyMustBeDeclared`                | A managed property set on the table but missing from the declaration                                                                                    | Declare it (or declare it `None` to remove it, where removal is possible)                              |
 | `ColumnMappingRequiredForDrop`          | A plan drops a column but the declaration lacks `delta.columnMapping.mode='name'`                                                                       | Declare the property (it may be set in the same sync as the drop)                                      |
+| `AmbiguousColumnRename`                 | A declared rename whose old and new column both exist on the table                                                                                      | Remove the `renamed_from` hint and drop the old column in its own sync                                 |
 | `PrimaryKeyReferencedByForeignKeys`     | Dropping or changing a primary key while foreign keys reference it (same-table FKs dropped in the same sync are exempt)                                 | Sync the referencing tables without those foreign keys first, then change the key                      |
 
 ## Clustering is not a blocked change
@@ -36,6 +37,30 @@ keep their old clustering layout until they are rewritten by a subsequent
 `OPTIMIZE` (optionally `OPTIMIZE FULL` to rewrite the whole table
 immediately). The engine issues the `ALTER TABLE` but does not run
 `OPTIMIZE`; query performance on old data improves only once you optimize.
+
+## Column renames
+
+A rename is declared with `renamed_from` on the new column (see
+[renaming a column](how-to-configure-table.md#renaming-a-column)). The differ
+relabels the observed column through the hint before comparing, so a rename
+emits a single rename action rather than a drop plus an add. The hint applies
+only when the old name is observed and the new one is not; once applied it is
+inert, so it is safe to keep as declaration history and correct on a fresh
+catalog. If both names are observed the rename cannot apply and
+`AmbiguousColumnRename` blocks the sync.
+
+Because only the column is relabeled, drift on layout and constraints that
+name the renamed column emerges naturally and is judged by the existing rules:
+a primary or foreign key on the column is dropped and re-created around the
+rename, an inbound foreign key blocks the change via
+`PrimaryKeyReferencedByForeignKeys`, clustering keys are re-declared, and a
+renamed **partition** column is blocked by `PartitioningChangeNotSupported`.
+
+Renaming requires `delta.columnMapping.mode='name'`. Downstream consumers are
+affected in ways the engine cannot see and does not manage: streaming reads
+need a `schemaTrackingLocation` to survive a rename, and change data feed has
+limitations on column-mapped tables. These are consumer concerns, documented
+rather than validated.
 
 Two further checks are scope invariants rather than rules — they define what a
 declaration is allowed to govern and always run, regardless of the rule set:
@@ -59,6 +84,8 @@ them succeed:
 | Unmanaged property key                               | A property key outside the managed registry (e.g. a typo)                                                                                                                                                                                                                            |
 | Property value format                                | A value the catalog would reject: boolean keys (`delta.enableChangeDataFeed`, `delta.enableTypeWidening`) must be lowercase `true`/`false`, retention durations `interval <n> <unit>`, `delta.dataSkippingNumIndexedCols` an integer >= -1, `delta.columnMapping.mode` `none`/`name` |
 | Column and struct field names needing column mapping | Special characters (spaces, `,;{}()=`, tabs, newlines) in a column name or any nested struct field name (reported as a dotted path, e.g. `payload.order id`) without `delta.columnMapping.mode='name'` declared                                                                      |
+| Rename hint without column mapping                   | A `renamed_from` hint on any column without `delta.columnMapping.mode='name'` declared — `RENAME COLUMN` requires column mapping, and the hint is visible at declaration time (unlike a drop, which is judged at sync time)                                                          |
+| Incoherent rename hint                               | A `renamed_from` naming the column itself, matching a still-declared column, duplicated across columns, or declared on a restricted scope that does not manage column structure                                                                                                      |
 | CDF-reserved column names                            | `_change_type`, `_commit_version`, `_commit_timestamp` while `delta.enableChangeDataFeed` is declared `true`                                                                                                                                                                         |
 | Tag limits                                           | More than 50 tags on the table or a column, or a tag value over 1000 characters                                                                                                                                                                                                      |
 | Decimal precision                                    | `Decimal` precision above 38                                                                                                                                                                                                                                                         |
