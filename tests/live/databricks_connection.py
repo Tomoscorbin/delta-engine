@@ -31,18 +31,18 @@ def open_sql_warehouse_connection(
 
     Authentication is resolved in this order:
 
-    1. ``DATABRICKS_TOKEN`` for local PAT-based runs.
-    2. Databricks SDK authentication, normally ``github-oidc`` in CI.
+    1. ``DATABRICKS_TOKEN`` — a personal access token, for local runs.
+    2. ``DATABRICKS_CONFIG_PROFILE`` — a ``~/.databrickscfg`` profile, for
+       local runs.
+    3. ``DATABRICKS_CLIENT_ID`` — OIDC workload identity federation through
+       the Databricks SDK for the named service principal, for CI.
+       ``DATABRICKS_AUTH_TYPE`` selects the flow and defaults to
+       ``github-oidc``.
 
     Required connection variables:
 
     - ``DATABRICKS_SERVER_HOSTNAME`` or ``DATABRICKS_HOST``
     - ``DATABRICKS_HTTP_PATH``
-
-    SDK authentication additionally requires:
-
-    - ``DATABRICKS_CLIENT_ID``
-    - ``DATABRICKS_AUTH_TYPE``; defaults to ``github-oidc``
     """
     environment = os.environ if environ is None else environ
 
@@ -78,17 +78,24 @@ def _open_with_sdk_authentication(
         ) from error
 
     profile = environment.get("DATABRICKS_CONFIG_PROFILE")
+    client_id = environment.get("DATABRICKS_CLIENT_ID")
 
     if profile:
         sdk_config = Config(profile=profile)
-    else:
+    elif client_id:
         sdk_config = Config(
             host=_resolve_sdk_host(environment, server_hostname),
-            client_id=_require(environment, "DATABRICKS_CLIENT_ID"),
+            client_id=client_id,
             auth_type=environment.get(
                 "DATABRICKS_AUTH_TYPE",
                 "github-oidc",
             ),
+        )
+    else:
+        raise DatabricksE2EConfigurationError(
+            "no Databricks credential configured: set DATABRICKS_TOKEN (personal"
+            " access token) or DATABRICKS_CONFIG_PROFILE (~/.databrickscfg profile)"
+            " for local runs, or DATABRICKS_CLIENT_ID for OIDC in CI"
         )
 
     def credentials_provider():
