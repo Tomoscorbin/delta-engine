@@ -595,3 +595,55 @@ def test_foreign_key_reference_rejects_blank_constraint_name() -> None:
             constraint_name="  ",
             referencing_table=QualifiedName("dev", "silver", "orders"),
         )
+
+
+def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
+    with pytest.raises(ValueError, match="still declared"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                Column("customer_nm", String()),
+                Column("customer_name", String(), renamed_from="customer_nm"),
+            ),
+        )
+
+
+def test_desired_table_rejects_duplicate_rename_sources() -> None:
+    with pytest.raises(ValueError, match="renamed_from 'customer_nm'"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                Column("a", String(), renamed_from="customer_nm"),
+                Column("b", String(), renamed_from="customer_nm"),
+            ),
+        )
+
+
+def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
+    metadata_aspects = frozenset(
+        {
+            TableAspect.TABLE_COMMENT,
+            TableAspect.COLUMN_COMMENTS,
+            TableAspect.COLUMN_TAGS,
+            TableAspect.TABLE_TAGS,
+            TableAspect.PRIMARY_KEY,
+            TableAspect.FOREIGN_KEYS,
+        }
+    )
+    with pytest.raises(ValueError, match="column structure"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(Column("customer_name", String(), renamed_from="customer_nm"),),
+            managed_aspects=metadata_aspects,
+        )
+
+
+def test_desired_table_accepts_a_valid_rename() -> None:
+    table = DesiredTable(
+        qualified_name=_QN,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        ),
+    )
+    assert table.columns[1].renamed_from == "customer_nm"
