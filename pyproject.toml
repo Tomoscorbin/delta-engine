@@ -26,6 +26,7 @@ dependencies = []
 [project.optional-dependencies]
 spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 sql = ["databricks-sql-connector>=4.0.0"]
+cli = ["typer>=0.12", "delta-engine[sql]"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
@@ -46,6 +47,7 @@ dev = [
   "commitizen>=4.0",
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
+  "typer>=0.12",
 ]
 docs = [
   "sphinx>=8.0",
@@ -188,7 +190,7 @@ id = "hexagonal-layers"
 name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
-layers = ["databricks | schema | adapters | api", "application", "domain"]
+layers = ["cli", "databricks | schema | adapters | api", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
@@ -206,6 +208,7 @@ id = "backend-imports-stay-in-adapters"
 name = "Backend imports stay in adapters"
 type = "forbidden"
 source_modules = [
+  "delta_engine.cli",
   "delta_engine.schema",
   "delta_engine.api",
   "delta_engine.application",
@@ -233,6 +236,20 @@ name = "Warehouse backend stays PySpark-free"
 type = "forbidden"
 source_modules = ["delta_engine.adapters.databricks.warehouse"]
 forbidden_modules = ["delta", "pyspark", "py4j"]
+
+[[tool.importlinter.contracts]]
+id = "cli-framework-stays-in-cli"
+name = "CLI framework imports stay in the CLI"
+type = "forbidden"
+source_modules = [
+  "delta_engine.schema",
+  "delta_engine.api",
+  "delta_engine.application",
+  "delta_engine.domain",
+  "delta_engine.adapters",
+  "delta_engine.databricks",
+]
+forbidden_modules = ["typer", "click", "rich"]
 
 
 # -------------------- MyPy --------------------
