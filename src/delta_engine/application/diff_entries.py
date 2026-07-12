@@ -24,6 +24,7 @@ from delta_engine.domain.plan import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -140,6 +141,13 @@ def _(action: AddColumn) -> tuple[DiffEntry, ...]:
 @action_entries.register
 def _(action: DropColumn) -> tuple[DiffEntry, ...]:
     return (DiffEntry(DiffCategory.COLUMNS, "-", (action.column_name,)),)
+
+
+@action_entries.register
+def _(action: RenameColumn) -> tuple[DiffEntry, ...]:
+    return (
+        DiffEntry(DiffCategory.COLUMNS, "~", (action.old_name, f"renamed → {action.new_name}")),
+    )
 
 
 @action_entries.register
