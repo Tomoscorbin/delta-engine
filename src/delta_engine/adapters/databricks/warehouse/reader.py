@@ -24,24 +24,22 @@ from typing import TYPE_CHECKING, Any
 
 from delta_engine.adapters.databricks.errors import exception_type_name
 from delta_engine.adapters.databricks.sql import (
-    column_tags_query,
-    columns_query,
-    describe_detail_query,
-    foreign_keys_query,
-    primary_key_query,
-    referencing_foreign_keys_query,
-    table_row_query,
-    table_tags_query,
-)
-from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
     column_from_catalog,
     column_tags_from_rows,
+    column_tags_query,
+    columns_query,
+    describe_detail_query,
     foreign_keys_from_rows,
+    foreign_keys_query,
     managed_properties_from_detail_row,
     primary_key_from_rows,
+    primary_key_query,
     referencing_foreign_keys_from_rows,
+    referencing_foreign_keys_query,
+    table_row_query,
     table_tags_from_rows,
+    table_tags_query,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (

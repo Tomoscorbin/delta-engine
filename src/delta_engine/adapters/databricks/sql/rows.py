@@ -1,10 +1,13 @@
 """
-Map catalog result rows to domain values.
+Turn catalog-reported facts into domain values.
 
 The row-mapping counterpart of :mod:`queries`, covering information_schema
 queries and DESCRIBE DETAIL: each query builder there has
 its mapper here, so the row shape a query produces and the domain value it
-becomes are defined in one shared place. Rows are duck-typed catalog rows —
+becomes are defined in one shared place. The module also owns boundary
+policy that is not tied to one row shape — ``column_from_catalog`` takes
+the catalog's facts as keywords, because the Spark backend reads them from
+catalog objects rather than query rows. Rows are duck-typed catalog rows —
 pyspark ``Row`` or databricks-sql ``Row`` — accessed only by attribute
 lookups and ``asDict()``, which both support; this module stays PySpark-free
 like the rest of the package.
