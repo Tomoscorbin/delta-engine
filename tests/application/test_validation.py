@@ -143,6 +143,7 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
+        "AmbiguousColumnRename",
         "PrimaryKeyReferencedByForeignKeys",
     }
 
@@ -961,3 +962,37 @@ def test_primary_key_change_blocked_while_foreign_keys_reference_it():
     result = validate_diff(_drift(change))
 
     assert result.failed
+
+
+# ---- AmbiguousColumnRename
+
+
+def test_ambiguous_rename_fails_when_source_and_target_both_exist():
+    desired = _desired_table(
+        columns=(Column("customer_name", String(), renamed_from="customer_nm"),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    drift = TableDrift(
+        desired=desired,
+        changes=(ColumnRemoved(column=ObservedColumn("customer_nm", String())),),
+    )
+
+    result = validate_diff(drift)
+
+    failures = [f for f in result.failures if f.rule_name == "AmbiguousColumnRename"]
+    assert len(failures) == 1
+    assert "customer_nm" in failures[0].message and "customer_name" in failures[0].message
+
+
+def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
+    desired = _desired_table(
+        columns=(Column("id", Integer(), nullable=False),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    drift = TableDrift(
+        desired=desired, changes=(ColumnRemoved(column=ObservedColumn("old", String())),)
+    )
+
+    result = validate_diff(drift)
+
+    assert not any(f.rule_name == "AmbiguousColumnRename" for f in result.failures)
