@@ -161,13 +161,13 @@ def _diff_column_structure(desired: DesiredTable, observed: ObservedTable) -> li
     observed_by_name = {column.name: column for column in observed.columns}
     changes: list[Change] = []
 
-    for name, column in desired_by_name.items():
+    for name, desired_only_column in desired_by_name.items():
         if name not in observed_by_name:
-            changes.append(ColumnAdded(column=column))
+            changes.append(ColumnAdded(column=desired_only_column))
 
-    for name, column in observed_by_name.items():
+    for name, observed_only_column in observed_by_name.items():
         if name not in desired_by_name:
-            changes.append(ColumnRemoved(column=column))
+            changes.append(ColumnRemoved(column=observed_only_column))
 
     for name, desired_column in desired_by_name.items():
         observed_column = observed_by_name.get(name)
