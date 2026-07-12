@@ -1,55 +1,59 @@
-"""
-Load ``DeltaTable`` declarations from ``module[:attribute]`` specs.
+"""Load ``DeltaTable`` declarations from explicit ``MODULE:ATTRIBUTE`` specs."""
 
-A bare module spec collects every ``DeltaTable`` bound at the module's top
-level (aggregator re-imports included), in definition order, deduplicated by
-object identity. ``module:attribute`` targets one binding, which must be a
-``DeltaTable`` or an iterable of them. The working directory is prepended to
-``sys.path`` so declarations load from a repo checkout without installation.
-"""
-
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 import importlib
 import os
 import sys
 from types import ModuleType
 
-from delta_engine.cli.errors import ConfigError, DeclarationImportError
+from delta_engine.cli.errors import ConfigError
 from delta_engine.schema import DeltaTable
 
 
 @dataclass(frozen=True)
 class _DeclarationSpec:
     module_name: str
-    attribute: str | None
+    attribute: str
 
 
 def load_declarations(spec_texts: Sequence[str]) -> tuple[DeltaTable, ...]:
     """
-    Resolve every ``module[:attribute]`` spec into the declared tables.
+    Resolve every ``MODULE:ATTRIBUTE`` spec into explicitly selected tables.
+
+    The attribute may hold one :class:`DeltaTable` or an iterable of them.
+    Duplicate qualified names are rejected with both source locations before
+    the caller resolves authentication or opens a connection.
 
     Raises:
-        ConfigError: For anticipated problems — malformed spec, missing module
-            or attribute, an attribute of the wrong type, or no tables found.
-        DeclarationImportError: When a declarations module raises while being
-            imported; the user's exception is carried on ``__cause__``.
+        ConfigError: For a malformed spec, missing target module or attribute,
+            wrong or empty attribute value, or duplicate qualified table name.
+        Exception: Any exception raised by imported user code is allowed to
+            propagate with its original traceback.
 
     """
+    if not spec_texts:
+        raise ConfigError("at least one declaration spec is required")
+
     _ensure_working_directory_on_path()
     tables: list[DeltaTable] = []
-    seen_ids: set[int] = set()
-    for spec_text in spec_texts:
+    origins_by_name: dict[str, str] = {}
+    for argument_index, spec_text in enumerate(spec_texts, start=1):
         spec = _parse_spec(spec_text)
         module = _import_module(spec.module_name)
-        for table in _collect(module, spec):
-            if id(table) in seen_ids:
-                continue
-            seen_ids.add(id(table))
+        value = _attribute(module, spec)
+        selected, is_iterable = _tables_from_attribute(value, spec_text)
+        for item_index, table in enumerate(selected):
+            origin = _origin(spec_text, argument_index, item_index, is_iterable=is_iterable)
+            qualified_name = str(table.to_desired_table().qualified_name)
+            previous_origin = origins_by_name.get(qualified_name)
+            if previous_origin is not None:
+                raise ConfigError(
+                    f"duplicate table definition '{qualified_name}': "
+                    f"selected by {previous_origin} and {origin}"
+                )
+            origins_by_name[qualified_name] = origin
             tables.append(table)
-    if not tables:
-        joined = ", ".join(spec_texts)
-        raise ConfigError(f"no DeltaTable declarations found in: {joined}")
     return tuple(tables)
 
 
@@ -61,15 +65,9 @@ def _ensure_working_directory_on_path() -> None:
 
 def _parse_spec(text: str) -> _DeclarationSpec:
     parts = text.split(":")
-    if len(parts) == 1:
-        module_name, attribute = parts[0], None
-    elif len(parts) == 2:
-        module_name, attribute = parts[0], parts[1]
-    else:
-        raise ConfigError(f"malformed spec '{text}': expected module or module:attribute")
-    if not module_name or (attribute is not None and not attribute):
-        raise ConfigError(f"malformed spec '{text}': expected module or module:attribute")
-    return _DeclarationSpec(module_name=module_name, attribute=attribute)
+    if len(parts) != 2 or not all(parts):
+        raise ConfigError(f"malformed spec '{text}': expected MODULE:ATTRIBUTE")
+    return _DeclarationSpec(module_name=parts[0], attribute=parts[1])
 
 
 def _import_module(module_name: str) -> ModuleType:
@@ -84,36 +82,40 @@ def _import_module(module_name: str) -> ModuleType:
                 f"module '{module_name}' not found; run from the project root "
                 "or install the package that contains it"
             ) from error
-        raise DeclarationImportError(module_name) from error
-    except Exception as error:
-        raise DeclarationImportError(module_name) from error
+        raise
 
 
-def _collect(module: ModuleType, spec: _DeclarationSpec) -> tuple[DeltaTable, ...]:
-    if spec.attribute is None:
-        return tuple(value for value in vars(module).values() if isinstance(value, DeltaTable))
-    try:
-        value = getattr(module, spec.attribute)
-    except AttributeError:
-        raise ConfigError(
-            f"module '{spec.module_name}' has no attribute '{spec.attribute}'"
-        ) from None
-    return _tables_from_attribute(value, spec)
+def _attribute(module: ModuleType, spec: _DeclarationSpec) -> object:
+    namespace = vars(module)
+    if spec.attribute not in namespace:
+        raise ConfigError(f"module '{spec.module_name}' has no attribute '{spec.attribute}'")
+    return namespace[spec.attribute]
 
 
-def _tables_from_attribute(value: object, spec: _DeclarationSpec) -> tuple[DeltaTable, ...]:
+def _tables_from_attribute(value: object, spec_text: str) -> tuple[tuple[DeltaTable, ...], bool]:
     if isinstance(value, DeltaTable):
-        return (value,)
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        return (value,), False
+    # Sequences only: an unordered container (a set, say) would make item
+    # indices in duplicate-definition messages depend on iteration order.
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         items = tuple(value)
-        for item in items:
+        if not items:
+            raise ConfigError(
+                f"'{spec_text}' is empty; expected at least one DeltaTable declaration"
+            )
+        for index, item in enumerate(items):
             if not isinstance(item, DeltaTable):
                 raise ConfigError(
-                    f"'{spec.module_name}:{spec.attribute}' contains "
-                    f"{type(item).__name__}; expected only DeltaTable declarations"
+                    f"'{spec_text}' item {index} is {type(item).__name__}; "
+                    "expected only DeltaTable declarations"
                 )
-        return items
+        return items, True
     raise ConfigError(
-        f"'{spec.module_name}:{spec.attribute}' is {type(value).__name__}; "
-        "expected a DeltaTable or an iterable of them"
+        f"'{spec_text}' is {type(value).__name__}; expected a DeltaTable "
+        "or a sequence (list or tuple) of them"
     )
+
+
+def _origin(spec_text: str, argument_index: int, item_index: int, *, is_iterable: bool) -> str:
+    item = f"[{item_index}]" if is_iterable else ""
+    return f"'{spec_text}{item}' (argument {argument_index})"

@@ -1,5 +1,6 @@
 """Shared CLI test fixtures: fake engine boundary and declaration modules."""
 
+from contextlib import contextmanager
 import sys
 from textwrap import dedent
 
@@ -12,10 +13,21 @@ from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
     TableAbsent,
+    TablePresent,
 )
 import delta_engine.cli.app as cli_app
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import Column, ObservedTable, QualifiedName, String
 from delta_engine.domain.plan import ActionPlan
+
+
+def observed_orders() -> TablePresent:
+    """Return an observed dev.silver.orders with one nullable id column."""
+    return TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName("dev", "silver", "orders"),
+            columns=(Column("id", String()),),
+        )
+    )
 
 
 class FakeReader:
@@ -58,14 +70,19 @@ def fake_engine(monkeypatch):
     """Route the CLI's engine boundary to fakes; yield the reader to preload states."""
     reader = FakeReader()
     engine = Engine(reader=reader, executor=FakeExecutor())
-    monkeypatch.setattr(cli_app, "open_connection", lambda settings: _StubConnection())
+
+    @contextmanager
+    def fake_connection(host, http_path, profile):
+        yield _StubConnection()
+
+    monkeypatch.setattr(cli_app, "open_connection", fake_connection)
     monkeypatch.setattr(cli_app, "build_sql_engine", lambda connection: engine)
     return reader
 
 
 @pytest.fixture
 def databricks_env(monkeypatch):
-    monkeypatch.setenv("DATABRICKS_SERVER_HOSTNAME", "test.cloud.databricks.com")
+    monkeypatch.setenv("DATABRICKS_HOST", "https://test.cloud.databricks.com")
     monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/test")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
 
@@ -90,4 +107,20 @@ ORDERS_ONLY = """
     from delta_engine.schema import Column, DeltaTable, String
 
     orders = DeltaTable("dev", "silver", "orders", columns=(Column("id", String()),))
+"""
+
+# Declares a NOT NULL column addition, which fails validation when diffed
+# against observed_orders().
+NOT_NULL_DRIFT_ORDERS = """
+    from delta_engine.schema import Column, DeltaTable, String
+
+    orders = DeltaTable(
+        "dev",
+        "silver",
+        "orders",
+        columns=(
+            Column("id", String()),
+            Column("amount", String(), nullable=False),
+        ),
+    )
 """

@@ -26,7 +26,7 @@ dependencies = []
 [project.optional-dependencies]
 spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 sql = ["databricks-sql-connector>=4.0.0"]
-cli = ["typer>=0.12", "delta-engine[sql]"]
+cli = ["typer>=0.12", "databricks-sdk>=0.120.0", "delta-engine[sql]"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
@@ -50,6 +50,7 @@ dev = [
   "commitizen>=4.0",
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
+  "databricks-sdk>=0.120.0",
   "typer>=0.12",
 ]
 docs = [
@@ -211,13 +212,25 @@ id = "backend-imports-stay-in-adapters"
 name = "Backend imports stay in adapters"
 type = "forbidden"
 source_modules = [
-  "delta_engine.cli",
   "delta_engine.schema",
   "delta_engine.api",
   "delta_engine.application",
   "delta_engine.domain",
 ]
 forbidden_modules = ["delta", "pyspark"]
+
+[[tool.importlinter.contracts]]
+id = "cli-stays-pyspark-free"
+name = "CLI stays PySpark-free"
+type = "forbidden"
+source_modules = ["delta_engine.cli"]
+forbidden_modules = ["delta", "pyspark"]
+ignore_imports = [
+  # The facade lazily reaches the Spark backend; the CLI itself must not.
+  # Ignoring this one edge keeps indirect-import checking on for every other
+  # path (e.g. a future direct cli -> adapters.databricks.spark import).
+  "delta_engine.databricks -> delta_engine.adapters.databricks.spark.factory",
+]
 
 [[tool.importlinter.contracts]]
 id = "shared-sql-core-is-backend-free"

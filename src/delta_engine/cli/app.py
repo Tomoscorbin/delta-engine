@@ -1,21 +1,18 @@
 """
 The delta-engine command-line application.
 
-Commands are thin orchestrations: resolve settings, load declarations, run
-``Engine.sync`` through the warehouse backend, render the report, and map it
-to an exit code. Every decision lives in ``declarations.py``,
-``connection.py``, or the engine itself.
+Commands are thin orchestrations: load explicit declarations, open a unified-
+authentication SQL connection, run ``Engine.sync`` through the warehouse
+backend, render the report, and map it to an exit code.
 """
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from enum import StrEnum
 import json
 import logging
-import os
 import sys
-import traceback
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
@@ -27,22 +24,18 @@ from delta_engine.application import (
     render_planned_sql,
     render_report,
 )
-from delta_engine.cli.connection import (
-    ConnectionSettings,
-    open_connection,
-    resolve_connection_settings,
-)
+from delta_engine.cli.connection import open_connection
 from delta_engine.cli.declarations import load_declarations
-from delta_engine.cli.errors import ConfigError, DeclarationImportError
-from delta_engine.databricks import build_sql_engine, configure_logging
-
-if TYPE_CHECKING:
-    from databricks.sql.client import Connection
+from delta_engine.cli.errors import ConfigError
+from delta_engine.databricks import build_sql_engine
 
 app = typer.Typer(
     name="delta-engine",
     help="Declarative schema management for Delta Lake tables on Databricks.",
     no_args_is_help=True,
+    # Plain tracebacks, matching reference-cli.md and keeping locals (which
+    # can hold connection settings) out of CI logs.
+    pretty_exceptions_enable=False,
 )
 
 
@@ -53,15 +46,18 @@ class OutputFormat(StrEnum):
     JSON = "json"
 
 
-_EXIT_IN_SYNC = 0
+_EXIT_SUCCESS = 0
 _EXIT_FAILURES = 1
 _EXIT_CHANGES_PENDING = 2
 
 SpecsArgument = Annotated[
     list[str],
     typer.Argument(
-        metavar="MODULE[:ATTR]...",
-        help="Declaration modules, e.g. myproject.tables or myproject.tables:all_tables.",
+        metavar="MODULE:ATTRIBUTE...",
+        help=(
+            "Explicit declaration attributes, e.g. "
+            "myproject.tables:orders or myproject.tables:all_tables."
+        ),
     ),
 ]
 OutputOption = Annotated[OutputFormat, typer.Option("--output", help="Report format on stdout.")]
@@ -72,15 +68,26 @@ ShowSqlOption = Annotated[
         help="Append each table's planned SQL (text output; JSON always carries it).",
     ),
 ]
-ServerHostnameOption = Annotated[
+HostOption = Annotated[
     str | None,
-    typer.Option("--server-hostname", help="Overrides DATABRICKS_SERVER_HOSTNAME."),
+    typer.Option("--host", help="Overrides DATABRICKS_HOST."),
 ]
 HttpPathOption = Annotated[
     str | None, typer.Option("--http-path", help="Overrides DATABRICKS_HTTP_PATH.")
 ]
+ProfileOption = Annotated[
+    str | None,
+    typer.Option("--profile", help="Overrides DATABRICKS_CONFIG_PROFILE."),
+]
 VerboseOption = Annotated[
     bool, typer.Option("--verbose", "-v", help="Show engine progress (INFO) on stderr.")
+]
+FailOnChangesOption = Annotated[
+    bool,
+    typer.Option(
+        "--fail-on-changes",
+        help="Exit 2 when a valid plan contains pending changes.",
+    ),
 ]
 
 
@@ -105,15 +112,25 @@ def plan(
     specs: SpecsArgument,
     output: OutputOption = OutputFormat.TEXT,
     show_sql: ShowSqlOption = False,
-    server_hostname: ServerHostnameOption = None,
+    host: HostOption = None,
     http_path: HttpPathOption = None,
+    profile: ProfileOption = None,
     verbose: VerboseOption = False,
+    fail_on_changes: FailOnChangesOption = False,
 ) -> None:
-    """Dry-run declarations against the catalog; exit 2 when changes are pending."""
+    """Dry-run declarations; valid plans succeed unless --fail-on-changes is set."""
     with _anticipated_errors():
-        report = _sync(specs, server_hostname, http_path, verbose, dry_run=True)
+        report = _sync(
+            specs,
+            host,
+            http_path,
+            profile,
+            verbose,
+            output,
+            dry_run=True,
+        )
         _emit(report, output, show_sql, include_diff=True)
-        raise typer.Exit(code=_plan_exit_code(report))
+        raise typer.Exit(code=_plan_exit_code(report, fail_on_changes=fail_on_changes))
 
 
 @app.command()
@@ -121,67 +138,99 @@ def apply(
     specs: SpecsArgument,
     output: OutputOption = OutputFormat.TEXT,
     show_sql: ShowSqlOption = False,
-    server_hostname: ServerHostnameOption = None,
+    host: HostOption = None,
     http_path: HttpPathOption = None,
+    profile: ProfileOption = None,
     verbose: VerboseOption = False,
 ) -> None:
     """Sync declarations to the catalog; exit 1 when any table fails."""
     with _anticipated_errors():
         try:
-            report = _sync(specs, server_hostname, http_path, verbose, dry_run=False)
+            report = _sync(
+                specs,
+                host,
+                http_path,
+                profile,
+                verbose,
+                output,
+                dry_run=False,
+            )
         except SyncFailedError as error:
             _emit(error.report, output, show_sql, include_diff=False)
             raise typer.Exit(code=_EXIT_FAILURES) from None
         _emit(report, output, show_sql, include_diff=False)
-        raise typer.Exit(code=_EXIT_IN_SYNC)
+        raise typer.Exit(code=_EXIT_SUCCESS)
 
 
-def _plan_exit_code(report: SyncReport) -> int:
+def _plan_exit_code(report: SyncReport, *, fail_on_changes: bool) -> int:
     if report.has_failures:
         return _EXIT_FAILURES
-    if report.has_changes:
+    if fail_on_changes and report.has_changes:
         return _EXIT_CHANGES_PENDING
-    return _EXIT_IN_SYNC
+    return _EXIT_SUCCESS
+
+
+@contextmanager
+def _engine_logging(verbose: bool) -> Iterator[None]:
+    """
+    Attach a per-invocation stderr handler to the package logger.
+
+    Scoped and removed afterwards so repeated in-process invocations (tests,
+    embedders) never leave a handler bound to a closed stream, and the CLI
+    never takes over an embedding application's root logger.
+    """
+    package_logger = logging.getLogger("delta_engine")
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s | %(name)s | %(message)s"))
+    previous_level = package_logger.level
+    package_logger.addHandler(handler)
+    package_logger.setLevel(logging.INFO if verbose else logging.WARNING)
+    try:
+        yield
+    finally:
+        package_logger.removeHandler(handler)
+        package_logger.setLevel(previous_level)
 
 
 def _sync(
     spec_texts: list[str],
-    server_hostname: str | None,
+    host: str | None,
     http_path: str | None,
+    profile: str | None,
     verbose: bool,
+    output: OutputFormat,
     *,
     dry_run: bool,
 ) -> SyncReport:
-    """Load declarations, open the connection, and run one sync."""
-    level = logging.INFO if verbose else logging.WARNING
-    # sys.stderr (not the sys.__stderr__ default) so ordinary stream
-    # redirection — including test runners — captures engine logs.
-    configure_logging(level=level, stream=sys.stderr)
+    """Load declarations, open one connection, and run one sync."""
+    with _engine_logging(verbose):
+        if output is OutputFormat.JSON:
+            # User declarations, authentication providers, and connector code
+            # can print. Keep machine-readable stdout reserved for the final
+            # payload.
+            with redirect_stdout(sys.stderr):
+                return _run_sync(
+                    spec_texts,
+                    host,
+                    http_path,
+                    profile,
+                    dry_run=dry_run,
+                )
+        return _run_sync(spec_texts, host, http_path, profile, dry_run=dry_run)
+
+
+def _run_sync(
+    spec_texts: list[str],
+    host: str | None,
+    http_path: str | None,
+    profile: str | None,
+    *,
+    dry_run: bool,
+) -> SyncReport:
     tables = load_declarations(spec_texts)
-    settings = resolve_connection_settings(server_hostname, http_path, os.environ)
-    connection = _connect(settings)
-    try:
+    with open_connection(host, http_path, profile) as connection:
         engine = build_sql_engine(connection)
-        try:
-            return engine.sync(*tables, dry_run=dry_run)
-        except ValueError as error:
-            # prepare_desired_tables rejects duplicate qualified names before
-            # any phase runs; that is a declaration problem, not a bug.
-            raise ConfigError(str(error)) from error
-    finally:
-        connection.close()
-
-
-def _connect(settings: ConnectionSettings) -> "Connection":
-    try:
-        return open_connection(settings)
-    except ConfigError:
-        raise
-    except Exception as error:
-        raise ConfigError(
-            f"failed to connect to Databricks ({type(error).__name__}): {error}; "
-            "check the DATABRICKS_* settings"
-        ) from error
+        return engine.sync(*tables, dry_run=dry_run)
 
 
 def _emit(report: SyncReport, output: OutputFormat, show_sql: bool, *, include_diff: bool) -> None:
@@ -201,14 +250,9 @@ def _emit(report: SyncReport, output: OutputFormat, show_sql: bool, *, include_d
 
 @contextmanager
 def _anticipated_errors() -> Iterator[None]:
-    """Print anticipated failures as messages, user bugs as tracebacks; exit 1."""
+    """Render anticipated configuration failures; let user-code defects propagate."""
     try:
         yield
     except ConfigError as error:
         typer.echo(f"error: {error}", err=True)
-        raise typer.Exit(code=_EXIT_FAILURES) from None
-    except DeclarationImportError as error:
-        typer.echo(f"error: {error}", err=True)
-        if error.__cause__ is not None:
-            traceback.print_exception(error.__cause__, file=sys.stderr)
         raise typer.Exit(code=_EXIT_FAILURES) from None

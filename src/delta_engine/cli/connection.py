@@ -1,86 +1,142 @@
-"""
-Resolve Databricks SQL warehouse connection settings and open connections.
+"""Open Databricks SQL connections through unified authentication."""
 
-Settings come from ``DATABRICKS_SERVER_HOSTNAME`` / ``DATABRICKS_HTTP_PATH`` /
-``DATABRICKS_TOKEN``, with ``--server-hostname`` / ``--http-path`` flags
-overriding their variables. The token is env-only so secrets stay out of
-shell history and process listings. The connector import is function-local,
-mirroring the lazy-import pattern in ``delta_engine.databricks``.
-"""
-
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+import logging
+import os
+import sys
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 from delta_engine.cli.errors import ConfigError
 
 if TYPE_CHECKING:
+    from databricks.sdk.core import Config
     from databricks.sql.client import Connection
 
-_SERVER_HOSTNAME_VAR = "DATABRICKS_SERVER_HOSTNAME"
 _HTTP_PATH_VAR = "DATABRICKS_HTTP_PATH"
-_TOKEN_VAR = "DATABRICKS_TOKEN"
+_INSTALL_HINT = 'pip install "delta-engine[cli]"'
+
+logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ConnectionSettings:
-    """Everything needed to open a SQL warehouse connection."""
-
-    server_hostname: str
-    http_path: str
-    access_token: str
-
-
-def resolve_connection_settings(
-    server_hostname: str | None,
+@contextmanager
+def open_connection(
+    host: str | None,
     http_path: str | None,
-    environ: Mapping[str, str],
-) -> ConnectionSettings:
+    profile: str | None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Iterator["Connection"]:
     """
-    Combine flags and environment into settings; flags win over env vars.
+    Open and own one SQL connection using Databricks unified authentication.
+
+    Explicit ``host`` and ``profile`` values are passed to the SDK
+    :class:`Config`; otherwise it resolves environment variables and Databricks
+    configuration profiles itself. ``http_path`` falls back to
+    ``DATABRICKS_HTTP_PATH`` because the warehouse path is a connector setting,
+    not an SDK authentication field. Every configuration gap found up front —
+    authentication and HTTP path — is reported in one error.
+
+    Connection-close errors are logged and suppressed so they never replace a
+    completed report or the primary exception raised by a sync.
 
     Raises:
-        ConfigError: Naming every missing value at once, so a misconfigured
-            CI job is fixed in one round trip.
+        ConfigError: If a dependency is missing or shadowed, authentication or
+            the HTTP path is not configured, or the connection cannot be
+            established.
 
     """
-    resolved_hostname = server_hostname or environ.get(_SERVER_HOSTNAME_VAR) or ""
-    resolved_http_path = http_path or environ.get(_HTTP_PATH_VAR) or ""
-    resolved_token = environ.get(_TOKEN_VAR) or ""
+    environment = os.environ if environ is None else environ
+    databricks_sql, config_class = _import_backends()
 
-    missing: list[str] = []
-    if not resolved_hostname:
-        missing.append(f"{_SERVER_HOSTNAME_VAR} (or --server-hostname)")
+    problems: list[str] = []
+    config = _build_config(config_class, host, profile, problems)
+    resolved_http_path = http_path if http_path is not None else environment.get(_HTTP_PATH_VAR)
     if not resolved_http_path:
-        missing.append(f"{_HTTP_PATH_VAR} (or --http-path)")
-    if not resolved_token:
-        missing.append(_TOKEN_VAR)
-    if missing:
-        raise ConfigError("missing connection settings: " + ", ".join(missing))
+        problems.append(f"missing {_HTTP_PATH_VAR} (or --http-path)")
+    if problems:
+        raise ConfigError("cannot connect to Databricks: " + "; ".join(problems))
+    assert config is not None and resolved_http_path  # narrowed by the problems check
 
-    return ConnectionSettings(
-        server_hostname=resolved_hostname,
-        http_path=resolved_http_path,
-        access_token=resolved_token,
-    )
+    # The connector re-raises connect-time failures unchanged and of many
+    # types (urllib3 transport errors, SDK auth ValueErrors), so this boundary
+    # translates everything rather than enumerating exception classes.
+    try:
+        connection = databricks_sql.connect(
+            server_hostname=config.host,
+            http_path=resolved_http_path,
+            credentials_provider=lambda: config.authenticate,
+        )
+    except Exception as error:
+        raise ConfigError(
+            f"failed to connect to Databricks ({type(error).__name__}): {error}"
+        ) from error
+
+    try:
+        yield connection
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            logger.warning("Failed to close Databricks SQL connection", exc_info=True)
 
 
-def open_connection(settings: ConnectionSettings) -> "Connection":
-    """
-    Open a SQL warehouse connection from ``settings``.
-
-    Raises:
-        ConfigError: When databricks-sql-connector is not installed.
-
-    """
+def _import_backends() -> tuple[ModuleType, type["Config"]]:
+    """Import the connector and SDK, translating failures into actionable errors."""
     try:
         from databricks import sql as databricks_sql
+        from databricks.sdk.core import Config
     except ImportError as error:
-        raise ConfigError(
-            'the CLI needs databricks-sql-connector: pip install "delta-engine[cli]"'
-        ) from error
-    return databricks_sql.connect(
-        server_hostname=settings.server_hostname,
-        http_path=settings.http_path,
-        access_token=settings.access_token,
-    )
+        shadow = _shadowing_module_file()
+        if shadow is not None:
+            raise ConfigError(
+                f"'{shadow}' shadows the installed databricks packages; "
+                "rename that file or run the CLI from a different directory"
+            ) from error
+        raise ConfigError(f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}") from error
+    return databricks_sql, Config
+
+
+def _shadowing_module_file() -> str | None:
+    """
+    Return the file shadowing the ``databricks`` namespace package, if any.
+
+    The CLI prepends the working directory to ``sys.path`` to load
+    declarations, so a project file named ``databricks.py`` resolves ahead of
+    the installed namespace package. A real ``databricks`` package always has
+    ``__path__``; a plain module does not.
+    """
+    module = sys.modules.get("databricks")
+    if module is not None and not hasattr(module, "__path__"):
+        return getattr(module, "__file__", None) or repr(module)
+    return None
+
+
+def _distribution_for(error: ImportError) -> str:
+    name = error.name or ""
+    if name.startswith("databricks.sdk"):
+        return "databricks-sdk"
+    if name.startswith("databricks"):
+        return "databricks-sql-connector"
+    return "databricks-sdk and databricks-sql-connector"
+
+
+def _build_config(
+    config_class: type["Config"],
+    host: str | None,
+    profile: str | None,
+    problems: list[str],
+) -> "Config | None":
+    """Build the SDK config, recording a failure instead of raising."""
+    try:
+        if host is not None and profile is not None:
+            return config_class(host=host, profile=profile)
+        if host is not None:
+            return config_class(host=host)
+        if profile is not None:
+            return config_class(profile=profile)
+        return config_class()
+    except ValueError as error:
+        problems.append(f"authentication: {error}")
+        return None
