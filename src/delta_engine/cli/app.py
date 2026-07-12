@@ -21,6 +21,7 @@ import typer
 
 import delta_engine
 from delta_engine.application import (
+    SyncFailedError,
     SyncReport,
     render_diff,
     render_planned_sql,
@@ -113,6 +114,26 @@ def plan(
         report = _sync(specs, server_hostname, http_path, verbose, dry_run=True)
         _emit(report, output, show_sql, include_diff=True)
         raise typer.Exit(code=_plan_exit_code(report))
+
+
+@app.command()
+def apply(
+    specs: SpecsArgument,
+    output: OutputOption = OutputFormat.TEXT,
+    show_sql: ShowSqlOption = False,
+    server_hostname: ServerHostnameOption = None,
+    http_path: HttpPathOption = None,
+    verbose: VerboseOption = False,
+) -> None:
+    """Sync declarations to the catalog; exit 1 when any table fails."""
+    with _anticipated_errors():
+        try:
+            report = _sync(specs, server_hostname, http_path, verbose, dry_run=False)
+        except SyncFailedError as error:
+            _emit(error.report, output, show_sql, include_diff=False)
+            raise typer.Exit(code=_EXIT_FAILURES) from None
+        _emit(report, output, show_sql, include_diff=False)
+        raise typer.Exit(code=_EXIT_IN_SYNC)
 
 
 def _plan_exit_code(report: SyncReport) -> int:
