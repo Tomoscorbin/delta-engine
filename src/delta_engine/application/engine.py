@@ -34,12 +34,12 @@ from datetime import UTC, datetime
 import logging
 
 from delta_engine.application.dependency_resolution import blocking_failures, resolve
-from delta_engine.application.desired_tables import DesiredTableSource, prepare_desired_tables
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import Failure
 from delta_engine.application.ports import (
     CatalogState,
     CatalogStateReader,
+    DesiredTableSource,
     ExecutionSummary,
     PlanExecutor,
     ReadFailed,
@@ -54,6 +54,29 @@ from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+    """
+    Lower table specifications into domain tables for the phase chain.
+
+    Converts each source via ``to_desired_table()``, rejects duplicate
+    qualified names, and returns the tables in deterministic qualified-name
+    order so a sync's report and execution order never depend on the order
+    tables were passed. Passing no tables yields an empty tuple.
+
+    Raises:
+        DuplicateTableDefinitionError: If two sources share a qualified name.
+
+    """
+    desired_by_name: dict[str, DesiredTable] = {}
+    for source in tables:
+        desired = source.to_desired_table()
+        key = str(desired.qualified_name)
+        if key in desired_by_name:
+            raise DuplicateTableDefinitionError(desired.qualified_name)
+        desired_by_name[key] = desired
+    return tuple(desired_by_name[key] for key in sorted(desired_by_name))
 
 
 @dataclass(slots=True)
@@ -143,7 +166,7 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = prepare_desired_tables(*tables)
+        desired = _prepare_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = self._read(desired)

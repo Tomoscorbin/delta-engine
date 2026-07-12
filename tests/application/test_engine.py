@@ -1,3 +1,4 @@
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.application.engine import Engine
@@ -394,6 +395,44 @@ def test_sync_returns_report_when_all_tables_succeed():
         TableRunStatus.SUCCESS,
     ]
     assert executor.executed_names == ["c.a.users", "c.b.orders"]
+
+
+@st.composite
+def _distinct_qualified_names(
+    draw: st.DrawFn, min_size: int = 1, max_size: int = 8
+) -> list[QualifiedName]:
+    """Draw a list of distinct QualifiedName instances."""
+    part = st.from_regex(r"[a-z][a-z0-9]{0,9}", fullmatch=True)
+    names: list[QualifiedName] = []
+    seen: set[str] = set()
+    size = draw(st.integers(min_value=min_size, max_value=max_size))
+    attempts = 0
+    while len(names) < size and attempts < size * 20:
+        attempts += 1
+        catalog, schema, name = draw(part), draw(part), draw(part)
+        key = f"{catalog}.{schema}.{name}"
+        if key not in seen:
+            seen.add(key)
+            names.append(QualifiedName(catalog, schema, name))
+    return names
+
+
+@given(_distinct_qualified_names(min_size=1, max_size=8))
+def test_tables_are_always_processed_in_qualified_name_order(
+    qualified_names: list[QualifiedName],
+) -> None:
+    # Given N distinct table declarations in arbitrary order
+    specs = [_spec(str(qn)) for qn in qualified_names]
+    reader = _RecordingReader()
+    engine = Engine(reader=reader, executor=_RecordingExecutor())
+
+    # When syncing
+    report = engine.sync(*specs)
+
+    # Then reads and reports are always in lexicographic qualified-name order
+    assert reader.fetched_names == sorted(reader.fetched_names)
+    reported = [str(table_report.qualified_name) for table_report in report]
+    assert reported == sorted(reported)
 
 
 def test_unchanged_table_is_reported_successful_without_execution():
@@ -1033,13 +1072,14 @@ def test_sync_rejects_duplicate_table_names_before_reading():
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
-    with pytest.raises(DuplicateTableDefinitionError):
+    with pytest.raises(DuplicateTableDefinitionError) as excinfo:
         engine.sync(
             _spec("cat.sch.orders"),
             _spec("cat.sch.orders"),
         )
 
-    # Then no phase has started
+    # Then the typed error names the table and no phase has started
+    assert str(excinfo.value.qualified_name) == "cat.sch.orders"
     assert reader.fetched_names == []
     assert executor.executed_names == []
 

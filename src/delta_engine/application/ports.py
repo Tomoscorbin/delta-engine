@@ -1,18 +1,30 @@
 """
-Application ports: adapter contracts and the message types they exchange.
+Application ports: the engine's boundary contracts and the message types they exchange.
 
 Each boundary is defined in full here — the vocabulary an adapter returns
 (``CatalogState`` for reads, ``ExecutionSummary`` for execution) sits beside
 the Protocol that requires it, so an adapter author reads one file to learn
-the whole contract.
+the whole contract. ``DesiredTableSource`` is the inbound counterpart: the
+contract a user-facing declaration satisfies to enter a sync.
 """
 
 from dataclasses import dataclass
 from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
-from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
+
+# ---------- DesiredTableSource ----------
+
+
+class DesiredTableSource(Protocol):
+    """A user-facing table specification that can produce a domain table."""
+
+    def to_desired_table(self) -> DesiredTable:
+        """Return the domain :class:`DesiredTable` for this specification."""
+        ...
+
 
 # ---------- CatalogState ----------
 

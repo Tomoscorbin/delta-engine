@@ -243,7 +243,7 @@ sequenceDiagram
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
-    Engine->>Engine: prepare_desired_tables()
+    Engine->>Engine: prepare desired tables
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
     Engine->>Differ: diff_table(desired, observed_or_none)
