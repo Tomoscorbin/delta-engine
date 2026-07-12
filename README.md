@@ -33,6 +33,10 @@ or cluster. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
 for both extras and their requirements.
 
+For CI or local shell workflows, install `delta-engine[cli]` and pass explicit
+`MODULE:ATTRIBUTE` declarations to `delta-engine plan` or `delta-engine apply`.
+See the [CLI reference](https://tomoscorbin.github.io/delta-engine/reference-cli.html).
+
 ## Quickstart
 
 ```python
@@ -91,6 +95,7 @@ for the model, or jump to what you need:
 
 **Reference**
 
+- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — commands, declaration grammar, unified authentication, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation

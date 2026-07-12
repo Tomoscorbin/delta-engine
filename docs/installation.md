@@ -74,9 +74,12 @@ pip install "delta-engine[cli]"
 
 `delta-engine plan` dry-runs your declarations against the catalog and
 `delta-engine apply` syncs them, both over a Databricks SQL warehouse
-connection configured through `DATABRICKS_SERVER_HOSTNAME`,
-`DATABRICKS_HTTP_PATH`, and `DATABRICKS_TOKEN`. See
-[how to gate schema changes in CI](how-to-gate-changes-in-ci.md).
+connection configured through Databricks unified authentication. The CLI extra
+includes Typer, `databricks-sdk`, and `databricks-sql-connector`; the base
+package remains dependency-free. Configure `DATABRICKS_HOST` and
+`DATABRICKS_HTTP_PATH`, then supply credentials through a profile, PAT, OAuth,
+or workload identity federation. See the [CLI reference](reference-cli.md) and
+[how to run schema plans in CI](how-to-gate-changes-in-ci.md).
 
 ## Verify
 

@@ -5,41 +5,78 @@ tags:
 
 # How to gate schema changes in CI
 
-Run `delta-engine plan` against the live catalog when a pull request opens: it
-dry-runs your declarations, prints the drift, and exits non-zero when the
-declarations and the catalog disagree. A dry run makes no catalog changes, so
-the gate is safe to run on every push.
+Run `delta-engine plan` against the live catalog when a pull request opens. It
+reads Unity Catalog, prints the semantic diff and report, and fails when a table
+cannot be read or changed safely. Pending valid changes remain mergeable by
+default; use `--fail-on-changes` for a scheduled or explicit drift gate.
 
-## The gate
+A plan executes no DDL, but it is a live warehouse operation and can start
+compute. Give its identity only the catalog and warehouse permissions needed to
+read state.
+
+## Run a plan
 
 ```bash
 pip install "delta-engine[cli]"
-delta-engine plan myproject.tables
+delta-engine plan myproject.tables:all_tables
 ```
 
-`myproject.tables` is a module containing your `DeltaTable` declarations —
-every table bound at the module's top level is included. Target an explicit
-aggregate with `myproject.tables:all_tables`, or pass several modules.
+Every declaration argument must use `MODULE:ATTRIBUTE`. The attribute may be a
+single `DeltaTable` or a non-empty sequence (list or tuple) of them.
+Bare-module scanning is not supported; see the
+[CLI reference](reference-cli.md#declaration-arguments) for the full grammar
+and duplicate checks.
 
-The exit code tells the story:
+The default exit codes are:
 
-| Exit code | Meaning                                                       |
-| --------- | ------------------------------------------------------------- |
-| 0         | The catalog already matches the declarations                  |
-| 1         | A table failed — unreadable, invalid drift, or a config error |
-| 2         | Validated changes are pending, waiting to be applied          |
+| Exit code | Meaning                                                        |
+| --------- | -------------------------------------------------------------- |
+| 0         | The plan is valid, whether in sync or carrying pending changes |
+| 1         | A table or configuration failed                                |
+| 2         | Pending valid changes and `--fail-on-changes` was supplied     |
 
-Failing on any non-zero code means a green job guarantees no drift. A pipeline
-that wants to treat "changes pending" differently from "broken" can branch on
-the two codes.
+Click usage errors also exit `2`, so treat that code as drift only when a plan
+report was produced.
 
-Connection settings come from the environment: `DATABRICKS_SERVER_HOSTNAME`,
-`DATABRICKS_HTTP_PATH`, and `DATABRICKS_TOKEN`. The token is env-only by
-design; `--server-hostname` and `--http-path` flags override their variables.
+For a strict drift gate:
 
-## A complete GitHub Actions workflow
+```bash
+delta-engine plan myproject.tables:all_tables --fail-on-changes
+```
 
-Gate pull requests, apply on merge to main:
+This is useful in a scheduled reconciliation check or after an apply. On a pull
+request, the default command usually gives the better workflow: a proposed
+declaration change can show the DDL it would apply without making the PR red.
+
+## Configure unified authentication
+
+The CLI delegates authentication to `databricks.sdk.core.Config`. In GitHub
+Actions, use [Databricks workload identity federation for GitHub OIDC](https://docs.databricks.com/aws/en/dev-tools/auth/provider-github)
+instead of storing a Databricks token. The job needs:
+
+- `permissions: id-token: write` so GitHub can issue an OIDC token
+- `permissions: contents: read` for checkout
+- `DATABRICKS_AUTH_TYPE=github-oidc`
+- `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and `DATABRICKS_HTTP_PATH`
+
+Use two Databricks service principals and federation policies:
+
+- A **plan identity** for trusted same-repository pull requests. Grant it
+  warehouse use and read-only catalog metadata access, but no schema-changing
+  privileges.
+- An **apply identity** with the required write privileges. Bind its federation
+  policy to a protected GitHub `production` environment and keep its client ID
+  in that environment's variables.
+
+Fork pull requests contain untrusted code and do not receive the live plan
+identity in the workflow below. Their plan job is skipped; run ordinary offline
+lint and unit tests for forks instead.
+
+## Complete GitHub Actions workflow
+
+This workflow plans trusted pull requests and applies after a push to `main`.
+It uses the currently supported [`actions/checkout@v7`](https://github.com/actions/checkout)
+major and does not store `DATABRICKS_TOKEN`.
 
 ````yaml
 name: schema
@@ -48,96 +85,135 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 env:
-  DATABRICKS_SERVER_HOSTNAME: ${{ vars.DATABRICKS_SERVER_HOSTNAME }}
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
   DATABRICKS_HTTP_PATH: ${{ vars.DATABRICKS_HTTP_PATH }}
-  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
 
 jobs:
   plan:
-    if: github.event_name == 'pull_request'
+    # Never run repository code from a fork with the live catalog identity.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_PLAN_CLIENT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install "delta-engine[cli]"
       - name: Plan
+        shell: bash
         run: |
-          { echo '```'; delta-engine plan myproject.tables; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          output="$(delta-engine plan myproject.tables:all_tables 2>&1)"
+          status=$?
+          set -e
+
+          {
+            echo '```text'
+            printf '%s\n' "$output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          printf '%s\n' "$output"
+          exit "$status"
 
   apply:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_APPLY_CLIENT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install "delta-engine[cli]"
-      - run: delta-engine apply myproject.tables
+      - run: delta-engine apply myproject.tables:all_tables
 ````
 
-The plan step writes the report into the job's step summary, so the drift is
-readable from the PR checks page. The pipe preserves the CLI's exit code, so
-pending changes still fail the gate.
+The plan step captures output and status separately. It disables the shell's
+fail-fast mode only while running the command, always writes the closing code
+fence, prints the same report to the job log, and finally exits with the
+original CLI status. A pipe or grouped `echo` command can otherwise hide the
+status or leave a broken step summary when the plan fails.
+
+Protect the `production` environment with the reviewers and branch rules
+appropriate for your deployment. The environment gate prevents the
+write-capable client ID and matching OIDC subject from being released merely
+because a push job was created.
 
 ## Show the SQL that would run
 
-`--show-sql` appends each table's exact planned statements to the text report:
+`--show-sql` appends each table's exact planned statements to text output:
 
 ```bash
-delta-engine plan myproject.tables --show-sql
+delta-engine plan myproject.tables:all_tables --show-sql
 ```
+
+SQL is compiled before dependency resolution. A table that is later blocked by
+a failed dependency can still carry planned statements in the report; those
+statements were not executed.
 
 ## Machine-readable output
 
-`--output json` prints the full run report — the same
-[`to_dict()` payload](reference-run-report.md) the Python API returns — as the
-only thing on stdout:
+`--output json` prints the full
+[`to_dict()` payload](reference-run-report.md) as the only content on stdout:
 
 ```bash
-delta-engine plan myproject.tables --output json | jq '.tables[] | {name, status}'
+delta-engine plan myproject.tables:all_tables --output json \
+  | jq '.tables[] | {name, status}'
 ```
 
-## The Python API, for custom gates
+Declaration/authentication prints and engine logs are redirected to stderr in
+JSON mode. The JSON already contains `planned_sql_statements`, so adding
+`--show-sql` does not change it.
 
-The CLI covers the common gate. For custom policy — tolerating a flaky read
-while hard-failing unsafe drift, say — call the engine directly and inspect
-the report:
+## The Python API for custom gates
+
+For custom policy, construct the same unified-auth connection explicitly and
+inspect the report:
 
 ```python
 import os
 import sys
 
 from databricks import sql
+from databricks.sdk.core import Config
 
 from delta_engine import ValidationFailure
 from delta_engine.databricks import build_sql_engine
+from myproject.tables import all_tables
 
-from myproject.tables import all_tables  # your DeltaTable declarations
-
+config = Config()
 with sql.connect(
-    server_hostname=os.environ["DATABRICKS_SERVER_HOSTNAME"],
+    server_hostname=config.host,
     http_path=os.environ["DATABRICKS_HTTP_PATH"],
-    access_token=os.environ["DATABRICKS_TOKEN"],
+    credentials_provider=lambda: config.authenticate,
 ) as connection:
     report = build_sql_engine(connection).sync(*all_tables, dry_run=True)
 
 for table_report in report:
     for failure in table_report.failures:
         if isinstance(failure, ValidationFailure):
-            sys.exit(1)  # never merge an unsafe change
+            sys.exit(1)
 ```
 
-On a Databricks cluster the same gate runs through the Spark backend: build
-the engine with `build_spark_engine(spark)` and everything else — the report,
-the booleans, the failure types — is identical.
-
-## Render the report yourself
-
-The CLI emits text and JSON; formatting a PR comment, a Slack message, or a
-log line from the JSON remains your pipeline's job. `to_dict()` is stable,
-JSON-serialisable data — see [the run report schema](reference-run-report.md).
+On a Databricks cluster, build the engine with `build_spark_engine(spark)`
+instead. The report and failure types are identical.
