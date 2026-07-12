@@ -21,7 +21,14 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
-from delta_engine.domain.model import Column, DesiredTable, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    ObservedColumn,
+    ObservedTable,
+    QualifiedName,
+)
 from delta_engine.domain.plan.actions import ActionPlan, SetTableComment
 
 # ---------- test builders
@@ -31,7 +38,7 @@ def _an_observed_table(partitioned_by=()):
     """Build a real ObservedTable, so reports are exercised against the domain type."""
     return ObservedTable(
         qualified_name=QualifiedName("cat", "schema", "observed"),
-        columns=(Column("id", Integer()),),
+        columns=(ObservedColumn("id", Integer()),),
         partitioned_by=partitioned_by,
     )
 

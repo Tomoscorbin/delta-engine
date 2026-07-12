@@ -20,6 +20,7 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
+    ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -67,6 +68,17 @@ def _desired_table(
     )
 
 
+def _as_observed(column: Column | ObservedColumn) -> ObservedColumn:
+    """Coerce a column written as ``Column`` into the observed-state type."""
+    return ObservedColumn(
+        name=column.name,
+        data_type=column.data_type,
+        nullable=column.nullable,
+        comment=column.comment,
+        tags=column.tags,
+    )
+
+
 def _observed_table(
     *,
     columns: tuple[Column, ...] | None = None,
@@ -74,9 +86,10 @@ def _observed_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
 ) -> ObservedTable:
+    source = (Column("id", Integer()),) if columns is None else columns
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer()),) if columns is None else columns,
+        columns=tuple(_as_observed(column) for column in source),
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
@@ -972,7 +985,7 @@ def test_undeclared_rename_guard_blocks_same_type_drop_and_add():
     # Given a diff that drops one String column and adds another
     drift = _drift(
         ColumnAdded(column=Column("customer_name", String())),
-        ColumnRemoved(column=Column("customer_nm", String())),
+        ColumnRemoved(column=ObservedColumn("customer_nm", String())),
     )
 
     # When / Then the guard flags the pair as a possible rename
@@ -986,7 +999,7 @@ def test_undeclared_rename_guard_blocks_widenable_type_drop_and_add():
     # An undeclared rename-plus-widen (Integer -> Long) is just as destructive
     drift = _drift(
         ColumnAdded(column=Column("amount", Long())),
-        ColumnRemoved(column=Column("amt", Integer())),
+        ColumnRemoved(column=ObservedColumn("amt", Integer())),
     )
 
     assert _undeclared_rename_failures(validate_diff(drift))
@@ -996,14 +1009,14 @@ def test_undeclared_rename_guard_allows_incompatible_type_drop_and_add():
     # Integer removed, String added: cannot be a rename, so no guard failure
     drift = _drift(
         ColumnAdded(column=Column("label", String())),
-        ColumnRemoved(column=Column("amt", Integer())),
+        ColumnRemoved(column=ObservedColumn("amt", Integer())),
     )
 
     assert not _undeclared_rename_failures(validate_diff(drift))
 
 
 def test_undeclared_rename_guard_allows_lone_drop_and_lone_add():
-    drop_only = _drift(ColumnRemoved(column=Column("old", String())))
+    drop_only = _drift(ColumnRemoved(column=ObservedColumn("old", String())))
     add_only = _drift(ColumnAdded(column=Column("new", String())))
 
     for drift in (drop_only, add_only):

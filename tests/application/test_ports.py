@@ -10,7 +10,7 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.domain.model import Column, Integer, ObservedTable, QualifiedName
+from delta_engine.domain.model import Integer, ObservedColumn, ObservedTable, QualifiedName
 
 # ---------- test builders
 
@@ -19,7 +19,7 @@ def _an_observed_table(partitioned_by=()):
     """Build a real ObservedTable, so reports are exercised against the domain type."""
     return ObservedTable(
         qualified_name=QualifiedName("cat", "schema", "observed"),
-        columns=(Column("id", Integer()),),
+        columns=(ObservedColumn("id", Integer()),),
         partitioned_by=partitioned_by,
     )
 
