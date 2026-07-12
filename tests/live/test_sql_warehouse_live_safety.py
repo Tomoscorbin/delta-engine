@@ -31,8 +31,6 @@ from tests.live.sql_warehouse_live_helpers import (
     table_exists,
 )
 
-pytestmark = pytest.mark.databricks_e2e
-
 
 def _assert_rejected_without_catalog_change(connection, table_name, declaration):
     before = read_live_table(connection, table_name)

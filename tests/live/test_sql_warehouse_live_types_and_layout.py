@@ -36,8 +36,6 @@ from tests.live.sql_warehouse_live_helpers import (
     read_live_table,
 )
 
-pytestmark = pytest.mark.databricks_e2e
-
 
 def _types(state) -> dict[str, str]:
     return {

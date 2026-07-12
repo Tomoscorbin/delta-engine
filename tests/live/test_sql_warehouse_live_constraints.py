@@ -19,8 +19,6 @@ from tests.live.sql_warehouse_live_helpers import (
     read_live_table,
 )
 
-pytestmark = pytest.mark.databricks_e2e
-
 
 def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
     table_name = live_tables("pk_lifecycle")

@@ -13,8 +13,6 @@ from tests.live.sql_warehouse_live_helpers import (
     table_exists,
 )
 
-pytestmark = pytest.mark.databricks_e2e
-
 
 def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_tables):
     table_name = live_tables("create")

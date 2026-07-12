@@ -1,9 +1,11 @@
 """
 Fixtures for credentialed live tests against a real Databricks SQL warehouse.
 
-These tests are excluded from the default pytest run by the addopts marker
-filter and only run when requested explicitly (a manual run or the live CI
-job):
+Every test collected from this directory is automatically marked
+``databricks_e2e`` — directory membership alone defines the live suite, so a
+new file cannot leak into default runs by forgetting a marker line. The
+addopts marker filter excludes the suite from every default pytest run; it
+only runs when requested explicitly (a manual run or the live CI job):
 
     export DATABRICKS_SERVER_HOSTNAME=... DATABRICKS_HTTP_PATH=...
     export DATABRICKS_TOKEN=...            # or profile/OIDC, see databricks_connection.py
@@ -16,13 +18,22 @@ and drops them afterwards, so runs are safe to repeat against a shared schema.
 
 from collections.abc import Callable
 import os
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 _LIVE_REQUIRED_ENV = ("DELTA_ENGINE_E2E_CATALOG", "DELTA_ENGINE_E2E_SCHEMA")
+_LIVE_DIRECTORY = Path(__file__).parent
 
 type LiveTableFactory = Callable[[str], str]
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark every test in this directory as credentialed-live."""
+    for item in items:
+        if _LIVE_DIRECTORY in item.path.parents:
+            item.add_marker(pytest.mark.databricks_e2e)
 
 
 @pytest.fixture(scope="module")

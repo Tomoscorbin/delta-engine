@@ -14,8 +14,6 @@ from tests.live.sql_warehouse_live_helpers import (
     read_live_table,
 )
 
-pytestmark = pytest.mark.databricks_e2e
-
 
 def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connection, live_tables):
     table_name = live_tables("metadata_scope")
