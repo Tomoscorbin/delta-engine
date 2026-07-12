@@ -20,6 +20,7 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
+    ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -67,6 +68,17 @@ def _desired_table(
     )
 
 
+def _as_observed(column: Column | ObservedColumn) -> ObservedColumn:
+    """Coerce a column written as ``Column`` into the observed-state type."""
+    return ObservedColumn(
+        name=column.name,
+        data_type=column.data_type,
+        nullable=column.nullable,
+        comment=column.comment,
+        tags=column.tags,
+    )
+
+
 def _observed_table(
     *,
     columns: tuple[Column, ...] | None = None,
@@ -74,9 +86,10 @@ def _observed_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
 ) -> ObservedTable:
+    source = (Column("id", Integer()),) if columns is None else columns
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer()),) if columns is None else columns,
+        columns=tuple(_as_observed(column) for column in source),
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,

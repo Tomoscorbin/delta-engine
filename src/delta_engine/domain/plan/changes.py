@@ -25,7 +25,7 @@ Naming conventions:
 from dataclasses import dataclass
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, TableAspect
+from delta_engine.domain.model import Column, ObservedColumn, TableAspect
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
