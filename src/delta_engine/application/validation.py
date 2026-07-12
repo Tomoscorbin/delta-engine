@@ -374,6 +374,52 @@ class ColumnMappingRequiredForDrop:
         )
 
 
+class UndeclaredColumnRename:
+    """
+    Disallow a drop/add pair that could be a rename in disguise.
+
+    A rename edited straight into a declaration diffs as a ``ColumnRemoved``
+    plus a ``ColumnAdded``; executing that pair silently destroys the removed
+    column's data. A pair is suspect when the added column's type equals the
+    removed column's or is a permitted widening of it — an undeclared
+    rename-plus-widen is just as destructive as a same-type one. Over-cautious
+    by design: a genuinely unrelated drop and add of compatible types must be
+    split across two syncs to state that they are unrelated.
+    """
+
+    name: ClassVar[str] = "UndeclaredColumnRename"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every removed column that a same-sync added column could be renaming."""
+        added = [change for change in drift.managed_changes if isinstance(change, ColumnAdded)]
+        failures: list[ValidationFailure] = []
+        for change in drift.managed_changes:
+            if not isinstance(change, ColumnRemoved):
+                continue
+            candidates = [
+                add.column.name
+                for add in added
+                if add.column.data_type == change.column.data_type
+                or _is_safe_widening(change.column.data_type, add.column.data_type)
+            ]
+            if not candidates:
+                continue
+            candidate_list = ", ".join(f"'{name}'" for name in candidates)
+            failures.append(
+                ValidationFailure(
+                    rule_name=self.name,
+                    message=(
+                        f"Operation not allowed: dropping column '{change.column.name}'"
+                        f" while adding {candidate_list} of a compatible type looks like"
+                        " a rename, which a drop plus an add would execute as silent"
+                        " data loss. If the drop and the add are unrelated, apply them"
+                        " in separate syncs."
+                    ),
+                )
+            )
+        return tuple(failures)
+
+
 class PrimaryKeyReferencedByForeignKeys:
     """
     Disallow dropping or changing a primary key while foreign keys reference it.
@@ -439,6 +485,7 @@ DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
     ColumnMappingRequiredForDrop(),
+    UndeclaredColumnRename(),
     PrimaryKeyReferencedByForeignKeys(),
 )
 

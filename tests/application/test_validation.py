@@ -140,6 +140,7 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
+        "UndeclaredColumnRename",
         "PrimaryKeyReferencedByForeignKeys",
     }
 
@@ -958,3 +959,52 @@ def test_primary_key_change_blocked_while_foreign_keys_reference_it():
     result = validate_diff(_drift(change))
 
     assert result.failed
+
+
+# ---- UndeclaredColumnRename
+
+
+def _undeclared_rename_failures(result: ValidationResult) -> list[ValidationFailure]:
+    return [f for f in result.failures if f.rule_name == "UndeclaredColumnRename"]
+
+
+def test_undeclared_rename_guard_blocks_same_type_drop_and_add():
+    # Given a diff that drops one String column and adds another
+    drift = _drift(
+        ColumnAdded(column=Column("customer_name", String())),
+        ColumnRemoved(column=Column("customer_nm", String())),
+    )
+
+    # When / Then the guard flags the pair as a possible rename
+    failures = _undeclared_rename_failures(validate_diff(drift))
+    assert len(failures) == 1
+    assert "customer_nm" in failures[0].message
+    assert "customer_name" in failures[0].message
+
+
+def test_undeclared_rename_guard_blocks_widenable_type_drop_and_add():
+    # An undeclared rename-plus-widen (Integer -> Long) is just as destructive
+    drift = _drift(
+        ColumnAdded(column=Column("amount", Long())),
+        ColumnRemoved(column=Column("amt", Integer())),
+    )
+
+    assert _undeclared_rename_failures(validate_diff(drift))
+
+
+def test_undeclared_rename_guard_allows_incompatible_type_drop_and_add():
+    # Integer removed, String added: cannot be a rename, so no guard failure
+    drift = _drift(
+        ColumnAdded(column=Column("label", String())),
+        ColumnRemoved(column=Column("amt", Integer())),
+    )
+
+    assert not _undeclared_rename_failures(validate_diff(drift))
+
+
+def test_undeclared_rename_guard_allows_lone_drop_and_lone_add():
+    drop_only = _drift(ColumnRemoved(column=Column("old", String())))
+    add_only = _drift(ColumnAdded(column=Column("new", String())))
+
+    for drift in (drop_only, add_only):
+        assert not _undeclared_rename_failures(validate_diff(drift))
