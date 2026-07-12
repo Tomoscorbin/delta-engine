@@ -374,6 +374,39 @@ class ColumnMappingRequiredForDrop:
         )
 
 
+class AmbiguousColumnRename:
+    """
+    Disallow a declared rename whose source and target both exist.
+
+    A rename that applies is relabeled out of the diff, leaving no trace of
+    its source — so a ``ColumnRemoved`` whose name is a declared rename source
+    proves the target was also observed and the rename could not apply.
+    """
+
+    name: ClassVar[str] = "AmbiguousColumnRename"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every declared rename whose source column survived the relabel pre-pass."""
+        targets_by_source = {
+            column.renamed_from: column.name
+            for column in drift.desired.columns
+            if column.renamed_from is not None
+        }
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: cannot rename '{change.column.name}' to"
+                    f" '{targets_by_source[change.column.name]}' — both columns exist"
+                    " on the table. If the old column should be dropped, remove the"
+                    " renamed_from hint and drop it in its own sync."
+                ),
+            )
+            for change in drift.managed_changes
+            if isinstance(change, ColumnRemoved) and change.column.name in targets_by_source
+        )
+
+
 class UndeclaredColumnRename:
     """
     Disallow a drop/add pair that could be a rename in disguise.
@@ -412,8 +445,9 @@ class UndeclaredColumnRename:
                         f"Operation not allowed: dropping column '{change.column.name}'"
                         f" while adding {candidate_list} of a compatible type looks like"
                         " a rename, which a drop plus an add would execute as silent"
-                        " data loss. If the drop and the add are unrelated, apply them"
-                        " in separate syncs."
+                        " data loss. If it is a rename, declare it on the new column:"
+                        " Column('new_name', ..., renamed_from='old_name'). If the drop"
+                        " and the add are unrelated, apply them in separate syncs."
                     ),
                 )
             )
@@ -485,6 +519,7 @@ DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
     ColumnMappingRequiredForDrop(),
+    AmbiguousColumnRename(),
     UndeclaredColumnRename(),
     PrimaryKeyReferencedByForeignKeys(),
 )

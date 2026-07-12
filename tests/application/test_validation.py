@@ -153,6 +153,7 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyTransitionNotSupported",
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
+        "AmbiguousColumnRename",
         "UndeclaredColumnRename",
         "PrimaryKeyReferencedByForeignKeys",
     }
@@ -1021,3 +1022,49 @@ def test_undeclared_rename_guard_allows_lone_drop_and_lone_add():
 
     for drift in (drop_only, add_only):
         assert not _undeclared_rename_failures(validate_diff(drift))
+
+
+# ---- AmbiguousColumnRename
+
+
+def test_ambiguous_rename_fails_when_source_and_target_both_exist():
+    desired = _desired_table(
+        columns=(Column("customer_name", String(), renamed_from="customer_nm"),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    drift = TableDrift(
+        desired=desired,
+        changes=(ColumnRemoved(column=ObservedColumn("customer_nm", String())),),
+    )
+
+    result = validate_diff(drift)
+
+    failures = [f for f in result.failures if f.rule_name == "AmbiguousColumnRename"]
+    assert len(failures) == 1
+    assert "customer_nm" in failures[0].message and "customer_name" in failures[0].message
+
+
+def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
+    desired = _desired_table(
+        columns=(Column("id", Integer(), nullable=False),),
+        properties={"delta.columnMapping.mode": "name"},
+    )
+    drift = TableDrift(
+        desired=desired, changes=(ColumnRemoved(column=ObservedColumn("old", String())),)
+    )
+
+    result = validate_diff(drift)
+
+    assert not any(f.rule_name == "AmbiguousColumnRename" for f in result.failures)
+
+
+def test_undeclared_rename_guard_message_offers_the_declared_rename_path():
+    drift = _drift(
+        ColumnAdded(column=Column("customer_name", String())),
+        ColumnRemoved(column=ObservedColumn("customer_nm", String())),
+    )
+
+    result = validate_diff(drift)
+
+    failure = next(f for f in result.failures if f.rule_name == "UndeclaredColumnRename")
+    assert "renamed_from" in failure.message
