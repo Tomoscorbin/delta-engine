@@ -23,6 +23,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -42,6 +43,7 @@ from delta_engine.domain.plan.changes import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenamed,
     ColumnTagSet,
     ColumnTagUnset,
     ForeignKeyAdded,
@@ -971,3 +973,127 @@ def test_observed_only_column_tags_are_ignored_because_column_is_removed():
     # column that will be dropped
     assert isinstance(diff, TableDrift)
     assert diff.changes == (ColumnRemoved(observed_only_column),)
+
+
+# ---------- column renames
+
+
+def test_diff_emits_rename_when_source_observed_and_target_absent():
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        )
+    )
+    observed = _observed(columns=(Column("id", Integer()), Column("customer_nm", String())))
+
+    drift = diff_table(desired, observed)
+
+    assert drift.changes == (ColumnRenamed(old_name="customer_nm", new_name="customer_name"),)
+
+
+def test_diff_pairs_residual_drift_under_the_new_name():
+    # A rename plus a widen decomposes into ColumnRenamed + ColumnDataTypeChanged
+    desired = _desired(columns=(Column("amount", Long(), renamed_from="amt"),))
+    observed = _observed(columns=(Column("amt", Integer()),))
+
+    drift = diff_table(desired, observed)
+
+    assert ColumnRenamed(old_name="amt", new_name="amount") in drift.changes
+    assert (
+        ColumnDataTypeChanged(column_name="amount", desired_type=Long(), observed_type=Integer())
+        in drift.changes
+    )
+    assert not any(isinstance(c, ColumnAdded | ColumnRemoved) for c in drift.changes)
+
+
+def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
+    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+    applied = _observed(columns=(Column("customer_name", String()),))
+    assert diff_table(desired, applied).changes == ()
+
+
+def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        )
+    )
+    observed = _observed(columns=(Column("id", Integer()),))
+
+    changes = diff_table(desired, observed).changes
+
+    assert changes == (
+        ColumnAdded(column=Column("customer_name", String(), renamed_from="customer_nm")),
+    )
+
+
+def test_diff_leaves_natural_facts_when_source_and_target_both_observed():
+    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+    observed = _observed(
+        columns=(Column("customer_name", String()), Column("customer_nm", String()))
+    )
+
+    changes = diff_table(desired, observed).changes
+
+    assert not any(isinstance(c, ColumnRenamed) for c in changes)
+    assert ColumnRemoved(column=ObservedColumn("customer_nm", String())) in changes
+
+
+def test_diff_missing_table_ignores_rename_hints():
+    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+
+    diff = diff_table(desired, None)
+
+    assert isinstance(diff, TableMissing)
+    assert all(not isinstance(action, RenameColumn) for action in diff.plan())
+
+
+def test_diff_lets_clustering_drift_emerge_across_a_rename():
+    # Observed clustering keeps the old name -> ClusteringChanged emerges
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        ),
+        clustered_by=("customer_name",),
+    )
+    observed = _observed(
+        columns=(Column("id", Integer()), Column("customer_nm", String())),
+        clustered_by=("customer_nm",),
+    )
+
+    changes = diff_table(desired, observed).changes
+
+    assert ColumnRenamed(old_name="customer_nm", new_name="customer_name") in changes
+    assert (
+        ClusteringChanged(
+            desired_clustering=("customer_name",), observed_clustering=("customer_nm",)
+        )
+        in changes
+    )
+
+
+def test_diff_renaming_a_partition_column_surfaces_partitioning_drift():
+    # Observed partitioning keeps the old name -> PartitioningChanged emerges,
+    # which validation blocks: partition-column renames are unsupported in v1.
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("event_day", String(), renamed_from="day"),
+        ),
+        partitioned_by=("event_day",),
+    )
+    observed = _observed(
+        columns=(Column("id", Integer()), Column("day", String())),
+        partitioned_by=("day",),
+    )
+
+    changes = diff_table(desired, observed).changes
+
+    assert ColumnRenamed(old_name="day", new_name="event_day") in changes
+    assert (
+        PartitioningChanged(desired_partitioning=("event_day",), observed_partitioning=("day",))
+        in changes
+    )
