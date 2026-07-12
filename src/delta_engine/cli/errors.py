@@ -10,7 +10,7 @@ class ConfigError(Exception):
     """
 
 
-class DeclarationModuleFailed(Exception):
+class DeclarationImportError(Exception):
     """
     A declarations module raised while being imported.
 
