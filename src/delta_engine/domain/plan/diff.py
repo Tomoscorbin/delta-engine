@@ -14,9 +14,15 @@ lowering semantics.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from delta_engine.domain.model import DesiredTable, ObservedTable, TableAspect
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    ObservedColumn,
+    ObservedTable,
+    TableAspect,
+)
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     CreateTable,
@@ -32,6 +38,7 @@ from delta_engine.domain.plan.changes import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenamed,
     ColumnTagSet,
     ColumnTagUnset,
     ForeignKeyAdded,
@@ -131,6 +138,13 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     ``TableDrift`` whose changes each record one atomic difference. An equal
     pair yields an empty drift.
 
+    A rename pre-pass runs first: ``_apply_renames`` relabels observed columns
+    through the declaration's ``renamed_from`` hints and emits ``ColumnRenamed``
+    facts, so the column helpers then pair a renamed column under its new name
+    and any residual drift on it (type, comment, tags) decomposes into the
+    existing change types. Only the column list is relabeled; layout and
+    constraint drift on a renamed column emerges naturally.
+
     Each aspect helper takes the two tables and pulls the slice it
     compares. The diff is scope-blind — every aspect is compared regardless
     of ``managed_aspects``, with scope judged in validation — except for
@@ -140,10 +154,13 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     if observed is None:
         return TableMissing(desired=desired)
 
+    observed_columns, rename_changes = _apply_renames(desired, observed)
+
     changes: tuple[Change, ...] = (
-        *_diff_column_structure(desired, observed),
-        *_diff_column_comments(desired, observed),
-        *_diff_column_tags(desired, observed),
+        *rename_changes,
+        *_diff_column_structure(desired.columns, observed_columns),
+        *_diff_column_comments(desired.columns, observed_columns),
+        *_diff_column_tags(desired.columns, observed_columns),
         *_diff_table_comment(desired, observed),
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
@@ -155,10 +172,46 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     return TableDrift(desired=desired, changes=changes)
 
 
-def _diff_column_structure(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+def _apply_renames(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[tuple[ObservedColumn, ...], tuple[ColumnRenamed, ...]]:
+    """
+    Relabel observed columns through the declaration's rename hints.
+
+    A hint applies only when its source is observed and its target is not;
+    every other case is inert here. A source-and-target-both-observed conflict
+    is left alone deliberately: the natural diff then contains a ``ColumnRemoved``
+    for the source, which validation rejects (see ``AmbiguousColumnRename``).
+
+    Only the column list is relabeled — observed partitioning, clustering, and
+    key constraints keep the old name, so their drift emerges naturally and is
+    judged by the existing aspect machinery (see the design spec).
+    """
+    renames = {
+        column.renamed_from: column.name
+        for column in desired.columns
+        if column.renamed_from is not None
+    }
+    observed_names = {column.name for column in observed.columns}
+    relabeled = observed.columns
+    applied: list[ColumnRenamed] = []
+    for old_name, new_name in renames.items():
+        if old_name not in observed_names or new_name in observed_names:
+            continue
+        relabeled = tuple(
+            replace(column, name=new_name) if column.name == old_name else column
+            for column in relabeled
+        )
+        applied.append(ColumnRenamed(old_name=old_name, new_name=new_name))
+    return relabeled, tuple(applied)
+
+
+def _diff_column_structure(
+    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+) -> list[Change]:
     """Return changes for column additions, removals, type drift, and nullability drift."""
-    desired_by_name = {column.name: column for column in desired.columns}
-    observed_by_name = {column.name: column for column in observed.columns}
+    desired_by_name = {column.name: column for column in desired_columns}
+    observed_by_name = {column.name: column for column in observed_columns}
     changes: list[Change] = []
 
     for name, desired_only_column in desired_by_name.items():
@@ -192,11 +245,13 @@ def _diff_column_structure(desired: DesiredTable, observed: ObservedTable) -> li
     return changes
 
 
-def _diff_column_comments(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+def _diff_column_comments(
+    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+) -> list[Change]:
     """Comment changes for name-matched column pairs."""
-    observed_by_name = {column.name: column for column in observed.columns}
+    observed_by_name = {column.name: column for column in observed_columns}
     changes: list[Change] = []
-    for column in desired.columns:
+    for column in desired_columns:
         if column.name not in observed_by_name:
             continue
         observed_column = observed_by_name[column.name]
@@ -211,17 +266,19 @@ def _diff_column_comments(desired: DesiredTable, observed: ObservedTable) -> lis
     return changes
 
 
-def _diff_column_tags(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+def _diff_column_tags(
+    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+) -> list[Change]:
     """
     Tag changes for every desired column, matched or added (full-state).
 
     A desired-only column's tags are included: the ADD_COLUMN phase precedes
     SET_COLUMN_TAG, so the column exists by the time its tags are applied.
     """
-    observed_by_name = {column.name: column for column in observed.columns}
+    observed_by_name = {column.name: column for column in observed_columns}
     changes: list[Change] = []
 
-    for column in desired.columns:
+    for column in desired_columns:
         observed_tags: Mapping[str, str] = (
             observed_by_name[column.name].tags if column.name in observed_by_name else {}
         )
