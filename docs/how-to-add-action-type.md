@@ -27,11 +27,6 @@ class UpdateComment(Action):
             raise ValueError("UpdateComment carries no difference")
 
     @property
-    def new_comment(self) -> str:
-        """Desired comment consumed by compilers."""
-        return self.desired_comment
-
-    @property
     def subject(self) -> str:
         return self.column_name
 ```
@@ -40,9 +35,12 @@ class UpdateComment(Action):
 
 Every action declares its `TableAspect`, carries enough desired and observed
 state for validation and reporting, and rejects a no-op payload when that is
-representable. Read-only properties can preserve concise compiler-facing
-attributes. `Action.subject` determines alphabetical sort order within a phase;
-`ActionPhase` is an `IntEnum` — lower values run first.
+representable. Name each field once, semantically (`desired_*` / `observed_*`
+for transition state), and have compilers and renderers read those names
+directly — the read-only alias properties on some existing actions are a
+compatibility seam, not a pattern to copy. `Action.subject` determines
+alphabetical sort order within a phase; `ActionPhase` is an `IntEnum` — lower
+values run first.
 
 ## 2. Add a phase constant if needed
 
@@ -102,7 +100,7 @@ In `src/delta_engine/adapters/databricks/sql/compile.py`, register a `singledisp
 @_compile_action.register
 def _(action: UpdateComment, backticked_table_name: str) -> str:
     col = backtick(action.column_name)
-    comment = quote_literal(action.new_comment)
+    comment = quote_literal(action.desired_comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {col} COMMENT {comment}"
 ```
 
@@ -120,7 +118,7 @@ properties, tags, comments), a `+`/`-`/`~` symbol, and its aligned cells:
 ```python
 @action_entries.register
 def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
-    text = f"column {action.column_name}: '{action.new_comment}'"
+    text = f"column {action.column_name}: '{action.desired_comment}'"
     return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
 ```
 
