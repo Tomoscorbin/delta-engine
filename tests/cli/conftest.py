@@ -77,7 +77,6 @@ def fake_engine(monkeypatch):
         yield (
             Target(
                 host="https://test.cloud.databricks.com",
-                client_id="test-client-id",
                 warehouse_id="test-warehouse",
             ),
             _StubConnection(),
@@ -90,11 +89,7 @@ def fake_engine(monkeypatch):
 
 @pytest.fixture
 def databricks_env(monkeypatch):
-    monkeypatch.setenv("DATABRICKS_HOST", "https://test.cloud.databricks.com")
-    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("DATABRICKS_SQL_WAREHOUSE_ID", "test-warehouse")
-    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://oidc.example/token")
-    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "test-oidc-token")
 
 
 @pytest.fixture

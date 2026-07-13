@@ -205,8 +205,8 @@ def columns_query(qualified_name: QualifiedName) -> str:
     Render the information_schema query for a table's columns.
 
     ``full_data_type`` is the DDL string the shared type parser consumes;
-    ``partition_index`` (1-based, NULL for non-partition columns) recovers
-    partition order without a DESCRIBE round trip. Ordered by
+    ``partition_index`` (NULL for non-partition columns) recovers partition
+    order without relying on whether the catalog numbers it from zero or one. Ordered by
     ``ordinal_position`` so the observed column tuple preserves the table's
     column order.
     """

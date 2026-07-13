@@ -88,23 +88,16 @@ def test_catalog_read_failure_prints_the_plan_report_and_exits_one(
     assert "PermissionDenied" in result.stdout
 
 
-def test_missing_connection_settings_are_one_line_configuration_errors(
+def test_missing_warehouse_setting_is_a_one_line_configuration_error(
     runner, fake_engine, write_module, monkeypatch
 ):
-    for name in (
-        "DATABRICKS_HOST",
-        "DATABRICKS_CLIENT_ID",
-        "DATABRICKS_SQL_WAREHOUSE_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("DATABRICKS_SQL_WAREHOUSE_ID", raising=False)
     monkeypatch.setattr(cli_app, "open_connection", real_open_connection)
     module = write_module("plan_no_env", ORDERS_ONLY)
 
     result = runner.invoke(app, ["plan", f"{module}:all_tables"])
 
     assert result.exit_code == 1
-    assert "DATABRICKS_HOST" in result.stderr
-    assert "DATABRICKS_CLIENT_ID" in result.stderr
     assert "DATABRICKS_SQL_WAREHOUSE_ID" in result.stderr
     assert result.stderr.count("\n") == 1
     assert "Traceback" not in result.stderr
@@ -211,7 +204,7 @@ def test_unexpected_engine_error_propagates_after_connection_cleanup(
     def recording_connection():
         try:
             yield (
-                Target("https://test.cloud.databricks.com", "client", "warehouse"),
+                Target("https://test.cloud.databricks.com", "warehouse"),
                 object(),
             )
         finally:
@@ -273,17 +266,18 @@ def test_help_and_version_keep_the_minimal_public_surface(runner):
     assert delta_engine.__version__ in version_result.stdout
 
 
-def test_output_never_contains_client_or_oidc_values(
-    runner, fake_engine, databricks_env, write_module
+def test_output_never_contains_connection_credentials(
+    runner, fake_engine, databricks_env, write_module, monkeypatch
 ):
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-access-token")
+    monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "test-client-secret")
     module = write_module("plan_no_credentials", ORDERS_ONLY)
 
     result = runner.invoke(app, ["plan", f"{module}:all_tables"])
 
     combined = result.stdout + result.stderr
-    assert "test-client-id" not in combined
-    assert "https://oidc.example/token" not in combined
-    assert "test-oidc-token" not in combined
+    assert "test-access-token" not in combined
+    assert "test-client-secret" not in combined
 
 
 def test_engine_logging_state_does_not_leak_across_invocations(

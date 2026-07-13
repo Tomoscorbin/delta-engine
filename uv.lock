@@ -571,7 +571,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-sdk", marker = "extra == 'cli'", specifier = ">=0.120.0" },
+    { name = "databricks-sdk", marker = "extra == 'cli'", specifier = ">=0.70.0" },
     { name = "databricks-sql-connector", marker = "extra == 'cli'", specifier = ">=4.0.0" },
     { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.0.0" },
     { name = "delta-spark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
@@ -583,7 +583,7 @@ provides-extras = ["cli", "spark", "sql"]
 [package.metadata.requires-dev]
 dev = [
     { name = "commitizen", specifier = ">=4.0" },
-    { name = "databricks-sdk", specifier = ">=0.120.0" },
+    { name = "databricks-sdk", specifier = ">=0.70.0" },
     { name = "databricks-sql-connector", specifier = ">=4.0.0" },
     { name = "delta-spark", specifier = ">=4.0.0" },
     { name = "hypothesis", specifier = ">=6.155.5" },

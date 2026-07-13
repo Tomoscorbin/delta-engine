@@ -7,7 +7,7 @@ tags:
 
 Run `delta-engine plan` when a trusted same-repository pull request opens. The
 command reads the live Unity Catalog state, prints the target, semantic diff,
-sync report, and exact planned SQL, then exits without executing DDL.
+sync report, and exact planned SQL without executing the planned DDL.
 
 Pending valid changes exit successfully. Catalog-read, validation, connection,
 and configuration failures exit unsuccessfully, so one command can act as the
@@ -43,7 +43,7 @@ collection, mixed sequence, and duplicate qualified table names fail before a
 connection opens. See the [CLI reference](reference-cli.md) for the complete
 contract.
 
-## Configure the read-only GitHub OIDC identity
+## Configure GitHub OIDC for this workflow
 
 Create one Databricks service principal for plans and grant only the warehouse
 and catalog permissions needed to read the declared tables' metadata. Do not
@@ -58,9 +58,9 @@ values as repository variables:
 - `DATABRICKS_PLAN_CLIENT_ID`
 - `DATABRICKS_SQL_WAREHOUSE_ID`
 
-The CLI always constructs the Databricks SDK configuration with
-`auth_type="github-oidc"`. It does not read a PAT, client secret, Databricks
-profile, or authentication-mode override.
+The workflow selects GitHub OIDC through the Databricks SDK's standard
+`DATABRICKS_AUTH_TYPE` setting. The CLI itself has no GitHub-specific
+authentication branch; it delegates credential resolution to the SDK.
 
 Fork pull requests execute code controlled by another repository. Skip the
 live plan for forks so that code never receives the federated catalog identity;
@@ -88,6 +88,7 @@ jobs:
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
       DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_PLAN_CLIENT_ID }}
+      DATABRICKS_AUTH_TYPE: github-oidc
       DATABRICKS_SQL_WAREHOUSE_ID: ${{ vars.DATABRICKS_SQL_WAREHOUSE_ID }}
     steps:
       - uses: actions/checkout@v7
@@ -134,6 +135,8 @@ Review the `DIFF` section for semantic intent and `PLANNED SQL` for the exact
 DDL a write-capable Python sync would compile. A `VALIDATION_FAILED` or
 `READ_FAILED` row is a failed check and includes detail in the report.
 
-`delta-engine plan` is always read-only; there is no apply command or flag to
-turn the plan into a write. Applying declarations remains a separate Python API
+`delta-engine plan` always calls the engine with `dry_run=True`; there is no
+apply command or flag to turn the generated plan into a write. Declaration
+modules are ordinary Python, which is why the workflow uses trusted code and a
+read-only identity. Applying declarations remains a separate Python API
 workflow with its own explicit connection and permissions.

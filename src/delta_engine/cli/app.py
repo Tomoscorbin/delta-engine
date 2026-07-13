@@ -1,4 +1,4 @@
-"""The CI-first, read-only ``delta-engine plan`` command."""
+"""The read-only ``delta-engine plan`` command."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
@@ -66,7 +66,7 @@ def _main(
 
 @app.command()
 def plan(declaration: DeclarationArgument) -> None:
-    """Read the live catalog and print a dry-run plan; never execute DDL."""
+    """Read the live catalog and print a dry-run plan; never execute planned DDL."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
         result = _plan(reference)

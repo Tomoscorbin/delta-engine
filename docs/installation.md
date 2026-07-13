@@ -77,13 +77,12 @@ catalog, prints its semantic diff, report, and planned SQL, and never executes
 DDL. The CLI extra contains only Typer, `databricks-sdk`, and
 `databricks-sql-connector`; the base package remains dependency-free.
 
-The MVP runs in trusted GitHub Actions jobs only. Configure
-`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and
-`DATABRICKS_SQL_WAREHOUSE_ID`, grant the job `id-token: write`, and use a
-read-only Databricks workload identity. PATs, profiles, OAuth client secrets,
-local user authentication, connection flags, and an apply command are not
-supported. See the [CLI reference](reference-cli.md) and
-[how to run schema plans in CI](how-to-gate-changes-in-ci.md).
+Configure `DATABRICKS_SQL_WAREHOUSE_ID`, then configure the Databricks SDK's
+standard unified authentication through environment variables or a profile.
+The CLI adds no connection flags and does not choose an authentication method.
+See the [CLI reference](reference-cli.md), or the
+[GitHub Actions OIDC example](how-to-gate-changes-in-ci.md) for a read-only CI
+deployment.
 
 ## Verify
 

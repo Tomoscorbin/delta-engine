@@ -300,7 +300,7 @@ skipped during execution. The engine still processes other tables.
 
 | Package                    | Responsibility                                                                      | Examples                                                                                 |
 | -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `delta_engine.cli`         | Read-only command, declaration loading, fixed OIDC authentication, connection ownership, and CLI rendering | `plan`, GitHub-OIDC SQL connection composition, planned-SQL rendering                    |
+| `delta_engine.cli`         | Read-only command composition and rendering                                          | `plan`, declaration loading, unified-auth SQL connection                                 |
 | `delta_engine.schema`      | User-facing declaration import surface                                              | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
@@ -341,15 +341,16 @@ require PySpark.
 
 `delta_engine.cli` sits above the hexagon as a driving adapter: a thin Typer
 layer (the `cli` extra) that loads one explicit declaration collection, opens
-one warehouse connection with fixed GitHub Actions OIDC authentication, and
-calls `Engine.sync(..., dry_run=True)`. Its connection module is the sole deep
-authentication boundary: it validates environment configuration, derives the
-connector HTTP path from a warehouse ID, constructs the SDK credentials, and
-owns the connection lifecycle. Catalog reads and SQL compilation remain in the
-warehouse adapter. Exact planned-SQL text rendering is CLI-private; the
-application layer exposes the report data, diff renderer, and report renderer
-without taking on command-specific presentation policy. The CLI contains no
-apply orchestration or planning and validation policy of its own.
+one warehouse connection through Databricks unified authentication, and calls
+`Engine.sync(..., dry_run=True)`. Its connection module validates warehouse
+selection, delegates workspace and credential resolution to the SDK, derives
+the connector HTTP path, and owns the connection lifecycle. Authentication
+policy stays in the invoking environment. Catalog reads and SQL compilation
+remain in the warehouse adapter. Exact planned-SQL text rendering is
+CLI-private; the application layer exposes the report data, diff renderer, and
+report renderer without taking on command-specific presentation policy. The
+CLI contains no apply orchestration or planning and validation policy of its
+own.
 
 `delta_engine.schema` and `delta_engine.databricks` are the public import paths
 for users. Their implementations still live in `delta_engine.api` and

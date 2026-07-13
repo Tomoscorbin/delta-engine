@@ -6,7 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["delta-lake", "databricks", "schema", "migrations", "ddl", "data-engineering"]
+keywords = [
+  "delta-lake",
+  "databricks",
+  "schema",
+  "migrations",
+  "ddl",
+  "data-engineering",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -26,7 +33,7 @@ dependencies = []
 [project.optional-dependencies]
 spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 sql = ["databricks-sql-connector>=4.0.0"]
-cli = ["typer>=0.12", "databricks-sdk>=0.120.0", "databricks-sql-connector>=4.0.0"]
+cli = ["typer>=0.12", "databricks-sdk>=0.70.0", "databricks-sql-connector>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
@@ -50,7 +57,7 @@ dev = [
   "commitizen>=4.0",
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
-  "databricks-sdk>=0.120.0",
+  "databricks-sdk>=0.70.0",
   "typer>=0.12",
 ]
 docs = [
@@ -168,7 +175,11 @@ markers = [
   "local_e2e: local Spark/Delta end-to-end tests that run in default CI",
   "databricks_e2e: credentialed Databricks/Unity Catalog end-to-end tests",
 ]
+# Credentialed live tests (tests/live) are opt-in: the default marker filter
+# keeps every ordinary and CI run off the real warehouse. Run them explicitly
+# with: uv run pytest tests/live -m databricks_e2e --no-cov
 addopts = """
+-m "not databricks_e2e"
 --cov
 --cov-report=term-missing:skip-covered
 --cov-report=xml:reports/coverage.xml

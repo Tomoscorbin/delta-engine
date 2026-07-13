@@ -1,8 +1,8 @@
-"""Open a Databricks SQL connection using GitHub Actions OIDC only."""
+"""Open a Databricks SQL connection through Databricks unified auth."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
 import os
 import sys
@@ -15,30 +15,30 @@ if TYPE_CHECKING:
     from databricks.sdk.core import Config
     from databricks.sql.client import Connection
 
-_HOST_VAR = "DATABRICKS_HOST"
-_CLIENT_ID_VAR = "DATABRICKS_CLIENT_ID"
 _WAREHOUSE_ID_VAR = "DATABRICKS_SQL_WAREHOUSE_ID"
-_OIDC_URL_VAR = "ACTIONS_ID_TOKEN_REQUEST_URL"
-_OIDC_TOKEN_VAR = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 _INSTALL_HINT = 'pip install "delta-engine[cli]"'
-_CANNOT_CONNECT = "cannot connect to Databricks using GitHub OIDC"
+_CANNOT_CONNECT = "cannot connect to Databricks"
+_SECRET_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class Target:
-    """One normalized Databricks SQL warehouse target and its plan identity."""
+    """One normalized Databricks SQL warehouse target."""
 
     host: str
-    client_id: str = field(repr=False)
     warehouse_id: str
 
     def __post_init__(self) -> None:
-        """Normalize the environment-derived identity at its owning boundary."""
+        """Normalize the resolved identity at its owning boundary."""
         object.__setattr__(self, "host", self.host.strip().rstrip("/"))
-        object.__setattr__(self, "client_id", self.client_id.strip())
         object.__setattr__(self, "warehouse_id", self.warehouse_id.strip())
+
+    @property
+    def server_hostname(self) -> str:
+        """Return the hostname form expected by the SQL connector."""
+        return self.host.removeprefix("https://").removeprefix("http://")
 
     @property
     def http_path(self) -> str:
@@ -47,30 +47,26 @@ class Target:
 
 
 @contextmanager
-def open_connection(
-    *,
-    environ: Mapping[str, str] | None = None,
-) -> Iterator[tuple[Target, "Connection"]]:
+def open_connection() -> Iterator[tuple[Target, "Connection"]]:
     """
-    Validate GitHub OIDC configuration, connect, and own the connection.
+    Resolve unified authentication, connect, and own the connection.
 
-    This is the CLI's single deep authentication boundary. It deliberately
-    constructs the SDK with ``auth_type='github-oidc'`` and offers no path to
-    profiles, PATs, OAuth client secrets, or local user authentication.
+    Authentication policy belongs to the environment that invokes the CLI. The
+    Databricks SDK resolves its standard environment variables and profiles;
+    this adapter adds only warehouse selection and connection ownership.
     Connection-close errors are logged and suppressed so they cannot replace a
     completed plan or the primary exception raised while planning.
 
     Raises:
-        ConfigError: If required environment or optional dependencies are
-            missing, SDK configuration fails, or the connection cannot open.
+        ConfigError: If the warehouse, authentication, or optional dependencies
+            are not configured, or the connection cannot open.
 
     """
-    environment = os.environ if environ is None else environ
-    target = _target_from_environment(environment)
-    _validate_oidc_environment(environment)
+    warehouse_id = _warehouse_id_from_environment()
     databricks_sql, config_class = _import_backends()
-    config = _build_config(config_class, target, environment)
-    connection = _connect(databricks_sql, config, target, environment)
+    config = _build_config(config_class)
+    target = _target_from_config(config, warehouse_id)
+    connection = _connect(databricks_sql, config, target)
 
     try:
         yield target, connection
@@ -84,37 +80,22 @@ def open_connection(
             )
 
 
-def _target_from_environment(environment: Mapping[str, str]) -> Target:
-    """Read, validate, and normalize the three public target settings."""
-    values = {
-        name: environment.get(name, "").strip()
-        for name in (_HOST_VAR, _CLIENT_ID_VAR, _WAREHOUSE_ID_VAR)
-    }
-    missing = [name for name, value in values.items() if not value]
-    if missing:
-        raise ConfigError(f"missing required environment: {', '.join(missing)}")
-
-    warehouse_id = values[_WAREHOUSE_ID_VAR]
+def _warehouse_id_from_environment() -> str:
+    """Read the one connector setting not owned by Databricks unified auth."""
+    warehouse_id = os.environ.get(_WAREHOUSE_ID_VAR, "").strip()
+    if not warehouse_id:
+        raise ConfigError(f"missing required environment: {_WAREHOUSE_ID_VAR}")
     if "/" in warehouse_id:
         raise ConfigError(f"{_WAREHOUSE_ID_VAR} must be a warehouse ID, not an HTTP path")
-
-    return Target(
-        host=values[_HOST_VAR],
-        client_id=values[_CLIENT_ID_VAR],
-        warehouse_id=warehouse_id,
-    )
+    return warehouse_id
 
 
-def _validate_oidc_environment(environment: Mapping[str, str]) -> None:
-    """Require the token endpoint variables granted by ``id-token: write``."""
-    missing = [
-        name for name in (_OIDC_URL_VAR, _OIDC_TOKEN_VAR) if not environment.get(name, "").strip()
-    ]
-    if missing:
-        raise ConfigError(
-            "GitHub Actions OIDC is unavailable: "
-            f"missing {', '.join(missing)}; grant the job id-token: write"
-        )
+def _target_from_config(config: "Config", warehouse_id: str) -> Target:
+    """Freeze the non-credential identity resolved by the SDK."""
+    host = (config.host or "").strip()
+    if not host:
+        raise ConfigError(f"{_CANNOT_CONNECT}: authentication resolved no workspace host")
+    return Target(host=host, warehouse_id=warehouse_id)
 
 
 def _import_backends() -> tuple[ModuleType, type["Config"]]:
@@ -151,54 +132,43 @@ def _distribution_for(error: ImportError) -> str:
     return "databricks-sdk and databricks-sql-connector"
 
 
-def _build_config(
-    config_class: type["Config"],
-    target: Target,
-    environment: Mapping[str, str],
-) -> "Config":
-    """Construct the one supported SDK authentication strategy explicitly."""
+def _build_config(config_class: type["Config"]) -> "Config":
+    """Delegate credential and workspace resolution to Databricks unified auth."""
     try:
-        return config_class(
-            host=target.host,
-            client_id=target.client_id,
-            auth_type="github-oidc",
-        )
+        return config_class()
     except ValueError as error:
-        detail = _safe_error_detail(error, target, environment)
-        raise ConfigError(f"{_CANNOT_CONNECT}: SDK configuration failed{detail}") from error
+        detail = _safe_error_detail(error)
+        raise ConfigError(
+            f"{_CANNOT_CONNECT}: authentication configuration failed{detail}"
+        ) from error
 
 
 def _connect(
     databricks_sql: ModuleType,
     config: "Config",
     target: Target,
-    environment: Mapping[str, str],
 ) -> "Connection":
     """Open the connector transport and translate its broad failure surface."""
     try:
         return databricks_sql.connect(
-            server_hostname=config.host,
+            server_hostname=target.server_hostname,
             http_path=target.http_path,
             credentials_provider=lambda: config.authenticate,
         )
     except Exception as error:
-        detail = _safe_error_detail(error, target, environment)
+        detail = _safe_error_detail(error)
         raise ConfigError(f"{_CANNOT_CONNECT} ({type(error).__name__}){detail}") from error
 
 
-def _safe_error_detail(
-    error: Exception,
-    target: Target,
-    environment: Mapping[str, str],
-) -> str:
-    """Return a useful one-line detail with identity and OIDC values redacted."""
+def _safe_error_detail(error: Exception) -> str:
+    """Return one-line detail with secret-looking environment values redacted."""
     message = " ".join(str(error).split())
-    sensitive_values = (
-        target.client_id,
-        environment.get(_OIDC_URL_VAR, ""),
-        environment.get(_OIDC_TOKEN_VAR, ""),
-    )
-    for value in sensitive_values:
+    sensitive_values = {
+        value
+        for name, value in os.environ.items()
+        if value and any(marker in name.upper() for marker in _SECRET_MARKERS)
+    }
+    for value in sorted(sensitive_values, key=len, reverse=True):
         if value:
             message = message.replace(value, "<redacted>")
     return f": {message}" if message else ""

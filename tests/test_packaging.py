@@ -20,9 +20,7 @@ def test_cli_extra_contains_the_sdk_connector_and_typer():
         requirement for requirement in requirements if "extra == 'cli'" in requirement
     ]
 
-    assert any(
-        requirement.startswith("databricks-sdk>=0.120.0") for requirement in cli_requirements
-    )
+    assert any(requirement.startswith("databricks-sdk>=0.70.0") for requirement in cli_requirements)
     assert any(
         requirement.startswith("databricks-sql-connector>=4.0.0")
         for requirement in cli_requirements

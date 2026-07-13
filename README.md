@@ -33,11 +33,10 @@ or cluster. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
 for both extras and their requirements.
 
-For trusted same-repository GitHub Actions workflows, install
-`delta-engine[cli]` and run the read-only
-`delta-engine plan MODULE:ATTRIBUTE` command with a GitHub OIDC plan identity.
-The CLI always shows the semantic diff, report, and planned SQL and never
-applies changes. See the
+Install `delta-engine[cli]` to run
+`delta-engine plan MODULE:ATTRIBUTE` through any standard Databricks
+unified-auth configuration. The CLI always shows the semantic diff, report,
+and planned SQL and never applies the generated plan. See the
 [CLI reference](https://tomoscorbin.github.io/delta-engine/reference-cli.html).
 
 ## Quickstart
@@ -98,7 +97,7 @@ for the model, or jump to what you need:
 
 **Reference**
 
-- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the read-only GitHub OIDC plan command, declaration grammar, output, and exit codes
+- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the read-only plan command, connection contract, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation

@@ -16,7 +16,7 @@ Main source layout:
 - `src/delta_engine/api`: implementation of public declaration objects.
 - `src/delta_engine/schema.py`: public schema declaration import surface.
 - `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
-- `src/delta_engine/cli`: read-only GitHub-OIDC `plan` command over the warehouse backend; requires the `cli` extra.
+- `src/delta_engine/cli`: read-only `plan` command over the warehouse backend; requires the `cli` extra.
 - `tests`: unit, integration, adapter, and end-to-end tests.
 - `docs`: Sphinx/MyST documentation.
 
@@ -36,7 +36,7 @@ Run tests:
 uv run pytest
 uv run pytest tests/domain/plan/test_diff.py
 uv run pytest tests/domain/plan/test_diff.py::test_name
-uv run pytest -m "not local_e2e"
+uv run pytest -m "not local_e2e and not databricks_e2e"
 ```
 
 The first test run starts a local Spark session through the `spark` fixture in `tests/conftest.py` and can take 30-60 seconds.
@@ -107,8 +107,8 @@ Rules:
 - `api` owns public declaration implementation and lowers declarations into domain snapshots.
 - `schema.py` and `databricks.py` are user-facing facades; keep them thin.
 - `cli.connection` may import the Databricks SDK and SQL connector only to
-  configure fixed GitHub OIDC authentication and own a connection; backend
-  reads and execution stay in adapters.
+  resolve unified authentication and own a connection; backend reads and
+  execution stay in adapters.
 - PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
 
 Expected dependency direction:

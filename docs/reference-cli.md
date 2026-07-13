@@ -5,7 +5,7 @@ tags:
 
 # CLI reference
 
-The `delta-engine` command has one read-only, CI-first workflow:
+The `delta-engine` command has one read-only workflow:
 
 ```bash
 delta-engine plan myproject.tables:all_tables
@@ -13,8 +13,9 @@ delta-engine plan myproject.tables:all_tables
 
 It loads one explicit declaration collection, reads one live Unity Catalog
 target through a Databricks SQL warehouse, and runs
-`Engine.sync(..., dry_run=True)`. It never executes DDL or otherwise mutates
-catalog state. Use the Python API when you intend to apply changes.
+`Engine.sync(..., dry_run=True)`. The engine invocation never executes planned
+DDL. Declaration modules are ordinary Python and remain responsible for their
+own import-time behaviour. Use the Python API when you intend to apply changes.
 
 Install the optional CLI dependencies first:
 
@@ -41,7 +42,7 @@ The command performs these operations in order:
 1. Import the selected declaration module from the current checkout.
 2. Validate that the attribute contains one non-empty ordered sequence of
    `DeltaTable` declarations.
-3. Open a SQL warehouse connection using GitHub Actions OIDC.
+3. Open a SQL warehouse connection using Databricks unified authentication.
 4. Read catalog state and build a dry-run plan.
 5. Print the target identity, semantic diff, sync report, and any planned SQL.
 
@@ -83,30 +84,32 @@ run plans only for code you trust. A missing target module or attribute is a
 short configuration error. Exceptions raised by the selected module, including
 a missing dependency imported by that module, retain their original traceback.
 
-## GitHub Actions OIDC target
+## Databricks connection
 
-The CLI supports exactly one authentication path. Every invocation requires:
+Every invocation requires one CLI-specific target setting:
 
-| Environment variable                | Meaning                                      |
-| ----------------------------------- | -------------------------------------------- |
-| `DATABRICKS_HOST`                   | Workspace URL                                |
-| `DATABRICKS_CLIENT_ID`              | Read-only Databricks service principal       |
-| `DATABRICKS_SQL_WAREHOUSE_ID`       | Warehouse ID, not a connector HTTP path      |
-| `ACTIONS_ID_TOKEN_REQUEST_URL`      | Supplied by GitHub for `id-token: write`     |
-| `ACTIONS_ID_TOKEN_REQUEST_TOKEN`    | Supplied by GitHub for `id-token: write`     |
+| Environment variable                | Meaning                                 |
+| ----------------------------------- | --------------------------------------- |
+| `DATABRICKS_SQL_WAREHOUSE_ID`       | Warehouse ID, not a connector HTTP path |
 
-The workflow job must grant `permissions: id-token: write`. The CLI constructs
-`databricks.sdk.core.Config` with `auth_type="github-oidc"`; PATs, profiles,
-OAuth client secrets, local user authentication, and generic unified-auth
-selection are not supported. Variables for those methods are ignored.
+The CLI constructs `databricks.sdk.core.Config()` without choosing an
+authentication method. The SDK resolves the workspace and credentials from its
+standard environment variables or configuration profiles. Authentication is
+therefore deployment configuration, not a CLI option or code path.
+
+For example, a GitHub Actions job can select workload identity federation with
+`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and
+`DATABRICKS_AUTH_TYPE=github-oidc`; see [the CI guide](how-to-gate-changes-in-ci.md).
+Local profiles and other Databricks unified-auth configurations use the same
+command without flags.
 
 The warehouse ID becomes `/sql/1.0/warehouses/<id>` inside the connection
 boundary. Users never configure connector transport paths directly.
 
 Authentication and connection failures are rendered as one-line configuration
-errors. Identity and OIDC values are redacted from failure details. A local
-file that shadows the installed `databricks` packages is also reported as a
-configuration error.
+errors. Secret-looking environment values are redacted from failure details. A
+local file that shadows the installed `databricks` packages is also reported as
+a configuration error.
 
 ## Output
 
@@ -117,8 +120,8 @@ Every completed plan writes these text sections to stdout in order:
 3. `SYNC REPORT`: statuses, failures, and summary
 4. `PLANNED SQL`: exact statements, when the plan compiled any
 
-The client ID and GitHub OIDC values are never rendered. Planned SQL is shown
-by default; there is no SQL display flag or JSON mode.
+Credentials are never intentionally rendered. Planned SQL is shown by default;
+there is no SQL display flag or JSON mode.
 
 Imported-code output, SDK or connector output, engine logs, configuration
 errors, and tracebacks go to stderr. This keeps the complete human-readable
