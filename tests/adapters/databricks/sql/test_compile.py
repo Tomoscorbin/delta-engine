@@ -26,6 +26,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -483,3 +484,11 @@ def test_every_action_type_has_a_registered_compiler():
 
     # Then every action has a specific compiler
     assert unregistered == []
+
+
+def test_compile_rename_column():
+    plan = ActionPlan((RenameColumn(old_name="customer_nm", new_name="customer_name"),))
+    statements = compile_plan(QualifiedName("dev", "silver", "customers"), plan)
+    assert statements == (
+        "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
+    )

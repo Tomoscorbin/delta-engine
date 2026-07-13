@@ -31,6 +31,10 @@ class Column:
         tags: Read-only mapping of Unity Catalog column tag keys to values. Tag
             keys are case-sensitive and are stored verbatim (never casefolded,
             unlike the column name).
+        renamed_from: The column's previous name, declaring a rename. Inert
+            unless the old name is observed and the new one is not, so it is
+            safe to keep on declarations that continue to manage column
+            structure, and correct on fresh environments.
 
     """
 
@@ -39,10 +43,18 @@ class Column:
     nullable: bool = True
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
+    renamed_from: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         _validate_column_fields(self.name, self.tags)
+        if self.renamed_from is not None:
+            if not self.renamed_from.strip():
+                raise ValueError(f"renamed_from must not be blank: {self.renamed_from!r}")
+            if self.renamed_from != self.renamed_from.casefold():
+                raise ValueError(f"renamed_from must be lowercase: {self.renamed_from!r}")
+            if self.renamed_from == self.name:
+                raise ValueError(f"Column {self.name!r} cannot be renamed_from itself")
 
 
 @dataclass(frozen=True, slots=True)

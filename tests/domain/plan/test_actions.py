@@ -1,7 +1,14 @@
 from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.domain.model import Column, DesiredTable, Integer, Long, QualifiedName
+from delta_engine.domain.model import (
+    Column,
+    DesiredTable,
+    Integer,
+    Long,
+    QualifiedName,
+    TableAspect,
+)
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPhase,
@@ -13,6 +20,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -25,6 +33,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
+from delta_engine.domain.plan.changes import ColumnRenameConflict, ColumnRenamed
 
 # ----- builders
 
@@ -325,3 +334,40 @@ def test_plan_reclusters_before_dropping_a_column():
     # Then clustering is changed off the old key before that column is dropped,
     # so the drop never targets a live clustering key
     assert [type(a) for a in plan] == [AlterClustering, DropColumn]
+
+
+def test_rename_column_orders_between_constraint_drops_and_column_adds():
+    plan = ActionPlan(
+        (
+            AddColumn(column=Column("b", Integer())),
+            RenameColumn(old_name="a", new_name="c"),
+            DropPrimaryKey(),
+        )
+    )
+    # Unrelated explicit constraint drops still precede the rename; constraints
+    # involving the renamed column are dropped atomically by RENAME COLUMN and
+    # are omitted from the plan before ActionPlan sees them.
+    assert [type(action) for action in plan] == [DropPrimaryKey, RenameColumn, AddColumn]
+
+
+def test_column_renamed_lowers_to_a_rename_action():
+    change = ColumnRenamed(old_name="customer_nm", new_name="customer_name")
+    assert change.actions() == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
+    assert change.aspect is TableAspect.COLUMN_STRUCTURE
+
+
+def test_column_renamed_rejects_no_difference():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnRenamed(old_name="same", new_name="same")
+
+
+def test_column_rename_conflict_has_no_action():
+    change = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
+
+    assert change.actions() == ()
+    assert change.aspect is TableAspect.COLUMN_STRUCTURE
+
+
+def test_column_rename_conflict_rejects_no_difference():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnRenameConflict(old_name="same", new_name="same")

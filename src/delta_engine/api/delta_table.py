@@ -185,6 +185,23 @@ def _validate_layout(
         )
 
 
+def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str | None]) -> None:
+    """
+    Reject rename hints without name-based column mapping.
+
+    Hints are visible in the declaration, so reject them at construction.
+    """
+    hinted = [column.name for column in columns if column.renamed_from is not None]
+    if not hinted:
+        return
+    if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
+        raise ValueError(
+            f"Columns {hinted} declare renamed_from, which requires"
+            f" {Property.COLUMN_MAPPING_MODE}='name'. Declare"
+            f" properties={{'{Property.COLUMN_MAPPING_MODE}': 'name'}} on this table."
+        )
+
+
 def _validate_column_names(
     columns: tuple[Column, ...],
     properties: Mapping[str, str | None],
@@ -456,6 +473,7 @@ class DeltaTable:
         clustered_by = tuple(clustered_by)
         _validate_layout(columns, partitioned_by, clustered_by)
         _validate_column_names(columns, user_properties, managed_aspects)
+        _validate_renames(columns, user_properties)
 
         table_tags = dict(tags or {})
         _validate_tags(f"table '{name}'", table_tags)

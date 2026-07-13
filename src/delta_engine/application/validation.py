@@ -29,6 +29,7 @@ from delta_engine.domain.plan import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenameConflict,
     ForeignKeyRemoved,
     PartitioningChanged,
     PrimaryKeyChanged,
@@ -374,6 +375,28 @@ class ColumnMappingRequiredForDrop:
         )
 
 
+class AmbiguousColumnRename:
+    """Disallow a declared rename whose source and target both exist."""
+
+    name: ClassVar[str] = "AmbiguousColumnRename"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every explicit rename conflict."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Operation not allowed: cannot rename '{change.old_name}' to"
+                    f" '{change.new_name}' — both columns exist"
+                    " on the table. If the old column should be dropped, remove the"
+                    " renamed_from hint and drop it in its own sync."
+                ),
+            )
+            for change in drift.managed_changes
+            if isinstance(change, ColumnRenameConflict)
+        )
+
+
 class PrimaryKeyReferencedByForeignKeys:
     """
     Disallow dropping or changing a primary key while foreign keys reference it.
@@ -439,6 +462,7 @@ DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
     PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
     ColumnMappingRequiredForDrop(),
+    AmbiguousColumnRename(),
     PrimaryKeyReferencedByForeignKeys(),
 )
 

@@ -45,6 +45,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -186,6 +187,10 @@ from delta_engine.domain.plan.actions import (
         (
             AlterClustering(columns=()),
             (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),),
+        ),
+        (
+            RenameColumn(old_name="customer_nm", new_name="customer_name"),
+            (DiffEntry(DiffCategory.COLUMNS, "~", ("customer_nm", "renamed → customer_name")),),
         ),
     ],
 )

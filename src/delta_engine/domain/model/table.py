@@ -224,6 +224,30 @@ class DesiredTable:
                     " primary key column."
                 )
 
+        declared_names = {column.name for column in self.columns}
+        rename_sources: set[str] = set()
+        for column in self.columns:
+            source = column.renamed_from
+            if source is None:
+                continue
+            if TableAspect.COLUMN_STRUCTURE not in self.managed_aspects:
+                raise ValueError(
+                    f"Column {column.name!r} declares renamed_from, but this"
+                    " declaration does not manage column structure"
+                )
+            if source in declared_names:
+                raise ValueError(
+                    f"Column {column.name!r} declares renamed_from {source!r},"
+                    f" but {source!r} is still declared. Remove the old column,"
+                    " or apply the rename and the reuse of the name in separate"
+                    " syncs."
+                )
+            if source in rename_sources:
+                raise ValueError(
+                    f"Two columns declare renamed_from {source!r}; a rename source must be unique"
+                )
+            rename_sources.add(source)
+
 
 @dataclass(frozen=True, slots=True)
 class ObservedTable:

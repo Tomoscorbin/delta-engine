@@ -25,6 +25,7 @@ from delta_engine.domain.plan import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
@@ -116,6 +117,14 @@ def _(action: DropColumn, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
     column_name = backtick(action.column_name)
     return f"ALTER TABLE {backticked_table_name} DROP COLUMN {column_name}"
+
+
+@_compile_action.register
+def _(action: RenameColumn, backticked_table_name: str) -> str:
+    """Compile ALTER TABLE ... RENAME COLUMN."""
+    old = backtick(action.old_name)
+    new = backtick(action.new_name)
+    return f"ALTER TABLE {backticked_table_name} RENAME COLUMN {old} TO {new}"
 
 
 @_compile_action.register
