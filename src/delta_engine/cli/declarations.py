@@ -67,6 +67,9 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
 
 def _ensure_working_directory_on_path() -> None:
     """Place the working directory first, even when it already appears later."""
+    # Fronting the working directory lets a stray local databricks.py shadow
+    # the installed SDK; connection._shadowing_module_file diagnoses exactly
+    # that. Change either policy only together with the other.
     working_directory = os.getcwd()
     sys.path[:] = [entry for entry in sys.path if entry != working_directory]
     sys.path.insert(0, working_directory)

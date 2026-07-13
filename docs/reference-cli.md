@@ -78,6 +78,11 @@ set, a mixed sequence, or duplicate qualified table names is a configuration
 error. The CLI does not scan module globals and does not accept multiple
 declaration references.
 
+Declaration order never changes the plan: the engine reports tables in
+sorted qualified-name order and derives execution order from foreign-key
+dependencies. The sequence requirement exists so error messages can point
+at a stable item index, not because position carries meaning.
+
 The current working directory takes import precedence, so repository code does
 not need to be installed first. Declaration imports execute arbitrary Python;
 run plans only for code you trust. A missing target module or attribute is a
@@ -88,9 +93,9 @@ a missing dependency imported by that module, retain their original traceback.
 
 Every invocation requires one CLI-specific target setting:
 
-| Environment variable                | Meaning                                 |
-| ----------------------------------- | --------------------------------------- |
-| `DATABRICKS_SQL_WAREHOUSE_ID`       | Warehouse ID, not a connector HTTP path |
+| Environment variable          | Meaning                                 |
+| ----------------------------- | --------------------------------------- |
+| `DATABRICKS_SQL_WAREHOUSE_ID` | Warehouse ID, not a connector HTTP path |
 
 The CLI constructs `databricks.sdk.core.Config()` without choosing an
 authentication method. The SDK resolves the workspace and credentials from its
@@ -133,8 +138,8 @@ the report explains why those statements were not eligible to run.
 
 ## Exit codes
 
-| Code | Meaning                                                                       |
-| ---- | ----------------------------------------------------------------------------- |
+| Code | Meaning                                                                      |
+| ---- | ---------------------------------------------------------------------------- |
 | 0    | The plan completed successfully, whether in sync or carrying pending changes |
 | 1    | Configuration, catalog read, or validation failed                            |
 | 2    | Typer/Click rejected malformed command-line usage                            |
