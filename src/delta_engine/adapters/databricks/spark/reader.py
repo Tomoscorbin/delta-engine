@@ -59,7 +59,7 @@ def _to_column_mapping(
     spark_column: SparkColumn, qualified_name: QualifiedName
 ) -> _ColumnMapping | None:
     """
-    Convert a Spark catalog column into a domain ``Column`` and its partition flag.
+    Convert a Spark catalog column into an ``ObservedColumn`` and its partition flag.
 
     Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``),
     the same shape information_schema gives the warehouse backend, so both

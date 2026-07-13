@@ -62,7 +62,8 @@ class TableSnapshot[ColumnT: (Column, ObservedColumn)]:
 
     Attributes:
         qualified_name: Fully qualified table name.
-        columns: Ordered tuple of ``Column`` definitions.
+        columns: Ordered tuple of column definitions — ``Column`` on desired
+            tables, ``ObservedColumn`` on observed tables.
         comment: Optional table-level comment (empty string when unset).
         tags: Read-only mapping of Unity Catalog tag keys to values.
         partitioned_by: Ordered tuple of partition column names.
