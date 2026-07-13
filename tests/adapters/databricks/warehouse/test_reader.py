@@ -111,7 +111,7 @@ def routed_connection(
     if table_rows is None:
         table_rows = [SimpleNamespace(comment=None)]
     if columns is None:
-        # A table with zero columns is not a valid domain object (`TableSnapshot`
+        # A table with zero columns is not a valid domain object (`ObservedTable`
         # requires at least one column), so tests that don't care about column
         # shape still need a placeholder column to get a valid ObservedTable.
         columns = [column_row("id")]
