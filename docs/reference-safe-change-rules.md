@@ -71,7 +71,7 @@ declaration is allowed to govern and always run, regardless of the rule set:
 | Invariant               | What it blocks                                                                                          | How to resolve                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `UnmanagedAspectDrift`  | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync | Sync the table fully, or update the declaration to match the live schema |
-| `MissingTableUnmanaged` | The table does not exist but this definition does not manage column structure                           | Create the table out-of-band first, or manage it fully                   |
+| `MissingTableUnmanaged` | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                   |
 
 ## Declaration-time checks
 

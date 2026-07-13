@@ -88,10 +88,10 @@ def test_actionplan_truthiness_and_length():
 
 
 def test_actionplan_rejects_non_actions():
-    blocker = ColumnRenameConflict(old_name="old", new_name="new")
+    non_action = ColumnRenameConflict(old_name="old", new_name="new")
 
     with pytest.raises(TypeError, match="accepts only Action instances"):
-        ActionPlan((blocker,))  # type: ignore[arg-type]
+        ActionPlan((non_action,))  # type: ignore[arg-type]
 
 
 def test_plan_orders_within_a_phase_by_subject_name():
@@ -149,7 +149,7 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
 @pytest.mark.parametrize(
     "action, expected_aspect",
     [
-        (_create_table_action(), TableAspect.COLUMN_STRUCTURE),
+        (_create_table_action(), TableAspect.TABLE_EXISTENCE),
         (AddColumn(_column("x")), TableAspect.COLUMN_STRUCTURE),
         (DropColumn(_observed_column("x")), TableAspect.COLUMN_STRUCTURE),
         (RenameColumn("old", "new"), TableAspect.COLUMN_STRUCTURE),
@@ -339,11 +339,11 @@ def test_drop_foreign_key_phases_before_drop_primary_key():
     assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
 
 
-def test_column_rename_conflict_is_a_non_action_blocker():
-    blocker = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
+def test_column_rename_conflict_is_a_non_action_difference():
+    difference = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
 
-    assert not isinstance(blocker, Action)
-    assert blocker.aspect is TableAspect.COLUMN_STRUCTURE
+    assert not isinstance(difference, Action)
+    assert difference.aspect is TableAspect.COLUMN_STRUCTURE
 
 
 def test_column_rename_conflict_rejects_no_difference():

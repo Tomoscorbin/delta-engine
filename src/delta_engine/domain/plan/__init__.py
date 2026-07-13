@@ -23,7 +23,6 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
-    BlockingChange,
     Change,
     ColumnRenameConflict,
     PartitioningChanged,
@@ -41,7 +40,6 @@ __all__ = [
     "AddColumn",
     "AlterClustering",
     "AlterColumnType",
-    "BlockingChange",
     "Change",
     "ColumnRenameConflict",
     "CreateTable",

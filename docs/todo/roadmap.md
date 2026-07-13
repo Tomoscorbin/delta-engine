@@ -73,7 +73,7 @@ operation.
 
 **Status.** Shipped 2026-07-12. The differ projects observed identity through
 the hint and emits `RenameColumn` directly; residual actions use the new name.
-`ColumnRenameConflict` is the explicit blocker when both names exist. The
+`ColumnRenameConflict` records the non-action difference when both names exist. The
 interim drop/add heuristic was not shipped because it would block legitimate
 independent schema edits.
 
@@ -87,9 +87,10 @@ only documented (`reference-limitations.md`).
 differ emits a rename when the old name is observed and the new one absent;
 the hint is inert once applied, preserving idempotency. `RenameColumn` compiles
 to `ALTER TABLE ... RENAME COLUMN` and declaration validation requires column
-mapping. Planning suppresses PK/FK drops performed atomically by the rename
-while retaining unrelated constraint drops. The same mechanism can extend to
-table renames later.
+mapping. The domain's drift projection suppresses PK/FK drops performed
+atomically by the rename while retaining unrelated constraint drops; the
+application planning boundary only validates and constructs the accepted plan.
+The same mechanism can extend to table renames later.
 
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
 

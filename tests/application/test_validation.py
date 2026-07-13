@@ -239,7 +239,7 @@ def test_empty_drift_produces_no_failures():
 # ---- missing table validation
 
 
-def test_missing_table_with_non_nullable_columns_passes_when_column_structure_is_managed():
+def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_managed():
     # Given a missing table with a NOT NULL column
     desired = _desired_table(
         columns=(Column("id", Integer(), nullable=False),),
@@ -250,7 +250,7 @@ def test_missing_table_with_non_nullable_columns_passes_when_column_structure_is
     assert validate_diff(TableMissing(desired=desired)).failed is False
 
 
-def test_validate_diff_fails_table_missing_when_column_structure_unmanaged():
+def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
     # Given a metadata-only definition for a table that does not exist
     desired = _desired_table(
         managed_aspects=frozenset({TableAspect.TABLE_COMMENT, TableAspect.TABLE_TAGS})
@@ -265,7 +265,7 @@ def test_validate_diff_fails_table_missing_when_column_structure_unmanaged():
     assert "does not exist" in result.failures[0].message
 
 
-def test_validate_diff_passes_table_missing_when_column_structure_managed():
+def test_validate_diff_passes_table_missing_when_table_existence_managed():
     # Given a fully managed definition for a missing table
     desired = _desired_table(managed_aspects=ALL_ASPECTS)
 
@@ -278,7 +278,7 @@ def test_validate_diff_passes_table_missing_when_column_structure_managed():
 
 
 def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
-    # Given a missing table whose declaration does not manage column structure
+    # Given a missing table whose declaration does not manage table existence
     desired = _desired_table(
         managed_aspects=frozenset({TableAspect.TABLE_COMMENT, TableAspect.TABLE_TAGS})
     )

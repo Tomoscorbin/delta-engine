@@ -1,4 +1,4 @@
-"""Produce executable actions and explicit blockers from table state."""
+"""Produce executable actions and non-action differences from table state."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -7,8 +7,10 @@ from typing import ClassVar
 from delta_engine.domain.model import (
     Column,
     DesiredTable,
+    ForeignKeyConstraint,
     ObservedColumn,
     ObservedTable,
+    QualifiedName,
     TableAspect,
 )
 from delta_engine.domain.plan.actions import (
@@ -76,8 +78,7 @@ class PartitioningChanged:
             )
 
 
-type BlockingChange = ColumnRenameConflict | PropertyUndeclared | PartitioningChanged
-type Change = Action | BlockingChange
+type Change = Action | ColumnRenameConflict | PropertyUndeclared | PartitioningChanged
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +90,7 @@ class TableMissing:
 
 @dataclass(frozen=True, slots=True)
 class TableDrift:
-    """Executable actions and blockers separating an observed table from its declaration."""
+    """Actions and other differences separating observed state from its declaration."""
 
     desired: DesiredTable
     changes: tuple[Change, ...]
@@ -100,13 +101,70 @@ class TableDrift:
         managed = self.desired.managed_aspects
         return tuple(change for change in self.changes if change.aspect in managed)
 
+    @property
+    def executable_actions(self) -> tuple[Action, ...]:
+        """
+        Project diff actions through operation semantics owned by the domain.
+
+        The raw diff retains constraint drops because validation needs their
+        observed state. A column rename performs drops for constraints using
+        that column atomically, so those redundant actions are omitted only
+        from this post-validation projection. This property does not imply
+        that the actions are safe; only ``plan_diff`` may construct a plan.
+        """
+        renamed_sources = {
+            action.old_name for action in self.changes if isinstance(action, RenameColumn)
+        }
+        renamed_primary_keys = {
+            change.primary_key
+            for change in self.changes
+            if isinstance(change, DropPrimaryKey)
+            and not renamed_sources.isdisjoint(change.primary_key.columns)
+        }
+        actions: list[Action] = []
+        for change in self.changes:
+            if not isinstance(change, Action):
+                continue
+            if isinstance(change, DropPrimaryKey) and change.primary_key in renamed_primary_keys:
+                continue
+            if isinstance(change, DropForeignKey) and _foreign_key_uses_renamed_column(
+                change.constraint,
+                renamed_sources=renamed_sources,
+                table_name=self.desired.qualified_name,
+            ):
+                continue
+            if (
+                isinstance(change, SetPrimaryKey)
+                and change.replaced_primary_key in renamed_primary_keys
+            ):
+                # RENAME COLUMN performs the correlated drop atomically, so
+                # the projection retains only an ordinary set operation.
+                change = replace(change, replaced_primary_key=None)
+            actions.append(change)
+        return tuple(actions)
+
 
 type TableDiff = TableMissing | TableDrift
 
 
+def _foreign_key_uses_renamed_column(
+    constraint: ForeignKeyConstraint,
+    *,
+    renamed_sources: set[str],
+    table_name: QualifiedName,
+) -> bool:
+    """Whether a local or self-referenced FK column is renamed by this table."""
+    local_column_renamed = not renamed_sources.isdisjoint(constraint.local_columns)
+    self_reference_renamed = (
+        constraint.referenced_table == table_name
+        and not renamed_sources.isdisjoint(constraint.referenced_columns)
+    )
+    return local_column_renamed or self_reference_renamed
+
+
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
-    Compute executable actions and blockers separating observed from desired state.
+    Compute actions and non-action differences separating observed from desired state.
 
     A rename pre-pass projects observed columns and layout names through
     ``renamed_from`` hints so residual drift is expressed under the declared
@@ -279,7 +337,7 @@ def _diff_table_comment(desired: DesiredTable, observed: ObservedTable) -> list[
 def _diff_properties(
     desired: DesiredTable, observed: ObservedTable
 ) -> list[SetProperty | UnsetProperty | PropertyUndeclared]:
-    """Return exact-declaration property actions and undeclared-property blockers."""
+    """Return exact-declaration property actions and undeclared-property differences."""
     if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 
@@ -321,7 +379,7 @@ def _diff_table_tags(
 def _diff_partitioning(
     desired_partitioning: tuple[str, ...], observed_partitioning: tuple[str, ...]
 ) -> list[PartitioningChanged]:
-    """Return a partitioning blocker, or nothing when specifications agree."""
+    """Return a partitioning difference, or nothing when specifications agree."""
     if desired_partitioning == observed_partitioning:
         return []
     return [

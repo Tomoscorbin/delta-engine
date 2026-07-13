@@ -9,6 +9,7 @@ from delta_engine.domain.model import (
     Column,
     DesiredTable,
     ForeignKeyConstraint,
+    ForeignKeyReference,
     Integer,
     Long,
     ObservedColumn,
@@ -129,7 +130,7 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
         ),
     ],
 )
-def test_plan_diff_rejects_each_explicit_blocker(desired, observed, expected_rule):
+def test_plan_diff_rejects_each_non_action_difference(desired, observed, expected_rule):
     result = plan_diff(diff_table(desired, observed))
 
     assert isinstance(result, PlanningFailed)
@@ -168,7 +169,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     )
 
 
-def test_plan_diff_rejects_missing_table_when_column_structure_is_unmanaged():
+def test_plan_diff_rejects_missing_table_when_table_existence_is_unmanaged():
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
 
     result = plan_diff(diff_table(desired, None))
@@ -197,7 +198,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     )
 
 
-def test_plan_diff_suppresses_primary_key_drop_handled_by_rename():
+def test_plan_diff_uses_domain_projected_primary_key_actions_for_rename():
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
     desired = _desired(
@@ -218,7 +219,33 @@ def test_plan_diff_suppresses_primary_key_drop_handled_by_rename():
     )
 
 
-def test_plan_diff_suppresses_local_foreign_key_drop_handled_by_rename():
+def test_plan_diff_validates_rename_constraint_drops_before_domain_projection():
+    reference = ForeignKeyReference(
+        constraint_name="orders_customer_id_fk",
+        referencing_table=QualifiedName("dev", "silver", "orders"),
+    )
+    desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
+    observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
+    desired = _desired(
+        columns=(Column("customer_name", String(), False, renamed_from="customer_nm"),),
+        primary_key=desired_key,
+    )
+    observed = _observed(
+        columns=(ObservedColumn("customer_nm", String(), False),),
+        primary_key=observed_key,
+        referencing_foreign_keys=(reference,),
+    )
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningFailed)
+    assert [failure.rule_name for failure in result.failures] == [
+        "PrimaryKeyReferencedByForeignKeys"
+    ]
+    assert not hasattr(result, "plan")
+
+
+def test_plan_diff_uses_domain_projected_local_foreign_key_actions_for_rename():
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = _foreign_key(
         local_columns=("parent_id",),
@@ -249,7 +276,7 @@ def test_plan_diff_suppresses_local_foreign_key_drop_handled_by_rename():
     )
 
 
-def test_plan_diff_suppresses_self_referencing_foreign_key_drop_handled_by_rename():
+def test_plan_diff_uses_domain_projected_self_referencing_foreign_key_actions_for_rename():
     desired_key = _foreign_key(
         local_columns=("manager_id",),
         referenced_table=_NAME,

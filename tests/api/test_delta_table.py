@@ -887,11 +887,12 @@ def test_metadata_scope_still_lowers_the_full_schema():
     assert tuple(c.name for c in desired.columns) == ("id", "name")
 
 
-def test_metadata_aspects_excludes_structure_properties_partitioning_and_clustering():
+def test_metadata_aspects_excludes_existence_and_physical_aspects():
     # Given the metadata named scope
     # Then physical-behaviour aspects are excluded by design
     assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
         {
+            TableAspect.TABLE_EXISTENCE,
             TableAspect.COLUMN_STRUCTURE,
             TableAspect.PROPERTIES,
             TableAspect.PARTITIONING,

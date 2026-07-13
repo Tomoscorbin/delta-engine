@@ -88,9 +88,11 @@ if desired.comment != observed.comment:
 ```
 
 `Change` already includes every `Action`, so no union edit is needed. If the
-difference cannot execute, add a frozen blocker in `diff.py`, add it to
-`BlockingChange`, and add a default validation rule that always rejects it.
-Successful `plan_diff` results must contain actions only.
+comparison cannot be represented as an action, add a frozen domain difference
+in `diff.py` and name it directly in `Change`. Decide whether it is accepted or
+rejected in application validation; the current three non-action differences
+are rejected by the default policy. Successful `plan_diff` results must
+contain actions only.
 
 ## 4. Register a SQL compiler
 
@@ -128,7 +130,8 @@ An action may emit several entries across categories (`CreateTable` lists its co
 
 If the new action can be unsafe, add a rule in
 `src/delta_engine/application/validation.py`. Rules receive the self-contained
-drift and match concrete actions or blockers from `drift.managed_changes`:
+drift and match concrete actions or non-action differences from
+`drift.managed_changes`:
 
 ```python
 from typing import ClassVar

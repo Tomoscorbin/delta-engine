@@ -74,11 +74,11 @@ class Action(ABC):
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """Create a new table from its complete desired definition."""
+    """Create a missing table from its complete desired definition."""
 
     table: DesiredTable
 
-    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_EXISTENCE
     phase: ClassVar[ActionPhase] = ActionPhase.CREATE_TABLE
 
     @property

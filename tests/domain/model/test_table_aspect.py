@@ -20,6 +20,7 @@ def test_aspect_declaration_order_is_canonical():
 
     # Then the order is as documented
     assert names == [
+        "TABLE_EXISTENCE",
         "COLUMN_STRUCTURE",
         "COLUMN_COMMENTS",
         "COLUMN_TAGS",

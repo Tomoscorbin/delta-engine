@@ -23,7 +23,7 @@ read → diff → plan → resolve → execute → report
 | Phase        | Question it answers                          | Outcome                                                           |
 | ------------ | -------------------------------------------- | ----------------------------------------------------------------- |
 | **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure      |
-| **Diff**     | How does observed state differ from desired? | Direct executable actions and explicit blockers — or no drift     |
+| **Diff**     | How does observed state differ from desired? | Direct actions and non-action differences — or no drift           |
 | **Plan**     | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
 | **Resolve**  | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                    |
 | **Execute**  | Apply the plan                               | An execution summary per table (skipped entirely on a dry run)    |
@@ -38,10 +38,11 @@ The rest of this page looks at the behaviours that fall out of this design.
 
 The diff phase produces rich, backend-neutral actions directly — for example,
 `DropColumn` carries the complete observed column — but never judges whether
-executing one is a good idea. Ambiguous or unsupported states are one of three
-explicit blockers. The planning boundary always validates that complete diff
-and returns either an accepted `ActionPlan` or failures; a rejected result has
-no plan.
+executing one is a good idea. Ambiguous or unsupported states remain domain
+differences rather than being labelled as blockers; the application default
+policy decides to reject them. The planning boundary always validates that
+complete diff and returns either an accepted `ActionPlan` or failures; a
+rejected result has no plan.
 
 This separation is why rejections are precise: a failed sync names the exact
 rule that fired and the column or table it fired on, rather than a generic

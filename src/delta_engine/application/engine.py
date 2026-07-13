@@ -8,7 +8,7 @@ any table fails, `SyncFailedError` is raised with a formatted summary.
 
 The five phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
-  2. Diff     — compute direct actions and explicit blockers
+  2. Diff     — compute direct actions and non-action differences
   3. Plan     — validate each diff, then accept a plan or append failures
   4. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
