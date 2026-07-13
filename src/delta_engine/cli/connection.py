@@ -102,37 +102,34 @@ def _target_from_config(config: "Config", warehouse_id: str) -> Target:
 
 def _import_backends() -> tuple[ModuleType, type["Config"]]:
     """Import the connector and SDK, translating optional-dependency failures."""
-    connector_logger = logging.getLogger(_SQL_CONNECTOR_LOGGER)
-    connector_logger.addFilter(_keep_relevant_connector_logs)
     try:
-        try:
-            databricks_sql, config_class = _load_databricks_backends()
-        except ImportError as error:
-            shadow = _shadowing_module_file()
-            if shadow is not None:
-                raise ConfigError(
-                    f"'{shadow}' shadows the installed databricks packages; "
-                    "rename that file or run the CLI from a different directory"
-                ) from error
+        from databricks import sql as databricks_sql
+        from databricks.sdk.core import Config
+    except ImportError as error:
+        shadow = _shadowing_module_file()
+        if shadow is not None:
             raise ConfigError(
-                f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}"
+                f"'{shadow}' shadows the installed databricks packages; "
+                "rename that file or run the CLI from a different directory"
             ) from error
-    finally:
-        connector_logger.removeFilter(_keep_relevant_connector_logs)
-    return databricks_sql, config_class
-
-
-def _load_databricks_backends() -> tuple[ModuleType, type["Config"]]:
-    """Load optional CLI dependencies behind the filtered import boundary."""
-    from databricks import sql as databricks_sql
-    from databricks.sdk.core import Config
-
+        raise ConfigError(f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}") from error
     return databricks_sql, Config
 
 
 def _keep_relevant_connector_logs(record: logging.LogRecord) -> bool:
     """Hide the connector's irrelevant import warning while retaining other logs."""
     return _OPTIONAL_PYARROW_WARNING not in record.getMessage()
+
+
+@contextmanager
+def _suppress_optional_pyarrow_warning() -> Iterator[None]:
+    """Filter the connector's lazy PyArrow warning within one call boundary."""
+    connector_logger = logging.getLogger(_SQL_CONNECTOR_LOGGER)
+    connector_logger.addFilter(_keep_relevant_connector_logs)
+    try:
+        yield
+    finally:
+        connector_logger.removeFilter(_keep_relevant_connector_logs)
 
 
 def _shadowing_module_file() -> str | None:
@@ -174,11 +171,12 @@ def _connect(
 ) -> "Connection":
     """Open the connector transport and translate its broad failure surface."""
     try:
-        return databricks_sql.connect(
-            server_hostname=target.server_hostname,
-            http_path=target.http_path,
-            credentials_provider=lambda: config.authenticate,
-        )
+        with _suppress_optional_pyarrow_warning():
+            return databricks_sql.connect(
+                server_hostname=target.server_hostname,
+                http_path=target.http_path,
+                credentials_provider=lambda: config.authenticate,
+            )
     except Exception as error:
         detail = _safe_error_detail(error)
         raise ConfigError(f"{_CANNOT_CONNECT} ({type(error).__name__}){detail}") from error

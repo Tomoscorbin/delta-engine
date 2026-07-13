@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from types import ModuleType
 
 from databricks.sql.exc import OperationalError
 import pytest
@@ -9,7 +10,7 @@ import pytest
 from delta_engine.cli.connection import (
     _OPTIONAL_PYARROW_WARNING,
     Target,
-    _import_backends,
+    _connect,
     open_connection,
 )
 from delta_engine.cli.errors import ConfigError
@@ -200,26 +201,31 @@ def test_missing_optional_package_has_the_cli_extra_hint(
     assert 'pip install "delta-engine[cli]"' in message
 
 
-def test_connector_import_hides_only_the_irrelevant_pyarrow_warning(monkeypatch, caplog):
+def test_lazy_connector_import_hides_pyarrow_warning_during_connect(caplog):
     connector_logger = logging.getLogger("databricks.sql.client")
     original_filters = tuple(connector_logger.filters)
 
-    class FakeDatabricksSQL:
-        pass
+    lazy_databricks_sql = ModuleType("lazy_databricks_sql")
 
-    def import_with_warnings():
+    def connect(**kwargs):
         connector_logger.warning("%s; install pyarrow", _OPTIONAL_PYARROW_WARNING)
         connector_logger.warning("warehouse warning")
-        return FakeDatabricksSQL, object
+        return _FakeConnection()
 
-    monkeypatch.setattr(
-        "delta_engine.cli.connection._load_databricks_backends",
-        import_with_warnings,
-    )
+    lazy_databricks_sql.connect = connect  # type: ignore[attr-defined]
+
+    class FakeConfig:
+        def authenticate(self) -> dict[str, str]:
+            return {"Authorization": "Bearer resolved"}
 
     with caplog.at_level(logging.WARNING, logger="databricks.sql.client"):
-        _import_backends()
+        connection = _connect(
+            lazy_databricks_sql,
+            FakeConfig(),
+            Target("https://test.cloud.databricks.com", "warehouse"),
+        )
 
+    assert isinstance(connection, _FakeConnection)
     assert _OPTIONAL_PYARROW_WARNING not in caplog.text
     assert "warehouse warning" in caplog.text
     assert tuple(connector_logger.filters) == original_filters
