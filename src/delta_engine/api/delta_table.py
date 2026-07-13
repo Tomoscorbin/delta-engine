@@ -187,13 +187,9 @@ def _validate_layout(
 
 def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str | None]) -> None:
     """
-    Reject rename hints the declared properties make undeployable.
+    Reject rename hints without name-based column mapping.
 
-    RENAME COLUMN requires column mapping, and a rename hint is
-    declaration-visible, so this fails at construction — unlike a drop, which
-    exists only as a diff fact against the observed catalog and is judged at
-    sync time (see ``ColumnMappingRequiredForDrop``). Enforcing it here gives
-    the author the error at import time rather than per-table on the next sync.
+    Hints are visible in the declaration, so reject them at construction.
     """
     hinted = [column.name for column in columns if column.renamed_from is not None]
     if not hinted:

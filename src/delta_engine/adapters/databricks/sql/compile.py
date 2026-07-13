@@ -121,7 +121,7 @@ def _(action: DropColumn, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: RenameColumn, backticked_table_name: str) -> str:
-    """Compile ALTER TABLE ... RENAME COLUMN; requires column mapping, checked at declaration."""
+    """Compile ALTER TABLE ... RENAME COLUMN."""
     old = backtick(action.old_name)
     new = backtick(action.new_name)
     return f"ALTER TABLE {backticked_table_name} RENAME COLUMN {old} TO {new}"

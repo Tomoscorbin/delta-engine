@@ -174,17 +174,23 @@ so it fails early rather than at sync).
 
 The hint applies exactly once — when the old name is observed and the new one
 is not. After the rename, the old name is gone, so the hint matches nothing
-and the sync is a no-op: it is safe to keep as history, and the same
-declaration deploys correctly into a fresh catalog. If both the old and new
-names exist on the table the rename cannot apply and the sync fails
-(`AmbiguousColumnRename`); if the old column should instead be dropped, remove
-the hint and drop it in its own sync.
+and the sync is a no-op: it is safe to keep as history (remove it if you later
+narrow the declaration's `scope`), and the same declaration deploys correctly
+into a fresh catalog. If both the old and new names exist on the table the
+rename cannot apply and the sync fails (`AmbiguousColumnRename`); if the old
+column should instead be dropped, remove the hint and drop it in its own sync.
 
-A primary or foreign key on the renamed column is dropped and re-created
-around the rename. If **another** table's foreign key references the column,
-sync that table without the foreign key first — an inbound reference blocks
-the change. Partition columns cannot be renamed (a partition change is not
-supported in place). Struct fields cannot be renamed.
+Databricks drops a primary or foreign key involving the column as part of a
+successful rename; the engine restores each declared key afterwards. It does
+not pre-drop those keys, so a failed rename does not leave them removed. If
+**another** table's foreign key references the renamed primary key, sync that
+table without the foreign key first — an inbound reference blocks the change.
+Partitioning and clustering metadata follow the mapped column's identity, so
+renaming a layout key needs no separate layout change.
+
+Change any dependent CHECK constraint or generated-column expression before
+renaming: the engine does not model those dependencies, so Databricks rejects
+the rename at execution if one remains. Struct fields cannot be renamed.
 
 ### When something else writes a managed key
 

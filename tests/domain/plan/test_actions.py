@@ -33,7 +33,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.changes import ColumnRenamed
+from delta_engine.domain.plan.changes import ColumnRenameConflict, ColumnRenamed
 
 # ----- builders
 
@@ -336,7 +336,7 @@ def test_plan_reclusters_before_dropping_a_column():
     assert [type(a) for a in plan] == [AlterClustering, DropColumn]
 
 
-def test_rename_column_orders_after_constraint_drops_and_before_column_adds():
+def test_rename_column_orders_between_constraint_drops_and_column_adds():
     plan = ActionPlan(
         (
             AddColumn(column=Column("b", Integer())),
@@ -344,8 +344,9 @@ def test_rename_column_orders_after_constraint_drops_and_before_column_adds():
             DropPrimaryKey(),
         )
     )
-    # Then the rename runs after the PK drop (a key on the old name is dropped
-    # first) and before any action targeting the new name
+    # Unrelated explicit constraint drops still precede the rename; constraints
+    # involving the renamed column are dropped atomically by RENAME COLUMN and
+    # are omitted from the plan before ActionPlan sees them.
     assert [type(action) for action in plan] == [DropPrimaryKey, RenameColumn, AddColumn]
 
 
@@ -358,3 +359,15 @@ def test_column_renamed_lowers_to_a_rename_action():
 def test_column_renamed_rejects_no_difference():
     with pytest.raises(ValueError, match="no difference"):
         ColumnRenamed(old_name="same", new_name="same")
+
+
+def test_column_rename_conflict_has_no_action():
+    change = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
+
+    assert change.actions() == ()
+    assert change.aspect is TableAspect.COLUMN_STRUCTURE
+
+
+def test_column_rename_conflict_rejects_no_difference():
+    with pytest.raises(ValueError, match="no difference"):
+        ColumnRenameConflict(old_name="same", new_name="same")

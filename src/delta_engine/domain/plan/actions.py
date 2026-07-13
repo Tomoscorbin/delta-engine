@@ -109,14 +109,7 @@ class DropColumn(Action):
 
 @dataclass(frozen=True, slots=True)
 class RenameColumn(Action):
-    """
-    Rename a column in place.
-
-    Runs after constraint drops (a key on the old name is dropped first) and
-    before every action that targets the new name. Requires column mapping;
-    the declaration-time check on ``DeltaTable`` guarantees a hint-carrying
-    declaration states it.
-    """
+    """Rename a column in place."""
 
     old_name: str
     new_name: str

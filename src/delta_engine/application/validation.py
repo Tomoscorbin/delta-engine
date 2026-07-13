@@ -29,6 +29,7 @@ from delta_engine.domain.plan import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenameConflict,
     ForeignKeyRemoved,
     PartitioningChanged,
     PrimaryKeyChanged,
@@ -375,35 +376,24 @@ class ColumnMappingRequiredForDrop:
 
 
 class AmbiguousColumnRename:
-    """
-    Disallow a declared rename whose source and target both exist.
-
-    A rename that applies is relabeled out of the diff, leaving no trace of
-    its source — so a ``ColumnRemoved`` whose name is a declared rename source
-    proves the target was also observed and the rename could not apply.
-    """
+    """Disallow a declared rename whose source and target both exist."""
 
     name: ClassVar[str] = "AmbiguousColumnRename"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every declared rename whose source column survived the relabel pre-pass."""
-        targets_by_source = {
-            column.renamed_from: column.name
-            for column in drift.desired.columns
-            if column.renamed_from is not None
-        }
+        """Flag every explicit rename conflict."""
         return tuple(
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot rename '{change.column.name}' to"
-                    f" '{targets_by_source[change.column.name]}' — both columns exist"
+                    f"Operation not allowed: cannot rename '{change.old_name}' to"
+                    f" '{change.new_name}' — both columns exist"
                     " on the table. If the old column should be dropped, remove the"
                     " renamed_from hint and drop it in its own sync."
                 ),
             )
             for change in drift.managed_changes
-            if isinstance(change, ColumnRemoved) and change.column.name in targets_by_source
+            if isinstance(change, ColumnRenameConflict)
         )
 
 

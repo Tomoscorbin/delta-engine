@@ -33,9 +33,8 @@ class Column:
             unlike the column name).
         renamed_from: The column's previous name, declaring a rename. Inert
             unless the old name is observed and the new one is not, so it is
-            safe to keep as declaration history and correct on fresh
-            environments. Only meaningful on the desired side, which is why
-            ``ObservedColumn`` has no such field.
+            safe to keep on declarations that continue to manage column
+            structure, and correct on fresh environments.
 
     """
 

@@ -19,13 +19,18 @@ from dataclasses import dataclass, replace
 from delta_engine.domain.model import (
     Column,
     DesiredTable,
+    ForeignKeyConstraint,
     ObservedColumn,
     ObservedTable,
+    QualifiedName,
     TableAspect,
 )
 from delta_engine.domain.plan.actions import (
+    Action,
     ActionPlan,
     CreateTable,
+    DropForeignKey,
+    DropPrimaryKey,
     SetColumnTag,
     SetForeignKey,
     SetTableTag,
@@ -38,6 +43,7 @@ from delta_engine.domain.plan.changes import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenameConflict,
     ColumnRenamed,
     ColumnTagSet,
     ColumnTagUnset,
@@ -118,11 +124,65 @@ class TableDrift:
         return tuple(change for change in self.changes if change.aspect in managed)
 
     def plan(self) -> ActionPlan:
-        """Build the action plan by collecting actions from every change."""
-        return ActionPlan(tuple(action for change in self.changes for action in change.actions()))
+        """Build the action plan, accounting for constraints dropped by a rename."""
+        renamed_sources = frozenset(
+            change.old_name for change in self.changes if isinstance(change, ColumnRenamed)
+        )
+        return ActionPlan(
+            tuple(
+                action
+                for change in self.changes
+                for action in _planned_actions(
+                    change,
+                    renamed_sources=renamed_sources,
+                    table_name=self.desired.qualified_name,
+                )
+            )
+        )
 
 
 type TableDiff = TableMissing | TableDrift
+
+
+def _planned_actions(
+    change: Change,
+    *,
+    renamed_sources: frozenset[str],
+    table_name: QualifiedName,
+) -> tuple[Action, ...]:
+    """Lower a change without pre-dropping constraints the rename drops atomically."""
+    actions = change.actions()
+    if not renamed_sources:
+        return actions
+
+    if isinstance(change, PrimaryKeyRemoved | PrimaryKeyChanged) and not renamed_sources.isdisjoint(
+        change.observed_primary_key.columns
+    ):
+        return tuple(action for action in actions if not isinstance(action, DropPrimaryKey))
+
+    if isinstance(change, ForeignKeyRemoved) and _foreign_key_uses_renamed_column(
+        change.constraint,
+        renamed_sources=renamed_sources,
+        table_name=table_name,
+    ):
+        return tuple(action for action in actions if not isinstance(action, DropForeignKey))
+
+    return actions
+
+
+def _foreign_key_uses_renamed_column(
+    constraint: ForeignKeyConstraint,
+    *,
+    renamed_sources: frozenset[str],
+    table_name: QualifiedName,
+) -> bool:
+    """Whether a local or self-referenced FK column is renamed by this table."""
+    local_column_renamed = not renamed_sources.isdisjoint(constraint.local_columns)
+    self_reference_renamed = (
+        constraint.referenced_table == table_name
+        and not renamed_sources.isdisjoint(constraint.referenced_columns)
+    )
+    return local_column_renamed or self_reference_renamed
 
 
 # ---------------------------------------------------------------------------
@@ -138,12 +198,11 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     ``TableDrift`` whose changes each record one atomic difference. An equal
     pair yields an empty drift.
 
-    A rename pre-pass runs first: ``_apply_renames`` relabels observed columns
-    through the declaration's ``renamed_from`` hints and emits ``ColumnRenamed``
-    facts, so the column helpers then pair a renamed column under its new name
-    and any residual drift on it (type, comment, tags) decomposes into the
-    existing change types. Only the column list is relabeled; layout and
-    constraint drift on a renamed column emerges naturally.
+    A rename pre-pass runs first: ``_apply_renames`` projects observed column
+    and layout names through the declaration's ``renamed_from`` hints and
+    emits ``ColumnRenamed`` facts, so residual drift pairs under the new name.
+    A source-and-target-both-observed case becomes an explicit
+    ``ColumnRenameConflict`` instead of masquerading as a column removal.
 
     Each aspect helper takes the two tables and pulls the slice it
     compares. The diff is scope-blind — every aspect is compared regardless
@@ -154,38 +213,42 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     if observed is None:
         return TableMissing(desired=desired)
 
-    observed_columns, rename_changes = _apply_renames(desired, observed)
+    rename_projection = _apply_renames(desired, observed)
 
     changes: tuple[Change, ...] = (
-        *rename_changes,
-        *_diff_column_structure(desired.columns, observed_columns),
-        *_diff_column_comments(desired.columns, observed_columns),
-        *_diff_column_tags(desired.columns, observed_columns),
+        *rename_projection.changes,
+        *_diff_column_structure(desired.columns, rename_projection.columns),
+        *_diff_column_comments(desired.columns, rename_projection.columns),
+        *_diff_column_tags(desired.columns, rename_projection.columns),
         *_diff_table_comment(desired, observed),
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
-        *_diff_partitioning(desired, observed),
-        *_diff_clustering(desired, observed),
+        *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
+        *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
         *_diff_primary_key(desired, observed),
         *_diff_foreign_keys(desired, observed),
     )
     return TableDrift(desired=desired, changes=changes)
 
 
-def _apply_renames(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[tuple[ObservedColumn, ...], tuple[ColumnRenamed, ...]]:
+@dataclass(frozen=True, slots=True)
+class _RenameProjection:
+    """Observed names projected through applicable declaration rename hints."""
+
+    columns: tuple[ObservedColumn, ...]
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    changes: tuple[ColumnRenamed | ColumnRenameConflict, ...]
+
+
+def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameProjection:
     """
-    Relabel observed columns through the declaration's rename hints.
+    Project observed column identity through the declaration's rename hints.
 
-    A hint applies only when its source is observed and its target is not;
-    every other case is inert here. A source-and-target-both-observed conflict
-    is left alone deliberately: the natural diff then contains a ``ColumnRemoved``
-    for the source, which validation rejects (see ``AmbiguousColumnRename``).
-
-    Only the column list is relabeled — observed partitioning, clustering, and
-    key constraints keep the old name, so their drift emerges naturally and is
-    judged by the existing aspect machinery (see the design spec).
+    A hint applies only when its source is observed and its target is not. The
+    same identity projection covers partitioning and clustering metadata,
+    which Delta updates with a mapped column rename. When both names exist,
+    emit a conflict and hide the source from ordinary removal diffing.
     """
     renames = {
         column.renamed_from: column.name
@@ -194,16 +257,37 @@ def _apply_renames(
     }
     observed_names = {column.name for column in observed.columns}
     relabeled = observed.columns
-    applied: list[ColumnRenamed] = []
+    applied_renames: dict[str, str] = {}
+    conflicted_sources: set[str] = set()
+    changes: list[ColumnRenamed | ColumnRenameConflict] = []
     for old_name, new_name in renames.items():
-        if old_name not in observed_names or new_name in observed_names:
+        if old_name not in observed_names:
+            continue
+        if new_name in observed_names:
+            conflicted_sources.add(old_name)
+            changes.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
             continue
         relabeled = tuple(
             replace(column, name=new_name) if column.name == old_name else column
             for column in relabeled
         )
-        applied.append(ColumnRenamed(old_name=old_name, new_name=new_name))
-    return relabeled, tuple(applied)
+        applied_renames[old_name] = new_name
+        changes.append(ColumnRenamed(old_name=old_name, new_name=new_name))
+
+    relabeled = tuple(
+        column for column in relabeled if column.name not in conflicted_sources
+    )
+    return _RenameProjection(
+        columns=relabeled,
+        partitioned_by=_relabel_names(observed.partitioned_by, applied_renames),
+        clustered_by=_relabel_names(observed.clustered_by, applied_renames),
+        changes=tuple(changes),
+    )
+
+
+def _relabel_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[str, ...]:
+    """Project a tuple of column names through applied renames."""
+    return tuple(renames.get(name, name) for name in names)
 
 
 def _diff_column_structure(
@@ -357,19 +441,23 @@ def _diff_table_tags(desired: DesiredTable, observed: ObservedTable) -> list[Cha
     return changes
 
 
-def _diff_partitioning(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+def _diff_partitioning(
+    desired_partitioning: tuple[str, ...], observed_partitioning: tuple[str, ...]
+) -> list[Change]:
     """Return the partitioning change, or nothing when the specs agree."""
-    if desired.partitioned_by == observed.partitioned_by:
+    if desired_partitioning == observed_partitioning:
         return []
     return [
         PartitioningChanged(
-            desired_partitioning=desired.partitioned_by,
-            observed_partitioning=observed.partitioned_by,
+            desired_partitioning=desired_partitioning,
+            observed_partitioning=observed_partitioning,
         )
     ]
 
 
-def _diff_clustering(desired: DesiredTable, observed: ObservedTable) -> list[Change]:
+def _diff_clustering(
+    desired_clustering: tuple[str, ...], observed_clustering: tuple[str, ...]
+) -> list[Change]:
     """
     Return the clustering change, or nothing when the key sets agree.
 
@@ -378,12 +466,12 @@ def _diff_clustering(desired: DesiredTable, observed: ObservedTable) -> list[Cha
     A reordered same-set pair is not a change. The emitted change keeps the
     desired declaration order for rendering CLUSTER BY (...).
     """
-    if set(desired.clustered_by) == set(observed.clustered_by):
+    if set(desired_clustering) == set(observed_clustering):
         return []
     return [
         ClusteringChanged(
-            desired_clustering=desired.clustered_by,
-            observed_clustering=observed.clustered_by,
+            desired_clustering=desired_clustering,
+            observed_clustering=observed_clustering,
         )
     ]
 

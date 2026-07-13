@@ -35,6 +35,7 @@ from delta_engine.domain.plan.changes import (
     ColumnCommentChanged,
     ColumnDataTypeChanged,
     ColumnRemoved,
+    ColumnRenameConflict,
     ColumnTagSet,
     ForeignKeyRemoved,
     PrimaryKeyChanged,
@@ -974,7 +975,9 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     )
     drift = TableDrift(
         desired=desired,
-        changes=(ColumnRemoved(column=ObservedColumn("customer_nm", String())),),
+        changes=(
+            ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),
+        ),
     )
 
     result = validate_diff(drift)

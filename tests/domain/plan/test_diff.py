@@ -43,6 +43,7 @@ from delta_engine.domain.plan.changes import (
     ColumnDataTypeChanged,
     ColumnNullabilityChanged,
     ColumnRemoved,
+    ColumnRenameConflict,
     ColumnRenamed,
     ColumnTagSet,
     ColumnTagUnset,
@@ -1019,7 +1020,7 @@ def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
     )
 
 
-def test_diff_leaves_natural_facts_when_source_and_target_both_observed():
+def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
     desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
     observed = _observed(
         columns=(Column("customer_name", String()), Column("customer_nm", String()))
@@ -1027,8 +1028,21 @@ def test_diff_leaves_natural_facts_when_source_and_target_both_observed():
 
     changes = diff_table(desired, observed).changes
 
-    assert not any(isinstance(c, ColumnRenamed) for c in changes)
-    assert ColumnRemoved(column=ObservedColumn("customer_nm", String())) in changes
+    assert changes == (
+        ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),
+    )
+    assert not any(isinstance(change, ColumnRemoved | ColumnRenamed) for change in changes)
+
+
+def test_ambiguous_rename_never_plans_a_column_drop():
+    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+    observed = _observed(
+        columns=(Column("customer_name", String()), Column("customer_nm", String()))
+    )
+
+    drift = diff_table(desired, observed)
+
+    assert not any(isinstance(action, DropColumn) for action in drift.plan())
 
 
 def test_diff_missing_table_ignores_rename_hints():
@@ -1040,8 +1054,7 @@ def test_diff_missing_table_ignores_rename_hints():
     assert all(not isinstance(action, RenameColumn) for action in diff.plan())
 
 
-def test_diff_lets_clustering_drift_emerge_across_a_rename():
-    # Observed clustering keeps the old name -> ClusteringChanged emerges
+def test_diff_projects_clustering_identity_across_a_rename():
     desired = _desired(
         columns=(
             Column("id", Integer()),
@@ -1056,18 +1069,12 @@ def test_diff_lets_clustering_drift_emerge_across_a_rename():
 
     changes = diff_table(desired, observed).changes
 
-    assert ColumnRenamed(old_name="customer_nm", new_name="customer_name") in changes
-    assert (
-        ClusteringChanged(
-            desired_clustering=("customer_name",), observed_clustering=("customer_nm",)
-        )
-        in changes
+    assert changes == (
+        ColumnRenamed(old_name="customer_nm", new_name="customer_name"),
     )
 
 
-def test_diff_renaming_a_partition_column_surfaces_partitioning_drift():
-    # Observed partitioning keeps the old name -> PartitioningChanged emerges,
-    # which validation blocks: partition-column renames are unsupported in v1.
+def test_diff_projects_partition_identity_across_a_rename():
     desired = _desired(
         columns=(
             Column("id", Integer()),
@@ -1082,8 +1089,121 @@ def test_diff_renaming_a_partition_column_surfaces_partitioning_drift():
 
     changes = diff_table(desired, observed).changes
 
-    assert ColumnRenamed(old_name="day", new_name="event_day") in changes
-    assert (
-        PartitioningChanged(desired_partitioning=("event_day",), observed_partitioning=("day",))
-        in changes
+    assert changes == (
+        ColumnRenamed(old_name="day", new_name="event_day"),
     )
+
+
+def test_diff_renames_primary_key_column_without_pre_dropping_the_key():
+    desired_key = PrimaryKeyConstraint(
+        columns=("customer_name",), constraint_name="test_pk"
+    )
+    observed_key = PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="legacy_pk")
+    desired = _desired(
+        columns=(
+            Column("customer_name", String(), nullable=False, renamed_from="customer_nm"),
+        ),
+        primary_key=desired_key,
+    )
+    observed = _observed(
+        columns=(Column("customer_nm", String(), nullable=False),),
+        primary_key=observed_key,
+    )
+
+    drift = diff_table(desired, observed)
+
+    assert set(drift.changes) == {
+        ColumnRenamed(old_name="customer_nm", new_name="customer_name"),
+        PrimaryKeyChanged(
+            desired_primary_key=desired_key,
+            observed_primary_key=observed_key,
+            referencing_foreign_keys=(),
+        ),
+    }
+    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetPrimaryKey)
+
+
+def test_diff_renames_foreign_key_column_without_pre_dropping_the_key():
+    parent = QualifiedName("dev", "silver", "parent")
+    desired_key = ForeignKeyConstraint(
+        local_columns=("parent_id",),
+        referenced_table=parent,
+        referenced_columns=("id",),
+        constraint_name="test_parent_id_fk",
+    )
+    observed_key = ForeignKeyConstraint(
+        local_columns=("parent",),
+        referenced_table=parent,
+        referenced_columns=("id",),
+        constraint_name="legacy_fk",
+    )
+    desired = _desired(
+        columns=(Column("parent_id", Integer(), renamed_from="parent"),),
+        foreign_keys=(desired_key,),
+    )
+    observed = _observed(
+        columns=(Column("parent", Integer()),),
+        foreign_keys=(observed_key,),
+    )
+
+    drift = diff_table(desired, observed)
+
+    assert set(drift.changes) == {
+        ColumnRenamed(old_name="parent", new_name="parent_id"),
+        ForeignKeyAdded(constraint=desired_key),
+        ForeignKeyRemoved(constraint=observed_key),
+    }
+    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetForeignKey)
+
+
+def test_diff_renames_self_referenced_column_without_pre_dropping_the_foreign_key():
+    desired_key = ForeignKeyConstraint(
+        local_columns=("manager_id",),
+        referenced_table=_QUALIFIED_NAME,
+        referenced_columns=("employee_id",),
+        constraint_name="test_manager_id_fk",
+    )
+    observed_key = ForeignKeyConstraint(
+        local_columns=("manager_id",),
+        referenced_table=_QUALIFIED_NAME,
+        referenced_columns=("id",),
+        constraint_name="legacy_fk",
+    )
+    desired = _desired(
+        columns=(
+            Column("employee_id", Integer(), renamed_from="id"),
+            Column("manager_id", Integer()),
+        ),
+        foreign_keys=(desired_key,),
+    )
+    observed = _observed(
+        columns=(Column("id", Integer()), Column("manager_id", Integer())),
+        foreign_keys=(observed_key,),
+    )
+
+    drift = diff_table(desired, observed)
+
+    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetForeignKey)
+
+
+def test_diff_keeps_an_unrelated_foreign_key_drop_before_a_rename():
+    unrelated_key = ForeignKeyConstraint(
+        local_columns=("id",),
+        referenced_table=QualifiedName("dev", "silver", "parent"),
+        referenced_columns=("id",),
+        constraint_name="legacy_fk",
+    )
+    desired = _desired(
+        columns=(
+            Column("id", Integer()),
+            Column("customer_name", String(), renamed_from="customer_nm"),
+        )
+    )
+    observed = _observed(
+        columns=(Column("id", Integer()), Column("customer_nm", String())),
+        foreign_keys=(unrelated_key,),
+    )
+
+    drift = diff_table(desired, observed)
+
+    assert tuple(type(action) for action in drift.plan()) == (DropForeignKey, RenameColumn)

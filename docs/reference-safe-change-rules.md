@@ -46,21 +46,24 @@ relabels the observed column through the hint before comparing, so a rename
 emits a single rename action rather than a drop plus an add. The hint applies
 only when the old name is observed and the new one is not; once applied it is
 inert, so it is safe to keep as declaration history and correct on a fresh
-catalog. If both names are observed the rename cannot apply and
-`AmbiguousColumnRename` blocks the sync.
+catalog (remove the hint if the declaration's `scope` is later narrowed). If
+both names are observed the rename cannot apply and `AmbiguousColumnRename`
+blocks the sync.
 
-Because only the column is relabeled, drift on layout and constraints that
-name the renamed column emerges naturally and is judged by the existing rules:
-a primary or foreign key on the column is dropped and re-created around the
-rename, an inbound foreign key blocks the change via
-`PrimaryKeyReferencedByForeignKeys`, clustering keys are re-declared, and a
-renamed **partition** column is blocked by `PartitioningChangeNotSupported`.
+Partitioning and clustering metadata follow a mapped column's identity, so a
+layout key rename does not create layout drift. Databricks drops any primary
+or foreign key involving the column as part of a successful rename; the
+engine restores declared keys afterwards without pre-dropping them. An inbound
+foreign key still blocks a primary-key rename via
+`PrimaryKeyReferencedByForeignKeys`.
 
 Renaming requires `delta.columnMapping.mode='name'`. Downstream consumers are
 affected in ways the engine cannot see and does not manage: streaming reads
 need a `schemaTrackingLocation` to survive a rename, and change data feed has
 limitations on column-mapped tables. These are consumer concerns, documented
-rather than validated.
+rather than validated. CHECK constraints and generated columns are also
+outside the model: change dependent expressions first, or Databricks rejects
+the rename at execution.
 
 Two further checks are scope invariants rather than rules — they define what a
 declaration is allowed to govern and always run, regardless of the rule set:

@@ -100,6 +100,24 @@ class ColumnRenamed:
 
 
 @dataclass(frozen=True, slots=True)
+class ColumnRenameConflict:
+    """A declared rename whose source and target are both present."""
+
+    old_name: str
+    new_name: str
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+
+    def __post_init__(self) -> None:
+        if self.old_name == self.new_name:
+            raise ValueError(f"ColumnRenameConflict carries no difference: {self.old_name!r}")
+
+    def actions(self) -> tuple[Action, ...]:
+        """No actions — validation must resolve which column should survive."""
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
 class ColumnDataTypeChanged:
     """A column whose data type differs from the declaration."""
 
@@ -463,6 +481,7 @@ type Change = (
     ColumnAdded
     | ColumnRemoved
     | ColumnRenamed
+    | ColumnRenameConflict
     | ColumnDataTypeChanged
     | ColumnNullabilityChanged
     | ColumnCommentChanged
