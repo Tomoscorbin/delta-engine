@@ -475,7 +475,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
 def test_engine_property_sync_is_idempotent(spark, temp_schema):
     # Given a declaration synced once — also detects Delta value normalization:
     # if the catalog stores a normalized form of a declared value, the second
-    # sync would plan a spurious PropertySet and this test fails
+    # sync would plan a spurious SetProperty and this test fails
     table_name = f"prop_idem_{uuid4().hex[:8]}"
     fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
     declaration = DeltaTable(
@@ -662,9 +662,7 @@ def test_engine_renames_column_preserving_data_and_is_idempotent(spark, temp_sch
     assert second.has_changes is False
 
 
-def test_engine_renames_partition_and_clustering_columns_without_layout_churn(
-    spark, temp_schema
-):
+def test_engine_renames_partition_and_clustering_columns_without_layout_churn(spark, temp_schema):
     # Given mapped tables whose old column names are layout keys
     partition_table = f"rename_partition_{uuid4().hex[:8]}"
     cluster_table = f"rename_cluster_{uuid4().hex[:8]}"

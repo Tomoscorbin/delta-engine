@@ -10,7 +10,7 @@ this document supersedes their prioritisation but not their detail.
 | #   | Item                                              | Tier | Effort | Tracking          |
 | --- | ------------------------------------------------- | ---- | ------ | ----------------- |
 | 1   | Type widening                                     | 1    | M      | tracked           |
-| 2   | Column renames (`renamed_from`) + interim guard   | 1    | M      | tracked           |
+| 2   | Column renames (`renamed_from`)                   | 1    | M      | shipped           |
 | 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | shipped           |
 | 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped           |
 | 5   | Delta-format / view guard in the reader           | 2    | S      | not tracked       |
@@ -31,7 +31,8 @@ this document supersedes their prioritisation but not their detail.
 
 Sequencing note: impact order is not build order. Items 3 and 4 shipped as the
 read-only `delta-engine plan MODULE:ATTRIBUTE` workflow; the remaining items
-are future work. Items 5 and 9 are afternoon-sized and can ship independently;
+are future work. Item 2 shipped without the over-broad interim heuristic; items
+5 and 9 are afternoon-sized and can ship independently;
 items 17 and 18 remain deliberately gated on evidence from real users.
 
 ---
@@ -58,7 +59,7 @@ operation.
   `permitted_transitions` mechanism as column mapping.
 - New `AlterColumnType` action plus `ALTER TABLE ... ALTER COLUMN ... TYPE`
   SQL compilation.
-- A validation rule that permits a `ColumnDataTypeChanged` only when the
+- Validation rules that permit an `AlterColumnType` action only when the
   transition is in the widening matrix **and** the declaration states the
   property `true`; everything else keeps the current failure.
 - Full Delta widening matrix (decided during execution — the engine is
@@ -68,7 +69,13 @@ operation.
   entries at execution; documented, not modeled.
 - Document the runtime minimum; do not gate on it (established policy).
 
-### 2. Column renames: `renamed_from` hint, with an interim guard
+### 2. Column renames: `renamed_from` hint
+
+**Status.** Shipped 2026-07-12. The differ projects observed identity through
+the hint and emits `RenameColumn` directly; residual actions use the new name.
+`ColumnRenameConflict` is the explicit blocker when both names exist. The
+interim drop/add heuristic was not shipped because it would block legitimate
+independent schema edits.
 
 **Why.** A rename in the declaration diffs as drop + add. Without column
 mapping it is blocked; **with** `columnMapping.mode='name'` declared — which
@@ -76,21 +83,13 @@ the engine itself requires for drops — it executes and silently destroys the
 column's data. This is the sharpest correctness hazard in the tool, currently
 only documented (`reference-limitations.md`).
 
-**Shape.** Two steps, shippable independently:
-
-1. _Interim guard (S)._ A validation rule that fails any diff containing both
-   a `ColumnRemoved` and a `ColumnAdded` of the same data type, with a message
-   offering the two honest paths: declare the rename (once supported), or
-   split the drop and the add across two syncs to state that they are
-   unrelated. Over-cautious by design; the two-sync escape hatch keeps false
-   positives cheap.
-2. _The feature (M)._ A `renamed_from` hint on `Column` (Terraform
-   moved-block style). The differ emits a rename when the old name is
-   observed and the new one absent; the hint is inert once applied, preserving
-   idempotency. New `RenameColumn` action compiling to
-   `ALTER TABLE ... RENAME COLUMN`, valid only under column mapping (validation
-   rule, same pattern as `ColumnMappingRequiredForDrop`). The same mechanism
-   extends later to table renames.
+**Shape.** A `renamed_from` hint on `Column` (Terraform moved-block style). The
+differ emits a rename when the old name is observed and the new one absent;
+the hint is inert once applied, preserving idempotency. `RenameColumn` compiles
+to `ALTER TABLE ... RENAME COLUMN` and declaration validation requires column
+mapping. Planning suppresses PK/FK drops performed atomically by the rename
+while retaining unrelated constraint drops. The same mechanism can extend to
+table renames later.
 
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
 

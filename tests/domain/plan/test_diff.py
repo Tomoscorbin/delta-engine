@@ -15,11 +15,9 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
-    ActionPlan,
     AddColumn,
     AlterClustering,
     AlterColumnType,
-    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -36,31 +34,10 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.changes import (
-    ClusteringChanged,
-    ColumnAdded,
-    ColumnCommentChanged,
-    ColumnDataTypeChanged,
-    ColumnNullabilityChanged,
-    ColumnRemoved,
-    ColumnRenameConflict,
-    ColumnRenamed,
-    ColumnTagSet,
-    ColumnTagUnset,
-    ForeignKeyAdded,
-    ForeignKeyRemoved,
-    PartitioningChanged,
-    PrimaryKeyAdded,
-    PrimaryKeyChanged,
-    PrimaryKeyRemoved,
-    PropertySet,
-    PropertyUndeclared,
-    PropertyUnset,
-    TableCommentChanged,
-    TableTagSet,
-    TableTagUnset,
-)
 from delta_engine.domain.plan.diff import (
+    ColumnRenameConflict,
+    PartitioningChanged,
+    PropertyUndeclared,
     TableDrift,
     TableMissing,
     diff_table,
@@ -133,6 +110,7 @@ def test_drift_carries_the_desired_table():
     # validation reads scope and properties from it with no second argument
     assert isinstance(diff, TableDrift)
     assert diff.desired is desired
+    assert not hasattr(diff, "plan")
 
 
 # ---------- column structure changes
@@ -145,9 +123,9 @@ def test_desired_only_column_produces_column_added_change():
         _observed(),
     )
 
-    # Then a ColumnAdded change is produced
+    # Then a AddColumn change is produced
     assert isinstance(diff, TableDrift)
-    assert ColumnAdded(Column("age", Integer())) in diff.changes
+    assert AddColumn(Column("age", Integer())) in diff.changes
 
 
 def test_observed_only_column_produces_column_removed_change():
@@ -157,9 +135,9 @@ def test_observed_only_column_produces_column_removed_change():
         _observed(columns=(Column("id", Integer()), Column("stale", String()))),
     )
 
-    # Then a ColumnRemoved change is produced
+    # Then a DropColumn change is produced
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (ColumnRemoved(ObservedColumn("stale", String())),)
+    assert diff.changes == (DropColumn(ObservedColumn("stale", String())),)
 
 
 def test_type_drift_produces_column_data_type_changed():
@@ -169,10 +147,10 @@ def test_type_drift_produces_column_data_type_changed():
         _observed(columns=(Column("id", Long()),)),
     )
 
-    # Then a ColumnDataTypeChanged change carries both sides
+    # Then a AlterColumnType change carries both sides
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Long()),
+        AlterColumnType(column_name="id", desired_type=Integer(), observed_type=Long()),
     )
 
 
@@ -187,9 +165,9 @@ def test_type_drift_suppresses_nullability_change_but_not_comment_change():
     # Then the type change is present and nullability is suppressed (the column
     # must be recreated first); comment drift is independent and not suppressed
     assert isinstance(diff, TableDrift)
-    assert any(isinstance(change, ColumnDataTypeChanged) for change in diff.changes)
-    assert not any(isinstance(change, ColumnNullabilityChanged) for change in diff.changes)
-    assert any(isinstance(change, ColumnCommentChanged) for change in diff.changes)
+    assert any(isinstance(change, AlterColumnType) for change in diff.changes)
+    assert not any(isinstance(change, SetColumnNullability) for change in diff.changes)
+    assert any(isinstance(change, SetColumnComment) for change in diff.changes)
 
 
 def test_nullability_drift_produces_column_nullability_changed():
@@ -199,10 +177,10 @@ def test_nullability_drift_produces_column_nullability_changed():
         _observed(columns=(Column("id", Integer(), nullable=True),)),
     )
 
-    # Then a ColumnNullabilityChanged change carries the direction
+    # Then a SetColumnNullability change carries the direction
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        ColumnNullabilityChanged(column_name="id", desired_nullable=False, observed_nullable=True),
+        SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
     )
 
 
@@ -219,13 +197,11 @@ def test_comment_drift_on_matched_column_produces_change():
     )
 
     # Then only the matched column produces a comment change; the ghost column's
-    # comment travels inside its ColumnAdded change
+    # comment travels inside its AddColumn change
     assert isinstance(diff, TableDrift)
-    comment_changes = [
-        change for change in diff.changes if isinstance(change, ColumnCommentChanged)
-    ]
+    comment_changes = [change for change in diff.changes if isinstance(change, SetColumnComment)]
     assert comment_changes == [
-        ColumnCommentChanged(column_name="id", desired_comment="pk", observed_comment="")
+        SetColumnComment(column_name="id", desired_comment="pk", observed_comment="")
     ]
 
 
@@ -242,17 +218,17 @@ def test_column_tag_drift_produces_set_and_unset_changes():
     # Then set changes cover added and updated tags; an unset change covers the removed tag
     assert isinstance(diff, TableDrift)
     tag_changes = {
-        change for change in diff.changes if isinstance(change, (ColumnTagSet, ColumnTagUnset))
+        change for change in diff.changes if isinstance(change, (SetColumnTag, UnsetColumnTag))
     }
     assert tag_changes == {
-        ColumnTagSet(column_name="id", tag_name="new", tag_value="x"),
-        ColumnTagSet(column_name="id", tag_name="pii", tag_value="true"),
-        ColumnTagUnset(column_name="id", tag_name="old"),
+        SetColumnTag(column_name="id", name="new", value="x"),
+        SetColumnTag(column_name="id", name="pii", value="true"),
+        UnsetColumnTag(column_name="id", name="old"),
     }
 
 
 def test_added_columns_tags_produce_set_facts():
-    # Given a desired-only column with tags (created by its ColumnAdded change)
+    # Given a desired-only column with tags (created by its AddColumn change)
     diff = diff_table(
         _desired(columns=(Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))),
         _observed(),
@@ -260,7 +236,7 @@ def test_added_columns_tags_produce_set_facts():
 
     # Then the added column's tags are changes too — ADD_COLUMN precedes SET_COLUMN_TAG
     assert isinstance(diff, TableDrift)
-    assert ColumnTagSet(column_name="new", tag_name="pii", tag_value="true") in diff.changes
+    assert SetColumnTag(column_name="new", name="pii", value="true") in diff.changes
 
 
 def test_identical_column_tags_produce_no_changes():
@@ -280,7 +256,7 @@ def test_table_comment_drift_produces_change_with_both_sides():
     diff = diff_table(_desired(comment="new"), _observed(comment="old"))
 
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (TableCommentChanged(desired_comment="new", observed_comment="old"),)
+    assert diff.changes == (SetTableComment(desired_comment="new", observed_comment="old"),)
 
 
 # ---------- property changes (exact declaration)
@@ -295,7 +271,7 @@ def test_declared_property_absent_from_catalog_produces_first_write_set():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value=None),
+        SetProperty(name="delta.enableChangeDataFeed", desired_value="true", observed_value=None),
     )
 
 
@@ -307,7 +283,7 @@ def test_declared_property_with_stale_value_produces_set_carrying_both_sides():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PropertySet(
+        SetProperty(
             name="delta.enableChangeDataFeed", desired_value="true", observed_value="false"
         ),
     )
@@ -333,7 +309,7 @@ def test_none_declaration_on_present_key_produces_unset():
 
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days"),
+        UnsetProperty(name="delta.logRetentionDuration", observed_value="interval 30 days"),
     )
 
 
@@ -355,12 +331,11 @@ def test_undeclared_registered_key_produces_blocking_change():
         _observed(properties={"delta.columnMapping.mode": "name"}),
     )
 
-    # Then the change records the fact for validation to fail; it plans nothing
+    # Then the diff records an explicit non-executable blocker
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
         PropertyUndeclared(name="delta.columnMapping.mode", observed_value="name"),
     )
-    assert diff.changes[0].actions() == ()
 
 
 def test_every_observed_key_without_declaration_is_a_blocking_change():
@@ -407,12 +382,12 @@ def test_declared_properties_are_not_compared_when_properties_unmanaged():
 
 def test_property_set_rejects_equal_values():
     with pytest.raises(ValueError, match="no difference"):
-        PropertySet(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
+        SetProperty(name="delta.enableChangeDataFeed", desired_value="true", observed_value="true")
 
 
 def test_property_set_first_write_is_always_representable():
     # Given observed_value=None — the guard is bypassed by type
-    change = PropertySet(
+    change = SetProperty(
         name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
     )
 
@@ -432,8 +407,8 @@ def test_table_tag_drift_produces_set_and_unset_changes():
     # Then the declared tag is set and the undeclared tag is unset — full-state
     assert isinstance(diff, TableDrift)
     assert set(diff.changes) == {
-        TableTagSet(name="env", value="prod"),
-        TableTagUnset(name="stale"),
+        SetTableTag(name="env", value="prod"),
+        UnsetTableTag(name="stale"),
     }
 
 
@@ -465,7 +440,7 @@ def test_clustering_drift_produces_change_with_both_sides():
         _observed(columns=columns, clustered_by=()),
     )
     assert diff.changes == (
-        ClusteringChanged(desired_clustering=("region",), observed_clustering=()),
+        AlterClustering(desired_clustering=("region",), observed_clustering=()),
     )
 
 
@@ -487,18 +462,19 @@ def test_clustering_removal_produces_cluster_by_none_action():
         _desired(columns=columns, clustered_by=()),
         _observed(columns=columns, clustered_by=("region",)),
     )
-    (change,) = diff.changes
-    assert change.actions() == (AlterClustering(columns=()),)
+    assert diff.changes == (
+        AlterClustering(desired_clustering=(), observed_clustering=("region",)),
+    )
 
 
 def test_clustering_change_produces_alter_clustering_action():
-    change = ClusteringChanged(desired_clustering=("region",), observed_clustering=("id",))
-    assert change.actions() == (AlterClustering(columns=("region",)),)
+    change = AlterClustering(desired_clustering=("region",), observed_clustering=("id",))
+    assert change.columns == ("region",)
 
 
 def test_clustering_changed_rejects_equal_key_sets():
     with pytest.raises(ValueError, match="no difference"):
-        ClusteringChanged(desired_clustering=("a", "b"), observed_clustering=("b", "a"))
+        AlterClustering(desired_clustering=("a", "b"), observed_clustering=("b", "a"))
 
 
 # ---------- primary key changes
@@ -512,7 +488,7 @@ def test_desired_only_primary_key_produces_added_change():
     )
 
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (PrimaryKeyAdded(primary_key=pk),)
+    assert diff.changes == (SetPrimaryKey(primary_key=pk),)
 
 
 def test_equal_primary_keys_by_column_set_produce_no_change():
@@ -539,7 +515,7 @@ def test_desired_only_foreign_key_produces_added_change():
     diff = diff_table(_desired(foreign_keys=(fk,)), _observed())
 
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (ForeignKeyAdded(constraint=fk),)
+    assert diff.changes == (SetForeignKey(constraint=fk),)
 
 
 def test_equal_foreign_keys_by_signature_produce_no_change():
@@ -559,22 +535,22 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
 
 def test_column_data_type_changed_rejects_equal_types():
     with pytest.raises(ValueError, match="no difference"):
-        ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Integer())
+        AlterColumnType(column_name="id", desired_type=Integer(), observed_type=Integer())
 
 
 def test_column_nullability_changed_rejects_equal_flags():
     with pytest.raises(ValueError, match="no difference"):
-        ColumnNullabilityChanged(column_name="id", desired_nullable=True, observed_nullable=True)
+        SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=True)
 
 
 def test_column_comment_changed_rejects_equal_comments():
     with pytest.raises(ValueError, match="no difference"):
-        ColumnCommentChanged(column_name="id", desired_comment="same", observed_comment="same")
+        SetColumnComment(column_name="id", desired_comment="same", observed_comment="same")
 
 
 def test_table_comment_changed_rejects_equal_comments():
     with pytest.raises(ValueError, match="no difference"):
-        TableCommentChanged(desired_comment="same", observed_comment="same")
+        SetTableComment(desired_comment="same", observed_comment="same")
 
 
 def test_partitioning_changed_rejects_equal_specs():
@@ -582,230 +558,23 @@ def test_partitioning_changed_rejects_equal_specs():
         PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
-def test_primary_key_changed_rejects_equal_column_sets():
+def test_correlated_primary_key_replacement_rejects_equal_column_sets():
     pk_a = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="x")
     pk_b = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="y")
 
     with pytest.raises(ValueError, match="no difference"):
-        PrimaryKeyChanged(
-            desired_primary_key=pk_a, observed_primary_key=pk_b, referencing_foreign_keys=()
+        DropPrimaryKey(
+            primary_key=pk_a,
+            referencing_foreign_keys=(),
+            replacement_primary_key=pk_b,
         )
-
-
-# ---------- change lowering: actions()
-
-
-def test_column_added_produces_add_column_only():
-    # Given an added column with tags — its tags arrive as separate ColumnTagSet changes
-    column = Column("age", Integer(), tags={"pii": "false"})
-
-    assert ColumnAdded(column=column).actions() == (AddColumn(column=column),)
-
-
-def test_column_removed_produces_drop_column():
-    assert ColumnRemoved(column=ObservedColumn("stale", Integer())).actions() == (
-        DropColumn("stale"),
-    )
-
-
-def test_column_data_type_changed_lowers_to_alter_column_type():
-    # Given a type change — validation decides whether the change is permitted
-    change = ColumnDataTypeChanged(column_name="id", desired_type=Integer(), observed_type=Long())
-
-    assert change.actions() == (
-        AlterColumnType(column_name="id", data_type=Integer(), observed_type=Long()),
-    )
-
-
-def test_column_nullability_changed_produces_set_column_nullability():
-    change = ColumnNullabilityChanged(
-        column_name="id", desired_nullable=True, observed_nullable=False
-    )
-
-    assert change.actions() == (SetColumnNullability(column_name="id", nullable=True),)
-
-
-def test_column_comment_changed_produces_set_column_comment():
-    change = ColumnCommentChanged(column_name="id", desired_comment="pk", observed_comment="")
-
-    assert change.actions() == (SetColumnComment("id", "pk"),)
-
-
-def test_column_tag_set_produces_set_column_tag():
-    change = ColumnTagSet(column_name="id", tag_name="pii", tag_value="true")
-
-    assert change.actions() == (SetColumnTag(column_name="id", name="pii", value="true"),)
-
-
-def test_column_tag_unset_produces_unset_column_tag():
-    change = ColumnTagUnset(column_name="id", tag_name="old")
-
-    assert change.actions() == (UnsetColumnTag(column_name="id", name="old"),)
-
-
-def test_table_comment_changed_produces_set_table_comment():
-    change = TableCommentChanged(desired_comment="new", observed_comment="old")
-
-    assert change.actions() == (SetTableComment(comment="new"),)
-
-
-def test_property_set_produces_set_property_carrying_observed_value():
-    change = PropertySet(
-        name="delta.enableChangeDataFeed", desired_value="true", observed_value="false"
-    )
-
-    assert change.actions() == (
-        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false"),
-    )
-
-
-def test_property_set_first_write_produces_set_property_with_no_observed_value():
-    # Given a first write — the catalog lacks the key
-    change = PropertySet(
-        name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
-    )
-
-    assert change.actions() == (
-        SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value=None),
-    )
-
-
-def test_property_unset_produces_unset_property():
-    change = PropertyUnset(name="delta.logRetentionDuration", observed_value="interval 30 days")
-
-    assert change.actions() == (UnsetProperty(name="delta.logRetentionDuration"),)
-
-
-def test_table_tag_set_produces_set_table_tag():
-    assert TableTagSet(name="env", value="prod").actions() == (
-        SetTableTag(name="env", value="prod"),
-    )
-
-
-def test_table_tag_unset_produces_unset_table_tag():
-    assert TableTagUnset(name="stale").actions() == (UnsetTableTag(name="stale"),)
-
-
-def test_partitioning_changed_produces_no_actions():
-    # Given a partitioning change — no in-place remedy exists; validation blocks it
-    change = PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=())
-
-    assert change.actions() == ()
-
-
-def test_primary_key_added_produces_set_primary_key():
-    pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
-
-    assert PrimaryKeyAdded(primary_key=pk).actions() == (
-        SetPrimaryKey(columns=("id",), constraint_name="test_pk"),
-    )
-
-
-def test_primary_key_removed_produces_drop_primary_key():
-    pk = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")
-
-    assert PrimaryKeyRemoved(observed_primary_key=pk, referencing_foreign_keys=()).actions() == (
-        DropPrimaryKey(),
-    )
-
-
-def test_primary_key_changed_produces_drop_then_set():
-    # Given a changed primary key (column set differs)
-    desired_pk = PrimaryKeyConstraint(columns=("a",), constraint_name="test_pk")
-    observed_pk = PrimaryKeyConstraint(columns=("b",), constraint_name="test_pk")
-    change = PrimaryKeyChanged(
-        desired_primary_key=desired_pk,
-        observed_primary_key=observed_pk,
-        referencing_foreign_keys=(),
-    )
-
-    # When the actions are sorted by ActionPlan (drop runs before set)
-    plan = ActionPlan(change.actions())
-
-    # Then the plan contains DropPrimaryKey followed by SetPrimaryKey
-    assert plan.actions == (
-        DropPrimaryKey(),
-        SetPrimaryKey(columns=("a",), constraint_name="test_pk"),
-    )
-
-
-def test_foreign_key_added_produces_set_foreign_key():
-    fk = _foreign_key()
-
-    assert ForeignKeyAdded(constraint=fk).actions() == (
-        SetForeignKey(
-            local_columns=("id",),
-            referenced_table=QualifiedName("dev", "silver", "other"),
-            referenced_columns=("id",),
-            constraint_name="test_id_fk",
-        ),
-    )
-
-
-def test_foreign_key_removed_produces_drop_foreign_key():
-    fk = _foreign_key("stale_fk")
-
-    assert ForeignKeyRemoved(constraint=fk).actions() == (
-        DropForeignKey(constraint_name="stale_fk"),
-    )
-
-
-def test_missing_table_plan_creates_table_then_follow_up_metadata_actions():
-    # Given a desired table that does not exist yet, with metadata that must be
-    # applied after CREATE TABLE
-    foreign_key = _foreign_key("test_id_fk")
-    desired = _desired(
-        columns=(Column("id", Integer(), tags={"pii": "false"}),),
-        tags={"env": "dev"},
-        foreign_keys=(foreign_key,),
-    )
-
-    # When planning the missing table
-    plan = TableMissing(desired=desired).plan()
-
-    # Then the table is created first, followed by metadata and foreign-key actions
-    assert plan.actions == (
-        CreateTable(desired),
-        SetTableTag(name="env", value="dev"),
-        SetColumnTag(column_name="id", name="pii", value="false"),
-        SetForeignKey(
-            local_columns=("id",),
-            referenced_table=QualifiedName("dev", "silver", "other"),
-            referenced_columns=("id",),
-            constraint_name="test_id_fk",
-        ),
-    )
-
-
-def test_drift_plan_collects_actions_from_detected_differences():
-    # Given an existing table with an added column and changed table comment
-    diff = diff_table(
-        _desired(
-            columns=(Column("id", Integer()), Column("age", Integer())),
-            comment="new table comment",
-        ),
-        _observed(
-            columns=(Column("id", Integer()),),
-            comment="old table comment",
-        ),
-    )
-
-    # When planning the drift
-    assert isinstance(diff, TableDrift)
-    plan = diff.plan()
-
-    # Then the plan contains the actions needed to reconcile the drift
-    assert plan.actions == (
-        AddColumn(Column("age", Integer())),
-        SetTableComment(comment="new table comment"),
-    )
 
 
 def test_managed_changes_filters_out_unmanaged_aspects():
     # Given a drift containing one managed change and one unmanaged change
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
-    table_comment_change = TableCommentChanged(desired_comment="new", observed_comment="old")
-    column_change = ColumnAdded(Column("new_col", Integer()))
+    table_comment_change = SetTableComment(desired_comment="new", observed_comment="old")
+    column_change = AddColumn(Column("new_col", Integer()))
 
     drift = TableDrift(
         desired=desired,
@@ -828,9 +597,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (
-        PrimaryKeyRemoved(observed_primary_key=primary_key, referencing_foreign_keys=()),
-    )
+    assert diff.changes == (DropPrimaryKey(primary_key=primary_key, referencing_foreign_keys=()),)
 
 
 def test_primary_key_removal_carries_observed_referencing_foreign_keys():
@@ -850,11 +617,11 @@ def test_primary_key_removal_carries_observed_referencing_foreign_keys():
     # Then the removal change carries the inbound reference for validation to judge
     assert isinstance(diff, TableDrift)
     (change,) = diff.changes
-    assert isinstance(change, PrimaryKeyRemoved)
+    assert isinstance(change, DropPrimaryKey)
     assert change.referencing_foreign_keys == (reference,)
 
 
-def test_changed_primary_key_produces_changed_change():
+def test_changed_primary_key_produces_correlated_drop_and_set_actions():
     # Given desired and observed primary keys over different column sets
     desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
@@ -869,13 +636,17 @@ def test_changed_primary_key_produces_changed_change():
         _observed(columns=columns, primary_key=observed_primary_key),
     )
 
-    # Then the key change is represented as one atomic changed fact
+    # Then replacement is represented directly by a mutually correlated pair
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
-        PrimaryKeyChanged(
-            desired_primary_key=desired_primary_key,
-            observed_primary_key=observed_primary_key,
+        DropPrimaryKey(
+            primary_key=observed_primary_key,
             referencing_foreign_keys=(),
+            replacement_primary_key=desired_primary_key,
+        ),
+        SetPrimaryKey(
+            primary_key=desired_primary_key,
+            replaced_primary_key=observed_primary_key,
         ),
     )
 
@@ -904,11 +675,10 @@ def test_primary_key_change_carries_observed_referencing_foreign_keys():
         ),
     )
 
-    # Then the changed fact carries the inbound reference for validation to judge
+    # Then the drop half carries the inbound reference for validation to judge
     assert isinstance(diff, TableDrift)
-    (change,) = diff.changes
-    assert isinstance(change, PrimaryKeyChanged)
-    assert change.referencing_foreign_keys == (reference,)
+    drop = next(change for change in diff.changes if isinstance(change, DropPrimaryKey))
+    assert drop.referencing_foreign_keys == (reference,)
 
 
 def test_observed_only_foreign_key_produces_removed_change():
@@ -923,7 +693,7 @@ def test_observed_only_foreign_key_produces_removed_change():
 
     # Then the foreign key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (ForeignKeyRemoved(constraint=foreign_key),)
+    assert diff.changes == (DropForeignKey(constraint=foreign_key),)
 
 
 def test_changed_foreign_key_signature_produces_remove_and_add_changes():
@@ -945,8 +715,8 @@ def test_changed_foreign_key_signature_produces_remove_and_add_changes():
     # Then the observed relationship is removed and the desired relationship is added
     assert isinstance(diff, TableDrift)
     assert set(diff.changes) == {
-        ForeignKeyAdded(constraint=desired_foreign_key),
-        ForeignKeyRemoved(constraint=observed_foreign_key),
+        SetForeignKey(constraint=desired_foreign_key),
+        DropForeignKey(constraint=observed_foreign_key),
     }
 
 
@@ -963,7 +733,7 @@ def test_observed_only_column_tags_are_ignored_because_column_is_removed():
     # Then the column removal is enough; no tag-unset noise is produced for a
     # column that will be dropped
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (ColumnRemoved(observed_only_column),)
+    assert diff.changes == (DropColumn(observed_only_column),)
 
 
 # ---------- column renames
@@ -980,22 +750,22 @@ def test_diff_emits_rename_when_source_observed_and_target_absent():
 
     drift = diff_table(desired, observed)
 
-    assert drift.changes == (ColumnRenamed(old_name="customer_nm", new_name="customer_name"),)
+    assert drift.changes == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
 
 
 def test_diff_pairs_residual_drift_under_the_new_name():
-    # A rename plus a widen decomposes into ColumnRenamed + ColumnDataTypeChanged
+    # A rename plus a widen decomposes into RenameColumn + AlterColumnType
     desired = _desired(columns=(Column("amount", Long(), renamed_from="amt"),))
     observed = _observed(columns=(Column("amt", Integer()),))
 
     drift = diff_table(desired, observed)
 
-    assert ColumnRenamed(old_name="amt", new_name="amount") in drift.changes
+    assert RenameColumn(old_name="amt", new_name="amount") in drift.changes
     assert (
-        ColumnDataTypeChanged(column_name="amount", desired_type=Long(), observed_type=Integer())
+        AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer())
         in drift.changes
     )
-    assert not any(isinstance(c, ColumnAdded | ColumnRemoved) for c in drift.changes)
+    assert not any(isinstance(c, AddColumn | DropColumn) for c in drift.changes)
 
 
 def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
@@ -1016,7 +786,7 @@ def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
     changes = diff_table(desired, observed).changes
 
     assert changes == (
-        ColumnAdded(column=Column("customer_name", String(), renamed_from="customer_nm")),
+        AddColumn(column=Column("customer_name", String(), renamed_from="customer_nm")),
     )
 
 
@@ -1028,21 +798,8 @@ def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
 
     changes = diff_table(desired, observed).changes
 
-    assert changes == (
-        ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),
-    )
-    assert not any(isinstance(change, ColumnRemoved | ColumnRenamed) for change in changes)
-
-
-def test_ambiguous_rename_never_plans_a_column_drop():
-    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
-    observed = _observed(
-        columns=(Column("customer_name", String()), Column("customer_nm", String()))
-    )
-
-    drift = diff_table(desired, observed)
-
-    assert not any(isinstance(action, DropColumn) for action in drift.plan())
+    assert changes == (ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),)
+    assert not any(isinstance(change, DropColumn | RenameColumn) for change in changes)
 
 
 def test_diff_missing_table_ignores_rename_hints():
@@ -1051,7 +808,8 @@ def test_diff_missing_table_ignores_rename_hints():
     diff = diff_table(desired, None)
 
     assert isinstance(diff, TableMissing)
-    assert all(not isinstance(action, RenameColumn) for action in diff.plan())
+    assert diff.desired is desired
+    assert not hasattr(diff, "plan")
 
 
 def test_diff_projects_clustering_identity_across_a_rename():
@@ -1069,9 +827,7 @@ def test_diff_projects_clustering_identity_across_a_rename():
 
     changes = diff_table(desired, observed).changes
 
-    assert changes == (
-        ColumnRenamed(old_name="customer_nm", new_name="customer_name"),
-    )
+    assert changes == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
 
 
 def test_diff_projects_partition_identity_across_a_rename():
@@ -1089,20 +845,14 @@ def test_diff_projects_partition_identity_across_a_rename():
 
     changes = diff_table(desired, observed).changes
 
-    assert changes == (
-        ColumnRenamed(old_name="day", new_name="event_day"),
-    )
+    assert changes == (RenameColumn(old_name="day", new_name="event_day"),)
 
 
-def test_diff_renames_primary_key_column_without_pre_dropping_the_key():
-    desired_key = PrimaryKeyConstraint(
-        columns=("customer_name",), constraint_name="test_pk"
-    )
+def test_diff_rename_and_primary_key_replacement_are_direct_actions():
+    desired_key = PrimaryKeyConstraint(columns=("customer_name",), constraint_name="test_pk")
     observed_key = PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="legacy_pk")
     desired = _desired(
-        columns=(
-            Column("customer_name", String(), nullable=False, renamed_from="customer_nm"),
-        ),
+        columns=(Column("customer_name", String(), nullable=False, renamed_from="customer_nm"),),
         primary_key=desired_key,
     )
     observed = _observed(
@@ -1113,17 +863,17 @@ def test_diff_renames_primary_key_column_without_pre_dropping_the_key():
     drift = diff_table(desired, observed)
 
     assert set(drift.changes) == {
-        ColumnRenamed(old_name="customer_nm", new_name="customer_name"),
-        PrimaryKeyChanged(
-            desired_primary_key=desired_key,
-            observed_primary_key=observed_key,
+        RenameColumn(old_name="customer_nm", new_name="customer_name"),
+        DropPrimaryKey(
+            primary_key=observed_key,
             referencing_foreign_keys=(),
+            replacement_primary_key=desired_key,
         ),
+        SetPrimaryKey(primary_key=desired_key, replaced_primary_key=observed_key),
     }
-    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetPrimaryKey)
 
 
-def test_diff_renames_foreign_key_column_without_pre_dropping_the_key():
+def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = ForeignKeyConstraint(
         local_columns=("parent_id",),
@@ -1149,14 +899,13 @@ def test_diff_renames_foreign_key_column_without_pre_dropping_the_key():
     drift = diff_table(desired, observed)
 
     assert set(drift.changes) == {
-        ColumnRenamed(old_name="parent", new_name="parent_id"),
-        ForeignKeyAdded(constraint=desired_key),
-        ForeignKeyRemoved(constraint=observed_key),
+        RenameColumn(old_name="parent", new_name="parent_id"),
+        SetForeignKey(constraint=desired_key),
+        DropForeignKey(constraint=observed_key),
     }
-    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetForeignKey)
 
 
-def test_diff_renames_self_referenced_column_without_pre_dropping_the_foreign_key():
+def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_actions():
     desired_key = ForeignKeyConstraint(
         local_columns=("manager_id",),
         referenced_table=_QUALIFIED_NAME,
@@ -1183,10 +932,14 @@ def test_diff_renames_self_referenced_column_without_pre_dropping_the_foreign_ke
 
     drift = diff_table(desired, observed)
 
-    assert tuple(type(action) for action in drift.plan()) == (RenameColumn, SetForeignKey)
+    assert set(drift.changes) == {
+        RenameColumn(old_name="id", new_name="employee_id"),
+        SetForeignKey(constraint=desired_key),
+        DropForeignKey(constraint=observed_key),
+    }
 
 
-def test_diff_keeps_an_unrelated_foreign_key_drop_before_a_rename():
+def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
     unrelated_key = ForeignKeyConstraint(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
@@ -1206,4 +959,7 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_before_a_rename():
 
     drift = diff_table(desired, observed)
 
-    assert tuple(type(action) for action in drift.plan()) == (DropForeignKey, RenameColumn)
+    assert drift.changes == (
+        RenameColumn(old_name="customer_nm", new_name="customer_name"),
+        DropForeignKey(constraint=unrelated_key),
+    )

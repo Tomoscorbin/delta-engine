@@ -1,4 +1,4 @@
-"""Domain representation of schema change actions."""
+"""Canonical domain vocabulary for executable table actions."""
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -6,7 +6,17 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
-from delta_engine.domain.model import Column, DataType, DesiredTable, QualifiedName
+from delta_engine.domain.model import (
+    Column,
+    DataType,
+    DesiredTable,
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    ObservedColumn,
+    PrimaryKeyConstraint,
+    QualifiedName,
+    TableAspect,
+)
 
 
 class ActionPhase(IntEnum):
@@ -44,16 +54,15 @@ class ActionPhase(IntEnum):
 
 class Action(ABC):
     """
-    Base class for all plan actions.
+    Base class for executable table actions.
 
-    Subclasses declare their deterministic-ordering contract:
-
-    - ``phase``: the execution phase this action belongs to (:class:`ActionPhase`).
-    - ``subject``: the identifier the action targets within its phase (a column
-      or property name), used to order actions that share a phase. Actions that
-      target the table as a whole return the empty string.
+    Every action carries the complete semantic state needed to validate and
+    report it as well as the compiler-facing state needed to execute it. Each
+    subclass declares its managed ``aspect``, execution ``phase``, and stable
+    within-phase ``subject``.
     """
 
+    aspect: ClassVar[TableAspect]
     phase: ClassVar[ActionPhase]
 
     @property
@@ -65,15 +74,11 @@ class Action(ABC):
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
-    """
-    Create a new table to match a desired definition.
-
-    Carries the full :class:`DesiredTable` (columns, properties, and comment)
-    so the SQL compiler can render a complete CREATE TABLE statement.
-    """
+    """Create a new table from its complete desired definition."""
 
     table: DesiredTable
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.CREATE_TABLE
 
     @property
@@ -83,10 +88,11 @@ class CreateTable(Action):
 
 @dataclass(frozen=True, slots=True)
 class AddColumn(Action):
-    """Add a column to an existing table."""
+    """Add a declared column to an existing table."""
 
     column: Column
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ADD_COLUMN
 
     @property
@@ -96,25 +102,36 @@ class AddColumn(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropColumn(Action):
-    """Remove a column from a table."""
+    """Remove an observed column from a table."""
 
-    column_name: str
+    column: ObservedColumn
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_COLUMN
 
     @property
+    def column_name(self) -> str:
+        """Observed column name consumed by action compilers."""
+        return self.column.name
+
+    @property
     def subject(self) -> str:
-        return self.column_name
+        return self.column.name
 
 
 @dataclass(frozen=True, slots=True)
 class RenameColumn(Action):
-    """Rename a column in place."""
+    """Rename an observed column in place."""
 
     old_name: str
     new_name: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.RENAME_COLUMN
+
+    def __post_init__(self) -> None:
+        if self.old_name == self.new_name:
+            raise ValueError(f"RenameColumn carries no difference: {self.old_name!r}")
 
     @property
     def subject(self) -> str:
@@ -123,19 +140,23 @@ class RenameColumn(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetProperty(Action):
-    """
-    Set a table property to its declared value.
-
-    ``observed_value`` records what the catalog held when the plan was built
-    (None = key absent). It does not affect the compiled SQL; it exists so
-    reports can distinguish a first write from an update.
-    """
+    """Set a table property, preserving its desired and observed values."""
 
     name: str
-    value: str
-    observed_value: str | None = None
+    desired_value: str
+    observed_value: str | None
 
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PROPERTY
+
+    def __post_init__(self) -> None:
+        if self.desired_value == self.observed_value:
+            raise ValueError(f"SetProperty carries no difference: {self.desired_value!r}")
+
+    @property
+    def value(self) -> str:
+        """Desired value consumed by action compilers."""
+        return self.desired_value
 
     @property
     def subject(self) -> str:
@@ -144,10 +165,12 @@ class SetProperty(Action):
 
 @dataclass(frozen=True, slots=True)
 class UnsetProperty(Action):
-    """Remove a table property the declaration asserts absent."""
+    """Remove an observed property the declaration asserts absent."""
 
     name: str
+    observed_value: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
     phase: ClassVar[ActionPhase] = ActionPhase.UNSET_PROPERTY
 
     @property
@@ -157,11 +180,12 @@ class UnsetProperty(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetTableTag(Action):
-    """Set a Unity Catalog tag on a table (distinct from a table property)."""
+    """Set a Unity Catalog tag on a table."""
 
     name: str
     value: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_TABLE_TAG
 
     @property
@@ -175,6 +199,7 @@ class UnsetTableTag(Action):
 
     name: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.UNSET_TABLE_TAG
 
     @property
@@ -184,12 +209,23 @@ class UnsetTableTag(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetColumnComment(Action):
-    """Set a column's comment."""
+    """Set a column comment, preserving its desired and observed values."""
 
     column_name: str
-    comment: str
+    desired_comment: str
+    observed_comment: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_COMMENTS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_COMMENT
+
+    def __post_init__(self) -> None:
+        if self.desired_comment == self.observed_comment:
+            raise ValueError(f"SetColumnComment carries no difference: {self.desired_comment!r}")
+
+    @property
+    def comment(self) -> str:
+        """Desired comment consumed by action compilers."""
+        return self.desired_comment
 
     @property
     def subject(self) -> str:
@@ -198,12 +234,13 @@ class SetColumnComment(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetColumnTag(Action):
-    """Set a Unity Catalog tag on a column (distinct from a column comment)."""
+    """Set a Unity Catalog tag on a column."""
 
     column_name: str
     name: str
     value: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_TAG
 
     @property
@@ -218,6 +255,7 @@ class UnsetColumnTag(Action):
     column_name: str
     name: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.UNSET_COLUMN_TAG
 
     @property
@@ -227,11 +265,22 @@ class UnsetColumnTag(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetTableComment(Action):
-    """Set a table's comment."""
+    """Set a table comment, preserving its desired and observed values."""
 
-    comment: str
+    desired_comment: str
+    observed_comment: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.TABLE_COMMENT
     phase: ClassVar[ActionPhase] = ActionPhase.SET_TABLE_COMMENT
+
+    def __post_init__(self) -> None:
+        if self.desired_comment == self.observed_comment:
+            raise ValueError(f"SetTableComment carries no difference: {self.desired_comment!r}")
+
+    @property
+    def comment(self) -> str:
+        """Desired comment consumed by action compilers."""
+        return self.desired_comment
 
     @property
     def subject(self) -> str:
@@ -240,12 +289,25 @@ class SetTableComment(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetColumnNullability(Action):
-    """Set a column's nullability."""
+    """Set a column's nullability, preserving both sides of the transition."""
 
     column_name: str
-    nullable: bool
+    desired_nullable: bool
+    observed_nullable: bool
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_NULLABILITY
+
+    def __post_init__(self) -> None:
+        if self.desired_nullable == self.observed_nullable:
+            raise ValueError(
+                f"SetColumnNullability carries no difference: {self.desired_nullable!r}"
+            )
+
+    @property
+    def nullable(self) -> bool:
+        """Desired nullability consumed by action compilers."""
+        return self.desired_nullable
 
     @property
     def subject(self) -> str:
@@ -254,9 +316,28 @@ class SetColumnNullability(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropPrimaryKey(Action):
-    """Drop the existing primary key constraint from a table."""
+    """Drop an observed primary key, optionally as one half of a replacement."""
 
+    primary_key: PrimaryKeyConstraint
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...]
+    replacement_primary_key: PrimaryKeyConstraint | None = None
+
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
+        if self.replacement_primary_key is not None and set(self.primary_key.columns) == set(
+            self.replacement_primary_key.columns
+        ):
+            raise ValueError(
+                f"DropPrimaryKey replacement carries no difference: {self.primary_key!r}"
+            )
+
+    @property
+    def observed_primary_key(self) -> PrimaryKeyConstraint:
+        """The catalog constraint that will be dropped."""
+        return self.primary_key
 
     @property
     def subject(self) -> str:
@@ -265,20 +346,31 @@ class DropPrimaryKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """
-    Add a primary key constraint to a table.
+    """Set a complete primary key, optionally as one half of a replacement."""
 
-    Carries the primary key column names (in declaration order) and the
-    engine-generated ``constraint_name`` so the compiler renders it directly.
-    That primary key columns must be NOT NULL is a well-formedness invariant of
-    a desired table, enforced when the ``DesiredTable`` is built, not a plan
-    concern — so this action needs only the names.
-    """
+    primary_key: PrimaryKeyConstraint
+    replaced_primary_key: PrimaryKeyConstraint | None = None
 
-    columns: tuple[str, ...]
-    constraint_name: str
-
+    aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
+
+    def __post_init__(self) -> None:
+        if self.replaced_primary_key is not None and set(self.primary_key.columns) == set(
+            self.replaced_primary_key.columns
+        ):
+            raise ValueError(
+                f"SetPrimaryKey replacement carries no difference: {self.primary_key!r}"
+            )
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        """Primary-key columns consumed by action compilers."""
+        return self.primary_key.columns
+
+    @property
+    def constraint_name(self) -> str:
+        """Primary-key name consumed by action compilers."""
+        return self.primary_key.constraint_name
 
     @property
     def subject(self) -> str:
@@ -287,51 +379,77 @@ class SetPrimaryKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropForeignKey(Action):
-    """Drop a named foreign key constraint from a table."""
+    """Drop a complete observed foreign key constraint."""
 
-    constraint_name: str
+    constraint: ForeignKeyConstraint
 
+    aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
     @property
+    def constraint_name(self) -> str:
+        """Catalog constraint name consumed by action compilers."""
+        return self.constraint.constraint_name
+
+    @property
     def subject(self) -> str:
-        return self.constraint_name
+        return self.constraint.constraint_name
 
 
 @dataclass(frozen=True, slots=True)
 class SetForeignKey(Action):
-    """
-    Add a foreign key constraint to a table.
+    """Set a complete declared foreign key constraint."""
 
-    Carries compiler-ready fields, including the engine-generated
-    ``constraint_name``. The compiler renders these values directly rather than
-    reading a partially-initialised domain constraint — symmetric with
-    :class:`SetPrimaryKey`.
-    """
+    constraint: ForeignKeyConstraint
 
-    local_columns: tuple[str, ...]
-    referenced_table: QualifiedName
-    referenced_columns: tuple[str, ...]
-    constraint_name: str
-
+    aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
 
     @property
+    def local_columns(self) -> tuple[str, ...]:
+        """Local columns consumed by action compilers."""
+        return self.constraint.local_columns
+
+    @property
+    def referenced_table(self) -> QualifiedName:
+        """Referenced table consumed by action compilers."""
+        return self.constraint.referenced_table
+
+    @property
+    def referenced_columns(self) -> tuple[str, ...]:
+        """Referenced columns consumed by action compilers."""
+        return self.constraint.referenced_columns
+
+    @property
+    def constraint_name(self) -> str:
+        """Constraint name consumed by action compilers."""
+        return self.constraint.constraint_name
+
+    @property
     def subject(self) -> str:
-        return ",".join(self.local_columns)
+        return ",".join(self.constraint.local_columns)
 
 
 @dataclass(frozen=True, slots=True)
 class AlterClustering(Action):
-    """
-    Set or clear a table's liquid-clustering keys in place.
+    """Set or clear liquid-clustering keys, preserving desired and observed state."""
 
-    Empty ``columns`` means ``CLUSTER BY NONE`` (remove clustering).
-    """
+    desired_clustering: tuple[str, ...]
+    observed_clustering: tuple[str, ...]
 
-    columns: tuple[str, ...]
-
+    aspect: ClassVar[TableAspect] = TableAspect.CLUSTERING
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "desired_clustering", tuple(self.desired_clustering))
+        object.__setattr__(self, "observed_clustering", tuple(self.observed_clustering))
+        if set(self.desired_clustering) == set(self.observed_clustering):
+            raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        """Desired clustering columns consumed by action compilers."""
+        return self.desired_clustering
 
     @property
     def subject(self) -> str:
@@ -340,21 +458,23 @@ class AlterClustering(Action):
 
 @dataclass(frozen=True, slots=True)
 class AlterColumnType(Action):
-    """
-    Widen a column's data type in place.
-
-    Emitted for every type change; whether the change is a permitted widening
-    is validation's judgment, not this action's. ``observed_type`` records the
-    catalog type when the plan was built. It does not affect the compiled SQL;
-    it exists so reports can render was/now — the same pattern as
-    :class:`SetProperty`'s ``observed_value``.
-    """
+    """Alter a column type, preserving desired and observed data types."""
 
     column_name: str
-    data_type: DataType
+    desired_type: DataType
     observed_type: DataType
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ALTER_COLUMN_TYPE
+
+    def __post_init__(self) -> None:
+        if self.desired_type == self.observed_type:
+            raise ValueError(f"AlterColumnType carries no difference: {self.desired_type!r}")
+
+    @property
+    def data_type(self) -> DataType:
+        """Desired type consumed by action compilers."""
+        return self.desired_type
 
     @property
     def subject(self) -> str:
@@ -366,23 +486,38 @@ def _execution_order(action: Action) -> tuple[int, str]:
     return (action.phase, action.subject)
 
 
+def _validate_primary_key_replacements(actions: tuple[Action, ...]) -> None:
+    """Require both correlated actions for every primary-key replacement."""
+    drops = {
+        (action.primary_key, action.replacement_primary_key)
+        for action in actions
+        if isinstance(action, DropPrimaryKey) and action.replacement_primary_key is not None
+    }
+    sets = {
+        (action.replaced_primary_key, action.primary_key)
+        for action in actions
+        if isinstance(action, SetPrimaryKey) and action.replaced_primary_key is not None
+    }
+    if drops != sets:
+        raise ValueError("Primary-key replacement requires correlated drop and set actions")
+
+
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
-    """
-    The actions to apply to a table, held in execution order.
-
-    A plan keeps its actions sorted by execution phase and then by subject name,
-    regardless of the order they are supplied in: ordering is an invariant of the
-    plan, not a step a caller has to remember. Both the phase and the subject are
-    declared by each action type (see :class:`Action`), so a new action orders
-    itself with no change here.
-    """
+    """Validated executable actions held in deterministic execution order."""
 
     actions: tuple[Action, ...] = ()
 
     def __post_init__(self) -> None:
-        """Sort the actions into execution order, preserving input order on ties."""
-        object.__setattr__(self, "actions", tuple(sorted(self.actions, key=_execution_order)))
+        """Reject non-actions, validate correlated operations, and establish order."""
+        actions = tuple(self.actions)
+        for action in actions:
+            if not isinstance(action, Action):
+                raise TypeError(
+                    f"ActionPlan accepts only Action instances; received {type(action).__name__}"
+                )
+        _validate_primary_key_replacements(actions)
+        object.__setattr__(self, "actions", tuple(sorted(actions, key=_execution_order)))
 
     def __len__(self) -> int:
         return len(self.actions)

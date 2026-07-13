@@ -53,7 +53,12 @@ class MyExecutor:
         return tuple(self._render(action) for action in plan.actions)
 ```
 
-The engine calls `compile` during planning on every run — dry or real — and records the statements on the table's report, so a dry run can preview the DDL. `compile` is **not** total: compiling a validated plan is a pure, local operation that cannot fail against a backend, so it may raise on a genuine programming error rather than swallowing it.
+The engine calls `compile` only with the `ActionPlan` carried by a
+`PlanningSucceeded` result, on every dry or real run, and records the
+statements on the table's report. A rejected diff has no plan and never reaches
+this port. `compile` is **not** total: compiling an accepted plan is a pure,
+local operation that cannot fail against a backend, so it may raise on a
+genuine programming error rather than swallowing it.
 
 `execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
 
@@ -95,7 +100,11 @@ engine.sync(customers, orders)  # your DeltaTable definitions
 
 ## Compile actions to statements
 
-`plan.actions` is a sorted tuple of `Action` objects. Each action has a `subject` (the column or table name it targets) and an `ActionPhase`. You can inspect the action type with `isinstance` or `match`/`case`:
+`plan.actions` is a sorted tuple containing only `Action` objects. Each action
+has a `TableAspect`, a `subject`, and an `ActionPhase`; richer actions also keep
+the desired/observed semantic state while exposing stable compiler-facing
+properties such as `DropColumn.column_name`. You can inspect the action type
+with `isinstance` or `match`/`case`:
 
 ```python
 from delta_engine.domain.plan.actions import CreateTable, AddColumn, DropColumn

@@ -3,7 +3,7 @@
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
-from delta_engine.domain.model import Column, QualifiedName
+from delta_engine.domain.model import Column, ObservedColumn, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import ActionPlan, AddColumn, DropColumn, SetTableComment
 
@@ -47,7 +47,12 @@ class ClosedConnection:
 def test_executor_compiles_plan_and_executes_statements_in_order():
     connection = FakeConnection()
     executor = WarehouseExecutor(connection)
-    plan = ActionPlan(actions=(AddColumn(Column("age", Integer())), DropColumn("legacy")))
+    plan = ActionPlan(
+        actions=(
+            AddColumn(Column("age", Integer())),
+            DropColumn(ObservedColumn("legacy", Integer())),
+        )
+    )
 
     summary = executor.execute(executor.compile(QN, plan))
 
@@ -105,7 +110,7 @@ def test_execute_keeps_the_summary_when_cursor_close_fails():
 
 def test_compile_returns_the_statements_execute_would_run():
     executor = WarehouseExecutor(FakeConnection())
-    plan = ActionPlan((SetTableComment(comment="hello"),))
+    plan = ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),))
 
     statements = executor.compile(QN, plan)
 

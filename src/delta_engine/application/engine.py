@@ -1,19 +1,18 @@
 """
-High-level orchestration of planning, validation, and execution.
+High-level orchestration of planning and execution.
 
 `Engine.sync` runs a chain of phases, each a pass over the per-table
 runs — one `TableRunReport` is born per table in the read phase and accretes
 its plan, SQL, failures, and execution as the chain proceeds. On a real run, if
 any table fails, `SyncFailedError` is raised with a formatted summary.
 
-The six phases, each taking the runs and returning them:
+The five phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
-  2. Diff     — compute the desired-observed diff; states the facts
-  3. Validate — check every diff against rules; append per-table failures
-  4. Plan     — lower every diff into its action plan and the SQL that applies it
-  5. Resolve  — order runs by FK dependency; append FK failures and
+  2. Diff     — compute direct actions and explicit blockers
+  3. Plan     — validate each diff, then accept a plan or append failures
+  4. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  6. Execute  — run the plan of every run with no failures and a non-empty
+  5. Execute  — run the plan of every run with no failures and a non-empty
                 plan, blocking FK dependents of runs that fail mid-execution
 
 Running `resolve()` after validation means a table that fails validation
@@ -36,6 +35,7 @@ import logging
 from delta_engine.application.dependency_resolution import blocking_failures, resolve
 from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import Failure
+from delta_engine.application.planning import PlanningFailed, plan_diff
 from delta_engine.application.ports import (
     CatalogState,
     CatalogStateReader,
@@ -49,7 +49,6 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.application.validation import validate_diff
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
@@ -117,12 +116,12 @@ class _TableRun:
 
 class Engine:
     """
-    High-level orchestrator to plan, validate, and execute changes.
+    High-level orchestrator to plan and execute changes.
 
     The engine coordinates reading current state from a catalog, computing a
-    diff of desired vs observed state, validating that diff, lowering it to an
-    action plan, resolving FK dependencies with full failure context, and
-    executing passing plans using the provided adapter implementations.
+    diff of desired vs observed state, accepting or rejecting that diff at the
+    validated planning boundary, resolving FK dependencies with full failure
+    context, and executing accepted plans using the provided adapters.
     """
 
     def __init__(
@@ -138,7 +137,7 @@ class Engine:
         Synchronize all registered tables to their desired state.
 
         Runs the phases as a chain, each transforming the per-table runs:
-        read → diff → validate → plan → resolve → execute. Each
+        read → diff → plan → resolve → execute. Each
         ``TableRunReport`` is born in the read phase and accretes its diff,
         plan, failures, and execution as later phases run.
 
@@ -149,7 +148,7 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, run read → diff → validate → plan → resolve
+            dry_run: When True, run read → diff → plan → resolve
                 but skip execution (zero catalog mutations). Every run's
                 ``execution`` stays ``None`` while its ``plan`` still records
                 the actions that would be applied, and the report is returned
@@ -174,7 +173,6 @@ class Engine:
 
         runs = self._read(desired)
         runs = self._diff(runs)
-        runs = self._validate(runs)
         runs = self._plan(runs)
         runs = self._resolve(runs)
         runs = self._execute(runs, dry_run=dry_run)
@@ -233,37 +231,28 @@ class Engine:
             run.diff = diff_table(desired=run.desired, observed=observed)
         return runs
 
-    def _validate(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """Validate every run's diff, appending any validation failures."""
+    def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """
+        Accept or reject each diff, then compile every accepted plan.
+
+        Compiling here, before the dry-run/execute split, means a dry run can
+        preview the exact DDL. ``plan_diff`` always applies the default policy;
+        rejected runs retain an empty plan and carry validation failures.
+        """
         for run in runs:
             if run.diff is None:
                 continue
-            result = validate_diff(run.diff)
-            run.failures.extend(result.failures)
-            # A run that has a diff passed its read, so any failures counted
-            # here are validation's own.
-            if run.failures:
+            result = plan_diff(run.diff)
+            if isinstance(result, PlanningFailed):
+                run.failures.extend(result.failures)
                 logger.error(
                     "Validation failed for %s (%d failure(s))",
                     run.qualified_name,
-                    len(run.failures),
+                    len(result.failures),
                 )
-            else:
-                logger.info("Validation passed for %s", run.qualified_name)
-        return runs
-
-    def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
-        """
-        Produce each run's concrete change: its action plan and the SQL that applies it.
-
-        Compiling here, before the dry-run/execute split, means a dry run can
-        preview the exact DDL. Only validated drift is lowered: a run that
-        failed read or validation keeps its empty plan and no statements.
-        """
-        for run in runs:
-            if run.diff is None or run.failures:
                 continue
-            run.plan = run.diff.plan()
+            logger.info("Validation passed for %s", run.qualified_name)
+            run.plan = result.plan
             run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
             logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
         return runs

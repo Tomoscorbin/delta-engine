@@ -3,7 +3,7 @@ import pyspark.sql.types as T
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionSucceeded
-from delta_engine.domain.model import Column, DesiredTable, QualifiedName
+from delta_engine.domain.model import Column, DesiredTable, ObservedColumn, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
     ActionPlan,
@@ -75,7 +75,7 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
     plan = ActionPlan(
         actions=(
             AddColumn(Column("age", Integer())),
-            DropColumn("legacy"),
+            DropColumn(ObservedColumn("legacy", Integer())),
         )
     )
 
@@ -171,7 +171,7 @@ def test_drop_column_action_removes_column_from_existing_table(spark, make_temp_
         tblprops={"delta.columnMapping.mode": "name"},
     )
     qualified_name = QualifiedName(*full_table_name.split("."))
-    plan = ActionPlan(actions=(DropColumn(column_name="to_remove"),))
+    plan = ActionPlan(actions=(DropColumn(ObservedColumn("to_remove", Integer())),))
 
     # When applying the plan
     summary = _apply(spark, qualified_name, plan)
@@ -190,7 +190,8 @@ def test_set_property_action_sets_table_property(spark, make_temp_table):
         actions=(
             SetProperty(
                 name=property_name,
-                value="yes",
+                desired_value="yes",
+                observed_value=None,
             ),
         )
     )
@@ -211,7 +212,8 @@ def test_set_column_comment_sets_comment_on_column(spark, make_temp_table):
         actions=(
             SetColumnComment(
                 column_name="name",
-                comment="customer name",
+                desired_comment="customer name",
+                observed_comment="",
             ),
         )
     )
@@ -229,7 +231,9 @@ def test_set_table_comment_sets_comment_on_table(spark, make_temp_table):
     # Given an existing Delta table
     full_table_name = make_temp_table("tbl_comment", "id INT NOT NULL")
     qualified_name = QualifiedName(*full_table_name.split("."))
-    plan = ActionPlan(actions=(SetTableComment(comment="staging table"),))
+    plan = ActionPlan(
+        actions=(SetTableComment(desired_comment="staging table", observed_comment=""),)
+    )
 
     # When applying the plan
     summary = _apply(spark, qualified_name, plan)
@@ -247,7 +251,8 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
         actions=(
             SetColumnNullability(
                 column_name="id",
-                nullable=True,
+                desired_nullable=True,
+                observed_nullable=False,
             ),
         )
     )
@@ -263,7 +268,7 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
 def test_compile_returns_the_statements_execute_would_run():
     # Given a plan with one action
     qualified_name = QualifiedName("cat", "schema", "tbl")
-    plan = ActionPlan((SetTableComment(comment="hello"),))
+    plan = ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),))
     executor = SparkExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
 
     # When compiling without executing

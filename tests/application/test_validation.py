@@ -29,20 +29,19 @@ from delta_engine.domain.model import (
     TableAspect,
     TimestampNtz,
 )
-from delta_engine.domain.plan.changes import (
+from delta_engine.domain.plan import (
+    AddColumn,
+    AlterColumnType,
     Change,
-    ColumnAdded,
-    ColumnCommentChanged,
-    ColumnDataTypeChanged,
-    ColumnRemoved,
-    ColumnRenameConflict,
-    ColumnTagSet,
-    ForeignKeyRemoved,
-    PrimaryKeyChanged,
-    PrimaryKeyRemoved,
-    TableCommentChanged,
+    DropColumn,
+    DropForeignKey,
+    DropPrimaryKey,
+    SetColumnComment,
+    SetColumnTag,
+    SetTableComment,
 )
 from delta_engine.domain.plan.diff import (
+    ColumnRenameConflict,
     TableDrift,
     TableMissing,
     diff_table,
@@ -106,8 +105,8 @@ def _validate(
     return validate_diff(diff_table(desired, observed), rules=rules)
 
 
-def _type_drift(column_name: str = "id") -> ColumnDataTypeChanged:
-    return ColumnDataTypeChanged(
+def _type_drift(column_name: str = "id") -> AlterColumnType:
+    return AlterColumnType(
         column_name=column_name,
         desired_type=Long(),
         observed_type=Integer(),
@@ -547,7 +546,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     # Given a drift with a type change and a NOT NULL column addition
     diff = _drift(
         _type_drift("id"),
-        ColumnAdded(Column("new_col", Integer(), nullable=False)),
+        AddColumn(Column("new_col", Integer(), nullable=False)),
     )
 
     # When validating
@@ -567,7 +566,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
 def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
     # Given a declaration that only manages table tags, but column structure has drifted
     diff = _drift(
-        ColumnAdded(Column("extra", Integer())),
+        AddColumn(Column("extra", Integer())),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
@@ -583,9 +582,9 @@ def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
 def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
     # Given two changes in one unmanaged aspect and one change in another
     diff = _drift(
-        ColumnAdded(Column("extra", Integer())),
-        ColumnAdded(Column("more", Integer())),
-        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        AddColumn(Column("extra", Integer())),
+        AddColumn(Column("more", Integer())),
+        SetTableComment(desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
@@ -601,7 +600,7 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
 def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
     # Given unmanaged drift and an empty rule set
     diff = _drift(
-        ColumnAdded(Column("extra", Integer())),
+        AddColumn(Column("extra", Integer())),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
@@ -643,7 +642,7 @@ def test_managed_drift_still_trips_safety_rules():
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
     # Given a metadata-only drift where only a managed aspect drifted
     diff = _drift(
-        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        SetTableComment(desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
     )
 
@@ -653,7 +652,7 @@ def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
 
 def test_drift_passes_when_all_aspects_managed():
     # Given a fully managed drift with a nullable column addition
-    diff = _drift(ColumnAdded(Column("extra", Integer())), managed_aspects=ALL_ASPECTS)
+    diff = _drift(AddColumn(Column("extra", Integer())), managed_aspects=ALL_ASPECTS)
 
     # Then validation passes
     assert validate_diff(diff).failed is False
@@ -662,7 +661,7 @@ def test_drift_passes_when_all_aspects_managed():
 def test_unmanaged_column_drop_does_not_require_column_mapping():
     # Given column structure drift on a declaration that does not manage column structure
     diff = _drift(
-        ColumnRemoved(Column("stale", Integer())),
+        DropColumn(ObservedColumn("stale", Integer())),
         managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
     )
 
@@ -698,7 +697,7 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
 def test_tag_only_scope_fails_when_table_comment_drifts():
     # Given a tag-only declaration with comment drift
     diff = _drift(
-        TableCommentChanged(desired_comment="new", observed_comment="old"),
+        SetTableComment(desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
     )
 
@@ -714,8 +713,8 @@ def test_tag_only_scope_fails_when_table_comment_drifts():
 def test_tag_only_scope_fails_when_column_comment_drifts():
     # Given a tag-only declaration with column comment drift
     diff = _drift(
-        ColumnTagSet(column_name="id", tag_name="pii", tag_value="true"),
-        ColumnCommentChanged(column_name="id", desired_comment="new", observed_comment="old"),
+        SetColumnTag(column_name="id", name="pii", value="true"),
+        SetColumnComment(column_name="id", desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
     )
 
@@ -851,7 +850,7 @@ def test_fails_undeclared_removal_forbidden_property_without_suggesting_none():
 
 def test_drop_without_column_mapping_fails_before_execution():
     # Given a plan that drops a column but the declaration lacks column mapping
-    diff = _drift(ColumnRemoved(Column("stale", Integer())))
+    diff = _drift(DropColumn(ObservedColumn("stale", Integer())))
 
     # When validating
     result = validate_diff(diff)
@@ -867,7 +866,7 @@ def test_drop_without_column_mapping_fails_before_execution():
 def test_drop_with_declared_column_mapping_passes():
     # Given the declaration states mode=name
     desired = _desired_table(properties={"delta.columnMapping.mode": "name"})
-    diff = _drift(ColumnRemoved(Column("stale", Integer())), desired=desired)
+    diff = _drift(DropColumn(ObservedColumn("stale", Integer())), desired=desired)
 
     # Then the column drop precondition passes
     assert validate_diff(diff).failed is False
@@ -876,8 +875,8 @@ def test_drop_with_declared_column_mapping_passes():
 def test_multiple_column_drops_produce_one_column_mapping_failure():
     # Given multiple dropped columns but no column mapping declaration
     diff = _drift(
-        ColumnRemoved(Column("stale_a", Integer())),
-        ColumnRemoved(Column("stale_b", Integer())),
+        DropColumn(ObservedColumn("stale_a", Integer())),
+        DropColumn(ObservedColumn("stale_b", Integer())),
     )
 
     # When validating
@@ -896,8 +895,8 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
         constraint_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
-    change = PrimaryKeyRemoved(
-        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+    change = DropPrimaryKey(
+        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
         referencing_foreign_keys=(reference,),
     )
 
@@ -913,8 +912,8 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
 
 
 def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
-    change = PrimaryKeyRemoved(
-        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+    change = DropPrimaryKey(
+        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
         referencing_foreign_keys=(),
     )
 
@@ -936,11 +935,11 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
         constraint_name="test_parent_id_fk",
         referencing_table=_QUALIFIED_NAME,
     )
-    pk_change = PrimaryKeyRemoved(
-        observed_primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
+    pk_change = DropPrimaryKey(
+        primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
         referencing_foreign_keys=(reference,),
     )
-    fk_change = ForeignKeyRemoved(constraint=own_fk)
+    fk_change = DropForeignKey(constraint=own_fk)
 
     result = validate_diff(_drift(pk_change, fk_change))
 
@@ -954,10 +953,10 @@ def test_primary_key_change_blocked_while_foreign_keys_reference_it():
         constraint_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
-    change = PrimaryKeyChanged(
-        desired_primary_key=PrimaryKeyConstraint(("id", "region"), "customers_pk"),
-        observed_primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
+    change = DropPrimaryKey(
+        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
         referencing_foreign_keys=(reference,),
+        replacement_primary_key=PrimaryKeyConstraint(("id", "region"), "customers_pk"),
     )
 
     result = validate_diff(_drift(change))
@@ -975,9 +974,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     )
     drift = TableDrift(
         desired=desired,
-        changes=(
-            ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),
-        ),
+        changes=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
     )
 
     result = validate_diff(drift)
@@ -993,7 +990,7 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
         properties={"delta.columnMapping.mode": "name"},
     )
     drift = TableDrift(
-        desired=desired, changes=(ColumnRemoved(column=ObservedColumn("old", String())),)
+        desired=desired, changes=(DropColumn(column=ObservedColumn("old", String())),)
     )
 
     result = validate_diff(drift)

@@ -35,7 +35,7 @@ flowchart TB
     Desired[Desired snapshot<br/>DesiredTable]
     Reader[Reader adapter<br/>SparkReader / WarehouseReader]
     Observed[Observed snapshot<br/>ObservedTable]
-    Engine[Application engine<br/>diff, validate, plan, resolve, report]
+    Engine[Application engine<br/>diff, plan, resolve, report]
     Plan[Action plan<br/>ActionPlan]
     Executor[Executor adapter<br/>SparkExecutor / WarehouseExecutor]
     Backend[Backend catalog<br/>Unity Catalog, via Spark SQL or a SQL warehouse]
@@ -63,10 +63,11 @@ through a sync.
 | `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape.                          |
 | `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                      |
 | `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                             |
-| `TableDiff`        | Typed facts describing how desired and observed state differ. It is either `TableMissing` or `TableDrift`.                                                   |
-| `Change`           | One atomic difference inside a `TableDrift` (`ColumnAdded`, `TableTagUnset`, …). Each names the `TableAspect` it belongs to and can lower itself to actions. |
+| `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`, whose members are executable actions or explicit blockers.                       |
+| `Change`           | One member of a `TableDrift`: either an `Action` or one of the three non-executable blockers (`ColumnRenameConflict`, `PropertyUndeclared`, `PartitioningChanged`). |
 | `TableAspect`      | One managed aspect of a table: columns, table comment, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.              |
-| `ValidationResult` | The application policy verdict for a diff. It says whether a drift is safe to plan in this run.                                                              |
+| `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                       |
+| `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                             |
 | `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                     |
 | `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                                              |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                    |
@@ -170,7 +171,7 @@ detection.
 `Struct` shows the same rule inside a modeled type. Struct fields carry name
 and type only: the catalog reports column types as DDL text, which does not
 reliably round-trip nested field nullability or comments, so declaring either
-would produce a permanent, blocked `ColumnDataTypeChanged` against whatever
+would produce a permanent, blocked `AlterColumnType` action against whatever
 the reader observes. Both sides normalize to name + type instead — declared
 fields are created nullable, nested comments are unmanaged, and modeling
 field nullability waits until the reader observes a real `StructType` rather
@@ -237,8 +238,7 @@ sequenceDiagram
     participant Engine
     participant Reader as CatalogStateReader
     participant Differ as diff_table
-    participant Validator as validate_diff
-    participant Planner as TableDiff.plan
+    participant Planner as plan_diff
     participant Resolver as resolve
     participant Executor as PlanExecutor
 
@@ -248,10 +248,8 @@ sequenceDiagram
     Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
     Engine->>Differ: diff_table(desired, observed_or_none)
     Differ-->>Engine: TableMissing / TableDrift
-    Engine->>Validator: validate_diff(diff)
-    Validator-->>Engine: ValidationResult
-    Engine->>Planner: plan from diff.changes
-    Planner-->>Engine: ActionPlan
+    Engine->>Planner: plan_diff(diff)
+    Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
     Engine->>Executor: compile(qualified_name, plan)
     Executor-->>Engine: SQL statements
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
@@ -261,23 +259,23 @@ sequenceDiagram
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
-The full run, with preparation first and reporting last bracketing the six
+The full run, with preparation first and reporting last bracketing the five
 phases:
 
 1. **Prepare** (before the chain): lower user-facing table declarations to
    `DesiredTable` values and reject duplicate qualified names.
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Diff**: compute the typed `TableDiff` with `diff_table`.
-4. **Validate**: judge the diff with `validate_diff`.
-5. **Plan**: construct an `ActionPlan` by iterating `diff.changes` after
-   validation, and compile it through the executor port into the SQL
-   statements that apply it — recorded on the report so a dry run can preview
-   the exact DDL.
-6. **Resolve**: order tables by foreign-key dependency and block dependents of
+4. **Plan**: call the total `plan_diff` boundary, which always applies the
+   default validation policy. A rejected result contributes validation
+   failures and has no plan; an accepted result carries the privately
+   constructed `ActionPlan`, which the engine compiles through the executor
+   port for dry-run preview and execution.
+5. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
-7. **Execute**: run the compiled statements of every table that has a
+6. **Execute**: run the compiled statements of every table that has a
    non-empty plan and no failures.
-8. **Report** (after the chain): return `SyncReport`, or raise
+7. **Report** (after the chain): return `SyncReport`, or raise
    `SyncFailedError` with the report on real runs that failed.
 
 Execution is gated by accumulated failures. A table that failed read,
@@ -289,8 +287,8 @@ skipped during execution. The engine still processes other tables.
 | `DeltaTable`       | User code             | Application preparation          | Public declaration object                      |
 | `DesiredTable`     | API lowering          | Domain planner, resolver, report | Target schema snapshot                         |
 | `ObservedTable`    | Reader adapter        | Domain planner, report           | Catalog schema snapshot                        |
-| `TableDiff`        | `diff_table`          | Validation, Engine (changes)     | Typed changes separating observed from desired |
-| `ActionPlan`       | Engine (from changes) | Executor (`compile`), report     | Ordered table-local changes                    |
+| `TableDiff`        | `diff_table`          | `plan_diff`                      | Direct actions and explicit blockers           |
+| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report    | Ordered, validated table-local actions         |
 | `CatalogState`     | Reader port           | Engine                           | Present, absent, or read-failed state          |
 | SQL statements     | Executor (`compile`)  | Executor (`execute`), report     | The DDL a plan lowers to                       |
 | `ExecutionSummary` | Executor port         | Engine, report                   | Attempted statement outcomes                   |
@@ -303,7 +301,7 @@ skipped during execution. The engine still processes other tables.
 | `delta_engine.cli`         | Read-only command composition and rendering                                          | `plan`, declaration loading, unified-auth SQL connection                                 |
 | `delta_engine.schema`      | User-facing declaration import surface                                              | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
-| `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
+| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, dependency resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                               |
 | `delta_engine.adapters`    | Backend integration and translation                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler     |
 
@@ -377,22 +375,23 @@ can read catalogs without one, such as `hive_metastore`.
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
 observed)` produces a `TableDiff` — `TableMissing` when the table does not
-exist, else a `TableDrift` holding a flat tuple of changes. Each change is a
-frozen dataclass recording one atomic difference (`ColumnAdded`,
-`TableTagUnset`, `ColumnDataTypeChanged`, …) and carries two things: an
-`aspect` naming the `TableAspect` it belongs to, and `.actions()` returning
-the DDL steps that reconcile it. Changes with no in-place remedy (a
-partitioning change) return no actions — validation blocks them instead. `*Changed` members carry both sides of the difference as one
-atomic pair (`desired_*` / `observed_*`), so rules can read the direction and
-report from/to values without correlating separate changes.
+exist, else a `TableDrift` holding direct executable actions and explicit
+blockers. Actions carry their `TableAspect` plus the complete desired/observed
+state needed by validation and reporting; compiler-facing attributes remain
+read-only properties on the richer objects. There is no mirrored fact
+vocabulary and no lowering method.
 
-Whether a change is permitted is policy — `validate_diff` evaluates
-precondition rules against the flat tuple, and rules match change types
-directly (e.g. `NonWideningColumnTypeChange` scans for
-`ColumnDataTypeChanged`; `PartitioningChangeNotSupported` scans for
-`PartitioningChanged`). The engine constructs the `ActionPlan` by iterating
-changes directly after validation — there is no separate `lower_diff` step and
-no hidden dependency between lowering and validation.
+Only three diff members are non-executable: `ColumnRenameConflict`,
+`PropertyUndeclared`, and `PartitioningChanged`. Each states an ambiguity or
+unsupported transition that policy must reject. `Change` is therefore exactly
+`Action | BlockingChange`.
+
+Whether a change is permitted is application policy. `plan_diff` always runs
+the default policy and returns either `PlanningSucceeded(plan)` or
+`PlanningFailed(failures)`. Only the success arm has an `ActionPlan`, and plan
+construction is private to that boundary, so callers cannot plan raw diffs
+without validation. `validate_diff(..., rules=...)` remains the lower-level
+interface for testing alternative rule sets; it does not construct plans.
 
 Two aspects deliberately diff under different semantics. Properties are
 exact-declaration: the declaration is the complete list of managed keys — a
@@ -417,10 +416,9 @@ validation, as an unconditional invariant rather than an optional rule:
 `validate_diff` fails the sync once per unmanaged aspect that has drifted
 (`UnmanagedAspectDrift`), and rules read `drift.managed_changes` — so
 unmanaged drift produces exactly one scope failure rather than also tripping
-safety rules for changes the user never requested. If validation passes,
-every change in the drift belongs to a managed aspect, so
-`TableDrift.plan()` naturally produces only the managed actions, with no
-filtering logic needed.
+safety rules for changes the user never requested. If planning succeeds,
+every change belongs to a managed aspect and every retained member is an
+executable action.
 
 The public API exposes named scopes only: `DeltaTable`'s `scope` parameter
 maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
@@ -436,8 +434,8 @@ never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
 - `TableMissing` means the catalog has no table at that name.
 - `TableDrift` means the table exists and carries a tuple of changes.
 
-The diff states facts only. It does not decide whether the facts are safe, and
-it does not talk to the backend. For an existing table, the changes span these
+The diff produces backend-neutral commands but does not decide whether they are
+safe, and it does not talk to the backend. For an existing table, changes span these
 aspects:
 
 - columns
@@ -449,11 +447,10 @@ aspects:
 - primary key
 - foreign keys
 
-Each dimension owns its local lowering to actions. For example, column additions
-produce `AddColumn` plus any column tag actions, table tag removals produce
-`UnsetTableTag`, and foreign-key additions produce `SetForeignKey`. Some facts
-produce no actions because they are intentionally blocked by validation policy:
-partitioning changes are represented in the diff but have no direct action.
+Each dimension produces canonical actions directly. For example, column
+additions produce `AddColumn` plus any `SetColumnTag` actions, table tag
+removals produce `UnsetTableTag`, and foreign-key additions produce
+`SetForeignKey`. Unsupported or ambiguous states use one of the three blockers.
 
 `validate_diff` is where policy lives. A missing table passes automatically
 because creating a table from its full declaration is safe. A drift is evaluated
@@ -465,7 +462,9 @@ by the rules in `DEFAULT_RULES`, which currently reject:
   or widening it without `delta.enableTypeWidening='true'` declared
 - changing table partitioning in place
 
-Only after validation passes does the engine call `diff.plan()`.
+The engine calls `plan_diff` once. A `PlanningFailed` keeps the run's plan empty
+and records its validation failures; a `PlanningSucceeded` supplies the only
+plan the compiler can receive.
 
 ## Deterministic action plans
 
@@ -536,9 +535,9 @@ connected components to produce a dependency-first order. It reports:
   a read failure, validation failure, unresolvable FK, invalid FK target, or FK
   cycle.
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.managed_changes` directly — typically matching a specific change type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.managed_changes` directly — typically matching a specific action or blocker type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
 
-`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when column structure is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift and aggregates their failures into a `ValidationResult`.
+`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when column structure is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift and aggregates their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
 
 Execution happens after resolution, and there is no second dependency pass after
 an execution failure. A dependency's execution failure is recorded on that
@@ -698,8 +697,8 @@ dependency cost.
 | Change                         | Main location                                                              | Notes                                                                                                                                                                                                                                                                               |
 | ------------------------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Add a new backend              | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                                                                      |
-| Add a new change type          | `delta_engine.domain.plan.changes`                                         | Add a frozen dataclass with an `aspect` `ClassVar[TableAspect]` and an `actions()` method; add it to the `Change` union, then emit it from the relevant `_diff_*` helper in `delta_engine.domain.plan.diff`. If the change is currently unsupported, add a rule to `validation.py`. |
-| Add a new action type          | `delta_engine.domain.plan` and adapter compiler                            | Define the action and phase in `actions.py`, emit it from the relevant change's `actions()` method, then compile it in the backend adapter.                                                                                                                                         |
+| Add a new executable difference | `delta_engine.domain.plan.actions`, differ, and adapter compiler           | Define the rich action, its aspect and phase in `actions.py`; emit it directly from the relevant `_diff_*` helper; add policy rules if needed; compile it in the backend adapter.                                                                                                    |
+| Add a new non-executable blocker | `delta_engine.domain.plan.diff` and application validation                 | Add the frozen blocker to `BlockingChange`, emit it from the differ, and add a default rule that rejects it so successful planning can contain actions only.                                                                                                                        |
 | Add a safety rule              | `delta_engine.application.validation`                                      | Rules inspect the `TableDrift` changes and return `ValidationFailure` values.                                                                                                                                                                                                       |
 | Add a data type                | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                                                        |
 | Change public declarations     | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                                                             |
