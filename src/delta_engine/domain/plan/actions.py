@@ -316,23 +316,16 @@ class SetColumnNullability(Action):
 
 @dataclass(frozen=True, slots=True)
 class DropPrimaryKey(Action):
-    """Drop an observed primary key, optionally as one half of a replacement."""
+    """Drop a complete observed primary key constraint."""
 
     primary_key: PrimaryKeyConstraint
     referencing_foreign_keys: tuple[ForeignKeyReference, ...]
-    replacement_primary_key: PrimaryKeyConstraint | None = None
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
-        if self.replacement_primary_key is not None and set(self.primary_key.columns) == set(
-            self.replacement_primary_key.columns
-        ):
-            raise ValueError(
-                f"DropPrimaryKey replacement carries no difference: {self.primary_key!r}"
-            )
 
     @property
     def observed_primary_key(self) -> PrimaryKeyConstraint:
@@ -346,21 +339,12 @@ class DropPrimaryKey(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetPrimaryKey(Action):
-    """Set a complete primary key, optionally as one half of a replacement."""
+    """Set a complete declared primary key constraint."""
 
     primary_key: PrimaryKeyConstraint
-    replaced_primary_key: PrimaryKeyConstraint | None = None
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
-
-    def __post_init__(self) -> None:
-        if self.replaced_primary_key is not None and set(self.primary_key.columns) == set(
-            self.replaced_primary_key.columns
-        ):
-            raise ValueError(
-                f"SetPrimaryKey replacement carries no difference: {self.primary_key!r}"
-            )
 
     @property
     def columns(self) -> tuple[str, ...]:
@@ -486,22 +470,6 @@ def _execution_order(action: Action) -> tuple[int, str]:
     return (action.phase, action.subject)
 
 
-def _validate_primary_key_replacements(actions: tuple[Action, ...]) -> None:
-    """Require both correlated actions for every primary-key replacement."""
-    drops = {
-        (action.primary_key, action.replacement_primary_key)
-        for action in actions
-        if isinstance(action, DropPrimaryKey) and action.replacement_primary_key is not None
-    }
-    sets = {
-        (action.replaced_primary_key, action.primary_key)
-        for action in actions
-        if isinstance(action, SetPrimaryKey) and action.replaced_primary_key is not None
-    }
-    if drops != sets:
-        raise ValueError("Primary-key replacement requires correlated drop and set actions")
-
-
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
     """Validated executable actions held in deterministic execution order."""
@@ -509,14 +477,13 @@ class ActionPlan:
     actions: tuple[Action, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject non-actions, validate correlated operations, and establish order."""
+        """Reject non-actions and establish deterministic execution order."""
         actions = tuple(self.actions)
         for action in actions:
             if not isinstance(action, Action):
                 raise TypeError(
                     f"ActionPlan accepts only Action instances; received {type(action).__name__}"
                 )
-        _validate_primary_key_replacements(actions)
         object.__setattr__(self, "actions", tuple(sorted(actions, key=_execution_order)))
 
     def __len__(self) -> int:

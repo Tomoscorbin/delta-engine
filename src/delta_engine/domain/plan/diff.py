@@ -115,17 +115,13 @@ class TableDrift:
         renamed_sources = {
             action.old_name for action in self.changes if isinstance(action, RenameColumn)
         }
-        renamed_primary_keys = {
-            change.primary_key
-            for change in self.changes
-            if isinstance(change, DropPrimaryKey)
-            and not renamed_sources.isdisjoint(change.primary_key.columns)
-        }
         actions: list[Action] = []
         for change in self.changes:
             if not isinstance(change, Action):
                 continue
-            if isinstance(change, DropPrimaryKey) and change.primary_key in renamed_primary_keys:
+            if isinstance(change, DropPrimaryKey) and not renamed_sources.isdisjoint(
+                change.primary_key.columns
+            ):
                 continue
             if isinstance(change, DropForeignKey) and _foreign_key_uses_renamed_column(
                 change.constraint,
@@ -133,13 +129,6 @@ class TableDrift:
                 table_name=self.desired.qualified_name,
             ):
                 continue
-            if (
-                isinstance(change, SetPrimaryKey)
-                and change.replaced_primary_key in renamed_primary_keys
-            ):
-                # RENAME COLUMN performs the correlated drop atomically, so
-                # the projection retains only an ordinary set operation.
-                change = replace(change, replaced_primary_key=None)
             actions.append(change)
         return tuple(actions)
 
@@ -405,7 +394,7 @@ def _diff_clustering(
 
 
 def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Action]:
-    """Return direct primary-key actions, with replacement pairs correlated."""
+    """Return direct primary-key actions; a changed key becomes a drop and a set."""
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
@@ -429,12 +418,8 @@ def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Ac
             DropPrimaryKey(
                 primary_key=observed_key,
                 referencing_foreign_keys=observed.referencing_foreign_keys,
-                replacement_primary_key=desired_key,
             ),
-            SetPrimaryKey(
-                primary_key=desired_key,
-                replaced_primary_key=observed_key,
-            ),
+            SetPrimaryKey(primary_key=desired_key),
         ]
 
     return []

@@ -558,18 +558,6 @@ def test_partitioning_changed_rejects_equal_specs():
         PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
-def test_correlated_primary_key_replacement_rejects_equal_column_sets():
-    pk_a = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="x")
-    pk_b = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="y")
-
-    with pytest.raises(ValueError, match="no difference"):
-        DropPrimaryKey(
-            primary_key=pk_a,
-            referencing_foreign_keys=(),
-            replacement_primary_key=pk_b,
-        )
-
-
 def test_managed_changes_filters_out_unmanaged_aspects():
     # Given a drift containing one managed change and one unmanaged change
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
@@ -621,7 +609,7 @@ def test_primary_key_removal_carries_observed_referencing_foreign_keys():
     assert change.referencing_foreign_keys == (reference,)
 
 
-def test_changed_primary_key_produces_correlated_drop_and_set_actions():
+def test_changed_primary_key_produces_drop_and_set_actions():
     # Given desired and observed primary keys over different column sets
     desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
@@ -636,18 +624,14 @@ def test_changed_primary_key_produces_correlated_drop_and_set_actions():
         _observed(columns=columns, primary_key=observed_primary_key),
     )
 
-    # Then replacement is represented directly by a mutually correlated pair
+    # Then the observed key is dropped and the desired key is set
     assert isinstance(diff, TableDrift)
     assert diff.changes == (
         DropPrimaryKey(
             primary_key=observed_primary_key,
             referencing_foreign_keys=(),
-            replacement_primary_key=desired_primary_key,
         ),
-        SetPrimaryKey(
-            primary_key=desired_primary_key,
-            replaced_primary_key=observed_primary_key,
-        ),
+        SetPrimaryKey(primary_key=desired_primary_key),
     )
 
 
@@ -867,9 +851,8 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
         DropPrimaryKey(
             primary_key=observed_key,
             referencing_foreign_keys=(),
-            replacement_primary_key=desired_key,
         ),
-        SetPrimaryKey(primary_key=desired_key, replaced_primary_key=observed_key),
+        SetPrimaryKey(primary_key=desired_key),
     }
     assert drift.executable_actions == (
         RenameColumn(old_name="customer_nm", new_name="customer_name"),

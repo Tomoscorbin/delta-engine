@@ -948,22 +948,6 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
     )
 
 
-def test_primary_key_change_blocked_while_foreign_keys_reference_it():
-    reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
-        referencing_table=QualifiedName("dev", "silver", "orders"),
-    )
-    change = DropPrimaryKey(
-        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
-        referencing_foreign_keys=(reference,),
-        replacement_primary_key=PrimaryKeyConstraint(("id", "region"), "customers_pk"),
-    )
-
-    result = validate_diff(_drift(change))
-
-    assert result.failed
-
-
 # ---- AmbiguousColumnRename
 
 

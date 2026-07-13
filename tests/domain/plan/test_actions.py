@@ -283,23 +283,6 @@ def test_plan_reclusters_after_add_and_before_drop():
     assert [type(action) for action in plan] == [AddColumn, AlterClustering, DropColumn]
 
 
-def test_primary_key_replacement_requires_both_correlated_actions():
-    observed = _primary_key("old_pk", ("old_id",))
-    desired = _primary_key("new_pk", ("id",))
-    drop = DropPrimaryKey(observed, (), replacement_primary_key=desired)
-
-    with pytest.raises(ValueError, match="correlated drop and set"):
-        ActionPlan((drop,))
-
-    plan = ActionPlan(
-        (
-            SetPrimaryKey(desired, replaced_primary_key=observed),
-            drop,
-        )
-    )
-    assert [type(action) for action in plan] == [DropPrimaryKey, SetPrimaryKey]
-
-
 def test_enriched_actions_preserve_compiler_facing_properties():
     observed_column = _observed_column("legacy")
     primary_key = _primary_key()
