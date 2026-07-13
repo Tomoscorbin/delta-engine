@@ -80,6 +80,7 @@ def _validate_table_structure(
 class TableAspect(Enum):
     """One independently manageable dimension of a table's state."""
 
+    TABLE_EXISTENCE = auto()
     COLUMN_STRUCTURE = auto()
     COLUMN_COMMENTS = auto()
     COLUMN_TAGS = auto()

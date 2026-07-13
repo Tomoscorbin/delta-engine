@@ -128,7 +128,7 @@ def test_table_has_changes_when_plan_is_non_empty():
         qualified_name=QualifiedName("cat", "schema", "tbl"),
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
     )
     assert report.has_changes is True
 
@@ -160,7 +160,7 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
         qualified_name=QualifiedName("cat", "schema", "a"),
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
     )
     unchanged = TableRunReport(
         qualified_name=QualifiedName("cat", "schema", "b"),
@@ -186,7 +186,7 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
         qualified_name=QualifiedName("cat", "schema", "a"),
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
         planned_sql_statements=("ALTER TABLE a SET ...",),
     )
     without_sql = TableRunReport(
@@ -352,7 +352,7 @@ def _a_changed_table_report():
         qualified_name=QualifiedName("cat", "schema", "orders"),
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
         planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
     )
 
@@ -399,7 +399,7 @@ def test_table_to_dict_reports_execution_counts_when_executed():
         qualified_name=QualifiedName("cat", "schema", "orders"),
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(comment="hello"),)),
+        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
         planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
         execution=ExecutionSummary((_ok_exec(0),)),
     )

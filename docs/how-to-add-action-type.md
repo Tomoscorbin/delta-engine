@@ -16,9 +16,15 @@ Add a frozen dataclass to `src/delta_engine/domain/plan/actions.py`:
 class UpdateComment(Action):
     """Change the comment on a column or table."""
     column_name: str
-    new_comment: str
+    desired_comment: str
+    observed_comment: str
 
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_COMMENTS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_COMMENT
+
+    def __post_init__(self) -> None:
+        if self.desired_comment == self.observed_comment:
+            raise ValueError("UpdateComment carries no difference")
 
     @property
     def subject(self) -> str:
@@ -27,7 +33,14 @@ class UpdateComment(Action):
 
 > Note: `SetColumnComment` is already implemented — this is a hypothetical example showing the pattern.
 
-`Action.subject` determines alphabetical sort order within a phase. `ActionPhase` is an `IntEnum` — lower values run first.
+Every action declares its `TableAspect`, carries enough desired and observed
+state for validation and reporting, and rejects a no-op payload when that is
+representable. Name each field once, semantically (`desired_*` / `observed_*`
+for transition state), and have compilers and renderers read those names
+directly — the read-only alias properties on some existing actions are a
+compatibility seam, not a pattern to copy. `Action.subject` determines
+alphabetical sort order within a phase; `ActionPhase` is an `IntEnum` — lower
+values run first.
 
 ## 2. Add a phase constant if needed
 
@@ -56,16 +69,28 @@ class ActionPhase(IntEnum):
 
 `ActionPlan` sorts by phase then subject automatically — no changes needed there.
 
-## 3. Add a lowering case
+## 3. Emit the action directly from the differ
 
-In `src/delta_engine/domain/plan/changes.py`, add the action emission inside the relevant change type's `actions()` method. For example, if `UpdateComment` is produced by `ColumnCommentChanged`:
+Update the relevant helper in `src/delta_engine/domain/plan/diff.py`. For
+example, a matched column comment pair emits the action itself:
 
 ```python
-def actions(self) -> tuple[Action, ...]:
-    return (UpdateComment(column_name=self.column_name, new_comment=self.desired_comment),)
+if desired.comment != observed.comment:
+    actions.append(
+        UpdateComment(
+            column_name=desired.name,
+            desired_comment=desired.comment,
+            observed_comment=observed.comment,
+        )
+    )
 ```
 
-If the action belongs to a new kind of difference, add a new change dataclass in `changes.py` (with an `aspect` `ClassVar[TableAspect]` and an `actions()` method), add it to the `Change` union there, and emit it from the relevant `_diff_*` helper in `src/delta_engine/domain/plan/diff.py`.
+`Change` already includes every `Action`, so no union edit is needed. If the
+comparison cannot be represented as an action, add a frozen domain difference
+in `diff.py` and name it directly in `Change`. Decide whether it is accepted or
+rejected in application validation; the current three non-action differences
+are rejected by the default policy. Successful `plan_diff` results must
+contain actions only.
 
 ## 4. Register a SQL compiler
 
@@ -75,7 +100,7 @@ In `src/delta_engine/adapters/databricks/sql/compile.py`, register a `singledisp
 @_compile_action.register
 def _(action: UpdateComment, backticked_table_name: str) -> str:
     col = backtick(action.column_name)
-    comment = quote_literal(action.new_comment)
+    comment = quote_literal(action.desired_comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {col} COMMENT {comment}"
 ```
 
@@ -85,12 +110,15 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 
 ## 5. Register a diff rendering arm
 
-In `src/delta_engine/application/rendering.py`, register a `singledispatch` arm on `_action_entries` so the action shows up in `render_diff`. Return one or more `DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys, properties, tags, comments), a `+`/`-`/`~` symbol, and its aligned cells:
+In `src/delta_engine/application/diff_entries.py`, register a `singledispatch`
+arm on `action_entries` so the action shows up in reports. Return one or more
+`DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys,
+properties, tags, comments), a `+`/`-`/`~` symbol, and its aligned cells:
 
 ```python
-@_action_entries.register
+@action_entries.register
 def _(action: UpdateComment) -> tuple[DiffEntry, ...]:
-    text = f"column {action.column_name}: '{action.new_comment}'"
+    text = f"column {action.column_name}: '{action.desired_comment}'"
     return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
 ```
 
@@ -98,12 +126,15 @@ An action may emit several entries across categories (`CreateTable` lists its co
 
 ## 6. Add a validation rule if needed
 
-If the new action type can be unsafe or is not yet supported, add a rule in `src/delta_engine/application/validation.py`. Rules receive the self-contained drift and usually match concrete change types from `drift.managed_changes`:
+If the new action can be unsafe, add a rule in
+`src/delta_engine/application/validation.py`. Rules receive the self-contained
+drift and match concrete actions or non-action differences from
+`drift.managed_changes`:
 
 ```python
 from typing import ClassVar
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.domain.plan.changes import TableCommentChanged
+from delta_engine.domain.plan.actions import UpdateComment
 from delta_engine.domain.plan.diff import TableDrift
 
 
@@ -117,17 +148,20 @@ class NoUnsafeCommentChange:
                 message=f"Operation not allowed: ...",
             )
             for change in drift.managed_changes
-            if isinstance(change, TableCommentChanged) and <condition>
+            if isinstance(change, UpdateComment) and <condition>
         )
 ```
 
-Add it to `DEFAULT_RULES` in the same file.
+Add it to `DEFAULT_RULES` in the same file. `plan_diff` deliberately exposes
+no rules parameter: accepted plans always use this default policy.
 
 ## 7. Write tests
 
 Add tests in:
 
-- `tests/domain/plan/test_diff.py` — does the relevant change's `actions()` produce `UpdateComment`?
+- `tests/domain/plan/test_diff.py` — does `diff_table` emit `UpdateComment` directly with both states?
+- `tests/domain/plan/test_actions.py` — does the action declare its aspect, invariants, phase, and compiler properties?
+- `tests/application/test_planning.py` — is the action accepted or rejected at the total planning boundary?
 - `tests/adapters/databricks/sql/test_compile.py` — does the compiler produce the correct SQL?
 - `tests/application/test_rendering.py` — does the action render its expected diff entries?
 - `tests/application/test_validation.py` — if you added a rule, does it fire correctly?

@@ -28,6 +28,7 @@ from delta_engine.domain.model import (
     Column,
     Decimal,
     DesiredTable,
+    ForeignKeyConstraint,
     Integer,
     Long,
     ObservedColumn,
@@ -59,6 +60,22 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 
+
+def _primary_key(
+    columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
+) -> PrimaryKeyConstraint:
+    return PrimaryKeyConstraint(columns, constraint_name)
+
+
+def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("cat", "sch", "customers"),
+        referenced_columns=("id",),
+        constraint_name=constraint_name,
+    )
+
+
 # ---------- action diff entries ----------
 
 
@@ -74,44 +91,41 @@ from delta_engine.domain.plan.actions import (
             (DiffEntry(DiffCategory.COLUMNS, "+", ("age", "Integer", "NOT NULL")),),
         ),
         (
-            DropColumn(column_name="legacy"),
+            DropColumn(column=ObservedColumn("legacy", Integer())),
             (DiffEntry(DiffCategory.COLUMNS, "-", ("legacy",)),),
         ),
         (
-            SetColumnNullability(column_name="id", nullable=False),
+            SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
             (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "set NOT NULL (was nullable)")),),
         ),
         (
-            SetColumnNullability(column_name="id", nullable=True),
+            SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=False),
             (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "drop NOT NULL (was NOT NULL)")),),
         ),
         (
-            AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer()),
+            AlterColumnType(column_name="id", desired_type=Long(), observed_type=Integer()),
             (DiffEntry(DiffCategory.COLUMNS, "~", ("id", "Integer → Long")),),
         ),
         # Decimal renders its parameters — the bare class name would hide a
         # precision widen.
         (
             AlterColumnType(
-                column_name="amount", data_type=Decimal(12, 2), observed_type=Decimal(10, 2)
+                column_name="amount",
+                desired_type=Decimal(12, 2),
+                observed_type=Decimal(10, 2),
             ),
             (DiffEntry(DiffCategory.COLUMNS, "~", ("amount", "Decimal(10,2) → Decimal(12,2)")),),
         ),
         (
-            SetPrimaryKey(columns=("id", "tenant_id"), constraint_name="tbl_pk"),
+            SetPrimaryKey(primary_key=_primary_key(("id", "tenant_id"))),
             (DiffEntry(DiffCategory.KEYS, "+", ("primary key (id, tenant_id)",)),),
         ),
         (
-            DropPrimaryKey(),
+            DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
             (DiffEntry(DiffCategory.KEYS, "-", ("primary key",)),),
         ),
         (
-            SetForeignKey(
-                local_columns=("customer_id",),
-                referenced_table=QualifiedName("cat", "sch", "customers"),
-                referenced_columns=("id",),
-                constraint_name="orders_customer_id_fk",
-            ),
+            SetForeignKey(constraint=_foreign_key()),
             (
                 DiffEntry(
                     DiffCategory.KEYS, "+", ("foreign key (customer_id) → cat.sch.customers",)
@@ -119,15 +133,21 @@ from delta_engine.domain.plan.actions import (
             ),
         ),
         (
-            DropForeignKey(constraint_name="orders_customer_id_fk"),
+            DropForeignKey(constraint=_foreign_key()),
             (DiffEntry(DiffCategory.KEYS, "-", ("foreign key orders_customer_id_fk",)),),
         ),
         (
-            SetProperty(name="delta.enableChangeDataFeed", value="true"),
+            SetProperty(
+                name="delta.enableChangeDataFeed", desired_value="true", observed_value=None
+            ),
             (DiffEntry(DiffCategory.PROPERTIES, "+", ("delta.enableChangeDataFeed = 'true'",)),),
         ),
         (
-            SetProperty(name="delta.enableChangeDataFeed", value="true", observed_value="false"),
+            SetProperty(
+                name="delta.enableChangeDataFeed",
+                desired_value="true",
+                observed_value="false",
+            ),
             (
                 DiffEntry(
                     DiffCategory.PROPERTIES,
@@ -137,7 +157,7 @@ from delta_engine.domain.plan.actions import (
             ),
         ),
         (
-            UnsetProperty(name="delta.logRetentionDuration"),
+            UnsetProperty(name="delta.logRetentionDuration", observed_value="old"),
             (DiffEntry(DiffCategory.PROPERTIES, "-", ("delta.logRetentionDuration",)),),
         ),
         (
@@ -157,23 +177,23 @@ from delta_engine.domain.plan.actions import (
             (DiffEntry(DiffCategory.TAGS, "-", ("column email.pii",)),),
         ),
         (
-            SetColumnComment(column_name="id", comment="the key"),
+            SetColumnComment(column_name="id", desired_comment="the key", observed_comment=""),
             (DiffEntry(DiffCategory.COMMENTS, "~", ("column id: 'the key'",)),),
         ),
         (
-            SetColumnComment(column_name="id", comment=""),
+            SetColumnComment(column_name="id", desired_comment="", observed_comment="old"),
             (DiffEntry(DiffCategory.COMMENTS, "~", ("column id comment (unset)",)),),
         ),
         (
-            SetTableComment(comment="core table"),
+            SetTableComment(desired_comment="core table", observed_comment=""),
             (DiffEntry(DiffCategory.COMMENTS, "~", ("table: 'core table'",)),),
         ),
         (
-            SetTableComment(comment=""),
+            SetTableComment(desired_comment="", observed_comment="old"),
             (DiffEntry(DiffCategory.COMMENTS, "~", ("table comment (unset)",)),),
         ),
         (
-            AlterClustering(columns=("region", "day")),
+            AlterClustering(desired_clustering=("region", "day"), observed_clustering=()),
             (
                 DiffEntry(
                     DiffCategory.CLUSTERING,
@@ -185,7 +205,7 @@ from delta_engine.domain.plan.actions import (
         # Removal carries no OPTIMIZE hint: OPTIMIZE FULL errors on a table
         # without clustering columns.
         (
-            AlterClustering(columns=()),
+            AlterClustering(desired_clustering=(), observed_clustering=("region",)),
             (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),),
         ),
         (
@@ -302,7 +322,12 @@ def test_diff_block_groups_lines_under_category_headings_in_plan_order():
     # Given a table whose plan sets the table comment and adds a column
     report = _grid_report(
         "orders",
-        plan=ActionPlan((SetTableComment(comment="c"), AddColumn(Column("age", Integer())))),
+        plan=ActionPlan(
+            (
+                SetTableComment(desired_comment="c", observed_comment=""),
+                AddColumn(Column("age", Integer())),
+            )
+        ),
     )
 
     # When rendering the diff block
@@ -393,7 +418,7 @@ def test_grid_detail_summarizes_changes_by_category_not_class_names():
             (
                 AddColumn(Column("a", Integer())),
                 AddColumn(Column("b", Integer())),
-                SetProperty(name="delta.appendOnly", value="true"),
+                SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
             )
         ),
     )
@@ -463,7 +488,9 @@ def test_grid_detail_truncates_an_overlong_detail_with_an_ellipsis():
 
 def test_grid_aligns_the_status_column_across_header_and_rows():
     # Given two tables whose names differ in length
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     failed = _grid_report(
         "a_much_longer_name",
         failures=(ValidationFailure(rule_name="R", message="m"),),
@@ -483,7 +510,9 @@ def test_grid_aligns_the_status_column_across_header_and_rows():
 
 def test_run_summary_footer_counts_changed_unchanged_and_failed():
     # Given a run over one changed, one unchanged, and one failed table
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     unchanged = _grid_report("b")
     failed = _grid_report("c", failures=(ValidationFailure(rule_name="R", message="m"),))
     sync = SyncReport(
@@ -504,7 +533,9 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
 
 def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     # Given a run over one changed and one failed table
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     failed = _grid_report("b", failures=(ValidationFailure(rule_name="R", message="m"),))
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -583,7 +614,9 @@ def test_render_report_failures_section_has_an_underlined_header():
 
 def test_render_report_has_no_failures_section_when_all_succeed():
     # Given a run where every table succeeds
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
@@ -596,7 +629,9 @@ def test_render_report_has_no_failures_section_when_all_succeed():
 
 def test_render_report_shows_dry_run_banner_only_for_dry_runs():
     # Given the same run rendered as a dry run and as an applied run
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     base = dict(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
@@ -613,7 +648,9 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
 
 def test_render_report_is_titled():
     # Given any run
-    changed = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    changed = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
@@ -629,7 +666,9 @@ def test_render_report_is_titled():
 
 def test_render_diff_is_titled():
     # Given any run
-    first = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    first = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
@@ -645,7 +684,9 @@ def test_render_diff_is_titled():
 
 def test_render_diff_joins_each_tables_change_block_in_report_order():
     # Given a run over two tables with plans
-    first = _grid_report("a", plan=ActionPlan((SetTableComment(comment="c"),)))
+    first = _grid_report(
+        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+    )
     second = _grid_report("b", plan=ActionPlan((AddColumn(Column("age", Integer())),)))
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),

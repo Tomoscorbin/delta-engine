@@ -1338,7 +1338,7 @@ def test_sync_fails_loud_on_undeclared_registered_property():
 
 def test_metadata_scoped_column_removal_fails_without_drop_precondition():
     # Given a metadata-only spec over a table with an extra column (an
-    # unmanaged ColumnRemoved drift) — the user never asked to drop anything
+    # unmanaged DropColumn drift) — the user never asked to drop anything
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")
     reader = _RecordingReader(

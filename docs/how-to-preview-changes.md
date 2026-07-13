@@ -6,7 +6,7 @@ tags:
 # How to preview changes with a dry run
 
 `sync(..., dry_run=True)` runs the full decision-making — read, diff,
-validate, plan, and dependency resolution — and skips only execution. Nothing
+accepted/rejected planning and dependency resolution — and skips only execution. Nothing
 in the catalog changes, and the returned report shows exactly what a real run
 would do, including any failures it would have.
 

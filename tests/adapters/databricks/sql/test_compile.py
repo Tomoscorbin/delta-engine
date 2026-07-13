@@ -8,13 +8,14 @@ from delta_engine.domain.model import (
     DesiredTable,
     Integer,
     Long,
+    ObservedColumn,
     QualifiedName,
     String,
     Struct,
     StructField,
     Variant,
 )
-from delta_engine.domain.model.constraints import PrimaryKeyConstraint
+from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
@@ -41,6 +42,32 @@ from delta_engine.domain.plan.actions import (
 )
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
+_REFERENCED_TABLE = QualifiedName("cat", "sch", "customers")
+
+
+def _observed_column(name: str) -> ObservedColumn:
+    return ObservedColumn(name, Integer())
+
+
+def _primary_key(
+    columns: tuple[str, ...] = ("id",), constraint_name: str = "tbl_pk"
+) -> PrimaryKeyConstraint:
+    return PrimaryKeyConstraint(columns, constraint_name)
+
+
+def _foreign_key(
+    *,
+    local_columns: tuple[str, ...] = ("customer_id",),
+    referenced_table: QualifiedName = _REFERENCED_TABLE,
+    referenced_columns: tuple[str, ...] = ("id",),
+    constraint_name: str = "orders_customer_id_fk",
+) -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        local_columns,
+        referenced_table,
+        referenced_columns,
+        constraint_name,
+    )
 
 
 def _create_table(
@@ -93,9 +120,9 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
     # Given an ActionPlan containing three actions
     plan = ActionPlan(
         actions=(
-            SetTableComment(comment="first"),
-            SetProperty(name="second", value="true"),
-            DropColumn(column_name="third"),
+            SetTableComment(desired_comment="first", observed_comment=""),
+            SetProperty(name="second", desired_value="true", observed_value=None),
+            DropColumn(column=_observed_column("third")),
         )
     )
 
@@ -120,7 +147,7 @@ def test_compile_backticks_table_and_column_identifiers():
 
 def test_alter_column_type_compiles_to_alter_column_type_statement():
     # Given a validated widening Integer → Long
-    action = AlterColumnType(column_name="id", data_type=Long(), observed_type=Integer())
+    action = AlterColumnType(column_name="id", desired_type=Long(), observed_type=Integer())
 
     # Then only the desired type reaches the SQL
     assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` TYPE BIGINT"
@@ -219,12 +246,12 @@ def test_create_table_renders_cluster_by_clause():
 
 
 def test_alter_clustering_renders_cluster_by():
-    action = AlterClustering(columns=("region", "day"))
+    action = AlterClustering(desired_clustering=("region", "day"), observed_clustering=())
     assert _compile_single(action) == ("ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY (`region`, `day`)")
 
 
 def test_alter_clustering_with_no_columns_renders_cluster_by_none():
-    action = AlterClustering(columns=())
+    action = AlterClustering(desired_clustering=(), observed_clustering=("region",))
     assert _compile_single(action) == "ALTER TABLE `cat`.`sch`.`tbl` CLUSTER BY NONE"
 
 
@@ -306,44 +333,44 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
     ("action", "expected"),
     [
         (
-            DropColumn(column_name="legacy"),
+            DropColumn(column=_observed_column("legacy")),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP COLUMN `legacy`",
         ),
         (
-            SetProperty(name="delta.appendOnly", value="true"),
+            SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
             "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.appendOnly'='true')",
         ),
         (
-            UnsetProperty(name="delta.enableChangeDataFeed"),
+            UnsetProperty(name="delta.enableChangeDataFeed", observed_value="true"),
             "ALTER TABLE `cat`.`sch`.`tbl` UNSET TBLPROPERTIES IF EXISTS "
             "('delta.enableChangeDataFeed')",
         ),
         (
-            SetTableComment(comment="core table"),
+            SetTableComment(desired_comment="core table", observed_comment=""),
             "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'core table'",
         ),
         (
-            SetColumnComment(column_name="id", comment="primary key"),
+            SetColumnComment(column_name="id", desired_comment="primary key", observed_comment=""),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'primary key'",
         ),
         (
-            SetColumnComment(column_name="id", comment=""),
+            SetColumnComment(column_name="id", desired_comment="", observed_comment="old"),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET COMMENT",
         ),
         (
-            SetColumnNullability(column_name="id", nullable=True),
+            SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=False),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` DROP NOT NULL",
         ),
         (
-            SetColumnNullability(column_name="id", nullable=False),
+            SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey(),
+            DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
-            DropForeignKey(constraint_name="orders_customer_id_fk"),
+            DropForeignKey(constraint=_foreign_key()),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`",
         ),
         (
@@ -370,10 +397,7 @@ def test_simple_actions_compile_to_expected_sql(action: Action, expected: str):
 
 def test_set_primary_key_renders_composite_primary_key():
     # Given a composite primary-key action
-    action = SetPrimaryKey(
-        columns=("tenant_id", "order_id"),
-        constraint_name="tbl_pk",
-    )
+    action = SetPrimaryKey(primary_key=_primary_key(("tenant_id", "order_id"), "tbl_pk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -387,12 +411,7 @@ def test_set_primary_key_renders_composite_primary_key():
 
 def test_set_foreign_key_renders_single_column_fk():
     # Given a single-column foreign-key action
-    action = SetForeignKey(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-        constraint_name="tbl_customer_id_fk",
-    )
+    action = SetForeignKey(constraint=_foreign_key(constraint_name="tbl_customer_id_fk"))
 
     # When compiling
     statement = _compile_single(action)
@@ -408,21 +427,22 @@ def test_set_foreign_key_renders_single_column_fk():
 def test_set_foreign_key_renders_composite_fk():
     # Given a composite foreign-key action
     action = SetForeignKey(
-        local_columns=("tenant_id", "customer_id"),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("tenant_id", "id"),
-        constraint_name="tbl_tenant_id_customer_id_fk",
+        constraint=_foreign_key(
+            local_columns=("tenant_id", "customer_id"),
+            referenced_columns=("tenant_id", "id"),
+            constraint_name="tbl_tenant_id_customer_id_fk",
+        )
     )
 
     # When compiling
     statement = _compile_single(action)
 
-    # Then both local and referenced columns render in order
+    # Then the complete domain constraint's canonical pair order is rendered
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl`"
         " ADD CONSTRAINT `tbl_tenant_id_customer_id_fk`"
-        " FOREIGN KEY (`tenant_id`, `customer_id`)"
-        " REFERENCES `cat`.`sch`.`customers` (`tenant_id`, `id`)"
+        " FOREIGN KEY (`customer_id`, `tenant_id`)"
+        " REFERENCES `cat`.`sch`.`customers` (`id`, `tenant_id`)"
     )
 
 
@@ -430,11 +450,11 @@ def test_set_foreign_key_renders_composite_fk():
     ("action", "expected"),
     [
         (
-            SetProperty(name="owner", value="O'Reilly"),
+            SetProperty(name="owner", desired_value="O'Reilly", observed_value=None),
             "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('owner'='O''Reilly')",
         ),
         (
-            SetColumnComment(column_name="id", comment="it's the key"),
+            SetColumnComment(column_name="id", desired_comment="it's the key", observed_comment=""),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'",
         ),
         (
@@ -455,11 +475,12 @@ def test_set_property_sql_ignores_observed_value():
     # Given two SetProperty actions differing only in observed_value
     first_write = SetProperty(
         name="delta.enableChangeDataFeed",
-        value="true",
+        desired_value="true",
+        observed_value=None,
     )
     update = SetProperty(
         name="delta.enableChangeDataFeed",
-        value="true",
+        desired_value="true",
         observed_value="false",
     )
 

@@ -57,8 +57,7 @@ metadata is applied.
   are not drift.
 - **Cannot create** a missing table. If the table does not exist, the sync
   fails at validation (`MissingTableUnmanaged`) — a metadata-only declaration
-  does not manage column structure, so it has no shape to create the table
-  from.
+  does not manage table existence, so it has no authority to create the table.
 
 Both failures are scope invariants, listed in
 [safe-change rules](reference-safe-change-rules.md).

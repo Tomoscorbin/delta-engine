@@ -17,15 +17,14 @@ one table's failure does not take down the rest of the run.
 Every sync runs the same chain of phases over every table in the call:
 
 ```text
-read → diff → validate → plan → resolve → execute → report
+read → diff → plan → resolve → execute → report
 ```
 
 | Phase        | Question it answers                          | Outcome                                                           |
 | ------------ | -------------------------------------------- | ----------------------------------------------------------------- |
 | **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure      |
-| **Diff**     | How does observed state differ from desired? | Typed drift facts — or no drift, meaning nothing to do            |
-| **Validate** | Is that drift safe to fix in place?          | Pass, or named validation failures                                |
-| **Plan**     | What DDL closes the gap, in what order?      | A deterministic action plan and the SQL statements it compiles to |
+| **Diff**     | How does observed state differ from desired? | Direct actions and non-action differences — or no drift           |
+| **Plan**     | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
 | **Resolve**  | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                    |
 | **Execute**  | Apply the plan                               | An execution summary per table (skipped entirely on a dry run)    |
 
@@ -35,12 +34,15 @@ dry run always returns the report without raising.
 
 The rest of this page looks at the behaviours that fall out of this design.
 
-## Diff states facts; validation decides safety
+## Diff produces actions; planning decides safety
 
-The diff phase only records what is different — "column `email` exists in the
-catalog but not in the declaration" — and never judges whether acting on that
-is a good idea. Judging is validation's job, applied as a separate rule set in
-the next phase.
+The diff phase produces rich, backend-neutral actions directly — for example,
+`DropColumn` carries the complete observed column — but never judges whether
+executing one is a good idea. Ambiguous or unsupported states remain domain
+differences rather than being labelled as blockers; the application default
+policy decides to reject them. The planning boundary always validates that
+complete diff and returns either an accepted `ActionPlan` or failures; a
+rejected result has no plan.
 
 This separation is why rejections are precise: a failed sync names the exact
 rule that fired and the column or table it fired on, rather than a generic
@@ -51,8 +53,8 @@ it.
 
 ## No SQL runs until a table fully passes
 
-Validation happens before planning, and planning before execution, so a table
-that fails validation is untouched — there is no partial application of the
+Validation is inseparable from plan construction, and planning happens before
+execution, so a rejected table is untouched — there is no plan containing the
 safe subset. Within execution, statements run in a deterministic order and a
 failure stops that table's remaining statements. Re-running `sync` after
 fixing the cause is always the recovery path: the engine re-reads live state
@@ -85,7 +87,7 @@ declaration side.
 
 ## Dry runs stop before execution
 
-`sync(..., dry_run=True)` runs read, diff, validate, plan, and resolve — the
+`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, and resolve — the
 full decision-making — and skips only execution. You get the same report with
 every planned action, the exact SQL it would run, and every failure the run
 _would_ have had, with zero catalog mutations, and no exception is raised. See

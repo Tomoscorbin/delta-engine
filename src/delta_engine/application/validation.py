@@ -25,21 +25,20 @@ from delta_engine.domain.model import (
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
-    ColumnAdded,
-    ColumnDataTypeChanged,
-    ColumnNullabilityChanged,
-    ColumnRemoved,
+    AddColumn,
+    AlterColumnType,
     ColumnRenameConflict,
-    ForeignKeyRemoved,
+    DropColumn,
+    DropForeignKey,
+    DropPrimaryKey,
     PartitioningChanged,
-    PrimaryKeyChanged,
-    PrimaryKeyRemoved,
-    PropertySet,
     PropertyUndeclared,
-    PropertyUnset,
+    SetColumnNullability,
+    SetProperty,
     TableDiff,
     TableDrift,
     TableMissing,
+    UnsetProperty,
 )
 
 
@@ -90,7 +89,7 @@ class NonNullableColumnAdd:
                 ),
             )
             for change in drift.managed_changes
-            if isinstance(change, ColumnAdded) and not change.column.nullable
+            if isinstance(change, AddColumn) and not change.column.nullable
         )
 
 
@@ -113,7 +112,7 @@ class NullabilityTighteningOnExistingColumn:
                 ),
             )
             for change in drift.managed_changes
-            if isinstance(change, ColumnNullabilityChanged) and not change.desired_nullable
+            if isinstance(change, SetColumnNullability) and not change.desired_nullable
         )
 
 
@@ -189,7 +188,7 @@ class NonWideningColumnTypeChange:
                 ),
             )
             for change in drift.managed_changes
-            if isinstance(change, ColumnDataTypeChanged)
+            if isinstance(change, AlterColumnType)
             and not _is_safe_widening(change.observed_type, change.desired_type)
         )
 
@@ -221,7 +220,7 @@ class TypeWideningRequiredForTypeChange:
                 ),
             )
             for change in drift.managed_changes
-            if isinstance(change, ColumnDataTypeChanged)
+            if isinstance(change, AlterColumnType)
             and _is_safe_widening(change.observed_type, change.desired_type)
         )
 
@@ -253,7 +252,7 @@ class PropertyTransitionNotSupported:
     """
     Disallow property transitions the catalog will reject.
 
-    A removal is a transition to absence: a ``PropertyUnset`` is judged as
+    A removal is a transition to absence: an ``UnsetProperty`` is judged as
     ``(observed_value, None)`` against the same permitted set as value
     changes, so a key whose registry entry permits no ``(value, None)``
     pair cannot be declared absent.
@@ -268,7 +267,7 @@ class PropertyTransitionNotSupported:
         failures: list[ValidationFailure] = []
         for change in drift.managed_changes:
             match change:
-                case PropertySet(
+                case SetProperty(
                     name=name, desired_value=desired_value, observed_value=str() as observed_value
                 ) if self._is_blocked(name, observed_value, desired_value):
                     failures.append(
@@ -281,7 +280,7 @@ class PropertyTransitionNotSupported:
                             ),
                         )
                     )
-                case PropertyUnset(name=name, observed_value=observed_value) if self._is_blocked(
+                case UnsetProperty(name=name, observed_value=observed_value) if self._is_blocked(
                     name, observed_value, None
                 ):
                     failures.append(
@@ -345,7 +344,7 @@ class ColumnMappingRequiredForDrop:
     Disallow dropping a column without column mapping declared.
 
     Delta only permits DROP COLUMN when ``delta.columnMapping.mode`` is
-    ``name``. This judges a managed change (a ``ColumnRemoved``) against the
+    ``name``. This judges a managed ``DropColumn`` action against the
     declaration — the safe case is when declaration and catalog already agree
     on the mode, in which case no property change exists to inspect, so the
     rule reads the declaration directly. Exact declaration guarantees a
@@ -358,7 +357,7 @@ class ColumnMappingRequiredForDrop:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a column drop when the declaration lacks column mapping."""
-        drops_a_column = any(isinstance(change, ColumnRemoved) for change in drift.managed_changes)
+        drops_a_column = any(isinstance(change, DropColumn) for change in drift.managed_changes)
         if not drops_a_column:
             return ()
         if drift.desired.properties.get(Property.COLUMN_MAPPING_MODE) == "name":
@@ -421,11 +420,11 @@ class PrimaryKeyReferencedByForeignKeys:
         dropped_here = {
             change.constraint.constraint_name
             for change in drift.managed_changes
-            if isinstance(change, ForeignKeyRemoved)
+            if isinstance(change, DropForeignKey)
         }
         failures: list[ValidationFailure] = []
         for change in drift.managed_changes:
-            if not isinstance(change, PrimaryKeyRemoved | PrimaryKeyChanged):
+            if not isinstance(change, DropPrimaryKey):
                 continue
             blockers = tuple(
                 reference
@@ -474,11 +473,9 @@ class UnmanagedAspectDrift:
     A scope invariant with the ``Rule`` interface, but not a member of
     ``DEFAULT_RULES``: it defines what a declaration is allowed to govern
     and runs unconditionally in ``validate_diff``. It must not be
-    suppressible — ``TableDrift.plan()`` iterates *all* changes, and the
-    guarantee that a passing validation implies only managed actions holds
-    only because this check always runs; ``rules=()`` letting unmanaged
-    drift through would make ``plan()`` emit changes the declaration never
-    asked for.
+    suppressible: the accepted planning boundary turns every validated action
+    into executable work, so ``rules=()`` still cannot admit actions from an
+    aspect the declaration does not manage.
 
     Unlike the safety rules it reads ``drift.changes`` (unfiltered): its
     subject is exactly the changes ``managed_changes`` excludes.
@@ -509,7 +506,7 @@ class UnmanagedAspectDrift:
 
 class MissingTableUnmanaged:
     """
-    Fail creation of a table whose declaration does not manage column structure.
+    Fail creation of a table whose declaration does not manage table existence.
 
     The scope invariant for the ``TableMissing`` arm, peer to
     ``UnmanagedAspectDrift`` on the drift arm. It shares the naming shape of
@@ -523,14 +520,14 @@ class MissingTableUnmanaged:
 
     def evaluate(self, missing: TableMissing) -> tuple[ValidationFailure, ...]:
         """Flag a missing table that this declaration cannot create."""
-        if TableAspect.COLUMN_STRUCTURE in missing.desired.managed_aspects:
+        if TableAspect.TABLE_EXISTENCE in missing.desired.managed_aspects:
             return ()
         return (
             ValidationFailure(
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: the table does not exist and this"
-                    " definition does not manage column structure, so it cannot"
+                    " definition does not manage table existence, so it cannot"
                     " be created. Manage the table fully or create it out-of-band"
                     " first."
                 ),
@@ -551,7 +548,7 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
 
     - ``MissingTableUnmanaged`` judges the missing arm: a table that does
       not exist cannot be created by a declaration that does not manage
-      column structure.
+      table existence.
     - ``UnmanagedAspectDrift`` judges the drift arm: one failure per
       drifted unmanaged aspect. It shares the ``Rule`` interface but runs
       from its own always-on tier, prepended to whatever ``rules`` are

@@ -154,9 +154,9 @@ ban-relative-imports = "all" # enforce absolute imports (TID252)
   "N812", # allow uppercase variable names
 ]
 # Value-object modules: each class is documented and the contract lives on the
-# abstract method (Action.subject, Failure.format_lines) or, for diff changes,
-# on the module docstring's description of actions(). Concrete overrides only
-# restate it, so we don't require a docstring on every override.
+# abstract method (Action.subject, Failure.format_lines) or the diff module's
+# canonical action/blocker vocabulary. Concrete overrides only restate it, so
+# we don't require a docstring on every override.
 "src/delta_engine/domain/plan/actions.py" = ["D102"]
 "src/delta_engine/application/failures.py" = ["D102"]
 "src/delta_engine/domain/plan/diff.py" = ["D102"]
