@@ -34,7 +34,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.domain.model import (
-    Column as DomainColumn,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
 )
@@ -51,7 +51,7 @@ _INFORMATION_SCHEMA_MISSING_CONDITIONS: Final[frozenset[str]] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class _ColumnMapping:
-    column: DomainColumn
+    column: ObservedColumn
     is_partition: bool
 
 
@@ -59,7 +59,7 @@ def _to_column_mapping(
     spark_column: SparkColumn, qualified_name: QualifiedName
 ) -> _ColumnMapping | None:
     """
-    Convert a Spark catalog column into a domain ``Column`` and its partition flag.
+    Convert a Spark catalog column into an ``ObservedColumn`` and its partition flag.
 
     Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``),
     the same shape information_schema gives the warehouse backend, so both

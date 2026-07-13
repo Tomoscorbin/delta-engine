@@ -468,10 +468,11 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     assert before.foreign_keys == after.foreign_keys
 
     from delta_engine.domain.model import ObservedTable
+    from tests.builders import as_observed_columns
 
     observed = ObservedTable(
         qualified_name=before.qualified_name,
-        columns=before.columns,
+        columns=as_observed_columns(before.columns),
         foreign_keys=before.foreign_keys,
     )
     diff = diff_table(after, observed)

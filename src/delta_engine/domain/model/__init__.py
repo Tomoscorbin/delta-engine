@@ -1,4 +1,4 @@
-from delta_engine.domain.model.column import Column
+from delta_engine.domain.model.column import Column, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -31,7 +31,6 @@ from delta_engine.domain.model.table import (
     DesiredTable,
     ObservedTable,
     TableAspect,
-    TableSnapshot,
 )
 
 __all__ = [
@@ -52,6 +51,7 @@ __all__ = [
     "Integer",
     "Long",
     "Map",
+    "ObservedColumn",
     "ObservedTable",
     "PrimaryKeyConstraint",
     "QualifiedName",
@@ -60,7 +60,6 @@ __all__ = [
     "Struct",
     "StructField",
     "TableAspect",
-    "TableSnapshot",
     "Timestamp",
     "TimestampNtz",
     "Variant",

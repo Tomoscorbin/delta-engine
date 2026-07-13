@@ -35,7 +35,7 @@ Run tests:
 uv run pytest
 uv run pytest tests/domain/plan/test_diff.py
 uv run pytest tests/domain/plan/test_diff.py::test_name
-uv run pytest -m "not local_e2e"
+uv run pytest -m "not local_e2e and not databricks_e2e"
 ```
 
 The first test run starts a local Spark session through the `spark` fixture in `tests/conftest.py` and can take 30-60 seconds.

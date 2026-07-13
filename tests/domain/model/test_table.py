@@ -7,67 +7,83 @@ from delta_engine.domain.model import (
     DesiredTable,
     ForeignKeyReference,
     Integer,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
     TableAspect,
-    TableSnapshot,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
 _COL = Column("id", Integer(), nullable=False)
+_OBSERVED_COL = ObservedColumn("id", Integer(), nullable=False)
+
+_EACH_TABLE_TYPE = pytest.mark.parametrize(
+    "table_type", [DesiredTable, ObservedTable], ids=["desired", "observed"]
+)
+_EACH_TABLE_AND_COLUMN_TYPE = pytest.mark.parametrize(
+    ("table_type", "column_type"),
+    [(DesiredTable, Column), (ObservedTable, ObservedColumn)],
+    ids=["desired", "observed"],
+)
 
 
-def test_fails_when_no_columns_defined():
+@_EACH_TABLE_TYPE
+def test_fails_when_no_columns_defined(table_type):
     # Given: a qualified table name and no columns
-    # When: constructing a table snapshot with an empty column list
+    # When: constructing a table with an empty column list
     # Then: validation fails because a table requires at least one column
     with pytest.raises(ValueError):
-        TableSnapshot(_QUALIFIED_NAME, ())
+        table_type(_QUALIFIED_NAME, ())
 
 
-def test_fails_when_column_names_duplicate():
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_fails_when_column_names_duplicate(table_type, column_type):
     # Given: two columns with the same lowercase name
-    cols = (Column("id", Integer()), Column("id", String()))
-    # When: constructing a table snapshot
+    cols = (column_type("id", Integer()), column_type("id", String()))
+    # When: constructing a table
     # Then: validation fails due to non-unique column identifiers
     with pytest.raises(ValueError):
-        TableSnapshot(_QUALIFIED_NAME, cols)
+        table_type(_QUALIFIED_NAME, cols)
 
 
-def test_fails_when_partition_references_undefined_column():
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_fails_when_partition_references_undefined_column(table_type, column_type):
     # Given: columns 'visit_date' and 'id'
-    cols = (Column("visit_date", Date()), Column("id", Integer()))
+    cols = (column_type("visit_date", Date()), column_type("id", Integer()))
     # When: declaring a partition on a column that is not defined
     # Then: validation fails because the partition column does not exist
     with pytest.raises(ValueError):
-        TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("date",))
+        table_type(_QUALIFIED_NAME, cols, partitioned_by=("date",))
 
 
-def test_fails_when_partition_column_name_is_not_lowercase():
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_fails_when_partition_column_name_is_not_lowercase(table_type, column_type):
     # Given: a column 'visit_date' and a partition spec naming it in upper case
-    cols = (Column("visit_date", Date()), Column("id", Integer()))
+    cols = (column_type("visit_date", Date()), column_type("id", Integer()))
 
-    # When: constructing the snapshot with a mixed-case partition reference
+    # When: constructing the table with a mixed-case partition reference
     # Then: validation fails — partition column names must be lowercase, consistent
     # with Column and QualifiedName which reject non-lowercase identifiers at construction
     with pytest.raises(ValueError, match="lowercase"):
-        TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
+        table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
 
 
-def test_fails_when_partition_columns_are_duplicated():
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_fails_when_partition_columns_are_duplicated(table_type, column_type):
     # Given: columns 'visit_date' and 'id'
-    cols = (Column("visit_date", Date()), Column("id", Integer()))
+    cols = (column_type("visit_date", Date()), column_type("id", Integer()))
     # When: the same partition column is listed twice (would emit malformed
     # PARTITIONED BY (visit_date, visit_date) DDL)
     # Then: validation fails rather than producing invalid SQL
     with pytest.raises(ValueError):
-        TableSnapshot(_QUALIFIED_NAME, cols, partitioned_by=("visit_date", "visit_date"))
+        table_type(_QUALIFIED_NAME, cols, partitioned_by=("visit_date", "visit_date"))
 
 
-def test_table_snapshot_primary_key_defaults_to_none():
+def test_desired_table_primary_key_defaults_to_none():
     # Given a DesiredTable constructed without primary_key
     table = DesiredTable(qualified_name=_QN, columns=(_COL,))
 
@@ -87,7 +103,7 @@ def test_primary_key_columns_returns_the_constraint_columns():
     # Given a table with a two-column primary key
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(Column("id", Integer()), Column("tenant_id", Integer())),
+        columns=(ObservedColumn("id", Integer()), ObservedColumn("tenant_id", Integer())),
         primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id"), constraint_name="t_pk"),
     )
 
@@ -95,7 +111,7 @@ def test_primary_key_columns_returns_the_constraint_columns():
     assert table.primary_key_columns == ("id", "tenant_id")
 
 
-def test_table_snapshot_rejects_pk_column_not_in_columns():
+def test_desired_table_rejects_pk_column_not_in_columns():
     # Given a primary_key naming a column that does not exist
     # Then construction raises ValueError
     with pytest.raises(ValueError, match="missing_col"):
@@ -112,7 +128,7 @@ def test_observed_table_has_primary_key_field():
     # Given an ObservedTable constructed with a primary key
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
@@ -151,7 +167,7 @@ def test_observed_table_allows_a_nullable_primary_key_column():
     # Given an ObservedTable read from a legacy catalog where a PK column is nullable
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(Column("id", Integer(), nullable=True),),
+        columns=(ObservedColumn("id", Integer(), nullable=True),),
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
@@ -160,7 +176,7 @@ def test_observed_table_allows_a_nullable_primary_key_column():
     assert table.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk")
 
 
-def test_table_snapshot_defaults_to_no_foreign_keys():
+def test_desired_table_defaults_to_no_foreign_keys():
     # Given a minimal table definition
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -171,7 +187,7 @@ def test_table_snapshot_defaults_to_no_foreign_keys():
     assert table.foreign_keys == ()
 
 
-def test_table_snapshot_stores_foreign_keys():
+def test_desired_table_stores_foreign_keys():
     # Given a foreign key referencing another table (name generated at the API layer)
     fk = ForeignKeyConstraint.generate(
         owner_table_name="orders",
@@ -197,7 +213,7 @@ def test_table_snapshot_stores_foreign_keys():
     assert table.foreign_keys[0].constraint_name == "orders_customer_id_fk"
 
 
-def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
+def test_desired_table_rejects_fk_referencing_unknown_local_column():
     # Given a FK whose local column is not declared (name provided so construction succeeds)
     fk = ForeignKeyConstraint.generate(
         owner_table_name="orders",
@@ -215,7 +231,7 @@ def test_table_snapshot_rejects_fk_referencing_unknown_local_column():
         )
 
 
-def test_table_snapshot_rejects_foreign_keys_with_duplicate_derived_names():
+def test_desired_table_rejects_foreign_keys_with_duplicate_derived_names():
     # Given two FKs on the same local columns with distinct names (construction succeeds;
     # the DesiredTable rejects them because the same local-column set is incoherent)
     first = ForeignKeyConstraint(
@@ -359,7 +375,7 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
     # When building an ObservedTable with both
     observed = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("customer_id", Integer()),),
+        columns=(ObservedColumn("customer_id", Integer()),),
         foreign_keys=(fk_one, fk_two),
     )
 
@@ -370,7 +386,7 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
 # ---------- tags ----------
 
 
-def test_table_snapshot_defaults_to_no_tags():
+def test_desired_table_defaults_to_no_tags():
     # Given a minimal table definition with no tags declared
     table = DesiredTable(qualified_name=_QN, columns=(_COL,))
 
@@ -378,7 +394,7 @@ def test_table_snapshot_defaults_to_no_tags():
     assert dict(table.tags) == {}
 
 
-def test_table_snapshot_stores_tags():
+def test_desired_table_stores_tags():
     # Given a table declared with two tags
     table = DesiredTable(
         qualified_name=_QN,
@@ -390,7 +406,7 @@ def test_table_snapshot_stores_tags():
     assert dict(table.tags) == {"env": "prod", "domain": "sales"}
 
 
-def test_table_snapshot_preserves_tag_key_case():
+def test_desired_table_preserves_tag_key_case():
     # Given a tag key with mixed case (UC tag keys are case-sensitive)
     table = DesiredTable(
         qualified_name=_QN,
@@ -402,7 +418,7 @@ def test_table_snapshot_preserves_tag_key_case():
     assert "CostCentre" in dict(table.tags)
 
 
-def test_table_snapshot_rejects_blank_tag_key():
+def test_desired_table_rejects_blank_tag_key():
     # Given a tag whose key is blank (would emit a malformed SET TAGS ('') clause)
     # When / Then construction fails, naming the offending key as blank
     with pytest.raises(ValueError, match="blank"):
@@ -417,7 +433,7 @@ def test_observed_table_stores_tags():
     # Given an ObservedTable read from a catalog carrying a tag
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         tags={"env": "prod"},
     )
 
@@ -478,7 +494,7 @@ def test_observed_table_properties_carry_values_only():
     # Given an observed table — the catalog has values, never assertions
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         properties={"delta.enableChangeDataFeed": "true"},
     )
 
@@ -495,7 +511,7 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
     )
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "orders"),
-        columns=(Column("id", Integer()), Column("day", Date())),
+        columns=(ObservedColumn("id", Integer()), ObservedColumn("day", Date())),
         partitioned_by=("id", "day"),
     )
     assert desired.partitioned_by == ("id", "day")
@@ -517,7 +533,10 @@ def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
         qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
     )
     observed = ObservedTable(
-        qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
+        qualified_name=name,
+        columns=as_observed_columns(columns),
+        partitioned_by=("a",),
+        clustered_by=("b",),
     )
 
     assert five_keys.clustered_by == ("a", "b", "c", "d", "e")
@@ -529,43 +548,42 @@ def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
 # ---------- clustered_by ----------
 
 
-def test_table_snapshot_defaults_to_no_clustering():
-    # Given a snapshot built without clustering
-    table = TableSnapshot(_QUALIFIED_NAME, (Column("id", Integer()),))
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_table_defaults_to_no_clustering(table_type, column_type):
+    # Given a table built without clustering
+    table = table_type(_QUALIFIED_NAME, (column_type("id", Integer()),))
     # Then clustered_by is a stable empty tuple
     assert table.clustered_by == ()
 
 
-def test_table_snapshot_stores_clustering_columns():
-    # Given a snapshot clustered by an existing column
-    columns = (Column("id", Integer()), Column("region", String()))
-    table = TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("region",))
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_table_stores_clustering_columns(table_type, column_type):
+    # Given a table clustered by an existing column
+    columns = (column_type("id", Integer()), column_type("region", String()))
+    table = table_type(_QUALIFIED_NAME, columns, clustered_by=("region",))
     # Then it reads the clustering columns back
     assert table.clustered_by == ("region",)
 
 
-def test_table_snapshot_rejects_clustering_column_not_in_columns():
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_table_rejects_clustering_column_not_in_columns(table_type, column_type):
     # Given a clustering column that is not defined
     with pytest.raises(ValueError, match=r"[Cc]luster"):
-        TableSnapshot(_QUALIFIED_NAME, (Column("id", Integer()),), clustered_by=("region",))
+        table_type(_QUALIFIED_NAME, (column_type("id", Integer()),), clustered_by=("region",))
 
 
-def test_table_snapshot_rejects_non_lowercase_clustering_column():
-    columns = (Column("id", Integer()), Column("region", String()))
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_table_rejects_non_lowercase_clustering_column(table_type, column_type):
+    columns = (column_type("id", Integer()), column_type("region", String()))
     with pytest.raises(ValueError, match="lowercase"):
-        TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
+        table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
 
 
-def test_table_snapshot_rejects_duplicate_clustering_column():
-    columns = (Column("id", Integer()), Column("region", String()))
+@_EACH_TABLE_AND_COLUMN_TYPE
+def test_table_rejects_duplicate_clustering_column(table_type, column_type):
+    columns = (column_type("id", Integer()), column_type("region", String()))
     with pytest.raises(ValueError, match=r"[Cc]luster"):
-        TableSnapshot(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
-
-
-def test_observed_table_accepts_clustering():
-    columns = (Column("id", Integer()), Column("region", String()))
-    table = ObservedTable(_QUALIFIED_NAME, columns, clustered_by=("region",))
-    assert table.clustered_by == ("region",)
+        table_type(_QUALIFIED_NAME, columns, clustered_by=("region", "region"))
 
 
 # ---------- referencing_foreign_keys ----------
@@ -580,7 +598,7 @@ def test_observed_table_carries_referencing_foreign_keys() -> None:
     # When building an ObservedTable with referencing_foreign_keys
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "customers"),
-        columns=(Column("id", Integer()),),
+        columns=(ObservedColumn("id", Integer()),),
         referencing_foreign_keys=(reference,),
     )
     # Then the field is readable and returns the value object
