@@ -56,7 +56,7 @@ from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 logger = logging.getLogger(__name__)
 
 
-def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
     """
     Lower table specifications into domain tables for the phase chain.
 
@@ -64,6 +64,9 @@ def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, 
     qualified names, and returns the tables in deterministic qualified-name
     order so a sync's report and execution order never depend on the order
     tables were passed. Passing no tables yields an empty tuple.
+
+    Public so drivers such as the CLI can run the same duplicate check
+    before acquiring a backend connection; the rule lives only here.
 
     Raises:
         DuplicateTableDefinitionError: If two sources share a qualified name.
@@ -166,7 +169,7 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = _prepare_desired_tables(*tables)
+        desired = prepare_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = self._read(desired)

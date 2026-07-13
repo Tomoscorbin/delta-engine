@@ -7,7 +7,7 @@ import os
 import sys
 from types import ModuleType
 
-from delta_engine.application import DuplicateTableDefinitionError
+from delta_engine.application.engine import prepare_desired_tables
 from delta_engine.cli.errors import ConfigError
 from delta_engine.schema import DeltaTable
 
@@ -59,7 +59,9 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
     module = _import_module(reference.module_name)
     value = _attribute(module, reference)
     tables = _tables_from_attribute(value, reference)
-    _reject_duplicate_names(tables)
+    # The engine's own preparation step owns the duplicate-name rule; running
+    # it here surfaces the same typed error before a connection is opened.
+    prepare_desired_tables(*tables)
     return tables
 
 
@@ -127,13 +129,3 @@ def _tables_from_attribute(
                 "expected only DeltaTable declarations"
             )
     return items
-
-
-def _reject_duplicate_names(tables: tuple[DeltaTable, ...]) -> None:
-    """Raise the engine's typed duplicate-definition error before connecting."""
-    seen = set()
-    for table in tables:
-        qualified_name = table.to_desired_table().qualified_name
-        if qualified_name in seen:
-            raise DuplicateTableDefinitionError(qualified_name)
-        seen.add(qualified_name)
