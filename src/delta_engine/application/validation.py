@@ -58,13 +58,13 @@ class Rule(Protocol):
     """
     Interface for drift validation rules.
 
-    A rule judges whether a managed change is safe, given the declaration it
-    belongs to. It receives the whole ``TableDrift`` — the self-contained
-    diff — and reads what it needs: ``drift.managed_changes`` for the changes
-    to judge (unmanaged drift is a scope violation the validator reports
-    separately, never rule input), and ``drift.desired`` for declaration
-    context such as declared properties. Never called for a ``TableMissing``
-    diff.
+    A rule judges whether a managed difference is safe, given the declaration
+    it belongs to. It receives the whole ``TableDrift`` — the self-contained
+    diff — and reads what it needs: ``drift.managed_actions`` or
+    ``drift.managed_findings`` for the differences to judge (unmanaged drift
+    is a scope violation the validator reports separately, never rule input),
+    and ``drift.desired`` for declaration context such as declared
+    properties. Never called for a ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -88,7 +88,7 @@ class NonNullableColumnAdd:
                     f"Operation not allowed: cannot add non-nullable column '{change.column.name}'"
                 ),
             )
-            for change in drift.managed_changes
+            for change in drift.managed_actions
             if isinstance(change, AddColumn) and not change.column.nullable
         )
 
@@ -111,7 +111,7 @@ class NullabilityTighteningOnExistingColumn:
                     " nullable=False — the next sync sees no drift."
                 ),
             )
-            for change in drift.managed_changes
+            for change in drift.managed_actions
             if isinstance(change, SetColumnNullability) and not change.desired_nullable
         )
 
@@ -187,7 +187,7 @@ class NonWideningColumnTypeChange:
                     " TimestampNtz); recreate the table to make any other type change."
                 ),
             )
-            for change in drift.managed_changes
+            for change in drift.managed_actions
             if isinstance(change, AlterColumnType)
             and not _is_safe_widening(change.observed_type, change.desired_type)
         )
@@ -219,7 +219,7 @@ class TypeWideningRequiredForTypeChange:
                     f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
                 ),
             )
-            for change in drift.managed_changes
+            for change in drift.managed_actions
             if isinstance(change, AlterColumnType)
             and _is_safe_widening(change.observed_type, change.desired_type)
         )
@@ -237,13 +237,13 @@ class PartitioningChangeNotSupported:
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: partitioning cannot be changed in place."
-                    f" Current: {change.observed_partitioning}."
-                    f" Requested: {change.desired_partitioning}."
+                    f" Current: {finding.observed_partitioning}."
+                    f" Requested: {finding.desired_partitioning}."
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for change in drift.managed_changes
-            if isinstance(change, PartitioningChanged)
+            for finding in drift.managed_findings
+            if isinstance(finding, PartitioningChanged)
         )
 
 
@@ -265,7 +265,7 @@ class PropertyTransitionNotSupported:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every restricted-key transition that is not permitted."""
         failures: list[ValidationFailure] = []
-        for change in drift.managed_changes:
+        for change in drift.managed_actions:
             match change:
                 case SetProperty(
                     name=name, desired_value=desired_value, observed_value=str() as observed_value
@@ -315,22 +315,22 @@ class PropertyMustBeDeclared:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every registered key set on the table but absent from the declaration."""
         return tuple(
-            ValidationFailure(rule_name=self.name, message=self._message(change))
-            for change in drift.managed_changes
-            if isinstance(change, PropertyUndeclared)
+            ValidationFailure(rule_name=self.name, message=self._message(finding))
+            for finding in drift.managed_findings
+            if isinstance(finding, PropertyUndeclared)
         )
 
-    def _message(self, change: PropertyUndeclared) -> str:
-        if not self._removal_permitted(change.name, change.observed_value):
+    def _message(self, finding: PropertyUndeclared) -> str:
+        if not self._removal_permitted(finding.name, finding.observed_value):
             return (
-                f"Operation not allowed: {change.name} is set on the table"
-                f" (value '{change.observed_value}') but not declared; it cannot"
+                f"Operation not allowed: {finding.name} is set on the table"
+                f" (value '{finding.observed_value}') but not declared; it cannot"
                 " be unset — declare it to continue managing this table's"
                 " properties."
             )
         return (
-            f"Operation not allowed: {change.name} is set on the table"
-            f" (value '{change.observed_value}') but not declared. Declare it"
+            f"Operation not allowed: {finding.name} is set on the table"
+            f" (value '{finding.observed_value}') but not declared. Declare it"
             " to manage it, or declare it as None to remove it."
         )
 
@@ -357,7 +357,7 @@ class ColumnMappingRequiredForDrop:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a column drop when the declaration lacks column mapping."""
-        drops_a_column = any(isinstance(change, DropColumn) for change in drift.managed_changes)
+        drops_a_column = any(isinstance(change, DropColumn) for change in drift.managed_actions)
         if not drops_a_column:
             return ()
         if drift.desired.properties.get(Property.COLUMN_MAPPING_MODE) == "name":
@@ -385,14 +385,14 @@ class AmbiguousColumnRename:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot rename '{change.old_name}' to"
-                    f" '{change.new_name}' — both columns exist"
+                    f"Operation not allowed: cannot rename '{finding.old_name}' to"
+                    f" '{finding.new_name}' — both columns exist"
                     " on the table. If the old column should be dropped, remove the"
                     " renamed_from hint and drop it in its own sync."
                 ),
             )
-            for change in drift.managed_changes
-            if isinstance(change, ColumnRenameConflict)
+            for finding in drift.managed_findings
+            if isinstance(finding, ColumnRenameConflict)
         )
 
 
@@ -419,11 +419,11 @@ class PrimaryKeyReferencedByForeignKeys:
         """Flag every PK drop/change still referenced by a surviving foreign key."""
         dropped_here = {
             change.constraint.constraint_name
-            for change in drift.managed_changes
+            for change in drift.managed_actions
             if isinstance(change, DropForeignKey)
         }
         failures: list[ValidationFailure] = []
-        for change in drift.managed_changes:
+        for change in drift.managed_actions:
             if not isinstance(change, DropPrimaryKey):
                 continue
             blockers = tuple(
@@ -477,10 +477,10 @@ class UnmanagedAspectDrift:
     into executable work, so ``rules=()`` still cannot admit actions from an
     aspect the declaration does not manage.
 
-    Unlike the safety rules it reads ``drift.changes`` (unfiltered): its
-    subject is exactly the changes ``managed_changes`` excludes.
+    Unlike the safety rules it reads the unfiltered actions and findings:
+    its subject is exactly the differences the managed views exclude.
     dict.fromkeys deduplicates the aspects while preserving first-seen
-    order, so failure order follows change order deterministically.
+    order, so failure order follows diff order deterministically.
     """
 
     name: ClassVar[str] = "UnmanagedAspectDrift"
@@ -489,7 +489,9 @@ class UnmanagedAspectDrift:
         """Flag every drifted aspect the declaration does not manage."""
         managed_aspects = drift.desired.managed_aspects
         unmanaged_aspects = dict.fromkeys(
-            change.aspect for change in drift.changes if change.aspect not in managed_aspects
+            difference.aspect
+            for difference in (*drift.actions, *drift.findings)
+            if difference.aspect not in managed_aspects
         )
         return tuple(
             ValidationFailure(
@@ -555,9 +557,9 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
       supplied.
 
     Rules are safety policy over the drift the declaration *does* manage:
-    each reads ``drift.managed_changes``, so unmanaged drift produces exactly
-    one scope failure rather than also tripping safety rules for changes the
-    user never requested.
+    each reads ``drift.managed_actions`` or ``drift.managed_findings``, so
+    unmanaged drift produces exactly one scope failure rather than also
+    tripping safety rules for differences the user never requested.
     """
     match diff:
         case TableMissing() as missing:

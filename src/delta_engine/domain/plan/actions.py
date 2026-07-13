@@ -472,19 +472,19 @@ def _execution_order(action: Action) -> tuple[int, str]:
 
 @dataclass(frozen=True, slots=True)
 class ActionPlan:
-    """Validated executable actions held in deterministic execution order."""
+    """
+    Validated executable actions held in deterministic execution order.
+
+    A plan keeps its actions sorted by execution phase and then by subject
+    name, regardless of the order they are supplied in: ordering is an
+    invariant of the plan, not a step a caller has to remember.
+    """
 
     actions: tuple[Action, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject non-actions and establish deterministic execution order."""
-        actions = tuple(self.actions)
-        for action in actions:
-            if not isinstance(action, Action):
-                raise TypeError(
-                    f"ActionPlan accepts only Action instances; received {type(action).__name__}"
-                )
-        object.__setattr__(self, "actions", tuple(sorted(actions, key=_execution_order)))
+        """Sort the actions into execution order, preserving input order on ties."""
+        object.__setattr__(self, "actions", tuple(sorted(self.actions, key=_execution_order)))
 
     def __len__(self) -> int:
         return len(self.actions)

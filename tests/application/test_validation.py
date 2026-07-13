@@ -30,12 +30,13 @@ from delta_engine.domain.model import (
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
+    Action,
     AddColumn,
     AlterColumnType,
-    Change,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    Finding,
     SetColumnComment,
     SetColumnTag,
     SetTableComment,
@@ -87,13 +88,15 @@ def _observed_table(
 
 
 def _drift(
-    *changes: Change,
+    *differences: Action | Finding,
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
     desired: DesiredTable | None = None,
 ) -> TableDrift:
     if desired is None:
         desired = _desired_table(managed_aspects=managed_aspects)
-    return TableDrift(desired=desired, changes=tuple(changes))
+    actions = tuple(item for item in differences if isinstance(item, Action))
+    findings = tuple(item for item in differences if not isinstance(item, Action))
+    return TableDrift(desired=desired, actions=actions, findings=findings)
 
 
 def _validate(
@@ -958,7 +961,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     )
     drift = TableDrift(
         desired=desired,
-        changes=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
+        findings=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
     )
 
     result = validate_diff(drift)
@@ -974,7 +977,7 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
         properties={"delta.columnMapping.mode": "name"},
     )
     drift = TableDrift(
-        desired=desired, changes=(DropColumn(column=ObservedColumn("old", String())),)
+        desired=desired, actions=(DropColumn(column=ObservedColumn("old", String())),)
     )
 
     result = validate_diff(drift)
