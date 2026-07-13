@@ -380,8 +380,18 @@ exist, else a `TableDrift` holding executable `actions` and non-action
 complete desired/observed state needed by validation and reporting;
 `CreateTable` uses the table-existence aspect because it realizes a missing
 table's complete desired state rather than belonging to one schema dimension.
-Compiler-facing attributes remain read-only properties on the richer objects.
-There is no mirrored fact vocabulary and no lowering method.
+Every value is named once (`desired_*` / `observed_*` for transition state),
+and compilers and renderers read those names directly. There is no mirrored
+fact vocabulary and no lowering method.
+
+Naming differences by their remedies (`SetTableComment` rather than a
+separate "comment changed" fact) rests on one assumption: remedies are
+one-to-one. For every remedied difference this engine has exactly one
+operation that closes it, which is what lets a single vocabulary serve
+diffing, validation, reporting, and compilation. If an aspect ever admits
+alternative remedies — say, a type change resolvable by an in-place widen
+or by an add-and-backfill — the difference and its remedy stop being the
+same thing, and the vocabularies must separate again for that aspect.
 
 Both arms state the complete intended transition the same way: a
 `TableMissing` exposes its creation actions — CREATE TABLE plus tag and
