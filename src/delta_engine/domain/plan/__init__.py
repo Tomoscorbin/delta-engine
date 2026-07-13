@@ -23,8 +23,8 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
-    Change,
     ColumnRenameConflict,
+    Finding,
     PartitioningChanged,
     PropertyUndeclared,
     TableDiff,
@@ -40,12 +40,12 @@ __all__ = [
     "AddColumn",
     "AlterClustering",
     "AlterColumnType",
-    "Change",
     "ColumnRenameConflict",
     "CreateTable",
     "DropColumn",
     "DropForeignKey",
     "DropPrimaryKey",
+    "Finding",
     "PartitioningChanged",
     "PropertyUndeclared",
     "RenameColumn",

@@ -1,4 +1,17 @@
-"""Produce executable actions and non-action differences from table state."""
+"""
+Diff desired and observed table state into actions and findings.
+
+``diff_table`` states every difference separating the observed table from
+its declaration, deciding nothing about safety or scope. Differences come
+in two structural kinds:
+
+- Actions — remedied differences. Each carries the one executable
+  operation that closes its gap, plus the desired/observed state
+  validation and reporting need.
+- Findings — differences no action can close (an ambiguous rename, an
+  undeclared managed property, a partitioning change). They exist to be
+  judged; the default validation policy rejects each one.
+"""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -18,6 +31,7 @@ from delta_engine.domain.plan.actions import (
     AddColumn,
     AlterClustering,
     AlterColumnType,
+    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
@@ -78,7 +92,7 @@ class PartitioningChanged:
             )
 
 
-type Change = Action | ColumnRenameConflict | PropertyUndeclared | PartitioningChanged
+type Finding = ColumnRenameConflict | PropertyUndeclared | PartitioningChanged
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,19 +101,59 @@ class TableMissing:
 
     desired: DesiredTable
 
+    @property
+    def actions(self) -> tuple[Action, ...]:
+        """
+        Creation actions realizing the complete desired state.
+
+        CREATE TABLE covers columns, comment, properties, layout, and the
+        primary key; Unity Catalog tags and foreign keys are applied by
+        follow-up actions.
+        """
+        table_tag_actions = tuple(
+            SetTableTag(name=name, value=value) for name, value in self.desired.tags.items()
+        )
+        column_tag_actions = tuple(
+            SetColumnTag(column_name=column.name, name=name, value=value)
+            for column in self.desired.columns
+            for name, value in column.tags.items()
+        )
+        foreign_key_actions = tuple(
+            SetForeignKey(constraint=constraint) for constraint in self.desired.foreign_keys
+        )
+        return (
+            CreateTable(self.desired),
+            *table_tag_actions,
+            *column_tag_actions,
+            *foreign_key_actions,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TableDrift:
-    """Actions and other differences separating observed state from its declaration."""
+    """
+    Differences separating observed state from its declaration.
+
+    ``actions`` are remedied differences, each carrying the executable
+    operation that closes its gap. ``findings`` are differences no action
+    can close; they exist to be judged by validation.
+    """
 
     desired: DesiredTable
-    changes: tuple[Change, ...]
+    actions: tuple[Action, ...] = ()
+    findings: tuple[Finding, ...] = ()
 
     @property
-    def managed_changes(self) -> tuple[Change, ...]:
-        """Return changes whose aspect the declaration manages."""
+    def managed_actions(self) -> tuple[Action, ...]:
+        """Return actions whose aspect the declaration manages."""
         managed = self.desired.managed_aspects
-        return tuple(change for change in self.changes if change.aspect in managed)
+        return tuple(action for action in self.actions if action.aspect in managed)
+
+    @property
+    def managed_findings(self) -> tuple[Finding, ...]:
+        """Return findings whose aspect the declaration manages."""
+        managed = self.desired.managed_aspects
+        return tuple(finding for finding in self.findings if finding.aspect in managed)
 
     @property
     def executable_actions(self) -> tuple[Action, ...]:
@@ -113,23 +167,21 @@ class TableDrift:
         that the actions are safe; only ``plan_diff`` may construct a plan.
         """
         renamed_sources = {
-            action.old_name for action in self.changes if isinstance(action, RenameColumn)
+            action.old_name for action in self.actions if isinstance(action, RenameColumn)
         }
         actions: list[Action] = []
-        for change in self.changes:
-            if not isinstance(change, Action):
-                continue
-            if isinstance(change, DropPrimaryKey) and not renamed_sources.isdisjoint(
-                change.primary_key.columns
+        for action in self.actions:
+            if isinstance(action, DropPrimaryKey) and not renamed_sources.isdisjoint(
+                action.primary_key.columns
             ):
                 continue
-            if isinstance(change, DropForeignKey) and _foreign_key_uses_renamed_column(
-                change.constraint,
+            if isinstance(action, DropForeignKey) and _foreign_key_uses_renamed_column(
+                action.constraint,
                 renamed_sources=renamed_sources,
                 table_name=self.desired.qualified_name,
             ):
                 continue
-            actions.append(change)
+            actions.append(action)
         return tuple(actions)
 
 
@@ -153,7 +205,7 @@ def _foreign_key_uses_renamed_column(
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
-    Compute actions and non-action differences separating observed from desired state.
+    Compute the actions and findings separating observed from desired state.
 
     A rename pre-pass projects observed columns and layout names through
     ``renamed_from`` hints so residual drift is expressed under the declared
@@ -165,20 +217,24 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         return TableMissing(desired=desired)
 
     rename_projection = _apply_renames(desired, observed)
-    changes: tuple[Change, ...] = (
-        *rename_projection.changes,
+    actions: tuple[Action, ...] = (
+        *rename_projection.renames,
         *_diff_column_structure(desired.columns, rename_projection.columns),
         *_diff_column_comments(desired.columns, rename_projection.columns),
         *_diff_column_tags(desired.columns, rename_projection.columns),
         *_diff_table_comment(desired, observed),
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
-        *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
         *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
         *_diff_primary_key(desired, observed),
         *_diff_foreign_keys(desired, observed),
     )
-    return TableDrift(desired=desired, changes=changes)
+    findings: tuple[Finding, ...] = (
+        *rename_projection.conflicts,
+        *_diff_undeclared_properties(desired, observed),
+        *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
+    )
+    return TableDrift(desired=desired, actions=actions, findings=findings)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +244,8 @@ class _RenameProjection:
     columns: tuple[ObservedColumn, ...]
     partitioned_by: tuple[str, ...]
     clustered_by: tuple[str, ...]
-    changes: tuple[RenameColumn | ColumnRenameConflict, ...]
+    renames: tuple[RenameColumn, ...]
+    conflicts: tuple[ColumnRenameConflict, ...]
 
 
 def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameProjection:
@@ -202,27 +259,29 @@ def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenamePro
     relabeled = observed.columns
     applied_renames: dict[str, str] = {}
     conflicted_sources: set[str] = set()
-    changes: list[RenameColumn | ColumnRenameConflict] = []
+    rename_actions: list[RenameColumn] = []
+    conflicts: list[ColumnRenameConflict] = []
     for old_name, new_name in renames.items():
         if old_name not in observed_names:
             continue
         if new_name in observed_names:
             conflicted_sources.add(old_name)
-            changes.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
+            conflicts.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
             continue
         relabeled = tuple(
             replace(column, name=new_name) if column.name == old_name else column
             for column in relabeled
         )
         applied_renames[old_name] = new_name
-        changes.append(RenameColumn(old_name=old_name, new_name=new_name))
+        rename_actions.append(RenameColumn(old_name=old_name, new_name=new_name))
 
     relabeled = tuple(column for column in relabeled if column.name not in conflicted_sources)
     return _RenameProjection(
         columns=relabeled,
         partitioned_by=_relabel_names(observed.partitioned_by, applied_renames),
         clustered_by=_relabel_names(observed.clustered_by, applied_renames),
-        changes=tuple(changes),
+        renames=tuple(rename_actions),
+        conflicts=tuple(conflicts),
     )
 
 
@@ -325,30 +384,40 @@ def _diff_table_comment(desired: DesiredTable, observed: ObservedTable) -> list[
 
 def _diff_properties(
     desired: DesiredTable, observed: ObservedTable
-) -> list[SetProperty | UnsetProperty | PropertyUndeclared]:
-    """Return exact-declaration property actions and undeclared-property differences."""
+) -> list[SetProperty | UnsetProperty]:
+    """Return exact-declaration property actions for declared keys."""
     if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 
-    changes: list[SetProperty | UnsetProperty | PropertyUndeclared] = []
+    actions: list[SetProperty | UnsetProperty] = []
     for name, declared_value in desired.properties.items():
         observed_value = observed.properties.get(name)
         if declared_value is None:
             if observed_value is not None:
-                changes.append(UnsetProperty(name=name, observed_value=observed_value))
+                actions.append(UnsetProperty(name=name, observed_value=observed_value))
         elif observed_value != declared_value:
-            changes.append(
+            actions.append(
                 SetProperty(
                     name=name,
                     desired_value=declared_value,
                     observed_value=observed_value,
                 )
             )
+    return actions
 
-    for name, observed_value in observed.properties.items():
-        if name not in desired.properties:
-            changes.append(PropertyUndeclared(name=name, observed_value=observed_value))
-    return changes
+
+def _diff_undeclared_properties(
+    desired: DesiredTable, observed: ObservedTable
+) -> list[PropertyUndeclared]:
+    """Return findings for managed catalog keys the declaration omits."""
+    if TableAspect.PROPERTIES not in desired.managed_aspects:
+        return []
+
+    return [
+        PropertyUndeclared(name=name, observed_value=observed_value)
+        for name, observed_value in observed.properties.items()
+        if name not in desired.properties
+    ]
 
 
 def _diff_table_tags(
