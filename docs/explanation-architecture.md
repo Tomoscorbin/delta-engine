@@ -300,6 +300,7 @@ skipped during execution. The engine still processes other tables.
 
 | Package                    | Responsibility                                                                      | Examples                                                                                 |
 | -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `delta_engine.cli`         | Read-only command composition and rendering                                          | `plan`, declaration loading, unified-auth SQL connection                                 |
 | `delta_engine.schema`      | User-facing declaration import surface                                              | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
@@ -308,6 +309,7 @@ skipped during execution. The engine still processes other tables.
 
 ```mermaid
 flowchart TB
+    CLI[delta_engine.cli<br/>read-only plan command]
     Public[delta_engine.__init__<br/>runtime exports]
     Schema[delta_engine.schema<br/>public declarations]
     Databricks[delta_engine.databricks<br/>public Databricks helpers]
@@ -316,6 +318,9 @@ flowchart TB
     Domain[domain<br/>snapshots, diffs, actions]
     Adapters[adapters<br/>Databricks reader, executor, SQL compiler]
 
+    CLI --> Schema
+    CLI --> Databricks
+    CLI --> App
     Public --> App
     Schema --> API
     Schema --> App
@@ -333,6 +338,19 @@ depends inward on the application ports and domain vocabulary. The top-level
 `delta_engine` package eagerly exposes backend-neutral runtime types such as
 `Engine`, `SyncReport`, and `SyncFailedError`, so `import delta_engine` does not
 require PySpark.
+
+`delta_engine.cli` sits above the hexagon as a driving adapter: a thin Typer
+layer (the `cli` extra) that loads one explicit declaration collection, opens
+one warehouse connection through Databricks unified authentication, and calls
+`Engine.sync(..., dry_run=True)`. Its connection module validates warehouse
+selection, delegates workspace and credential resolution to the SDK, derives
+the connector HTTP path, and owns the connection lifecycle. Authentication
+policy stays in the invoking environment. Catalog reads and SQL compilation
+remain in the warehouse adapter. Exact planned-SQL text rendering is
+CLI-private; the application layer exposes the report data, diff renderer, and
+report renderer without taking on command-specific presentation policy. The
+CLI contains no apply orchestration or planning and validation policy of its
+own.
 
 `delta_engine.schema` and `delta_engine.databricks` are the public import paths
 for users. Their implementations still live in `delta_engine.api` and
@@ -688,10 +706,13 @@ dependency cost.
 | Change FK ordering or blocking | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                                                               |
 | Change report output           | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                                                                      |
 | Change Databricks SQL          | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                                                               |
+| Change CLI commands or output  | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                                                             |
 
 ## Architectural rules
 
-- Keep PySpark and Databricks imports inside `delta_engine.adapters`.
+- Keep PySpark and Databricks backend behaviour inside `delta_engine.adapters`.
+  The CLI connection-composition module may import the Databricks SDK and SQL
+  connector solely for authentication and connection lifecycle.
 - Keep the domain backend-free, immutable, and deterministic.
 - Make immutability real, not conventional: frozen dataclasses copy their
   collection fields in `__post_init__` — sequences into tuples, mappings into

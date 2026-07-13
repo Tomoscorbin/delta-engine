@@ -16,6 +16,7 @@ Main source layout:
 - `src/delta_engine/api`: implementation of public declaration objects.
 - `src/delta_engine/schema.py`: public schema declaration import surface.
 - `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
+- `src/delta_engine/cli`: read-only `plan` command over the warehouse backend; requires the `cli` extra.
 - `tests`: unit, integration, adapter, and end-to-end tests.
 - `docs`: Sphinx/MyST documentation.
 
@@ -105,15 +106,18 @@ Rules:
 - `adapters` own backend integration, SQL compilation, Spark/Databricks parsing, identifier quoting, and backend exception translation.
 - `api` owns public declaration implementation and lowers declarations into domain snapshots.
 - `schema.py` and `databricks.py` are user-facing facades; keep them thin.
+- `cli.connection` may import the Databricks SDK and SQL connector only to
+  resolve unified authentication and own a connection; backend reads and
+  execution stay in adapters.
 - PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
 
 Expected dependency direction:
 
 ```text
-databricks | schema | adapters | api -> application -> domain
+cli -> databricks | schema | adapters | api -> application -> domain
 ```
 
-A separate import-linter contract forbids `delta` and `pyspark` imports from `schema`, `api`, `application`, and `domain`.
+Two more import-linter contracts forbid `delta` and `pyspark` imports: one covering `schema`, `api`, `application`, and `domain`; another covering `cli`, with a carve-out for the one legitimate edge (the lazy Spark facade import). A further contract confines `typer`/`click`/`rich` imports to `cli`.
 
 ## Sync lifecycle
 
@@ -178,6 +182,7 @@ Foreign-key declarations reference the target `DeltaTable` object, or `Self`, ra
 | Report/output formatting             | `src/delta_engine/application/report.py` and `src/delta_engine/application/rendering.py` |
 | Databricks SQL generation            | `src/delta_engine/adapters/databricks/sql`                                               |
 | Public Databricks helper             | `src/delta_engine/databricks.py`                                                         |
+| CLI commands, output, exit codes     | `src/delta_engine/cli`                                                                   |
 | Documentation                        | `docs`                                                                                   |
 
 Before changing architecture, action planning, validation, adapters, or public behaviour, read the relevant docs instead of guessing:

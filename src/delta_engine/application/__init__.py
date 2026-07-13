@@ -8,7 +8,7 @@ public so callers can annotate and inspect the objects a `SyncReport` yields.
 """
 
 from delta_engine.application.engine import Engine
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -21,6 +21,7 @@ from delta_engine.application.rendering import render_diff, render_report
 from delta_engine.application.report import SyncReport, TableRunReport, TableRunStatus
 
 __all__ = [
+    "DuplicateTableDefinitionError",
     "Engine",
     "ExecutionFailure",
     "Failure",

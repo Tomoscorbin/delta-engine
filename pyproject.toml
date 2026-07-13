@@ -33,12 +33,16 @@ dependencies = []
 [project.optional-dependencies]
 spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 sql = ["databricks-sql-connector>=4.0.0"]
+cli = ["typer>=0.12", "databricks-sdk>=0.70.0", "databricks-sql-connector>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
 Repository = "https://github.com/Tomoscorbin/delta-engine"
 Documentation = "https://tomoscorbin.github.io/delta-engine/"
 Issues = "https://github.com/Tomoscorbin/delta-engine/issues"
+
+[project.scripts]
+delta-engine = "delta_engine.cli:main"
 
 [dependency-groups]
 dev = [
@@ -54,6 +58,10 @@ dev = [
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
   "databricks-sdk>=0.70.0",
+  "typer>=0.12",
+  # tests/test_packaging.py imports it directly; do not rely on pytest's
+  # transitive dependency.
+  "packaging>=24.0",
 ]
 docs = [
   "sphinx>=8.0",
@@ -200,7 +208,7 @@ id = "hexagonal-layers"
 name = "Hexagonal package layers"
 type = "layers"
 containers = ["delta_engine"]
-layers = ["databricks | schema | adapters | api", "application", "domain"]
+layers = ["cli", "databricks | schema | adapters | api", "application", "domain"]
 exhaustive = true
 ignore_imports = [
   # Public Databricks facade; implementation remains in adapters.
@@ -226,6 +234,24 @@ source_modules = [
 forbidden_modules = ["delta", "pyspark"]
 
 [[tool.importlinter.contracts]]
+id = "cli-stays-pyspark-free"
+name = "CLI stays PySpark-free"
+type = "forbidden"
+source_modules = ["delta_engine.cli"]
+forbidden_modules = ["delta", "pyspark"]
+ignore_imports = [
+  # The facade lazily reaches the Spark backend at runtime; the CLI itself
+  # must not. Also ignore the facade's TYPE_CHECKING-only SparkSession import
+  # (never executes; it exists only for build_spark_engine's type hint, but
+  # grimp's static analysis cannot tell that from a real import). Together
+  # these exempt exactly the facade's two static edges to Spark, keeping
+  # indirect-import checking on for every other path (e.g. a future direct
+  # cli -> adapters.databricks.spark import).
+  "delta_engine.databricks -> delta_engine.adapters.databricks.spark.factory",
+  "delta_engine.databricks -> pyspark",
+]
+
+[[tool.importlinter.contracts]]
 id = "shared-sql-core-is-backend-free"
 name = "Shared SQL core stays PySpark-free"
 type = "forbidden"
@@ -245,6 +271,20 @@ name = "Warehouse backend stays PySpark-free"
 type = "forbidden"
 source_modules = ["delta_engine.adapters.databricks.warehouse"]
 forbidden_modules = ["delta", "pyspark", "py4j"]
+
+[[tool.importlinter.contracts]]
+id = "cli-framework-stays-in-cli"
+name = "CLI framework imports stay in the CLI"
+type = "forbidden"
+source_modules = [
+  "delta_engine.schema",
+  "delta_engine.api",
+  "delta_engine.application",
+  "delta_engine.domain",
+  "delta_engine.adapters",
+  "delta_engine.databricks",
+]
+forbidden_modules = ["typer", "click", "rich"]
 
 
 # -------------------- MyPy --------------------

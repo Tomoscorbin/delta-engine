@@ -7,6 +7,7 @@ def test_public_api_exposes_the_intended_names():
     # Given the application package's declared public surface
     # Then the runtime names re-exported by delta_engine are importable here
     from delta_engine.application import (
+        DuplicateTableDefinitionError,
         Engine,
         ExecutionFailure,
         Failure,
@@ -22,7 +23,10 @@ def test_public_api_exposes_the_intended_names():
         render_report,
     )
     from delta_engine.application.engine import Engine as EngineImpl
-    from delta_engine.application.errors import SyncFailedError as SyncFailedErrorImpl
+    from delta_engine.application.errors import (
+        DuplicateTableDefinitionError as DuplicateTableDefinitionErrorImpl,
+        SyncFailedError as SyncFailedErrorImpl,
+    )
     from delta_engine.application.failures import (
         ExecutionFailure as ExecutionFailureImpl,
         Failure as FailureImpl,
@@ -42,6 +46,7 @@ def test_public_api_exposes_the_intended_names():
     )
 
     assert set(application.__all__) == {
+        "DuplicateTableDefinitionError",
         "Engine",
         "ExecutionFailure",
         "Failure",
@@ -57,6 +62,7 @@ def test_public_api_exposes_the_intended_names():
         "render_report",
     }
     # And each name resolves to the real type (single identity, not a shadow copy)
+    assert DuplicateTableDefinitionError is DuplicateTableDefinitionErrorImpl
     assert Engine is EngineImpl
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
@@ -70,3 +76,5 @@ def test_public_api_exposes_the_intended_names():
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
     assert render_report is render_report_impl
+
+    assert not hasattr(application, "render_planned_sql")

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -25,6 +25,14 @@ from delta_engine.domain.model.table import DesiredTable
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
+
+
+def test_duplicate_table_definition_error_is_a_value_error_with_the_name():
+    error = DuplicateTableDefinitionError(_QN)
+
+    assert isinstance(error, ValueError)
+    assert error.qualified_name == _QN
+    assert str(error) == "Duplicate table definition: cat.sch.tbl"
 
 
 def _table_report(

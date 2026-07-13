@@ -63,6 +63,27 @@ This path requires Unity Catalog: every read runs through
 `information_schema`, which a catalog such as `hive_metastore` does not
 expose (see [limitations](reference-limitations.md)).
 
+## Installing the CLI
+
+The `cli` extra adds the read-only `delta-engine plan` command on top of the
+SQL warehouse backend:
+
+```bash
+pip install "delta-engine[cli]"
+```
+
+The command builds a plan for one explicit declaration collection against the
+live catalog, prints its semantic diff, report, and planned SQL, and never
+executes the planned SQL. The CLI extra contains only Typer, `databricks-sdk`, and
+`databricks-sql-connector`; the base package remains dependency-free.
+
+Configure `DATABRICKS_SQL_WAREHOUSE_ID`, then configure the Databricks SDK's
+standard unified authentication through environment variables or a profile.
+The CLI adds no connection flags and does not choose an authentication method.
+See the [CLI reference](reference-cli.md), or the
+[GitHub Actions OIDC example](how-to-gate-changes-in-ci.md) for a read-only CI
+deployment.
+
 ## Verify
 
 ```python

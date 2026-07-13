@@ -33,6 +33,12 @@ or cluster. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
 for both extras and their requirements.
 
+Install `delta-engine[cli]` to run
+`delta-engine plan MODULE:ATTRIBUTE` through any standard Databricks
+unified-auth configuration. The CLI always shows the semantic diff, report,
+and planned SQL and never applies the generated plan. See the
+[CLI reference](https://tomoscorbin.github.io/delta-engine/reference-cli.html).
+
 ## Quickstart
 
 ```python
@@ -86,11 +92,12 @@ for the model, or jump to what you need:
 - [Configure a table](https://tomoscorbin.github.io/delta-engine/how-to-configure-table.html) — properties, tags, comments, keys, and partitioning
 - [Deploy metadata only](https://tomoscorbin.github.io/delta-engine/how-to-deploy-metadata-only.html) — roll out governance metadata with no schema change
 - [Preview changes with a dry run](https://tomoscorbin.github.io/delta-engine/how-to-preview-changes.html)
-- [Gate schema changes in CI](https://tomoscorbin.github.io/delta-engine/how-to-gate-changes-in-ci.html) — fail a pull request when declarations and the catalog disagree
+- [Gate schema changes in CI](https://tomoscorbin.github.io/delta-engine/how-to-gate-changes-in-ci.html) — report planned changes and fail unreadable or unsafe plans
 - [Handle sync failures](https://tomoscorbin.github.io/delta-engine/how-to-handle-sync-failures.html) — inspect `SyncReport` and act on each status
 
 **Reference**
 
+- [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the read-only plan command, connection contract, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation

@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 import logging
 
 from delta_engine.application.dependency_resolution import blocking_failures, resolve
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import Failure
 from delta_engine.application.ports import (
     CatalogState,
@@ -56,7 +56,7 @@ from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 logger = logging.getLogger(__name__)
 
 
-def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
     """
     Lower table specifications into domain tables for the phase chain.
 
@@ -65,8 +65,11 @@ def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, 
     order so a sync's report and execution order never depend on the order
     tables were passed. Passing no tables yields an empty tuple.
 
+    Public so drivers such as the CLI can run the same duplicate check
+    before acquiring a backend connection; the rule lives only here.
+
     Raises:
-        ValueError: If two sources share a qualified name.
+        DuplicateTableDefinitionError: If two sources share a qualified name.
 
     """
     desired_by_name: dict[str, DesiredTable] = {}
@@ -74,7 +77,7 @@ def _prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, 
         desired = source.to_desired_table()
         key = str(desired.qualified_name)
         if key in desired_by_name:
-            raise ValueError(f"Duplicate table definition: {desired.qualified_name}")
+            raise DuplicateTableDefinitionError(desired.qualified_name)
         desired_by_name[key] = desired
     return tuple(desired_by_name[key] for key in sorted(desired_by_name))
 
@@ -144,7 +147,8 @@ class Engine:
 
         Args:
             *tables: The table specifications to synchronize. Duplicate
-                qualified names raise ``ValueError`` before any phase runs.
+                qualified names raise ``DuplicateTableDefinitionError`` before
+                any phase runs.
             dry_run: When True, run read → diff → validate → plan → resolve
                 but skip execution (zero catalog mutations). Every run's
                 ``execution`` stays ``None`` while its ``plan`` still records
@@ -156,6 +160,8 @@ class Engine:
             The aggregate :class:`SyncReport` for the run.
 
         Raises:
+            DuplicateTableDefinitionError: If two table specifications have
+                the same qualified name. No phase has run when this is raised.
             SyncFailedError: On a real run (``dry_run=False``), if any table
                 fails to read, validate, resolve foreign keys, or execute. The
                 report is available on the exception's ``report`` attribute. A
@@ -163,7 +169,7 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = _prepare_desired_tables(*tables)
+        desired = prepare_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = self._read(desired)

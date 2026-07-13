@@ -3,112 +3,140 @@ tags:
   - how-to
 ---
 
-# How to gate schema changes in CI
+# How to report schema plans in CI
 
-Run a dry run against the live catalog when a pull request opens, fail the job
-when the declarations and the catalog disagree, and surface the exact changes —
-including the SQL that would run — in the job output. A dry run makes no catalog
-changes and never raises, so the whole result is available as data for the gate
-to act on.
+Run `delta-engine plan` when a trusted same-repository pull request opens. The
+command reads the live Unity Catalog state, prints the target, semantic diff,
+sync report, and exact planned SQL without executing the planned DDL.
 
-## The gate
+Pending valid changes exit successfully. Catalog-read, validation, connection,
+and configuration failures exit unsuccessfully, so one command can act as the
+PR check without making an intentional schema change look like a broken build.
 
-```python
-import json
-import sys
+## Prepare one declaration collection
 
-from delta_engine.databricks import build_spark_engine
-
-from myproject.tables import all_tables  # your DeltaTable declarations
-
-report = build_spark_engine(spark).sync(*all_tables, dry_run=True)
-
-print(json.dumps(report.to_dict(), indent=2))
-
-if report.has_failures or report.has_changes:
-    sys.exit(1)
-```
-
-The two booleans state different facts:
-
-- `report.has_failures` — a table could not be read, failed validation, or was
-  blocked by a foreign-key dependency. Its drift was **not** planned.
-- `report.has_changes` — at least one table has a validated, planned change
-  waiting to apply.
-
-A green job means the catalog already matches the declarations. Fail on
-`has_failures` to catch declarations that cannot apply; fail on `has_changes` to
-require that changes are reviewed and applied deliberately rather than drifting
-in.
-
-## The warehouse variant
-
-The example above needs a live Spark session, which usually means a cluster
-sitting around for the job. Most CI runners have neither. Open a
-`databricks.sql` connection to a SQL warehouse instead, and the same dry run
-runs from a plain Python job — no Spark session or cluster required:
+Expose the tables for the workflow as one non-empty ordered sequence:
 
 ```python
-import os
+# myproject/tables.py
+from delta_engine.schema import Column, DeltaTable, Integer
 
-from databricks import sql
+orders = DeltaTable(
+    "production",
+    "silver",
+    "orders",
+    columns=(Column("id", Integer(), nullable=False),),
+)
 
-from delta_engine.databricks import build_sql_engine
-
-from myproject.tables import all_tables  # your DeltaTable declarations
-
-with sql.connect(
-    server_hostname=os.environ["DATABRICKS_SERVER_HOSTNAME"],
-    http_path=os.environ["DATABRICKS_HTTP_PATH"],
-    access_token=os.environ["DATABRICKS_TOKEN"],
-) as connection:
-    engine = build_sql_engine(connection)
-    report = engine.sync(*all_tables, dry_run=True)
+all_tables = [orders]
 ```
 
-`report` is the same `SyncReport` either way: the `has_failures`/`has_changes`
-gate above, the SQL preview below, and failure discrimination all apply
-unchanged. The warehouse backend compiles the same statements the Spark
-backend does, so a gate written against one works against the other
-untouched. This path needs the `delta-engine[sql]` extra
-([installation](installation.md)) and Unity Catalog
-([limitations](reference-limitations.md)).
+The command takes the collection's exact `MODULE:ATTRIBUTE` reference:
 
-## Show the SQL that would run
-
-`report.planned_sql_statements` maps each table's dotted name to the exact statements a
-real sync would execute — full text, in execution order, untruncated:
-
-```python
-for name, statements in report.planned_sql_statements.items():
-    print(f"-- {name}")
-    for statement in statements:
-        print(statement)
+```bash
+pip install "delta-engine[cli]"
+delta-engine plan myproject.tables:all_tables
 ```
 
-The same statements appear per table in `report.to_dict()`, so a single JSON
-payload carries the status, the planned actions, and the DDL together.
+The CLI accepts one reference only. A single table, empty or unordered
+collection, mixed sequence, and duplicate qualified table names fail before a
+connection opens. See the [CLI reference](reference-cli.md) for the complete
+contract.
 
-## Discriminate failures by type
+## Configure GitHub OIDC for this workflow
 
-The concrete failure types are importable, so a gate can treat failure classes
-differently — for example tolerating a flaky read while hard-failing unsafe
-drift:
+Create one Databricks service principal for plans and grant only the warehouse
+and catalog permissions needed to read the declared tables' metadata. Do not
+grant schema-changing privileges.
 
-```python
-from delta_engine import ReadFailure, ValidationFailure
+Configure Databricks workload identity federation for the repository and pull
+request subjects you trust. The GitHub job needs `permissions: id-token: write`
+so GitHub supplies its OIDC request URL and token. Store these non-secret target
+values as repository variables:
 
-for table_report in report:
-    for failure in table_report.failures:
-        if isinstance(failure, ValidationFailure):
-            sys.exit(1)  # never merge an unsafe change
-        if isinstance(failure, ReadFailure):
-            print(f"transient read failure on {table_report.qualified_name}")
-```
+- `DATABRICKS_HOST`
+- `DATABRICKS_PLAN_CLIENT_ID`
+- `DATABRICKS_SQL_WAREHOUSE_ID`
 
-## Render the report yourself
+The workflow selects GitHub OIDC through the Databricks SDK's standard
+`DATABRICKS_AUTH_TYPE` setting. The CLI itself has no GitHub-specific
+authentication branch; it delegates credential resolution to the SDK.
 
-delta-engine deliberately ships no PR-comment or markdown renderer. `to_dict()`
-is stable, JSON-serialisable data (see
-[the run report schema](reference-run-report.md)); formatting it into a PR
-comment, a Slack message, or a log line is your pipeline's job.
+Fork pull requests execute code controlled by another repository. Skip the
+live plan for forks so that code never receives the federated catalog identity;
+run the project's ordinary offline lint and test jobs for those PRs instead.
+
+## Add the GitHub Actions workflow
+
+This complete workflow has one read-only plan job, no apply path, and no
+write-capable identity:
+
+````yaml
+name: schema-plan
+
+on:
+  pull_request:
+
+jobs:
+  plan:
+    # Do not give fork-controlled code the live catalog identity.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_PLAN_CLIENT_ID }}
+      DATABRICKS_AUTH_TYPE: github-oidc
+      DATABRICKS_SQL_WAREHOUSE_ID: ${{ vars.DATABRICKS_SQL_WAREHOUSE_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install "delta-engine[cli]"
+      - name: Plan schemas
+        shell: bash
+        run: |
+          set +e
+          delta-engine plan myproject.tables:all_tables > plan-report.txt
+          status=$?
+          set -e
+
+          {
+            echo '## Delta Engine plan'
+            echo
+            echo '```text'
+            cat plan-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat plan-report.txt
+          exit "$status"
+````
+
+The command's complete report is stdout, so the step stores it before writing
+the fenced summary and replaying it to the job log. Imported-code output, logs,
+configuration errors, and tracebacks remain on stderr and therefore go directly
+to the log. The original exit status is preserved after the summary is written.
+
+## Interpret the result
+
+| Exit code | Result                                                                       |
+| --------- | ---------------------------------------------------------------------------- |
+| 0         | The live plan completed, with or without pending changes                     |
+| 1         | Configuration, authentication, catalog reading, or validation failed         |
+| 2         | The command line was malformed, such as a missing argument or removed option |
+
+Review the `DIFF` section for semantic intent and `PLANNED SQL` for the exact
+DDL a write-capable Python sync would compile. A `VALIDATION_FAILED` or
+`READ_FAILED` row is a failed check and includes detail in the report.
+
+`delta-engine plan` always calls the engine with `dry_run=True`; there is no
+apply command or flag to turn the generated plan into a write. Declaration
+modules are ordinary Python, which is why the workflow uses trusted code and a
+read-only identity. Applying declarations remains a separate Python API
+workflow with its own explicit connection and permissions.

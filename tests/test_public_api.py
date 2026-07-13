@@ -11,6 +11,7 @@ import pytest
 import delta_engine
 
 _EAGER = {
+    "DuplicateTableDefinitionError",
     "Engine",
     "SyncReport",
     "TableRunReport",
@@ -31,6 +32,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     # Given the curated root namespace
     # Then every pyspark-free name resolves to the same object as its source module
     from delta_engine import (
+        DuplicateTableDefinitionError,
         Engine,
         ExecutionFailure,
         Failure,
@@ -46,6 +48,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         render_report,
     )
     from delta_engine.application import (
+        DuplicateTableDefinitionError as DuplicateTableDefinitionErrorImpl,
         Engine as EngineImpl,
         ExecutionFailure as ExecutionFailureImpl,
         Failure as FailureImpl,
@@ -61,6 +64,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         render_report as render_report_impl,
     )
 
+    assert DuplicateTableDefinitionError is DuplicateTableDefinitionErrorImpl
     assert Engine is EngineImpl
     assert Failure is FailureImpl
     assert FailurePhase is FailurePhaseImpl
@@ -74,6 +78,10 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
     assert render_report is render_report_impl
+
+
+def test_planned_sql_renderer_is_not_exposed_from_the_root():
+    assert not hasattr(delta_engine, "render_planned_sql")
 
 
 def test_all_advertises_eager_and_lazy_names():

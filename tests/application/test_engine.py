@@ -2,7 +2,7 @@ from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.application.engine import Engine
-from delta_engine.application.errors import SyncFailedError
+from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import (
     ExecutionFailure,
     ForeignKeyFailure,
@@ -1073,13 +1073,14 @@ def test_sync_rejects_duplicate_table_names_before_reading():
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
-    with pytest.raises(ValueError):
+    with pytest.raises(DuplicateTableDefinitionError) as excinfo:
         engine.sync(
             _spec("cat.sch.orders"),
             _spec("cat.sch.orders"),
         )
 
-    # Then no phase has started
+    # Then the typed error names the table and no phase has started
+    assert str(excinfo.value.qualified_name) == "cat.sch.orders"
     assert reader.fetched_names == []
     assert executor.executed_names == []
 
