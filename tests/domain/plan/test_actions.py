@@ -276,24 +276,6 @@ def test_plan_reclusters_after_add_and_before_drop():
     assert [type(action) for action in plan] == [AddColumn, AlterClustering, DropColumn]
 
 
-def test_enriched_actions_preserve_compiler_facing_properties():
-    observed_column = _observed_column("legacy")
-    primary_key = _primary_key()
-    foreign_key = _foreign_key()
-
-    assert DropColumn(observed_column).column_name == "legacy"
-    assert SetProperty("prop", "new", "old").value == "new"
-    assert SetColumnComment("id", "new", "old").comment == "new"
-    assert SetTableComment("new", "old").comment == "new"
-    assert SetColumnNullability("id", False, True).nullable is False
-    assert SetPrimaryKey(primary_key).columns == ("id",)
-    assert SetPrimaryKey(primary_key).constraint_name == "table_pk"
-    assert DropForeignKey(foreign_key).constraint_name == "table_customer_id_fk"
-    assert SetForeignKey(foreign_key).referenced_table == foreign_key.referenced_table
-    assert AlterClustering(("region",), ()).columns == ("region",)
-    assert AlterColumnType("id", Long(), Integer()).data_type == Long()
-
-
 @pytest.mark.parametrize(
     "factory",
     [

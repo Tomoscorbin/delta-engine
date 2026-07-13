@@ -474,11 +474,6 @@ def test_clustering_removal_produces_cluster_by_none_action():
     )
 
 
-def test_clustering_change_produces_alter_clustering_action():
-    change = AlterClustering(desired_clustering=("region",), observed_clustering=("id",))
-    assert change.columns == ("region",)
-
-
 def test_clustering_changed_rejects_equal_key_sets():
     with pytest.raises(ValueError, match="no difference"):
         AlterClustering(desired_clustering=("a", "b"), observed_clustering=("b", "a"))

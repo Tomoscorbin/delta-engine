@@ -140,7 +140,7 @@ def _(action: AddColumn) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: DropColumn) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.COLUMNS, "-", (action.column_name,)),)
+    return (DiffEntry(DiffCategory.COLUMNS, "-", (action.column.name,)),)
 
 
 @action_entries.register
@@ -152,20 +152,23 @@ def _(action: RenameColumn) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
-    change = "drop NOT NULL (was NOT NULL)" if action.nullable else "set NOT NULL (was nullable)"
+    if action.desired_nullable:
+        change = "drop NOT NULL (was NOT NULL)"
+    else:
+        change = "set NOT NULL (was nullable)"
     return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
 
 
 @action_entries.register
 def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
-    change = f"{_type_display(action.observed_type)} → {_type_display(action.data_type)}"
+    change = f"{_type_display(action.observed_type)} → {_type_display(action.desired_type)}"
     return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
 
 
 @action_entries.register
 def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
-    if action.comment:
-        text = f"column {action.column_name}: '{action.comment}'"
+    if action.desired_comment:
+        text = f"column {action.column_name}: '{action.desired_comment}'"
     else:
         text = f"column {action.column_name} comment (unset)"
     return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
@@ -173,15 +176,19 @@ def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
-    text = f"table: '{action.comment}'" if action.comment else "table comment (unset)"
+    text = (
+        f"table: '{action.desired_comment}'" if action.desired_comment else "table comment (unset)"
+    )
     return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
 
 
 @action_entries.register
 def _(action: SetProperty) -> tuple[DiffEntry, ...]:
     if action.observed_value is None:
-        return (DiffEntry(DiffCategory.PROPERTIES, "+", (f"{action.name} = '{action.value}'",)),)
-    text = f"{action.name} = '{action.value}' (was '{action.observed_value}')"
+        return (
+            DiffEntry(DiffCategory.PROPERTIES, "+", (f"{action.name} = '{action.desired_value}'",)),
+        )
+    text = f"{action.name} = '{action.desired_value}' (was '{action.observed_value}')"
     return (DiffEntry(DiffCategory.PROPERTIES, "~", (text,)),)
 
 
@@ -213,7 +220,11 @@ def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(action.columns)})",)),)
+    return (
+        DiffEntry(
+            DiffCategory.KEYS, "+", (f"primary key ({', '.join(action.primary_key.columns)})",)
+        ),
+    )
 
 
 @action_entries.register
@@ -223,13 +234,16 @@ def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
-    text = f"foreign key ({', '.join(action.local_columns)}) → {action.referenced_table}"
+    local_columns = ", ".join(action.constraint.local_columns)
+    text = f"foreign key ({local_columns}) → {action.constraint.referenced_table}"
     return (DiffEntry(DiffCategory.KEYS, "+", (text,)),)
 
 
 @action_entries.register
 def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint_name}",)),)
+    return (
+        DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint.constraint_name}",)),
+    )
 
 
 _OPTIMIZE_FULL_HINT: Final[str] = "run OPTIMIZE FULL to recluster existing data"
@@ -240,8 +254,8 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     # No hint on removal: OPTIMIZE FULL errors on a table without clustering
     # columns (DELTA_OPTIMIZE_FULL_NOT_SUPPORTED); existing files simply keep
     # their old layout after CLUSTER BY NONE.
-    if not action.columns:
+    if not action.desired_clustering:
         return (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),)
-    columns = ", ".join(action.columns)
+    columns = ", ".join(action.desired_clustering)
     text = f"clustering ({columns}) — {_OPTIMIZE_FULL_HINT}"
     return (DiffEntry(DiffCategory.CLUSTERING, "~", (text,)),)

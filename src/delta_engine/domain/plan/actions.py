@@ -14,7 +14,6 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     ObservedColumn,
     PrimaryKeyConstraint,
-    QualifiedName,
     TableAspect,
 )
 
@@ -56,10 +55,10 @@ class Action(ABC):
     """
     Base class for executable table actions.
 
-    Every action carries the complete semantic state needed to validate and
-    report it as well as the compiler-facing state needed to execute it. Each
-    subclass declares its managed ``aspect``, execution ``phase``, and stable
-    within-phase ``subject``.
+    Every action carries the complete semantic state needed to validate,
+    report, and execute it, with each value named once (``desired_*`` /
+    ``observed_*`` for transition state). Each subclass declares its managed
+    ``aspect``, execution ``phase``, and stable within-phase ``subject``.
     """
 
     aspect: ClassVar[TableAspect]
@@ -110,11 +109,6 @@ class DropColumn(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_COLUMN
 
     @property
-    def column_name(self) -> str:
-        """Observed column name consumed by action compilers."""
-        return self.column.name
-
-    @property
     def subject(self) -> str:
         return self.column.name
 
@@ -152,11 +146,6 @@ class SetProperty(Action):
     def __post_init__(self) -> None:
         if self.desired_value == self.observed_value:
             raise ValueError(f"SetProperty carries no difference: {self.desired_value!r}")
-
-    @property
-    def value(self) -> str:
-        """Desired value consumed by action compilers."""
-        return self.desired_value
 
     @property
     def subject(self) -> str:
@@ -223,11 +212,6 @@ class SetColumnComment(Action):
             raise ValueError(f"SetColumnComment carries no difference: {self.desired_comment!r}")
 
     @property
-    def comment(self) -> str:
-        """Desired comment consumed by action compilers."""
-        return self.desired_comment
-
-    @property
     def subject(self) -> str:
         return self.column_name
 
@@ -278,11 +262,6 @@ class SetTableComment(Action):
             raise ValueError(f"SetTableComment carries no difference: {self.desired_comment!r}")
 
     @property
-    def comment(self) -> str:
-        """Desired comment consumed by action compilers."""
-        return self.desired_comment
-
-    @property
     def subject(self) -> str:
         return ""
 
@@ -305,11 +284,6 @@ class SetColumnNullability(Action):
             )
 
     @property
-    def nullable(self) -> bool:
-        """Desired nullability consumed by action compilers."""
-        return self.desired_nullable
-
-    @property
     def subject(self) -> str:
         return self.column_name
 
@@ -328,11 +302,6 @@ class DropPrimaryKey(Action):
         object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
 
     @property
-    def observed_primary_key(self) -> PrimaryKeyConstraint:
-        """The catalog constraint that will be dropped."""
-        return self.primary_key
-
-    @property
     def subject(self) -> str:
         return ""
 
@@ -345,16 +314,6 @@ class SetPrimaryKey(Action):
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.SET_PRIMARY_KEY
-
-    @property
-    def columns(self) -> tuple[str, ...]:
-        """Primary-key columns consumed by action compilers."""
-        return self.primary_key.columns
-
-    @property
-    def constraint_name(self) -> str:
-        """Primary-key name consumed by action compilers."""
-        return self.primary_key.constraint_name
 
     @property
     def subject(self) -> str:
@@ -371,11 +330,6 @@ class DropForeignKey(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_FOREIGN_KEY
 
     @property
-    def constraint_name(self) -> str:
-        """Catalog constraint name consumed by action compilers."""
-        return self.constraint.constraint_name
-
-    @property
     def subject(self) -> str:
         return self.constraint.constraint_name
 
@@ -388,26 +342,6 @@ class SetForeignKey(Action):
 
     aspect: ClassVar[TableAspect] = TableAspect.FOREIGN_KEYS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_FOREIGN_KEY
-
-    @property
-    def local_columns(self) -> tuple[str, ...]:
-        """Local columns consumed by action compilers."""
-        return self.constraint.local_columns
-
-    @property
-    def referenced_table(self) -> QualifiedName:
-        """Referenced table consumed by action compilers."""
-        return self.constraint.referenced_table
-
-    @property
-    def referenced_columns(self) -> tuple[str, ...]:
-        """Referenced columns consumed by action compilers."""
-        return self.constraint.referenced_columns
-
-    @property
-    def constraint_name(self) -> str:
-        """Constraint name consumed by action compilers."""
-        return self.constraint.constraint_name
 
     @property
     def subject(self) -> str:
@@ -431,11 +365,6 @@ class AlterClustering(Action):
             raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
 
     @property
-    def columns(self) -> tuple[str, ...]:
-        """Desired clustering columns consumed by action compilers."""
-        return self.desired_clustering
-
-    @property
     def subject(self) -> str:
         return ""
 
@@ -454,11 +383,6 @@ class AlterColumnType(Action):
     def __post_init__(self) -> None:
         if self.desired_type == self.observed_type:
             raise ValueError(f"AlterColumnType carries no difference: {self.desired_type!r}")
-
-    @property
-    def data_type(self) -> DataType:
-        """Desired type consumed by action compilers."""
-        return self.desired_type
 
     @property
     def subject(self) -> str:
