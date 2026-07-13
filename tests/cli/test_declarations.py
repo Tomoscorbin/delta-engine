@@ -40,6 +40,22 @@ def test_malformed_reference_is_a_configuration_error(text):
         DeclarationRef.parse(text)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "./tables.py:all_tables",
+        ".relative:all_tables",
+        "tables.py/:all_tables",
+        "my-project.tables:all_tables",
+        "myproject.tables:all tables",
+        "myproject.tables:all_tables.first",
+    ],
+)
+def test_path_like_and_non_identifier_references_are_configuration_errors(text):
+    with pytest.raises(ConfigError, match="MODULE:ATTRIBUTE"):
+        DeclarationRef.parse(text)
+
+
 def test_non_empty_ordered_sequence_loads_in_declared_order(write_module):
     module = write_module("decl_ordered", _TWO_TABLES)
 
@@ -122,6 +138,28 @@ def test_missing_attribute_is_a_configuration_error(write_module):
 
     with pytest.raises(ConfigError, match="no_such_attr"):
         _load(f"{module}:no_such_attr")
+
+
+def test_attributes_provided_by_module_getattr_load_normally(write_module):
+    # A lazy declaration module (PEP 562 module __getattr__) is ordinary Python.
+    module = write_module(
+        "decl_module_getattr",
+        """
+        from delta_engine.schema import Column, DeltaTable, String
+
+        def __getattr__(name):
+            if name == "all_tables":
+                orders = DeltaTable(
+                    "dev", "silver", "orders", columns=(Column("id", String()),)
+                )
+                return [orders]
+            raise AttributeError(name)
+        """,
+    )
+
+    tables = _load(f"{module}:all_tables")
+
+    assert _dotted_names(tables) == ["dev.silver.orders"]
 
 
 def test_module_import_exception_propagates_unchanged(write_module):

@@ -21,13 +21,17 @@ class DeclarationRef:
 
     @classmethod
     def parse(cls, text: str) -> "DeclarationRef":
-        """Parse exactly one non-empty ``MODULE:ATTRIBUTE`` reference."""
-        parts = text.split(":")
-        if len(parts) != 2 or not all(parts):
+        """Parse exactly one importable ``MODULE:ATTRIBUTE`` reference."""
+        module_name, separator, attribute = text.partition(":")
+        module_is_importable = bool(separator) and all(
+            part.isidentifier() for part in module_name.split(".")
+        )
+        if not module_is_importable or not attribute.isidentifier():
             raise ConfigError(
-                f"malformed declaration reference '{text}': expected MODULE:ATTRIBUTE"
+                f"malformed declaration reference '{text}': expected MODULE:ATTRIBUTE, "
+                "such as myproject.tables:all_tables (a module name, not a file path)"
             )
-        return cls(module_name=parts[0], attribute=parts[1])
+        return cls(module_name=module_name, attribute=attribute)
 
     def __str__(self) -> str:
         """Return the command-line representation."""
@@ -82,14 +86,17 @@ def _import_module(module_name: str) -> ModuleType:
         raise
 
 
+_MISSING = object()
+
+
 def _attribute(module: ModuleType, reference: DeclarationRef) -> object:
-    """Fetch the explicitly selected module attribute without invoking fallbacks."""
-    namespace = vars(module)
-    if reference.attribute not in namespace:
+    """Fetch the selected attribute; lazy module ``__getattr__`` hooks participate."""
+    value = getattr(module, reference.attribute, _MISSING)
+    if value is _MISSING:
         raise ConfigError(
             f"module '{reference.module_name}' has no attribute '{reference.attribute}'"
         )
-    return namespace[reference.attribute]
+    return value
 
 
 def _tables_from_attribute(
