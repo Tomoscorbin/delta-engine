@@ -78,7 +78,7 @@ uv run pytest
 To skip local Spark/Delta end-to-end tests:
 
 ```bash
-uv run pytest -m "not local_e2e"
+uv run pytest -m "not local_e2e and not databricks_e2e"
 ```
 
 Do not run credentialed Databricks tests unless explicitly asked.
