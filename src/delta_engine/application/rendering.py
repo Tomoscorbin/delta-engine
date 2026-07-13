@@ -152,7 +152,7 @@ def _heading(text: str, rule: str = "=") -> str:
 
 def _dry_run_banner(report: SyncReport) -> str:
     """Return the dry-run banner, or empty for an applied run."""
-    return "DRY RUN — no changes applied" if report.dry_run else ""
+    return "PLAN — no planned SQL executed" if report.dry_run else ""
 
 
 def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:

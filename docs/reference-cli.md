@@ -43,7 +43,7 @@ The command performs these operations in order:
 2. Validate that the attribute contains one non-empty ordered sequence of
    `DeltaTable` declarations.
 3. Open a SQL warehouse connection using Databricks unified authentication.
-4. Read catalog state and build a dry-run plan.
+4. Read catalog state and build a plan without executing it.
 5. Print the target identity, semantic diff, sync report, and any planned SQL.
 
 A stopped warehouse may start when the plan reads catalog metadata, so the
@@ -124,6 +124,10 @@ Every completed plan writes these text sections to stdout in order:
 2. `DIFF`: semantic changes for each table
 3. `SYNC REPORT`: statuses, failures, and summary
 4. `PLANNED SQL`: exact statements, when the plan compiled any
+
+The sync report labels this boundary `PLAN — no planned SQL executed`. Catalog
+reads still occur and may start the warehouse; only the generated statements
+are guaranteed not to execute.
 
 Credentials are never intentionally rendered. Planned SQL is shown by default;
 there is no SQL display flag or JSON mode.

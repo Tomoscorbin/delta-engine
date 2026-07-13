@@ -595,8 +595,8 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
     applied = render_report(SyncReport(**base, dry_run=False))
 
     # Then the banner appears (below the title) for a dry run and is absent otherwise
-    assert "DRY RUN — no changes applied" in dry.splitlines()
-    assert "DRY RUN" not in applied
+    assert "PLAN — no planned SQL executed" in dry.splitlines()
+    assert "PLAN — no planned SQL executed" not in applied
 
 
 def test_render_report_is_titled():

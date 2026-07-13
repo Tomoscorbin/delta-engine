@@ -38,8 +38,7 @@ def test_in_sync_plan_exits_zero_and_prints_the_complete_identity_and_report(
     assert f"Declarations: {module}:all_tables" in result.stdout
     assert "DIFF" in result.stdout
     assert "SYNC REPORT" in result.stdout
-    assert "DRY RUN" in result.stdout
-    assert "no changes" in result.stdout
+    assert "PLAN — no planned SQL executed" in result.stdout
     assert "PLANNED SQL" not in result.stdout
 
 

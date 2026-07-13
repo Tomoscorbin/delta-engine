@@ -66,7 +66,7 @@ def _main(
 
 @app.command()
 def plan(declaration: DeclarationArgument) -> None:
-    """Read the live catalog and print a dry-run plan; never execute planned DDL."""
+    """Read the live catalog and print a plan; never execute planned DDL."""
     with _anticipated_errors():
         reference = DeclarationRef.parse(declaration)
         result = _plan(reference)
