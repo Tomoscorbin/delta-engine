@@ -75,7 +75,7 @@ through a sync.
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                               |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
-For example, the domain has `Column`, `QualifiedName`, `PrimaryKeyConstraint`,
+For example, the domain has `DesiredColumn`, `QualifiedName`, `PrimaryKeyConstraint`,
 `ForeignKeyConstraint`, and `DataType` values. The Databricks adapter is
 responsible for translating Spark catalog objects and SQL type names into those
 values before the engine sees them.

@@ -3,7 +3,7 @@ import pyspark.sql.types as T
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionSucceeded
-from delta_engine.domain.model import Column, DesiredTable, ObservedColumn, QualifiedName
+from delta_engine.domain.model import DesiredColumn, DesiredTable, ObservedColumn, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
     ActionPlan,
@@ -74,7 +74,7 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
     spark = _FakeSpark()
     plan = ActionPlan(
         actions=(
-            AddColumn(Column("age", Integer())),
+            AddColumn(DesiredColumn("age", Integer())),
             DropColumn(ObservedColumn("legacy", Integer())),
         )
     )
@@ -115,7 +115,7 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
     # Given a desired table to be created in an empty schema
     desired = DesiredTable(
         qualified_name=QualifiedName(TEST_CATALOG, temp_schema, "customers"),
-        columns=(Column(name="id", data_type=Integer()),),
+        columns=(DesiredColumn(name="id", data_type=Integer()),),
     )
     plan = ActionPlan(actions=(CreateTable(table=desired),))
 
@@ -146,7 +146,7 @@ def test_add_column_action_adds_column_to_existing_table(spark, make_temp_table)
     plan = ActionPlan(
         actions=(
             AddColumn(
-                column=Column(
+                column=DesiredColumn(
                     name="age",
                     data_type=Integer(),
                 )

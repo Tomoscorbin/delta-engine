@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from delta_engine.domain.model import (
-    Column,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     ObservedColumn,
@@ -291,7 +291,7 @@ def _relabel_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[
 
 
 def _diff_column_structure(
-    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
 ) -> list[Action]:
     """Return actions for additions, removals, type drift, and nullability drift."""
     desired_by_name = {column.name: column for column in desired_columns}
@@ -330,7 +330,7 @@ def _diff_column_structure(
 
 
 def _diff_column_comments(
-    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
 ) -> list[SetColumnComment]:
     """Return comment actions for name-matched column pairs."""
     observed_by_name = {column.name: column for column in observed_columns}
@@ -350,7 +350,7 @@ def _diff_column_comments(
 
 
 def _diff_column_tags(
-    desired_columns: tuple[Column, ...], observed_columns: tuple[ObservedColumn, ...]
+    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
 ) -> list[SetColumnTag | UnsetColumnTag]:
     """Return full-state tag actions for matched and newly added columns."""
     observed_by_name = {column.name: column for column in observed_columns}

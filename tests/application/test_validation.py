@@ -9,10 +9,10 @@ from delta_engine.application.validation import (
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Byte,
-    Column,
     DataType,
     Date,
     Decimal,
+    DesiredColumn,
     DesiredTable,
     Double,
     Float,
@@ -54,7 +54,7 @@ _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 def _desired_table(
     *,
-    columns: tuple[Column, ...] | None = None,
+    columns: tuple[DesiredColumn, ...] | None = None,
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
@@ -62,7 +62,7 @@ def _desired_table(
 ) -> DesiredTable:
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer()),) if columns is None else columns,
+        columns=(DesiredColumn("id", Integer()),) if columns is None else columns,
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
@@ -72,12 +72,12 @@ def _desired_table(
 
 def _observed_table(
     *,
-    columns: tuple[Column, ...] | None = None,
+    columns: tuple[DesiredColumn, ...] | None = None,
     properties: dict[str, str] | None = None,
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
 ) -> ObservedTable:
-    source = (Column("id", Integer()),) if columns is None else columns
+    source = (DesiredColumn("id", Integer()),) if columns is None else columns
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
         columns=as_observed_columns(source),
@@ -155,11 +155,11 @@ def test_validate_diff_uses_default_rules_when_rules_are_not_supplied():
     # Given a diff that violates a default safety rule
     desired = _desired_table(
         columns=(
-            Column("id", Integer()),
-            Column("x", Integer(), nullable=False),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("x", Integer(), nullable=False),
         )
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating without explicit rules
     result = _validate(desired, observed)
@@ -173,11 +173,11 @@ def test_validate_diff_allows_safety_rules_to_be_suppressed():
     # Given a diff that would normally violate a default safety rule
     desired = _desired_table(
         columns=(
-            Column("id", Integer()),
-            Column("x", Integer(), nullable=False),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("x", Integer(), nullable=False),
         )
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating with no safety rules
     result = _validate(desired, observed, rules=())
@@ -216,11 +216,11 @@ def test_validation_passes_when_no_rule_is_broken():
     # Given a drift containing only a nullable column addition
     desired = _desired_table(
         columns=(
-            Column("id", Integer()),
-            Column("age", Integer()),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("age", Integer()),
         )
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
     result = _validate(desired, observed)
@@ -245,7 +245,7 @@ def test_empty_drift_produces_no_failures():
 def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_managed():
     # Given a missing table with a NOT NULL column
     desired = _desired_table(
-        columns=(Column("id", Integer(), nullable=False),),
+        columns=(DesiredColumn("id", Integer(), nullable=False),),
         managed_aspects=ALL_ASPECTS,
     )
 
@@ -301,12 +301,12 @@ def test_rejects_adding_non_nullable_columns_to_existing_table():
     # Given an existing table and a declaration adding two NOT NULL columns
     desired = _desired_table(
         columns=(
-            Column("id", Integer()),
-            Column("a", Integer(), nullable=False),
-            Column("b", String(), nullable=False),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("a", Integer(), nullable=False),
+            DesiredColumn("b", String(), nullable=False),
         )
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
     result = _validate(desired, observed)
@@ -325,11 +325,11 @@ def test_allows_adding_nullable_column_to_existing_table():
     # Given an existing table and a declaration adding a nullable column
     desired = _desired_table(
         columns=(
-            Column("id", Integer()),
-            Column("age", Integer()),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("age", Integer()),
         ),
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # Then validation passes
     assert _validate(desired, observed).failed is False
@@ -342,14 +342,14 @@ def test_rejects_tightening_existing_columns_to_not_null():
     # Given existing nullable columns and a declaration tightening them to NOT NULL
     desired = _desired_table(
         columns=(
-            Column("id", Integer(), nullable=False),
-            Column("email", String(), nullable=False),
+            DesiredColumn("id", Integer(), nullable=False),
+            DesiredColumn("email", String(), nullable=False),
         )
     )
     observed = _observed_table(
         columns=(
-            Column("id", Integer(), nullable=True),
-            Column("email", String(), nullable=True),
+            DesiredColumn("id", Integer(), nullable=True),
+            DesiredColumn("email", String(), nullable=True),
         )
     )
 
@@ -368,8 +368,8 @@ def test_rejects_tightening_existing_columns_to_not_null():
 
 def test_allows_loosening_existing_column_to_nullable():
     # Given an existing NOT NULL column and a declaration loosening it
-    desired = _desired_table(columns=(Column("id", Integer(), nullable=True),))
-    observed = _observed_table(columns=(Column("id", Integer(), nullable=False),))
+    desired = _desired_table(columns=(DesiredColumn("id", Integer(), nullable=True),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer(), nullable=False),))
 
     # Then validation passes
     assert _validate(desired, observed).failed is False
@@ -380,8 +380,8 @@ def test_allows_loosening_existing_column_to_nullable():
 
 def test_rejects_widening_type_change_without_type_widening_declared():
     # Given an existing column widened Integer → Long, with no property declared
-    desired = _desired_table(columns=(Column("id", Long()),))
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    desired = _desired_table(columns=(DesiredColumn("id", Long()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
     result = _validate(desired, observed)
@@ -397,10 +397,10 @@ def test_rejects_widening_type_change_without_type_widening_declared():
 def test_widening_type_change_passes_with_type_widening_declared():
     # Given a widen Integer → Long with the property declared in the same sync
     desired = _desired_table(
-        columns=(Column("id", Long()),),
+        columns=(DesiredColumn("id", Long()),),
         properties={"delta.enableTypeWidening": "true"},
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating
     result = _validate(desired, observed)
@@ -412,10 +412,10 @@ def test_widening_type_change_passes_with_type_widening_declared():
 def test_rejects_non_widening_type_change_even_with_type_widening_declared():
     # Given Integer → String, which no widening supports
     desired = _desired_table(
-        columns=(Column("id", String()),),
+        columns=(DesiredColumn("id", String()),),
         properties={"delta.enableTypeWidening": "true"},
     )
-    observed = _observed_table(columns=(Column("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     result = _validate(desired, observed)
 
@@ -427,10 +427,10 @@ def test_rejects_non_widening_type_change_even_with_type_widening_declared():
 def test_rejects_narrowing_type_change():
     # Given Long → Integer — the reverse of a widening is a narrowing
     desired = _desired_table(
-        columns=(Column("id", Integer()),),
+        columns=(DesiredColumn("id", Integer()),),
         properties={"delta.enableTypeWidening": "true"},
     )
-    observed = _observed_table(columns=(Column("id", Long()),))
+    observed = _observed_table(columns=(DesiredColumn("id", Long()),))
 
     result = _validate(desired, observed)
 
@@ -441,10 +441,10 @@ def test_rejects_narrowing_type_change():
 def _widening_result(desired_type: DataType, observed_type: DataType) -> ValidationResult:
     """Validate a single-column type change with type widening declared."""
     desired = _desired_table(
-        columns=(Column("c", desired_type),),
+        columns=(DesiredColumn("c", desired_type),),
         properties={"delta.enableTypeWidening": "true"},
     )
-    observed = _observed_table(columns=(Column("c", observed_type),))
+    observed = _observed_table(columns=(DesiredColumn("c", observed_type),))
     return _validate(desired, observed)
 
 
@@ -517,7 +517,7 @@ def test_every_widening_matrix_entry_is_permitted():
 def test_rejects_partitioning_change():
     # Given a declaration that changes table partitioning (identical columns on
     # both sides so partitioning is the only drift)
-    columns = (Column("id", Integer()), Column("value", Integer()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("value", Integer()))
     desired = _desired_table(columns=columns, partitioned_by=("id",))
     observed = _observed_table(columns=columns)
 
@@ -534,7 +534,7 @@ def test_allows_clustering_change():
     # Given a declaration that changes clustering (identical columns on both
     # sides so clustering is the only drift). Unlike partitioning, liquid
     # clustering keys are reconciled in place, so no safety rule blocks them.
-    columns = (Column("id", Integer()), Column("region", String()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("region", String()))
     desired = _desired_table(columns=columns, clustered_by=("region",))
     observed = _observed_table(columns=columns)
 
@@ -549,7 +549,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     # Given a drift with a type change and a NOT NULL column addition
     diff = _drift(
         _type_drift("id"),
-        AddColumn(Column("new_col", Integer(), nullable=False)),
+        AddColumn(DesiredColumn("new_col", Integer(), nullable=False)),
     )
 
     # When validating
@@ -569,7 +569,7 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
 def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
     # Given a declaration that only manages table tags, but column structure has drifted
     diff = _drift(
-        AddColumn(Column("extra", Integer())),
+        AddColumn(DesiredColumn("extra", Integer())),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
@@ -585,8 +585,8 @@ def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
 def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
     # Given two changes in one unmanaged aspect and one change in another
     diff = _drift(
-        AddColumn(Column("extra", Integer())),
-        AddColumn(Column("more", Integer())),
+        AddColumn(DesiredColumn("extra", Integer())),
+        AddColumn(DesiredColumn("more", Integer())),
         SetTableComment(desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
@@ -603,7 +603,7 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
 def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
     # Given unmanaged drift and an empty rule set
     diff = _drift(
-        AddColumn(Column("extra", Integer())),
+        AddColumn(DesiredColumn("extra", Integer())),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
@@ -655,7 +655,7 @@ def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
 
 def test_drift_passes_when_all_aspects_managed():
     # Given a fully managed drift with a nullable column addition
-    diff = _drift(AddColumn(Column("extra", Integer())), managed_aspects=ALL_ASPECTS)
+    diff = _drift(AddColumn(DesiredColumn("extra", Integer())), managed_aspects=ALL_ASPECTS)
 
     # Then validation passes
     assert validate_diff(diff).failed is False
@@ -680,7 +680,7 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
     # Given a tag-only declaration with table and column tag drift
     desired = DesiredTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer(), tags={"pii": "false"}),),
+        columns=(DesiredColumn("id", Integer(), tags={"pii": "false"}),),
         tags={"domain": "sales"},
         managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
     )
@@ -732,10 +732,12 @@ def test_tag_only_scope_fails_when_column_comment_drifts():
 def test_tag_only_scope_fails_when_column_structure_drifts():
     # Given a tag-only declaration whose live table has an extra, undeclared column
     desired = _desired_table(
-        columns=(Column("id", Integer()),),
+        columns=(DesiredColumn("id", Integer()),),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
     )
-    observed = _observed_table(columns=(Column("id", Integer()), Column("extra", String())))
+    observed = _observed_table(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("extra", String()))
+    )
 
     # When validating the diff
     result = _validate(desired, observed)
@@ -956,7 +958,7 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
 
 def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     desired = _desired_table(
-        columns=(Column("customer_name", String(), renamed_from="customer_nm"),),
+        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),),
         properties={"delta.columnMapping.mode": "name"},
     )
     drift = TableDrift(
@@ -973,7 +975,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
 
 def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
     desired = _desired_table(
-        columns=(Column("id", Integer(), nullable=False),),
+        columns=(DesiredColumn("id", Integer(), nullable=False),),
         properties={"delta.columnMapping.mode": "name"},
     )
     drift = TableDrift(

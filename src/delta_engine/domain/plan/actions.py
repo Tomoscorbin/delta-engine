@@ -7,8 +7,8 @@ from enum import IntEnum, auto
 from typing import ClassVar
 
 from delta_engine.domain.model import (
-    Column,
     DataType,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -89,7 +89,7 @@ class CreateTable(Action):
 class AddColumn(Action):
     """Add a declared column to an existing table."""
 
-    column: Column
+    column: DesiredColumn
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ADD_COLUMN

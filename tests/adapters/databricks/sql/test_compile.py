@@ -4,7 +4,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
 from delta_engine.domain.model import (
-    Column,
+    DesiredColumn,
     DesiredTable,
     Integer,
     Long,
@@ -71,7 +71,7 @@ def _foreign_key(
 
 
 def _create_table(
-    *columns: Column,
+    *columns: DesiredColumn,
     comment: str = "",
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
@@ -136,7 +136,7 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
 def test_compile_backticks_table_and_column_identifiers():
     # Given identifiers that need quoting
     target = QualifiedName("cat-alog", "sch ema", "select")
-    plan = ActionPlan(actions=(AddColumn(Column("weird column", Integer())),))
+    plan = ActionPlan(actions=(AddColumn(DesiredColumn("weird column", Integer())),))
 
     # When compiling
     (statement,) = compile_plan(target, plan)
@@ -155,7 +155,7 @@ def test_alter_column_type_compiles_to_alter_column_type_statement():
 
 def test_add_column_with_comment_includes_comment_clause():
     # Given a new column with a comment
-    action = AddColumn(Column("age", Integer(), comment="user age"))
+    action = AddColumn(DesiredColumn("age", Integer(), comment="user age"))
 
     # When compiling
     statement = _compile_single(action)
@@ -166,7 +166,7 @@ def test_add_column_with_comment_includes_comment_clause():
 
 def test_add_column_without_comment_omits_comment_clause():
     # Given a new column with no comment
-    action = AddColumn(Column("age", Integer()))
+    action = AddColumn(DesiredColumn("age", Integer()))
 
     # When compiling
     statement = _compile_single(action)
@@ -177,7 +177,7 @@ def test_add_column_without_comment_omits_comment_clause():
 
 def test_add_column_rejects_non_nullable_column():
     # Given an AddColumn action carrying a NOT NULL column
-    action = AddColumn(Column("age", Integer(), nullable=False))
+    action = AddColumn(DesiredColumn("age", Integer(), nullable=False))
 
     # When / Then compiling fails loudly rather than silently dropping NOT NULL
     with pytest.raises(AssertionError, match="age"):
@@ -187,8 +187,8 @@ def test_add_column_rejects_non_nullable_column():
 def test_create_table_renders_columns_nullability_comments_table_comment_and_properties():
     # Given a CREATE TABLE with column metadata, table comment, and property
     action = _create_table(
-        Column("id", Integer(), nullable=False),
-        Column("name", String(), comment="customer"),
+        DesiredColumn("id", Integer(), nullable=False),
+        DesiredColumn("name", String(), comment="customer"),
         comment="core table",
         properties={"delta.appendOnly": "true"},
     )
@@ -208,7 +208,7 @@ def test_create_table_renders_columns_nullability_comments_table_comment_and_pro
 
 def test_create_table_omits_comment_clause_when_table_comment_is_empty():
     # Given a CREATE TABLE with no table-level comment
-    action = _create_table(Column("id", Integer()))
+    action = _create_table(DesiredColumn("id", Integer()))
 
     # When compiling
     statement = _compile_single(action)
@@ -220,8 +220,8 @@ def test_create_table_omits_comment_clause_when_table_comment_is_empty():
 def test_create_table_renders_partition_clause():
     # Given a partitioned table
     action = _create_table(
-        Column("id", Integer()),
-        Column("ds", String()),
+        DesiredColumn("id", Integer()),
+        DesiredColumn("ds", String()),
         partitioned_by=("ds",),
     )
 
@@ -235,8 +235,8 @@ def test_create_table_renders_partition_clause():
 def test_create_table_renders_cluster_by_clause():
     # Given a clustered table
     action = _create_table(
-        Column("id", Integer()),
-        Column("region", String()),
+        DesiredColumn("id", Integer()),
+        DesiredColumn("region", String()),
         clustered_by=("region",),
     )
     # When compiling
@@ -258,7 +258,7 @@ def test_alter_clustering_with_no_columns_renders_cluster_by_none():
 def test_create_table_renders_properties_in_sorted_order_and_filters_none_values():
     # Given a desired table with valued properties and absence assertions
     action = _create_table(
-        Column("id", Integer()),
+        DesiredColumn("id", Integer()),
         properties={
             "z": "last",
             "delta.logRetentionDuration": None,
@@ -277,8 +277,8 @@ def test_create_table_renders_properties_in_sorted_order_and_filters_none_values
 def test_create_table_inlines_primary_key_constraint():
     # Given a CREATE TABLE with a primary key
     action = _create_table(
-        Column("id", Integer(), nullable=False),
-        Column("name", String()),
+        DesiredColumn("id", Integer(), nullable=False),
+        DesiredColumn("name", String()),
         primary_key=PrimaryKeyConstraint.generate(
             table_name=_TARGET.name,
             columns=("id",),
@@ -298,7 +298,7 @@ def test_create_table_inlines_primary_key_constraint():
 
 def test_create_table_without_primary_key_omits_constraint_clause():
     # Given a CREATE TABLE with no primary key
-    action = _create_table(Column("id", Integer()))
+    action = _create_table(DesiredColumn("id", Integer()))
 
     # When compiling
     statement = _compile_single(action)
@@ -312,8 +312,8 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
     # Given a CREATE TABLE with a struct column whose field name needs column
     # mapping, and a variant column
     action = _create_table(
-        Column("payload", Struct((StructField("order id", Integer()),))),
-        Column("attributes", Variant()),
+        DesiredColumn("payload", Struct((StructField("order id", Integer()),))),
+        DesiredColumn("attributes", Variant()),
         properties={"delta.columnMapping.mode": "name"},
     )
 

@@ -2,7 +2,7 @@ from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.domain.model import (
-    Column,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     Integer,
@@ -41,8 +41,8 @@ from delta_engine.domain.plan.diff import ColumnRenameConflict
 _TARGET = QualifiedName("cat", "sch", "table")
 
 
-def _column(name: str) -> Column:
-    return Column(name=name, data_type=Integer())
+def _column(name: str) -> DesiredColumn:
+    return DesiredColumn(name=name, data_type=Integer())
 
 
 def _observed_column(name: str) -> ObservedColumn:

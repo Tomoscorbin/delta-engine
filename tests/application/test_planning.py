@@ -6,7 +6,7 @@ from delta_engine.application.planning import (
     plan_diff,
 )
 from delta_engine.domain.model import (
-    Column,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -38,7 +38,7 @@ _NAME = QualifiedName("dev", "silver", "test")
 def _desired(**overrides) -> DesiredTable:
     values = {
         "qualified_name": _NAME,
-        "columns": (Column("id", Integer()),),
+        "columns": (DesiredColumn("id", Integer()),),
     }
     return DesiredTable(**(values | overrides))
 
@@ -68,19 +68,24 @@ def _foreign_key(
 
 def test_plan_diff_accepts_safe_actions():
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()), Column("age", Integer()))),
+        _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
         _observed(),
     )
 
     result = plan_diff(diff)
 
     assert isinstance(result, PlanningSucceeded)
-    assert result.plan.actions == (AddColumn(Column("age", Integer())),)
+    assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
 
 
 def test_plan_diff_rejects_unsafe_actions_without_constructing_a_plan():
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()), Column("required", Integer(), nullable=False))),
+        _desired(
+            columns=(
+                DesiredColumn("id", Integer()),
+                DesiredColumn("required", Integer(), nullable=False),
+            )
+        ),
         _observed(),
     )
 
@@ -94,7 +99,7 @@ def test_plan_diff_rejects_unsafe_actions_without_constructing_a_plan():
 def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
     diff = diff_table(
         _desired(
-            columns=(Column("id", Integer()), Column("age", Integer())),
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())),
             managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
         ),
         _observed(),
@@ -111,7 +116,7 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
     "desired, observed, expected_rule",
     [
         (
-            _desired(columns=(Column("new", String(), renamed_from="old"),)),
+            _desired(columns=(DesiredColumn("new", String(), renamed_from="old"),)),
             _observed(columns=(ObservedColumn("new", String()), ObservedColumn("old", String()))),
             "AmbiguousColumnRename",
         ),
@@ -122,7 +127,7 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
         ),
         (
             _desired(
-                columns=(Column("id", Integer()), Column("day", String())),
+                columns=(DesiredColumn("id", Integer()), DesiredColumn("day", String())),
                 partitioned_by=("day",),
             ),
             _observed(columns=(ObservedColumn("id", Integer()), ObservedColumn("day", String()))),
@@ -153,7 +158,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
         constraint_name="test_id_fk",
     )
     desired = _desired(
-        columns=(Column("id", Integer(), tags={"pii": "false"}),),
+        columns=(DesiredColumn("id", Integer(), tags={"pii": "false"}),),
         tags={"env": "dev"},
         foreign_keys=(foreign_key,),
     )
@@ -181,7 +186,7 @@ def test_plan_diff_rejects_missing_table_when_table_existence_is_unmanaged():
 
 def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     desired = _desired(
-        columns=(Column("amount", Long(), renamed_from="amt"),),
+        columns=(DesiredColumn("amount", Long(), renamed_from="amt"),),
         properties={"delta.enableTypeWidening": "true"},
     )
     observed = _observed(
@@ -202,7 +207,7 @@ def test_plan_diff_uses_domain_projected_primary_key_actions_for_rename():
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
     desired = _desired(
-        columns=(Column("customer_name", String(), False, renamed_from="customer_nm"),),
+        columns=(DesiredColumn("customer_name", String(), False, renamed_from="customer_nm"),),
         primary_key=desired_key,
     )
     observed = _observed(
@@ -227,7 +232,7 @@ def test_plan_diff_validates_rename_constraint_drops_before_domain_projection():
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
     desired = _desired(
-        columns=(Column("customer_name", String(), False, renamed_from="customer_nm"),),
+        columns=(DesiredColumn("customer_name", String(), False, renamed_from="customer_nm"),),
         primary_key=desired_key,
     )
     observed = _observed(
@@ -260,7 +265,7 @@ def test_plan_diff_uses_domain_projected_local_foreign_key_actions_for_rename():
         constraint_name="legacy_fk",
     )
     desired = _desired(
-        columns=(Column("parent_id", Integer(), renamed_from="parent"),),
+        columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
         foreign_keys=(desired_key,),
     )
     observed = _observed(
@@ -291,8 +296,8 @@ def test_plan_diff_uses_domain_projected_self_referencing_foreign_key_actions_fo
     )
     desired = _desired(
         columns=(
-            Column("employee_id", Integer(), renamed_from="id"),
-            Column("manager_id", Integer()),
+            DesiredColumn("employee_id", Integer(), renamed_from="id"),
+            DesiredColumn("manager_id", Integer()),
         ),
         foreign_keys=(desired_key,),
     )
@@ -319,8 +324,8 @@ def test_plan_diff_retains_unrelated_foreign_key_drop_before_rename():
     )
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         )
     )
     observed = _observed(

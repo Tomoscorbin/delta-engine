@@ -14,7 +14,7 @@ import functools
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.domain.model import Column, DataType, Decimal
+from delta_engine.domain.model import DataType, Decimal, DesiredColumn
 from delta_engine.domain.plan import (
     Action,
     AddColumn,
@@ -105,7 +105,7 @@ class DiffEntry:
         return " ".join(self.cells[1:])
 
 
-def _column_add_entry(column: Column) -> DiffEntry:
+def _column_add_entry(column: DesiredColumn) -> DiffEntry:
     """Build a '+' columns entry for a created column (name, type, optional NOT NULL)."""
     cells = [column.name, _type_name(column.data_type)]
     if not column.nullable:

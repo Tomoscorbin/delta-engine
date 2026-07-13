@@ -25,8 +25,8 @@ from delta_engine.application.rendering import (
 )
 from delta_engine.application.report import SyncReport, TableRunReport
 from delta_engine.domain.model import (
-    Column,
     Decimal,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     Integer,
@@ -83,11 +83,11 @@ def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> ForeignKeyCo
     ("action", "expected"),
     [
         (
-            AddColumn(Column("age", Integer())),
+            AddColumn(DesiredColumn("age", Integer())),
             (DiffEntry(DiffCategory.COLUMNS, "+", ("age", "Integer")),),
         ),
         (
-            AddColumn(Column("age", Integer(), nullable=False)),
+            AddColumn(DesiredColumn("age", Integer(), nullable=False)),
             (DiffEntry(DiffCategory.COLUMNS, "+", ("age", "Integer", "NOT NULL")),),
         ),
         (
@@ -225,8 +225,8 @@ def test_create_table_entries_list_columns_with_types_and_primary_key():
         table=DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(
-                Column("id", Integer(), nullable=False),
-                Column("name", String()),
+                DesiredColumn("id", Integer(), nullable=False),
+                DesiredColumn("name", String()),
             ),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
         )
@@ -245,7 +245,7 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
     action = CreateTable(
         table=DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "tbl"),
-            columns=(Column("id", Integer()), Column("region", String())),
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("region", String())),
             clustered_by=("region",),
         )
     )
@@ -282,7 +282,7 @@ def test_every_action_type_has_registered_diff_entries():
 
 def _report_with_empty_plan_and_failure() -> TableRunReport:
     qualified_name = QualifiedName("dev", "silver", "orders")
-    desired = DesiredTable(qualified_name=qualified_name, columns=(Column("id", Integer()),))
+    desired = DesiredTable(qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),))
     observed = ObservedTable(
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
@@ -325,7 +325,7 @@ def test_diff_block_groups_lines_under_category_headings_in_plan_order():
         plan=ActionPlan(
             (
                 SetTableComment(desired_comment="c", observed_comment=""),
-                AddColumn(Column("age", Integer())),
+                AddColumn(DesiredColumn("age", Integer())),
             )
         ),
     )
@@ -359,7 +359,9 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     qualified_name = QualifiedName("cat", "sch", "orders")
     report = TableRunReport(
         qualified_name=qualified_name,
-        desired=DesiredTable(qualified_name=qualified_name, columns=(Column("id", Integer()),)),
+        desired=DesiredTable(
+            qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
+        ),
         read=ReadFailed(ReadFailure("IOError", "boom")),
     )
 
@@ -375,7 +377,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 
 def _grid_report(name, *, plan=None, failures=()):
     qualified_name = QualifiedName("cat", "sch", name)
-    columns = (Column("id", Integer()),)
+    columns = (DesiredColumn("id", Integer()),)
     plan = plan if plan is not None else ActionPlan()
     return TableRunReport(
         qualified_name=qualified_name,
@@ -416,8 +418,8 @@ def test_grid_detail_summarizes_changes_by_category_not_class_names():
         "orders",
         plan=ActionPlan(
             (
-                AddColumn(Column("a", Integer())),
-                AddColumn(Column("b", Integer())),
+                AddColumn(DesiredColumn("a", Integer())),
+                AddColumn(DesiredColumn("b", Integer())),
                 SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
             )
         ),
@@ -435,9 +437,9 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
     # Given a three-statement plan where two applied and one failed during execution
     plan = ActionPlan(
         (
-            AddColumn(Column("a", Integer())),
-            AddColumn(Column("b", Integer())),
-            AddColumn(Column("c", Integer())),
+            AddColumn(DesiredColumn("a", Integer())),
+            AddColumn(DesiredColumn("b", Integer())),
+            AddColumn(DesiredColumn("c", Integer())),
         )
     )
     report = dataclasses.replace(
@@ -687,7 +689,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
     first = _grid_report(
         "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
     )
-    second = _grid_report("b", plan=ActionPlan((AddColumn(Column("age", Integer())),)))
+    second = _grid_report("b", plan=ActionPlan((AddColumn(DesiredColumn("age", Integer())),)))
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),

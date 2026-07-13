@@ -5,7 +5,7 @@ import pytest
 from delta_engine.api.delta_table import METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.domain.model import (
     ALL_ASPECTS,
-    Column as DomainColumn,
+    DesiredColumn as DomainColumn,
     QualifiedName,
     TableAspect,
 )

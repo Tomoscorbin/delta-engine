@@ -1,52 +1,52 @@
 import pytest
 
-from delta_engine.domain.model.column import Column, ObservedColumn
+from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.data_type import Integer, String
 
 
 def test_defaults_to_nullable_true() -> None:
     # Given: a column with no explicit nullability
-    # When: constructing a Column
-    col = Column("id", Integer())
+    # When: constructing a DesiredColumn
+    col = DesiredColumn("id", Integer())
     # Then: it defaults to nullable=True
     assert col.nullable is True
 
 
 def test_raises_when_name_is_not_lowercase() -> None:
     # Given: a column name containing uppercase characters
-    # When: constructing a Column
+    # When: constructing a DesiredColumn
     # Then: a ValueError is raised
     with pytest.raises(ValueError, match="lowercase"):
-        Column("UserId", Integer())
+        DesiredColumn("UserId", Integer())
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
 def test_raises_when_name_is_blank(blank: str) -> None:
     # Given: a blank or whitespace-only column name (would emit a malformed
     # `` `` identifier in DDL)
-    # When/Then: constructing a Column fails
+    # When/Then: constructing a DesiredColumn fails
     with pytest.raises(ValueError, match="blank"):
-        Column(blank, Integer())
+        DesiredColumn(blank, Integer())
 
 
 def test_tags_default_to_empty() -> None:
     # Given: a column with no explicit tags
-    # When: constructing a Column
-    col = Column("id", Integer())
+    # When: constructing a DesiredColumn
+    col = DesiredColumn("id", Integer())
     # Then: it defaults to an empty tag mapping
     assert dict(col.tags) == {}
 
 
 def test_tags_are_stored_verbatim() -> None:
     # Given a column declared with two tags
-    col = Column("email", Integer(), tags={"pii": "true", "classification": "restricted"})
+    col = DesiredColumn("email", Integer(), tags={"pii": "true", "classification": "restricted"})
     # Then the tags are stored exactly as given
     assert dict(col.tags) == {"pii": "true", "classification": "restricted"}
 
 
 def test_tag_keys_are_case_sensitive() -> None:
     # Given tag keys differing only in case (UC tag keys are case-sensitive)
-    col = Column("email", Integer(), tags={"PII": "true", "pii": "false"})
+    col = DesiredColumn("email", Integer(), tags={"PII": "true", "pii": "false"})
     # Then both keys are preserved distinctly (not casefolded like the column name)
     assert dict(col.tags) == {"PII": "true", "pii": "false"}
 
@@ -54,31 +54,31 @@ def test_tag_keys_are_case_sensitive() -> None:
 @pytest.mark.parametrize("blank", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
 def test_raises_when_tag_key_is_blank(blank: str) -> None:
     # Given a blank or whitespace-only tag key
-    # When/Then: constructing a Column fails
+    # When/Then: constructing a DesiredColumn fails
     with pytest.raises(ValueError, match="Tag key must not be blank"):
-        Column("id", Integer(), tags={blank: "v"})
+        DesiredColumn("id", Integer(), tags={blank: "v"})
 
 
 def test_column_accepts_a_lowercase_renamed_from_hint() -> None:
-    column = Column("customer_name", String(), renamed_from="customer_nm")
+    column = DesiredColumn("customer_name", String(), renamed_from="customer_nm")
     assert column.renamed_from == "customer_nm"
 
 
 def test_column_defaults_to_no_rename_hint() -> None:
-    assert Column("customer_name", String()).renamed_from is None
+    assert DesiredColumn("customer_name", String()).renamed_from is None
 
 
 def test_column_rejects_malformed_renamed_from() -> None:
     with pytest.raises(ValueError, match="lowercase"):
-        Column("customer_name", String(), renamed_from="Customer_NM")
+        DesiredColumn("customer_name", String(), renamed_from="Customer_NM")
     with pytest.raises(ValueError, match="blank"):
-        Column("customer_name", String(), renamed_from="  ")
+        DesiredColumn("customer_name", String(), renamed_from="  ")
     with pytest.raises(ValueError, match="itself"):
-        Column("customer_name", String(), renamed_from="customer_name")
+        DesiredColumn("customer_name", String(), renamed_from="customer_name")
 
 
 def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
-    # Given/Then: blank and non-lowercase names are rejected, like Column
+    # Given/Then: blank and non-lowercase names are rejected, like DesiredColumn
     with pytest.raises(ValueError, match="blank"):
         ObservedColumn("  ", Integer())
     with pytest.raises(ValueError, match="lowercase"):

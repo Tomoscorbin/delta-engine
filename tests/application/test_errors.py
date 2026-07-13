@@ -20,7 +20,7 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.domain.model import Column, Integer, QualifiedName
+from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -43,7 +43,7 @@ def _table_report(
 ) -> TableRunReport:
     return TableRunReport(
         qualified_name=_QN,
-        desired=DesiredTable(qualified_name=_QN, columns=(Column("id", Integer()),)),
+        desired=DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),)),
         read=read,
         failures=failures,
         execution=execution,
