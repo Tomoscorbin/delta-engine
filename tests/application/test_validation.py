@@ -46,6 +46,7 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
@@ -68,17 +69,6 @@ def _desired_table(
     )
 
 
-def _as_observed(column: Column | ObservedColumn) -> ObservedColumn:
-    """Coerce a column written as ``Column`` into the observed-state type."""
-    return ObservedColumn(
-        name=column.name,
-        data_type=column.data_type,
-        nullable=column.nullable,
-        comment=column.comment,
-        tags=column.tags,
-    )
-
-
 def _observed_table(
     *,
     columns: tuple[Column, ...] | None = None,
@@ -89,7 +79,7 @@ def _observed_table(
     source = (Column("id", Integer()),) if columns is None else columns
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=tuple(_as_observed(column) for column in source),
+        columns=as_observed_columns(source),
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
@@ -692,7 +682,7 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer(), tags={"pii": "true"}),),
+        columns=(ObservedColumn("id", Integer(), tags={"pii": "true"}),),
         tags={"legacy": "yes"},
     )
 

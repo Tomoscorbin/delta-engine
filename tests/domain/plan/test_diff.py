@@ -62,6 +62,7 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
@@ -71,21 +72,10 @@ def _desired(**overrides) -> DesiredTable:
     return DesiredTable(**{**defaults, **overrides})
 
 
-def _as_observed(column: Column | ObservedColumn) -> ObservedColumn:
-    """Coerce a column written as ``Column`` into the observed-state type."""
-    return ObservedColumn(
-        name=column.name,
-        data_type=column.data_type,
-        nullable=column.nullable,
-        comment=column.comment,
-        tags=column.tags,
-    )
-
-
 def _observed(**overrides) -> ObservedTable:
     defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(ObservedColumn("id", Integer()),))
     merged = {**defaults, **overrides}
-    merged["columns"] = tuple(_as_observed(column) for column in merged["columns"])
+    merged["columns"] = as_observed_columns(merged["columns"])
     return ObservedTable(**merged)
 
 

@@ -7,6 +7,7 @@ from delta_engine.domain.model import (
     DesiredTable,
     ForeignKeyReference,
     Integer,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
@@ -14,10 +15,12 @@ from delta_engine.domain.model import (
     TableSnapshot,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
 _COL = Column("id", Integer(), nullable=False)
+_OBSERVED_COL = ObservedColumn("id", Integer(), nullable=False)
 
 
 def test_fails_when_no_columns_defined():
@@ -87,7 +90,7 @@ def test_primary_key_columns_returns_the_constraint_columns():
     # Given a table with a two-column primary key
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(Column("id", Integer()), Column("tenant_id", Integer())),
+        columns=(ObservedColumn("id", Integer()), ObservedColumn("tenant_id", Integer())),
         primary_key=PrimaryKeyConstraint(columns=("id", "tenant_id"), constraint_name="t_pk"),
     )
 
@@ -112,7 +115,7 @@ def test_observed_table_has_primary_key_field():
     # Given an ObservedTable constructed with a primary key
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
@@ -151,7 +154,7 @@ def test_observed_table_allows_a_nullable_primary_key_column():
     # Given an ObservedTable read from a legacy catalog where a PK column is nullable
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(Column("id", Integer(), nullable=True),),
+        columns=(ObservedColumn("id", Integer(), nullable=True),),
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
     )
 
@@ -359,7 +362,7 @@ def test_observed_table_allows_two_foreign_keys_over_the_same_local_columns():
     # When building an ObservedTable with both
     observed = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("customer_id", Integer()),),
+        columns=(ObservedColumn("customer_id", Integer()),),
         foreign_keys=(fk_one, fk_two),
     )
 
@@ -417,7 +420,7 @@ def test_observed_table_stores_tags():
     # Given an ObservedTable read from a catalog carrying a tag
     table = ObservedTable(
         qualified_name=_QN,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         tags={"env": "prod"},
     )
 
@@ -478,7 +481,7 @@ def test_observed_table_properties_carry_values_only():
     # Given an observed table — the catalog has values, never assertions
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(_COL,),
+        columns=(_OBSERVED_COL,),
         properties={"delta.enableChangeDataFeed": "true"},
     )
 
@@ -495,7 +498,7 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
     )
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "orders"),
-        columns=(Column("id", Integer()), Column("day", Date())),
+        columns=(ObservedColumn("id", Integer()), ObservedColumn("day", Date())),
         partitioned_by=("id", "day"),
     )
     assert desired.partitioned_by == ("id", "day")
@@ -517,7 +520,10 @@ def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
         qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
     )
     observed = ObservedTable(
-        qualified_name=name, columns=columns, partitioned_by=("a",), clustered_by=("b",)
+        qualified_name=name,
+        columns=as_observed_columns(columns),
+        partitioned_by=("a",),
+        clustered_by=("b",),
     )
 
     assert five_keys.clustered_by == ("a", "b", "c", "d", "e")
@@ -563,7 +569,7 @@ def test_table_snapshot_rejects_duplicate_clustering_column():
 
 
 def test_observed_table_accepts_clustering():
-    columns = (Column("id", Integer()), Column("region", String()))
+    columns = (ObservedColumn("id", Integer()), ObservedColumn("region", String()))
     table = ObservedTable(_QUALIFIED_NAME, columns, clustered_by=("region",))
     assert table.clustered_by == ("region",)
 
@@ -580,7 +586,7 @@ def test_observed_table_carries_referencing_foreign_keys() -> None:
     # When building an ObservedTable with referencing_foreign_keys
     observed = ObservedTable(
         qualified_name=QualifiedName("dev", "silver", "customers"),
-        columns=(Column("id", Integer()),),
+        columns=(ObservedColumn("id", Integer()),),
         referencing_foreign_keys=(reference,),
     )
     # Then the field is readable and returns the value object
