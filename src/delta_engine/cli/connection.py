@@ -19,6 +19,8 @@ _WAREHOUSE_ID_VAR = "DATABRICKS_SQL_WAREHOUSE_ID"
 _INSTALL_HINT = 'pip install "delta-engine[cli]"'
 _CANNOT_CONNECT = "cannot connect to Databricks"
 _SECRET_MARKERS = ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
+_SQL_CONNECTOR_LOGGER = "databricks.sql.client"
+_OPTIONAL_PYARROW_WARNING = "pyarrow is not installed by default"
 
 logger = logging.getLogger(__name__)
 
@@ -100,18 +102,37 @@ def _target_from_config(config: "Config", warehouse_id: str) -> Target:
 
 def _import_backends() -> tuple[ModuleType, type["Config"]]:
     """Import the connector and SDK, translating optional-dependency failures."""
+    connector_logger = logging.getLogger(_SQL_CONNECTOR_LOGGER)
+    connector_logger.addFilter(_keep_relevant_connector_logs)
     try:
-        from databricks import sql as databricks_sql
-        from databricks.sdk.core import Config
-    except ImportError as error:
-        shadow = _shadowing_module_file()
-        if shadow is not None:
+        try:
+            databricks_sql, config_class = _load_databricks_backends()
+        except ImportError as error:
+            shadow = _shadowing_module_file()
+            if shadow is not None:
+                raise ConfigError(
+                    f"'{shadow}' shadows the installed databricks packages; "
+                    "rename that file or run the CLI from a different directory"
+                ) from error
             raise ConfigError(
-                f"'{shadow}' shadows the installed databricks packages; "
-                "rename that file or run the CLI from a different directory"
+                f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}"
             ) from error
-        raise ConfigError(f"the CLI needs {_distribution_for(error)}: {_INSTALL_HINT}") from error
+    finally:
+        connector_logger.removeFilter(_keep_relevant_connector_logs)
+    return databricks_sql, config_class
+
+
+def _load_databricks_backends() -> tuple[ModuleType, type["Config"]]:
+    """Load optional CLI dependencies behind the filtered import boundary."""
+    from databricks import sql as databricks_sql
+    from databricks.sdk.core import Config
+
     return databricks_sql, Config
+
+
+def _keep_relevant_connector_logs(record: logging.LogRecord) -> bool:
+    """Hide the connector's irrelevant import warning while retaining other logs."""
+    return _OPTIONAL_PYARROW_WARNING not in record.getMessage()
 
 
 def _shadowing_module_file() -> str | None:
