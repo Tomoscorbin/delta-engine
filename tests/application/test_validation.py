@@ -20,6 +20,7 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
+    ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -45,6 +46,7 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
@@ -74,9 +76,10 @@ def _observed_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
 ) -> ObservedTable:
+    source = (Column("id", Integer()),) if columns is None else columns
     return ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer()),) if columns is None else columns,
+        columns=as_observed_columns(source),
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
@@ -679,7 +682,7 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
-        columns=(Column("id", Integer(), tags={"pii": "true"}),),
+        columns=(ObservedColumn("id", Integer(), tags={"pii": "true"}),),
         tags={"legacy": "yes"},
     )
 

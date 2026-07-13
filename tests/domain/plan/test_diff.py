@@ -7,6 +7,7 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
@@ -61,6 +62,7 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
+from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
@@ -71,8 +73,10 @@ def _desired(**overrides) -> DesiredTable:
 
 
 def _observed(**overrides) -> ObservedTable:
-    defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
-    return ObservedTable(**{**defaults, **overrides})
+    defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(ObservedColumn("id", Integer()),))
+    merged = {**defaults, **overrides}
+    merged["columns"] = as_observed_columns(merged["columns"])
+    return ObservedTable(**merged)
 
 
 def _foreign_key(constraint_name: str = "test_id_fk") -> ForeignKeyConstraint:
@@ -152,7 +156,7 @@ def test_observed_only_column_produces_column_removed_change():
 
     # Then a ColumnRemoved change is produced
     assert isinstance(diff, TableDrift)
-    assert diff.changes == (ColumnRemoved(Column("stale", String())),)
+    assert diff.changes == (ColumnRemoved(ObservedColumn("stale", String())),)
 
 
 def test_type_drift_produces_column_data_type_changed():
@@ -596,7 +600,9 @@ def test_column_added_produces_add_column_only():
 
 
 def test_column_removed_produces_drop_column():
-    assert ColumnRemoved(column=Column("stale", Integer())).actions() == (DropColumn("stale"),)
+    assert ColumnRemoved(column=ObservedColumn("stale", Integer())).actions() == (
+        DropColumn("stale"),
+    )
 
 
 def test_column_data_type_changed_lowers_to_alter_column_type():
@@ -943,7 +949,7 @@ def test_changed_foreign_key_signature_produces_remove_and_add_changes():
 
 def test_observed_only_column_tags_are_ignored_because_column_is_removed():
     # Given an observed-only column that also has catalog tags
-    observed_only_column = Column("stale", Integer(), tags={"old": "true"})
+    observed_only_column = ObservedColumn("stale", Integer(), tags={"old": "true"})
 
     # When diffing
     diff = diff_table(

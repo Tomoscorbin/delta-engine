@@ -30,6 +30,7 @@ from delta_engine.domain.model import (
     DesiredTable,
     Integer,
     Long,
+    ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -257,7 +258,9 @@ def test_every_action_type_has_registered_diff_entries():
 def _report_with_empty_plan_and_failure() -> TableRunReport:
     qualified_name = QualifiedName("dev", "silver", "orders")
     desired = DesiredTable(qualified_name=qualified_name, columns=(Column("id", Integer()),))
-    observed = ObservedTable(qualified_name=qualified_name, columns=(Column("id", Integer()),))
+    observed = ObservedTable(
+        qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
+    )
     return TableRunReport(
         qualified_name=qualified_name,
         desired=desired,
@@ -347,7 +350,11 @@ def _grid_report(name, *, plan=None, failures=()):
     return TableRunReport(
         qualified_name=qualified_name,
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
-        read=TablePresent(table=ObservedTable(qualified_name=qualified_name, columns=columns)),
+        read=TablePresent(
+            table=ObservedTable(
+                qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
+            )
+        ),
         plan=plan,
         # One fake statement per action, as the engine would have compiled.
         planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),

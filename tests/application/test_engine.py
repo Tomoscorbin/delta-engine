@@ -24,7 +24,7 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
-from delta_engine.domain.model import ObservedTable, QualifiedName
+from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
@@ -37,6 +37,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.schema import Column, DeltaTable, ForeignKey, String
+from tests.builders import as_observed_columns
 
 # ---------------------------------------------------------------------------
 # Helpers and fakes
@@ -137,7 +138,7 @@ def _existing_id_table(fqn: str) -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(Column("id", String()),),
+            columns=(ObservedColumn("id", String()),),
         )
     )
 
@@ -149,7 +150,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(Column("id", String(), nullable=False),),
+            columns=(ObservedColumn("id", String(), nullable=False),),
             primary_key=PrimaryKeyConstraint.generate(
                 table_name=table_name,
                 columns=("id",),
@@ -165,7 +166,7 @@ def _existing_fk_table_synced(fqn: str, references: str) -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=desired.qualified_name,
-            columns=desired.columns,
+            columns=as_observed_columns(desired.columns),
             primary_key=desired.primary_key,
             foreign_keys=desired.foreign_keys,
         )
@@ -207,7 +208,7 @@ def _existing_matching_table(fqn: str) -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(Column("id", String()),),
+            columns=(ObservedColumn("id", String()),),
         )
     )
 
@@ -219,7 +220,7 @@ def _existing_tag_drifted_table(fqn: str) -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(Column("id", String(), tags={"stale": "true"}),),
+            columns=(ObservedColumn("id", String(), tags={"stale": "true"}),),
             tags={"legacy": "yes"},
         )
     )
@@ -1290,7 +1291,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
             fqn: TablePresent(
                 table=ObservedTable(
                     qualified_name=QualifiedName(catalog, schema, name),
-                    columns=(Column("id", String()), Column("stale", String())),
+                    columns=(ObservedColumn("id", String()), ObservedColumn("stale", String())),
                 )
             )
         }
@@ -1317,7 +1318,7 @@ def test_sync_fails_loud_on_undeclared_registered_property():
             fqn: TablePresent(
                 table=ObservedTable(
                     qualified_name=QualifiedName(catalog, schema, name),
-                    columns=(Column("id", String()),),
+                    columns=(ObservedColumn("id", String()),),
                     properties={"delta.columnMapping.mode": "name"},
                 )
             )
@@ -1344,7 +1345,7 @@ def test_metadata_scoped_column_removal_fails_without_drop_precondition():
             fqn: TablePresent(
                 table=ObservedTable(
                     qualified_name=QualifiedName(catalog, schema, name),
-                    columns=(Column("id", String()), Column("extra", String())),
+                    columns=(ObservedColumn("id", String()), ObservedColumn("extra", String())),
                 )
             )
         }

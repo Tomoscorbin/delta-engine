@@ -49,7 +49,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.domain.model import (
-    Column as DomainColumn,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
 )
@@ -150,8 +150,8 @@ def _describe_detail_row(cursor: Any, qualified_name: QualifiedName) -> Any:
 
 def _to_columns(
     column_rows: Sequence[Any], qualified_name: QualifiedName
-) -> tuple[DomainColumn, ...]:
-    """Map information_schema.columns rows to domain columns, skipping unmappable types."""
+) -> tuple[ObservedColumn, ...]:
+    """Map information_schema.columns rows to observed columns, skipping unmappable types."""
     columns = []
     for row in column_rows:
         column = column_from_catalog(

@@ -28,9 +28,9 @@ from typing import Any
 from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
-    Column,
     ForeignKeyConstraint,
     ForeignKeyReference,
+    ObservedColumn,
     PrimaryKeyConstraint,
     QualifiedName,
 )
@@ -46,9 +46,9 @@ def column_from_catalog(
     comment: str,
     is_partition: bool,
     qualified_name: QualifiedName,
-) -> Column | None:
+) -> ObservedColumn | None:
     """
-    Build a domain ``Column`` from catalog-reported facts, or ``None``.
+    Build an ``ObservedColumn`` from catalog-reported facts, or ``None``.
 
     Owns the shared unmappable-type policy for both read backends, so the
     two readers cannot drift apart on it. A column whose type string has no
@@ -85,7 +85,7 @@ def column_from_catalog(
         )
         return None
 
-    return Column(
+    return ObservedColumn(
         name=name.casefold(),
         data_type=data_type,
         nullable=nullable,
