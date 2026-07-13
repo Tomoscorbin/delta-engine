@@ -90,7 +90,7 @@ uv run lint-imports
 uv run --group docs sphinx-build -b html docs docs/_build/html -W
 ```
 
-Do not run credentialed Databricks tests unless explicitly asked.
+This repo carries no tests that need Databricks credentials; the full suite runs locally. Live verification against a real workspace happens in a separate project outside this repo.
 
 ## Architecture boundaries
 
