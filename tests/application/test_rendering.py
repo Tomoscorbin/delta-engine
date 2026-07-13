@@ -20,7 +20,6 @@ from delta_engine.application.rendering import (
     render_diff,
     render_diff_block,
     render_grid,
-    render_planned_sql,
     render_report,
     run_summary_footer,
 )
@@ -649,33 +648,3 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
     assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
     assert "~ table: 'c'" in rendered
     assert "+ age  Integer" in rendered
-
-
-def test_render_planned_sql_shows_each_tables_statements_under_its_name():
-    # Given one table with planned SQL and one with nothing to do
-    changed = _grid_report("orders", plan=ActionPlan((SetTableComment(comment="c"),)))
-    unchanged = _grid_report("customers")
-    sync = SyncReport(
-        started_at=datetime(2025, 1, 1, 0, 0, 0),
-        ended_at=datetime(2025, 1, 1, 0, 0, 1),
-        table_reports=(changed, unchanged),
-    )
-
-    # When rendering the planned SQL
-    rendered = render_planned_sql(sync)
-
-    # Then each planned statement sits under its table's name; no-op tables are omitted
-    assert "PLANNED SQL" in rendered
-    assert "-- cat.sch.orders" in rendered
-    assert "SQL 0" in rendered
-    assert "customers" not in rendered
-
-
-def test_render_planned_sql_is_empty_when_nothing_is_planned():
-    sync = SyncReport(
-        started_at=datetime(2025, 1, 1, 0, 0, 0),
-        ended_at=datetime(2025, 1, 1, 0, 0, 1),
-        table_reports=(_grid_report("orders"),),
-    )
-
-    assert render_planned_sql(sync) == ""

@@ -1,4 +1,4 @@
-"""Load ``DeltaTable`` declarations from explicit ``MODULE:ATTRIBUTE`` specs."""
+"""Load one ordered collection of declarations from ``MODULE:ATTRIBUTE``."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -7,54 +7,56 @@ import os
 import sys
 from types import ModuleType
 
+from delta_engine.application import DuplicateTableDefinitionError
 from delta_engine.cli.errors import ConfigError
 from delta_engine.schema import DeltaTable
 
 
-@dataclass(frozen=True)
-class _DeclarationSpec:
+@dataclass(frozen=True, slots=True)
+class DeclarationRef:
+    """The explicit module attribute containing a declaration collection."""
+
     module_name: str
     attribute: str
 
+    @classmethod
+    def parse(cls, text: str) -> "DeclarationRef":
+        """Parse exactly one non-empty ``MODULE:ATTRIBUTE`` reference."""
+        parts = text.split(":")
+        if len(parts) != 2 or not all(parts):
+            raise ConfigError(
+                f"malformed declaration reference '{text}': expected MODULE:ATTRIBUTE"
+            )
+        return cls(module_name=parts[0], attribute=parts[1])
 
-def load_declarations(spec_texts: Sequence[str]) -> tuple[DeltaTable, ...]:
+    def __str__(self) -> str:
+        """Return the command-line representation."""
+        return f"{self.module_name}:{self.attribute}"
+
+
+def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
     """
-    Resolve every ``MODULE:ATTRIBUTE`` spec into explicitly selected tables.
+    Resolve ``reference`` into one non-empty ordered sequence of tables.
 
-    The attribute may hold one :class:`DeltaTable` or an iterable of them.
-    Duplicate qualified names are rejected with both source locations before
-    the caller resolves authentication or opens a connection.
+    A single table is rejected: the selected attribute is always a collection,
+    even when the collection currently contains only one declaration. Duplicate
+    qualified names fail before authentication or catalog access begins.
 
     Raises:
-        ConfigError: For a malformed spec, missing target module or attribute,
-            wrong or empty attribute value, or duplicate qualified table name.
+        ConfigError: If the target module or attribute is missing, or the
+            attribute is not a non-empty ordered sequence of ``DeltaTable``.
+        DuplicateTableDefinitionError: If the sequence defines one qualified
+            table more than once.
         Exception: Any exception raised by imported user code is allowed to
             propagate with its original traceback.
 
     """
-    if not spec_texts:
-        raise ConfigError("at least one declaration spec is required")
-
     _ensure_working_directory_on_path()
-    tables: list[DeltaTable] = []
-    origins_by_name: dict[str, str] = {}
-    for argument_index, spec_text in enumerate(spec_texts, start=1):
-        spec = _parse_spec(spec_text)
-        module = _import_module(spec.module_name)
-        value = _attribute(module, spec)
-        selected, is_iterable = _tables_from_attribute(value, spec_text)
-        for item_index, table in enumerate(selected):
-            origin = _origin(spec_text, argument_index, item_index, is_iterable=is_iterable)
-            qualified_name = str(table.to_desired_table().qualified_name)
-            previous_origin = origins_by_name.get(qualified_name)
-            if previous_origin is not None:
-                raise ConfigError(
-                    f"duplicate table definition '{qualified_name}': "
-                    f"selected by {previous_origin} and {origin}"
-                )
-            origins_by_name[qualified_name] = origin
-            tables.append(table)
-    return tuple(tables)
+    module = _import_module(reference.module_name)
+    value = _attribute(module, reference)
+    tables = _tables_from_attribute(value, reference)
+    _reject_duplicate_names(tables)
+    return tables
 
 
 def _ensure_working_directory_on_path() -> None:
@@ -64,14 +66,8 @@ def _ensure_working_directory_on_path() -> None:
     sys.path.insert(0, working_directory)
 
 
-def _parse_spec(text: str) -> _DeclarationSpec:
-    parts = text.split(":")
-    if len(parts) != 2 or not all(parts):
-        raise ConfigError(f"malformed spec '{text}': expected MODULE:ATTRIBUTE")
-    return _DeclarationSpec(module_name=parts[0], attribute=parts[1])
-
-
 def _import_module(module_name: str) -> ModuleType:
+    """Import the selected module while distinguishing its own missing dependencies."""
     try:
         return importlib.import_module(module_name)
     except ModuleNotFoundError as error:
@@ -86,37 +82,51 @@ def _import_module(module_name: str) -> ModuleType:
         raise
 
 
-def _attribute(module: ModuleType, spec: _DeclarationSpec) -> object:
+def _attribute(module: ModuleType, reference: DeclarationRef) -> object:
+    """Fetch the explicitly selected module attribute without invoking fallbacks."""
     namespace = vars(module)
-    if spec.attribute not in namespace:
-        raise ConfigError(f"module '{spec.module_name}' has no attribute '{spec.attribute}'")
-    return namespace[spec.attribute]
+    if reference.attribute not in namespace:
+        raise ConfigError(
+            f"module '{reference.module_name}' has no attribute '{reference.attribute}'"
+        )
+    return namespace[reference.attribute]
 
 
-def _tables_from_attribute(value: object, spec_text: str) -> tuple[tuple[DeltaTable, ...], bool]:
+def _tables_from_attribute(
+    value: object,
+    reference: DeclarationRef,
+) -> tuple[DeltaTable, ...]:
+    """Validate and freeze the selected ordered declaration collection."""
+    reference_text = str(reference)
     if isinstance(value, DeltaTable):
-        return (value,), False
-    # Sequences only: an unordered container (a set, say) would make item
-    # indices in duplicate-definition messages depend on iteration order.
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        items = tuple(value)
-        if not items:
+        raise ConfigError(
+            f"'{reference_text}' is one DeltaTable; expected a non-empty ordered sequence"
+        )
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ConfigError(
+            f"'{reference_text}' is {type(value).__name__}; "
+            "expected a non-empty ordered sequence of DeltaTable declarations"
+        )
+
+    items = tuple(value)
+    if not items:
+        raise ConfigError(
+            f"'{reference_text}' is empty; expected at least one DeltaTable declaration"
+        )
+    for index, item in enumerate(items):
+        if not isinstance(item, DeltaTable):
             raise ConfigError(
-                f"'{spec_text}' is empty; expected at least one DeltaTable declaration"
+                f"'{reference_text}' item {index} is {type(item).__name__}; "
+                "expected only DeltaTable declarations"
             )
-        for index, item in enumerate(items):
-            if not isinstance(item, DeltaTable):
-                raise ConfigError(
-                    f"'{spec_text}' item {index} is {type(item).__name__}; "
-                    "expected only DeltaTable declarations"
-                )
-        return items, True
-    raise ConfigError(
-        f"'{spec_text}' is {type(value).__name__}; expected a DeltaTable "
-        "or a sequence (list or tuple) of them"
-    )
+    return items
 
 
-def _origin(spec_text: str, argument_index: int, item_index: int, *, is_iterable: bool) -> str:
-    item = f"[{item_index}]" if is_iterable else ""
-    return f"'{spec_text}{item}' (argument {argument_index})"
+def _reject_duplicate_names(tables: tuple[DeltaTable, ...]) -> None:
+    """Raise the engine's typed duplicate-definition error before connecting."""
+    seen = set()
+    for table in tables:
+        qualified_name = table.to_desired_table().qualified_name
+        if qualified_name in seen:
+            raise DuplicateTableDefinitionError(qualified_name)
+        seen.add(qualified_name)

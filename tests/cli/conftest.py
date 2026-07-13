@@ -16,6 +16,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 import delta_engine.cli.app as cli_app
+from delta_engine.cli.connection import Target
 from delta_engine.domain.model import Column, ObservedTable, QualifiedName, String
 from delta_engine.domain.plan import ActionPlan
 
@@ -72,8 +73,15 @@ def fake_engine(monkeypatch):
     engine = Engine(reader=reader, executor=FakeExecutor())
 
     @contextmanager
-    def fake_connection(host, http_path, profile):
-        yield _StubConnection()
+    def fake_connection():
+        yield (
+            Target(
+                host="https://test.cloud.databricks.com",
+                client_id="test-client-id",
+                warehouse_id="test-warehouse",
+            ),
+            _StubConnection(),
+        )
 
     monkeypatch.setattr(cli_app, "open_connection", fake_connection)
     monkeypatch.setattr(cli_app, "build_sql_engine", lambda connection: engine)
@@ -83,8 +91,10 @@ def fake_engine(monkeypatch):
 @pytest.fixture
 def databricks_env(monkeypatch):
     monkeypatch.setenv("DATABRICKS_HOST", "https://test.cloud.databricks.com")
-    monkeypatch.setenv("DATABRICKS_HTTP_PATH", "/sql/1.0/warehouses/test")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("DATABRICKS_SQL_WAREHOUSE_ID", "test-warehouse")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://oidc.example/token")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "test-oidc-token")
 
 
 @pytest.fixture
@@ -107,6 +117,7 @@ ORDERS_ONLY = """
     from delta_engine.schema import Column, DeltaTable, String
 
     orders = DeltaTable("dev", "silver", "orders", columns=(Column("id", String()),))
+    all_tables = [orders]
 """
 
 # Declares a NOT NULL column addition, which fails validation when diffed
@@ -123,4 +134,5 @@ NOT_NULL_DRIFT_ORDERS = """
             Column("amount", String(), nullable=False),
         ),
     )
+    all_tables = [orders]
 """

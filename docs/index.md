@@ -64,7 +64,7 @@ for what is and isn't backend-neutral, and
 | You want to…                                   | Read                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------- |
 | Install the package and sync your first table  | [Installation](installation.md), [Getting started](tutorial-getting-started.md) |
-| Run plans or applies from a shell or CI         | [CLI reference](reference-cli.md)                                              |
+| Run read-only schema plans in GitHub Actions    | [CLI reference](reference-cli.md)                                              |
 | Understand what a sync does before running one | [How a sync works](explanation-sync-lifecycle.md)                               |
 | Check whether the engine supports something    | [Capabilities and limitations](reference-limitations.md)                        |
 | Declare keys, properties, tags, or comments    | The how-to guides in the sidebar                                                |

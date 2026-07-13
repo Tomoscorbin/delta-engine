@@ -16,7 +16,7 @@ Main source layout:
 - `src/delta_engine/api`: implementation of public declaration objects.
 - `src/delta_engine/schema.py`: public schema declaration import surface.
 - `src/delta_engine/databricks.py`: public Databricks helper import surface with lazy adapter imports.
-- `src/delta_engine/cli`: Typer command-line interface (`plan`/`apply`) over the warehouse backend; requires the `cli` extra.
+- `src/delta_engine/cli`: read-only GitHub-OIDC `plan` command over the warehouse backend; requires the `cli` extra.
 - `tests`: unit, integration, adapter, and end-to-end tests.
 - `docs`: Sphinx/MyST documentation.
 
@@ -106,8 +106,9 @@ Rules:
 - `adapters` own backend integration, SQL compilation, Spark/Databricks parsing, identifier quoting, and backend exception translation.
 - `api` owns public declaration implementation and lowers declarations into domain snapshots.
 - `schema.py` and `databricks.py` are user-facing facades; keep them thin.
-- `cli.connection` may import the Databricks SDK and SQL connector only to resolve
-  authentication and own a connection; backend reads and execution stay in adapters.
+- `cli.connection` may import the Databricks SDK and SQL connector only to
+  configure fixed GitHub OIDC authentication and own a connection; backend
+  reads and execution stay in adapters.
 - PySpark, Delta, Py4J, Spark SQL details, and Databricks-specific assumptions must not leak into `domain` or `application`.
 
 Expected dependency direction:

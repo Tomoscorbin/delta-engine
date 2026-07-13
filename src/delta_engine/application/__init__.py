@@ -17,7 +17,7 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.rendering import render_diff, render_planned_sql, render_report
+from delta_engine.application.rendering import render_diff, render_report
 from delta_engine.application.report import SyncReport, TableRunReport, TableRunStatus
 
 __all__ = [
@@ -34,6 +34,5 @@ __all__ = [
     "TableRunStatus",
     "ValidationFailure",
     "render_diff",
-    "render_planned_sql",
     "render_report",
 ]

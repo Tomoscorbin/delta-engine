@@ -4,6 +4,8 @@ from importlib.metadata import entry_points, requires
 import subprocess
 import sys
 
+from packaging.requirements import Requirement
+
 
 def test_base_distribution_has_no_unconditional_runtime_dependencies():
     requirements = requires("delta-engine") or []
@@ -26,6 +28,11 @@ def test_cli_extra_contains_the_sdk_connector_and_typer():
         for requirement in cli_requirements
     )
     assert any(requirement.startswith("typer>=0.12") for requirement in cli_requirements)
+    assert {Requirement(requirement).name for requirement in cli_requirements} == {
+        "databricks-sdk",
+        "databricks-sql-connector",
+        "typer",
+    }
 
 
 def test_console_script_points_at_the_stdlib_only_shim():

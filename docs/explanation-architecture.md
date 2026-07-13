@@ -300,7 +300,7 @@ skipped during execution. The engine still processes other tables.
 
 | Package                    | Responsibility                                                                      | Examples                                                                                 |
 | -------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `delta_engine.cli`         | Command parsing, declaration loading, authentication, and connection ownership     | `plan`, `apply`, unified-auth SQL connection composition                                 |
+| `delta_engine.cli`         | Read-only command, declaration loading, fixed OIDC authentication, connection ownership, and CLI rendering | `plan`, GitHub-OIDC SQL connection composition, planned-SQL rendering                    |
 | `delta_engine.schema`      | User-facing declaration import surface                                              | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.api`         | Declaration implementation package                                                  | `DeltaTable`, `ForeignKey`, `Property`                                                   |
 | `delta_engine.application` | Use-case orchestration, ports, failures, validation, dependency resolution, reports | `Engine`, `CatalogStateReader`, `PlanExecutor`, `validate_diff`, `resolve`, `SyncReport` |
@@ -309,7 +309,7 @@ skipped during execution. The engine still processes other tables.
 
 ```mermaid
 flowchart TB
-    CLI[delta_engine.cli<br/>plan / apply commands]
+    CLI[delta_engine.cli<br/>read-only plan command]
     Public[delta_engine.__init__<br/>runtime exports]
     Schema[delta_engine.schema<br/>public declarations]
     Databricks[delta_engine.databricks<br/>public Databricks helpers]
@@ -340,12 +340,16 @@ depends inward on the application ports and domain vocabulary. The top-level
 require PySpark.
 
 `delta_engine.cli` sits above the hexagon as a driving adapter: a thin Typer
-layer (the `cli` extra) that loads declarations, opens a warehouse connection
-through unified authentication, and calls the same `Engine.sync` any other
-caller does. Its connection module imports the Databricks SDK and SQL connector
-only to resolve credentials and own that connection's lifecycle; catalog reads,
-SQL compilation, and execution remain in the warehouse adapter. The CLI holds
-no planning or validation policy of its own.
+layer (the `cli` extra) that loads one explicit declaration collection, opens
+one warehouse connection with fixed GitHub Actions OIDC authentication, and
+calls `Engine.sync(..., dry_run=True)`. Its connection module is the sole deep
+authentication boundary: it validates environment configuration, derives the
+connector HTTP path from a warehouse ID, constructs the SDK credentials, and
+owns the connection lifecycle. Catalog reads and SQL compilation remain in the
+warehouse adapter. Exact planned-SQL text rendering is CLI-private; the
+application layer exposes the report data, diff renderer, and report renderer
+without taking on command-specific presentation policy. The CLI contains no
+apply orchestration or planning and validation policy of its own.
 
 `delta_engine.schema` and `delta_engine.databricks` are the public import paths
 for users. Their implementations still live in `delta_engine.api` and

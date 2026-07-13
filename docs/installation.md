@@ -65,20 +65,24 @@ expose (see [limitations](reference-limitations.md)).
 
 ## Installing the CLI
 
-The `cli` extra adds the `delta-engine` command on top of the SQL warehouse
-backend:
+The `cli` extra adds the read-only `delta-engine plan` command on top of the
+SQL warehouse backend:
 
 ```bash
 pip install "delta-engine[cli]"
 ```
 
-`delta-engine plan` dry-runs your declarations against the catalog and
-`delta-engine apply` syncs them, both over a Databricks SQL warehouse
-connection configured through Databricks unified authentication. The CLI extra
-includes Typer, `databricks-sdk`, and `databricks-sql-connector`; the base
-package remains dependency-free. Configure `DATABRICKS_HOST` and
-`DATABRICKS_HTTP_PATH`, then supply credentials through a profile, PAT, OAuth,
-or workload identity federation. See the [CLI reference](reference-cli.md) and
+The command dry-runs one explicit declaration collection against the live
+catalog, prints its semantic diff, report, and planned SQL, and never executes
+DDL. The CLI extra contains only Typer, `databricks-sdk`, and
+`databricks-sql-connector`; the base package remains dependency-free.
+
+The MVP runs in trusted GitHub Actions jobs only. Configure
+`DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and
+`DATABRICKS_SQL_WAREHOUSE_ID`, grant the job `id-token: write`, and use a
+read-only Databricks workload identity. PATs, profiles, OAuth client secrets,
+local user authentication, connection flags, and an apply command are not
+supported. See the [CLI reference](reference-cli.md) and
 [how to run schema plans in CI](how-to-gate-changes-in-ci.md).
 
 ## Verify

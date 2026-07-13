@@ -1,7 +1,8 @@
-"""Open Databricks SQL connections through unified authentication."""
+"""Open a Databricks SQL connection using GitHub Actions OIDC only."""
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 import logging
 import os
 import sys
@@ -14,73 +15,110 @@ if TYPE_CHECKING:
     from databricks.sdk.core import Config
     from databricks.sql.client import Connection
 
-_HTTP_PATH_VAR = "DATABRICKS_HTTP_PATH"
+_HOST_VAR = "DATABRICKS_HOST"
+_CLIENT_ID_VAR = "DATABRICKS_CLIENT_ID"
+_WAREHOUSE_ID_VAR = "DATABRICKS_SQL_WAREHOUSE_ID"
+_OIDC_URL_VAR = "ACTIONS_ID_TOKEN_REQUEST_URL"
+_OIDC_TOKEN_VAR = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 _INSTALL_HINT = 'pip install "delta-engine[cli]"'
-_CANNOT_CONNECT = "cannot connect to Databricks"
+_CANNOT_CONNECT = "cannot connect to Databricks using GitHub OIDC"
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class Target:
+    """One normalized Databricks SQL warehouse target and its plan identity."""
+
+    host: str
+    client_id: str = field(repr=False)
+    warehouse_id: str
+
+    def __post_init__(self) -> None:
+        """Normalize the environment-derived identity at its owning boundary."""
+        object.__setattr__(self, "host", self.host.strip().rstrip("/"))
+        object.__setattr__(self, "client_id", self.client_id.strip())
+        object.__setattr__(self, "warehouse_id", self.warehouse_id.strip())
+
+    @property
+    def http_path(self) -> str:
+        """Derive the connector path without exposing it as CLI configuration."""
+        return f"/sql/1.0/warehouses/{self.warehouse_id}"
+
+
 @contextmanager
 def open_connection(
-    host: str | None,
-    http_path: str | None,
-    profile: str | None,
     *,
     environ: Mapping[str, str] | None = None,
-) -> Iterator["Connection"]:
+) -> Iterator[tuple[Target, "Connection"]]:
     """
-    Open and own one SQL connection using Databricks unified authentication.
+    Validate GitHub OIDC configuration, connect, and own the connection.
 
-    Explicit ``host`` and ``profile`` values are passed to the SDK
-    :class:`Config`; otherwise it resolves environment variables and Databricks
-    configuration profiles itself. ``http_path`` falls back to
-    ``DATABRICKS_HTTP_PATH`` because the warehouse path is a connector setting,
-    not an SDK authentication field. A missing HTTP path is reported before
-    importing the connector or asking the SDK to resolve authentication.
-
-    Connection-close errors are logged and suppressed so they never replace a
-    completed report or the primary exception raised by a sync.
+    This is the CLI's single deep authentication boundary. It deliberately
+    constructs the SDK with ``auth_type='github-oidc'`` and offers no path to
+    profiles, PATs, OAuth client secrets, or local user authentication.
+    Connection-close errors are logged and suppressed so they cannot replace a
+    completed plan or the primary exception raised while planning.
 
     Raises:
-        ConfigError: If a dependency is missing or shadowed, authentication or
-            the HTTP path is not configured, or the connection cannot be
-            established.
+        ConfigError: If required environment or optional dependencies are
+            missing, SDK configuration fails, or the connection cannot open.
 
     """
     environment = os.environ if environ is None else environ
-    resolved_http_path = http_path if http_path is not None else environment.get(_HTTP_PATH_VAR)
-    if not resolved_http_path:
-        raise ConfigError(f"{_CANNOT_CONNECT}: missing {_HTTP_PATH_VAR} (or --http-path)")
-
+    target = _target_from_environment(environment)
+    _validate_oidc_environment(environment)
     databricks_sql, config_class = _import_backends()
-    config = _build_config(config_class, host, profile)
-
-    # The connector re-raises connect-time failures unchanged and of many
-    # types (urllib3 transport errors, SDK auth ValueErrors), so this boundary
-    # translates everything rather than enumerating exception classes.
-    try:
-        connection = databricks_sql.connect(
-            server_hostname=config.host,
-            http_path=resolved_http_path,
-            credentials_provider=lambda: config.authenticate,
-        )
-    except Exception as error:
-        raise ConfigError(
-            f"failed to connect to Databricks ({type(error).__name__}): {error}"
-        ) from error
+    config = _build_config(config_class, target, environment)
+    connection = _connect(databricks_sql, config, target, environment)
 
     try:
-        yield connection
+        yield target, connection
     finally:
         try:
             connection.close()
-        except Exception:
-            logger.warning("Failed to close Databricks SQL connection", exc_info=True)
+        except Exception as error:
+            logger.warning(
+                "Failed to close Databricks SQL connection (%s)",
+                type(error).__name__,
+            )
+
+
+def _target_from_environment(environment: Mapping[str, str]) -> Target:
+    """Read, validate, and normalize the three public target settings."""
+    values = {
+        name: environment.get(name, "").strip()
+        for name in (_HOST_VAR, _CLIENT_ID_VAR, _WAREHOUSE_ID_VAR)
+    }
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        raise ConfigError(f"missing required environment: {', '.join(missing)}")
+
+    warehouse_id = values[_WAREHOUSE_ID_VAR]
+    if "/" in warehouse_id:
+        raise ConfigError(f"{_WAREHOUSE_ID_VAR} must be a warehouse ID, not an HTTP path")
+
+    return Target(
+        host=values[_HOST_VAR],
+        client_id=values[_CLIENT_ID_VAR],
+        warehouse_id=warehouse_id,
+    )
+
+
+def _validate_oidc_environment(environment: Mapping[str, str]) -> None:
+    """Require the token endpoint variables granted by ``id-token: write``."""
+    missing = [
+        name for name in (_OIDC_URL_VAR, _OIDC_TOKEN_VAR) if not environment.get(name, "").strip()
+    ]
+    if missing:
+        raise ConfigError(
+            "GitHub Actions OIDC is unavailable: "
+            f"missing {', '.join(missing)}; grant the job id-token: write"
+        )
 
 
 def _import_backends() -> tuple[ModuleType, type["Config"]]:
-    """Import the connector and SDK, translating failures into actionable errors."""
+    """Import the connector and SDK, translating optional-dependency failures."""
     try:
         from databricks import sql as databricks_sql
         from databricks.sdk.core import Config
@@ -96,14 +134,7 @@ def _import_backends() -> tuple[ModuleType, type["Config"]]:
 
 
 def _shadowing_module_file() -> str | None:
-    """
-    Return the file shadowing the ``databricks`` namespace package, if any.
-
-    The CLI prepends the working directory to ``sys.path`` to load
-    declarations, so a project file named ``databricks.py`` resolves ahead of
-    the installed namespace package. A real ``databricks`` package always has
-    ``__path__``; a plain module does not.
-    """
+    """Return a plain module file shadowing the ``databricks`` namespace."""
     module = sys.modules.get("databricks")
     if module is not None and not hasattr(module, "__path__"):
         return getattr(module, "__file__", None) or repr(module)
@@ -111,6 +142,7 @@ def _shadowing_module_file() -> str | None:
 
 
 def _distribution_for(error: ImportError) -> str:
+    """Name the missing optional distribution represented by ``error``."""
     name = error.name or ""
     if name.startswith("databricks.sdk"):
         return "databricks-sdk"
@@ -121,17 +153,52 @@ def _distribution_for(error: ImportError) -> str:
 
 def _build_config(
     config_class: type["Config"],
-    host: str | None,
-    profile: str | None,
+    target: Target,
+    environment: Mapping[str, str],
 ) -> "Config":
-    """Build the SDK config, translating authentication failures."""
+    """Construct the one supported SDK authentication strategy explicitly."""
     try:
-        if host is not None and profile is not None:
-            return config_class(host=host, profile=profile)
-        if host is not None:
-            return config_class(host=host)
-        if profile is not None:
-            return config_class(profile=profile)
-        return config_class()
+        return config_class(
+            host=target.host,
+            client_id=target.client_id,
+            auth_type="github-oidc",
+        )
     except ValueError as error:
-        raise ConfigError(f"{_CANNOT_CONNECT}: authentication: {error}") from error
+        detail = _safe_error_detail(error, target, environment)
+        raise ConfigError(f"{_CANNOT_CONNECT}: SDK configuration failed{detail}") from error
+
+
+def _connect(
+    databricks_sql: ModuleType,
+    config: "Config",
+    target: Target,
+    environment: Mapping[str, str],
+) -> "Connection":
+    """Open the connector transport and translate its broad failure surface."""
+    try:
+        return databricks_sql.connect(
+            server_hostname=config.host,
+            http_path=target.http_path,
+            credentials_provider=lambda: config.authenticate,
+        )
+    except Exception as error:
+        detail = _safe_error_detail(error, target, environment)
+        raise ConfigError(f"{_CANNOT_CONNECT} ({type(error).__name__}){detail}") from error
+
+
+def _safe_error_detail(
+    error: Exception,
+    target: Target,
+    environment: Mapping[str, str],
+) -> str:
+    """Return a useful one-line detail with identity and OIDC values redacted."""
+    message = " ".join(str(error).split())
+    sensitive_values = (
+        target.client_id,
+        environment.get(_OIDC_URL_VAR, ""),
+        environment.get(_OIDC_TOKEN_VAR, ""),
+    )
+    for value in sensitive_values:
+        if value:
+            message = message.replace(value, "<redacted>")
+    return f": {message}" if message else ""
