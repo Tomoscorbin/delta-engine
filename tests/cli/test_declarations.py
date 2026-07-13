@@ -189,12 +189,15 @@ def test_loads_from_the_working_directory_without_installation(tmp_path, monkeyp
         )
     )
     monkeypatch.chdir(tmp_path)
+    # Loading mutates sys.path in place; snapshot it so a failed assertion
+    # cannot leak the temporary directory into later tests.
+    monkeypatch.setattr(sys, "path", list(sys.path))
 
-    tables = _load("decl_cwd_tables:all_tables")
-
-    assert _dotted_names(tables) == ["dev.silver.orders"]
-    sys.modules.pop("decl_cwd_tables", None)
-    sys.path.remove(str(tmp_path))
+    try:
+        tables = _load("decl_cwd_tables:all_tables")
+        assert _dotted_names(tables) == ["dev.silver.orders"]
+    finally:
+        sys.modules.pop("decl_cwd_tables", None)
 
 
 def test_working_directory_takes_precedence_when_already_later_on_path(tmp_path, monkeypatch):
@@ -216,7 +219,8 @@ def test_working_directory_takes_precedence_when_already_later_on_path(tmp_path,
     monkeypatch.syspath_prepend(str(project))
     monkeypatch.syspath_prepend(str(shadow))
 
-    tables = _load(f"{module_name}:all_tables")
-
-    assert _dotted_names(tables) == ["dev.silver.orders"]
-    sys.modules.pop(module_name, None)
+    try:
+        tables = _load(f"{module_name}:all_tables")
+        assert _dotted_names(tables) == ["dev.silver.orders"]
+    finally:
+        sys.modules.pop(module_name, None)
