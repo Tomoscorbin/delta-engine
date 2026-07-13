@@ -1,38 +1,38 @@
 # Feature roadmap
 
-2026-07-10. Consolidated from two codebase review sweeps. Ordered by impact,
+2026-07-13. Consolidated from two codebase review sweeps. Ordered by impact,
 highest first, within four tiers. Effort is rough: S (a day or two), M (about
 a week), L (multiple weeks). Items already sketched in `todo.md` are marked;
 this document supersedes their prioritisation but not their detail.
 
 ## Summary
 
-| #   | Item                                              | Tier | Effort | In todo.md |
-| --- | ------------------------------------------------- | ---- | ------ | ---------- |
-| 1   | Type widening                                     | 1    | M      | yes        |
-| 2   | Column renames (`renamed_from`) + interim guard   | 1    | M      | yes        |
-| 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | partly     |
-| 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | no         |
-| 5   | Delta-format / view guard in the reader           | 2    | S      | no         |
-| 6   | Identity columns                                  | 2    | M      | no         |
-| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly     |
-| 8   | CHECK constraints                                 | 2    | M      | no         |
-| 9   | `RELY` on PK/FK constraints                       | 2    | S      | yes        |
-| 10  | External-table (LOCATION) policy                  | 3    | S–M    | no         |
-| 11  | Schema-level orphan detection                     | 3    | M      | no         |
-| 12  | `ignored_properties` escape hatch                 | 3    | S      | yes        |
-| 13  | Column defaults and generated columns             | 3    | M      | no         |
-| 14  | Declaration-time limit checks                     | 3    | S      | no         |
-| 15  | Multi-environment deployment pattern (docs)       | 3    | S      | no         |
-| 16  | Transient-failure retry                           | 3    | S      | no         |
-| 17  | Metadata read batching                            | 4    | M      | partly     |
-| 18  | Plan artifacts (approve-then-apply)               | 4    | L      | no         |
-| 19  | Existing gated items (UNIQUE, Char/Varchar, ...)  | 4    | —      | yes        |
+| #   | Item                                              | Tier | Effort | Tracking          |
+| --- | ------------------------------------------------- | ---- | ------ | ----------------- |
+| 1   | Type widening                                     | 1    | M      | tracked           |
+| 2   | Column renames (`renamed_from`) + interim guard   | 1    | M      | tracked           |
+| 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | shipped           |
+| 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped           |
+| 5   | Delta-format / view guard in the reader           | 2    | S      | not tracked       |
+| 6   | Identity columns                                  | 2    | M      | not tracked       |
+| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly tracked    |
+| 8   | CHECK constraints                                 | 2    | M      | not tracked       |
+| 9   | `RELY` on PK/FK constraints                       | 2    | S      | tracked           |
+| 10  | External-table (LOCATION) policy                  | 3    | S–M    | not tracked       |
+| 11  | Schema-level orphan detection                     | 3    | M      | not tracked       |
+| 12  | `ignored_properties` escape hatch                 | 3    | S      | tracked           |
+| 13  | Column defaults and generated columns             | 3    | M      | not tracked       |
+| 14  | Declaration-time limit checks                     | 3    | S      | not tracked       |
+| 15  | Multi-environment deployment pattern (docs)       | 3    | S      | not tracked       |
+| 16  | Transient-failure retry                           | 3    | S      | not tracked       |
+| 17  | Metadata read batching                            | 4    | M      | partly tracked    |
+| 18  | Plan artifacts (approve-then-apply)               | 4    | L      | not tracked       |
+| 19  | Existing gated items (UNIQUE, Char/Varchar, ...)  | 4    | —      | tracked           |
 
-Sequencing note: impact order is not build order. Items 5 and 9 are
-afternoon-sized and can ship immediately; the SQL-preview half of item 3 is
-similarly small. Item 4 is the largest single investment and multiplies the
-value of item 3, so plan them together.
+Sequencing note: impact order is not build order. Items 3 and 4 shipped as the
+read-only `delta-engine plan MODULE:ATTRIBUTE` workflow; the remaining items
+are future work. Items 5 and 9 are afternoon-sized and can ship independently;
+items 17 and 18 remain deliberately gated on evidence from real users.
 
 ---
 
@@ -94,58 +94,43 @@ only documented (`reference-limitations.md`).
 
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
 
-**Status.** Shipped 2026-07-10, with the shape refined during design: the SQL
+**Status.** Shipped 2026-07-13, with the shape refined during design: the SQL
 preview flows through a new `PlanExecutor.compile` port method onto
 `TableRunReport.planned_sql_statements` (no `databricks.py` helper — the
 engine compiles once and `execute` runs exactly the previewed statements);
 `to_dict()` only, under `schema_version: 1` (no `to_rows`, no Spark lift);
 `has_changes` and the `any_failures` → `has_failures` rename shipped
 together. See `reference-run-report.md` and `how-to-gate-changes-in-ci.md`.
-The sketch below is kept as the original motivation.
+The original motivation is retained below as historical context.
 
-**Why.** The workflow that makes tools like this indispensable: PR opens →
-`sync(dry_run=True)` runs → the plan renders as a PR comment → merge applies.
-Dry run exists; what is missing is everything around it. This item turns
-delta-engine from "a library I call" into "the deployment pipeline".
+**Why.** The workflow that makes tools like this indispensable: a pull request
+opens, a read-only plan runs against the live catalog, and the exact semantic
+diff and SQL are available for review. The shipped CLI turns that library
+capability into a small deployment-pipeline boundary; applying declarations
+remains a separate Python API workflow.
 
-**Shape.** Three deliverables, one theme:
+**Delivered shape.** The implementation separates three related capabilities:
 
-- _Structured projection_ (design already in `todo.md`): backend-free
-  `SyncReport.to_rows()` / `to_dict()` yielding per-table records — name,
-  status, action count, applied/total, failure summaries — plus optional
-  per-action rows. Export `TableRunReport` and the concrete failure types
-  from the public API. An optional thin Spark lift in `databricks.py` for
-  `display()` / run-history persistence stays at the edge.
-- _SQL preview for dry runs (S)._ The most common question a cautious user
-  asks is "show me the exact DDL you will run", and today the compiled SQL is
-  only visible after execution, truncated to 240 chars. `compile_plan` is
-  pure and takes `(qualified_name, plan)` — both on every `TableRunReport`.
-  Add a helper in `databricks.py` that renders full statements for a report,
-  keeping the compiler at the adapter edge.
-- _Drift gate (S)._ `SyncReport.has_changes` — trivially derivable, but it is
-  the natural CI assertion ("fail if drift exists") and belongs on the report.
+- _Structured projection_: backend-free `SyncReport.to_dict()` and public
+  report/failure types expose per-table status, changes, planned SQL, and
+  failures.
+- _SQL preview_: `PlanExecutor.compile` records the exact statements on the
+  report; the CLI renders them without adding a public command-specific API.
+- _Plan gate_: `SyncReport.has_changes` and `has_failures` support CI policy,
+  while the CLI treats every valid plan as a successful read-only operation.
 
 ### 4. Databricks SQL warehouse adapter (PySpark-free syncs)
 
-**Why.** Everything the engine executes is SQL; everything it reads has an
-`information_schema` / `DESCRIBE` equivalent. A second adapter on
-`databricks-sql-connector` (or the Statement Execution REST API) means syncs
-and dry runs execute from a plain CI runner against a serverless warehouse —
-no Spark session, no cluster spin-up, schema sync as a 30-second GitHub
-Actions step. It is also the first real test of the ports architecture the
-project was designed around. The largest single unlock on this list.
+**Status.** Shipped 2026-07-13 as the PySpark-free warehouse backend and the
+read-only `delta-engine plan MODULE:ATTRIBUTE` CLI workflow. The CLI uses
+Databricks unified authentication, derives the SQL connector path from
+`DATABRICKS_SQL_WAREHOUSE_ID`, and never executes the planned SQL.
 
-**Shape.**
-
-- Implement `CatalogStateReader` and `PlanExecutor` per
-  `how-to-implement-adapter.md`.
-- Replace `spark.catalog.listColumns` / `getTable` / `tableExists` with
-  `information_schema.columns` / `tables` queries.
-- The real work: a DDL type-string parser that does not depend on
-  `pyspark.sql.types.DataType.fromDDL`. Scope it to the types the domain
-  models; unknown types keep the existing skip-with-warning behaviour.
-- Ship as an optional dependency group (e.g. `delta-engine[sql]`), keeping
-  the existing lazy-import structure.
+**Delivered shape.** The warehouse backend implements the reader and executor
+ports over `databricks-sql-connector`, shares the PySpark-free SQL compiler and
+catalog row mapping, and is available through the `sql` and `cli` extras. The
+CLI adds the deliberately narrow `plan MODULE:ATTRIBUTE` composition layer;
+the Python API remains the write/apply mechanism.
 
 ---
 

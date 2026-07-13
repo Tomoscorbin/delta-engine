@@ -72,9 +72,9 @@ SQL warehouse backend:
 pip install "delta-engine[cli]"
 ```
 
-The command dry-runs one explicit declaration collection against the live
-catalog, prints its semantic diff, report, and planned SQL, and never executes
-DDL. The CLI extra contains only Typer, `databricks-sdk`, and
+The command builds a plan for one explicit declaration collection against the
+live catalog, prints its semantic diff, report, and planned SQL, and never
+executes the planned SQL. The CLI extra contains only Typer, `databricks-sdk`, and
 `databricks-sql-connector`; the base package remains dependency-free.
 
 Configure `DATABRICKS_SQL_WAREHOUSE_ID`, then configure the Databricks SDK's
