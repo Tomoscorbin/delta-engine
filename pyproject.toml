@@ -62,6 +62,7 @@ dev = [
   # tests/test_packaging.py imports it directly; do not rely on pytest's
   # transitive dependency.
   "packaging>=24.0",
+  "pytest-xdist>=3.8.0",
 ]
 docs = [
   "sphinx>=8.0",

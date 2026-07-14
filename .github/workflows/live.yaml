@@ -1,9 +1,5 @@
 # Credentialed live suite against a real Databricks SQL warehouse.
 #
-# Deliberately not part of regular CI: manual dispatch only, and the run
-# targets whichever ref is selected (`gh workflow run live.yaml --ref <branch>`
-# once this file exists on main).
-#
 # Required repository variables:
 #   DATABRICKS_HOST            workspace URL
 #   DATABRICKS_HTTP_PATH       SQL warehouse endpoint path
@@ -14,10 +10,15 @@
 #   DATABRICKS_CLIENT_ID       service principal for OIDC workload identity
 #                              federation (needs a Databricks federation
 #                              policy for this repository)
-name: Live
+name: Live Databricks Tests
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly drift check (Mondays 07:00 UTC): catches Databricks-side
+    # behaviour changes the hermetic suite cannot see. Non-blocking — it
+    # never gates a PR.
+    - cron: "0 7 * * 1"
 
 # One live run at a time: the suite shares a schema and a warehouse.
 concurrency:
@@ -83,4 +84,9 @@ jobs:
         run: uv sync --locked
 
       - name: Run live suite
-        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA
+        # -n 8: the suite is I/O-bound on warehouse round-trips, not runner
+        # CPU, so running more workers than cores still speeds it up. Tests are
+        # isolated (uuid-named tables, per-test cleanup), so they parallelise
+        # safely; excess concurrency degrades to warehouse queueing, not
+        # failure. Tune to the warehouse's concurrency headroom.
+        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA -n 8

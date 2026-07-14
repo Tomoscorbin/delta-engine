@@ -68,7 +68,7 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
 )
 
 # Complex types Delta accepts neither as partition columns
-# (DELTA_INVALID_PARTITION_COLUMN_TYPE) nor as liquid-clustering keys.
+# (INVALID_PARTITION_COLUMN_DATA_TYPE) nor as liquid-clustering keys.
 # Two distinct backend rules that happen to name the same types today.
 _TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
 

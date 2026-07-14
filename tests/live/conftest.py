@@ -11,10 +11,11 @@ only runs when requested explicitly (a manual run or the live CI job):
                                                        # DATABRICKS_CONFIG_PROFILE
     export DATABRICKS_HTTP_PATH=...
     export DELTA_ENGINE_E2E_CATALOG=... DELTA_ENGINE_E2E_SCHEMA=...
-    uv run pytest tests/live -m databricks_e2e --no-cov
+    uv run pytest tests/live -m databricks_e2e --no-cov -n auto
 
 Every test allocates uniquely named tables through the ``live_tables`` factory
-and drops them afterwards, so runs are safe to repeat against a shared schema.
+and drops them afterwards, so runs are safe to repeat against a shared schema
+and safe to run in parallel: ``-n auto`` fans the suite across xdist workers.
 """
 
 from collections.abc import Callable
@@ -37,7 +38,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.databricks_e2e)
 
 
-@pytest.fixture(scope="module")
+# Session-scoped so each parallel xdist worker opens one connection and reuses
+# it for every test it runs, rather than reconnecting per module.
+@pytest.fixture(scope="session")
 def live_connection():
     missing = [name for name in _LIVE_REQUIRED_ENV if not os.environ.get(name)]
     if missing:
@@ -64,3 +67,101 @@ def live_tables(live_connection) -> LiveTableFactory:
 
     for name in reversed(names):
         execute_sql(live_connection, f"DROP TABLE IF EXISTS {qualified_table(name)}")
+
+
+# Visitor-facing behaviour areas for the GitHub job summary, in report order.
+# Each live test file maps to a label and a one-line statement of what it
+# proves; a new live file needs an entry here to appear in the summary.
+_LIVE_AREAS: dict[str, tuple[str, str]] = {
+    "test_sql_warehouse_live.py": (
+        "Table lifecycle",
+        "create, evolve every mutable aspect, dry-run previews, idempotent resync",
+    ),
+    "test_sql_warehouse_live_constraints.py": (
+        "Primary & foreign keys",
+        "add, change, and drop keys; composite, self-referential, dependency order",
+    ),
+    "test_sql_warehouse_live_safety.py": (
+        "Validation blocks",
+        "unsafe DDL is rejected and the catalog is left unchanged",
+    ),
+    "test_sql_warehouse_live_scopes.py": (
+        "Scoped ownership",
+        "metadata-only and tags-only declarations change nothing outside their scope",
+    ),
+    "test_sql_warehouse_live_types_and_layout.py": (
+        "Types & layout",
+        "every column type round-trips; widening, partitioning, and clustering",
+    ),
+    "test_sql_warehouse_live_renames.py": (
+        "Column renames",
+        "data, tags, and comments travel; keys are replaced; ambiguity is rejected",
+    ),
+    "test_sql_warehouse_live_platform_assumptions.py": (
+        "Platform assumptions",
+        "Databricks behaviours the engine's safety gates rely on",
+    ),
+}
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """
+    Append a behaviour-area summary of the live suite to the GitHub job summary.
+
+    Only acts in CI (``GITHUB_STEP_SUMMARY`` set) and only counts this
+    directory's tests, so a full-repo run that deselects the live suite writes
+    nothing and non-live files never leak in. Runs once on the xdist
+    controller, with results already aggregated across workers.
+    """
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+
+    # Collapse each test's phase reports (setup/call/teardown) to one pass/fail.
+    passed_by_test: dict[str, bool] = {}
+    for status in ("passed", "failed", "error"):
+        for report in terminalreporter.stats.get(status, []):
+            filename = report.nodeid.split("::", 1)[0].rsplit("/", 1)[-1]
+            if filename not in _LIVE_AREAS:
+                continue
+            passed_by_test[report.nodeid] = (
+                passed_by_test.get(report.nodeid, True) and status == "passed"
+            )
+
+    if not passed_by_test:
+        return
+
+    counts_by_file: dict[str, list[int]] = {}
+    for nodeid, passed in passed_by_test.items():
+        filename = nodeid.split("::", 1)[0].rsplit("/", 1)[-1]
+        counts = counts_by_file.setdefault(filename, [0, 0])
+        counts[0] += int(passed)
+        counts[1] += 1
+
+    total = len(passed_by_test)
+    total_passed = sum(passed_by_test.values())
+
+    lines: list[str] = []
+    if total_passed == total:
+        lines.append(f"## ✅ Live Databricks tests — all {total} passed")
+    else:
+        lines.append(
+            f"## ❌ Live Databricks tests — {total - total_passed} failed, {total_passed} passed"
+        )
+    lines += [
+        "",
+        "Verified against a real Databricks SQL warehouse (Unity Catalog).",
+        "",
+        "| Area | Checks | Result |",
+        "| --- | --- | --- |",
+    ]
+    for filename, (label, description) in _LIVE_AREAS.items():
+        counts = counts_by_file.get(filename)
+        if counts is None:
+            continue
+        area_passed, area_total = counts
+        mark = "✅" if area_passed == area_total else "❌"
+        lines.append(f"| {label} | {description} | {mark} {area_passed}/{area_total} |")
+
+    with open(summary_path, "a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n")
