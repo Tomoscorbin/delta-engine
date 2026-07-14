@@ -36,15 +36,15 @@ class SafeStreamHandler(logging.StreamHandler):
     """
     StreamHandler that tolerates interpreter/pytest teardown.
 
-    Swallows ValueError raised when the stream is already closed.
+    Skips emission when the stream is already closed.
     """
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record, swallowing ValueError if the stream is closed."""
-        try:
-            super().emit(record)
-        except ValueError:
-            pass
+        """Emit a log record unless teardown has already closed the stream."""
+        stream = self.stream
+        if stream is None or getattr(stream, "closed", False):
+            return
+        super().emit(record)
 
 
 def configure_logging(level: int = logging.INFO, stream: TextIO | None = None) -> None:

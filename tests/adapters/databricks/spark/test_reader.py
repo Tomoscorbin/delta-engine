@@ -392,6 +392,20 @@ def test_fetch_state_returns_failed_when_existence_probe_raises(qn):
     assert result.failure.exception_type == "RuntimeError"
 
 
+def test_fetch_state_contains_an_exception_whose_message_cannot_be_rendered(qn):
+    class UnrenderableError(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("rendering failed")
+
+    spark = routed_spark(qn, catalog=FakeCatalog(exists_exc=UnrenderableError()))
+
+    result = SparkReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "UnrenderableError"
+    assert result.failure.message == "<exception message unavailable>"
+
+
 def test_fetch_state_returns_failed_when_describe_detail_raises(qn):
     spark = routed_spark(qn, catalog=single_column_catalog(qn), describe=AnalysisException("boom"))
     result = SparkReader(spark).fetch_state(qn)

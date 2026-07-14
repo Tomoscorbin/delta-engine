@@ -1,7 +1,7 @@
 """
-Name exceptions for failure records: prefer the underlying Java class.
+Render exceptions safely for failure records.
 
-One total naming policy covers both backends. Most PySpark failures arrive
+One total rendering policy covers both backends. Most PySpark failures arrive
 already converted to PySpark's own exception hierarchy
 (``AnalysisException`` and friends), and every databricks-sql-connector
 failure is a plain Python exception — for all of those the Python class
@@ -16,6 +16,8 @@ of the warehouse backend (which must run without PySpark installed — see
 the import-linter contracts), and the duck-typing matches how this layer
 already treats catalog rows and connections.
 """
+
+_MESSAGE_UNAVAILABLE = "<exception message unavailable>"
 
 
 def exception_type_name(exception: Exception) -> str:
@@ -34,3 +36,20 @@ def exception_type_name(exception: Exception) -> str:
         except Exception:
             pass
     return type(exception).__name__
+
+
+def exception_message(exception: Exception) -> str:
+    """
+    Return ``exception``'s message without allowing rendering to raise.
+
+    ``Py4JJavaError.__str__`` makes another gateway call to render the wrapped
+    Java exception. If the gateway itself failed, that secondary call can
+    raise and break the readers' and executor's total boundary while they are
+    trying to record the original failure. A stable fallback keeps failure
+    construction non-throwing even when the backend can no longer describe
+    its exception.
+    """
+    try:
+        return str(exception)
+    except Exception:
+        return _MESSAGE_UNAVAILABLE

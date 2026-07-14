@@ -11,7 +11,7 @@ py4j-aware resolver in :mod:`delta_engine.adapters.databricks.errors`.
 from collections.abc import Callable, Iterable
 import logging
 
-from delta_engine.adapters.databricks.errors import exception_type_name
+from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
     ExecutionFailed,
@@ -67,12 +67,13 @@ def _execute_statement(
     try:
         execute(statement)
     except Exception as exception:
-        logger.warning("Statement failed: %s\nSQL: %s", exception, statement)
+        message = exception_message(exception)
+        logger.warning("Statement failed: %s\nSQL: %s", message, statement)
         return ExecutionFailed(
             failure=ExecutionFailure(
                 statement_index=statement_index,
                 exception_type=exception_type_name(exception),
-                message=str(exception),
+                message=message,
                 statement=statement,
             ),
         )

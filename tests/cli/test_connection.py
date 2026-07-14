@@ -135,6 +135,24 @@ def test_sdk_configuration_error_is_sanitized_and_translated(monkeypatch, wareho
     assert "<redacted>" in message
 
 
+def test_sdk_configuration_error_survives_an_unrenderable_message(monkeypatch, warehouse_env):
+    from databricks.sdk import core as sdk_core
+
+    class UnrenderableError(ValueError):
+        def __str__(self) -> str:
+            raise RuntimeError("rendering failed")
+
+    class BrokenConfig:
+        def __init__(self, **kwargs) -> None:
+            raise UnrenderableError()
+
+    monkeypatch.setattr(sdk_core, "Config", BrokenConfig)
+
+    with pytest.raises(ConfigError, match="exception message unavailable"):
+        with open_connection():
+            pass
+
+
 def test_sdk_configuration_must_resolve_a_workspace_host(monkeypatch, warehouse_env):
     from databricks.sdk import core as sdk_core
 

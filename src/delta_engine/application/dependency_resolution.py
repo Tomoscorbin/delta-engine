@@ -38,8 +38,10 @@ from dataclasses import dataclass
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
 from delta_engine.domain.model import DesiredTable, ForeignKeyConstraint, QualifiedName, TableAspect
 
-# A table dependency graph is small (tens of tables, shallow chains), so the
-# recursion depth of the SCC traversal below stays far under Python's limit.
+# TODO: Replace the recursive SCC traversal with an iterative implementation.
+# Its call depth follows dependency depth, so a chain near Python's recursion
+# limit raises RecursionError even though the public API declares no table-count
+# or dependency-depth limit. Preserve deterministic dependency-first ordering.
 
 
 @dataclass(frozen=True, slots=True)

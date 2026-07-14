@@ -9,6 +9,7 @@ import sys
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+from delta_engine.adapters.databricks.errors import exception_message
 from delta_engine.cli.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -184,7 +185,7 @@ def _connect(
 
 def _safe_error_detail(error: Exception) -> str:
     """Return one-line detail with secret-looking environment values redacted."""
-    message = " ".join(str(error).split())
+    message = " ".join(exception_message(error).split())
     sensitive_values = {
         value
         for name, value in os.environ.items()
