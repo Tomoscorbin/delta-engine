@@ -115,7 +115,7 @@ def _(action: AddColumn, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: DropColumn, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
-    column_name = backtick(action.column_name)
+    column_name = backtick(action.column.name)
     return f"ALTER TABLE {backticked_table_name} DROP COLUMN {column_name}"
 
 
@@ -129,7 +129,7 @@ def _(action: RenameColumn, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: SetProperty, backticked_table_name: str) -> str:
-    pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
+    pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
     return f"ALTER TABLE {backticked_table_name} SET TBLPROPERTIES ({pair})"
 
 
@@ -169,31 +169,31 @@ def _(action: UnsetColumnTag, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetColumnComment, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
-    if not action.comment:
+    if not action.desired_comment:
         return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} UNSET COMMENT"
-    comment = quote_literal(action.comment)
+    comment = quote_literal(action.desired_comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 
 
 @_compile_action.register
 def _(action: SetTableComment, backticked_table_name: str) -> str:
-    comment = quote_literal(action.comment)
+    comment = quote_literal(action.desired_comment)
     return f"COMMENT ON TABLE {backticked_table_name} IS {comment}"
 
 
 @_compile_action.register
 def _(action: SetColumnNullability, backticked_table_name: str) -> str:
     column_name = backtick(action.column_name)
-    sign = "DROP" if action.nullable else "SET"
+    sign = "DROP" if action.desired_nullable else "SET"
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} {sign} NOT NULL"
 
 
 @_compile_action.register
 def _(action: AlterClustering, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... CLUSTER BY (...) or CLUSTER BY NONE."""
-    if not action.columns:
+    if not action.desired_clustering:
         return f"ALTER TABLE {backticked_table_name} CLUSTER BY NONE"
-    columns = ", ".join(backtick(column) for column in action.columns)
+    columns = ", ".join(backtick(column) for column in action.desired_clustering)
     return f"ALTER TABLE {backticked_table_name} CLUSTER BY ({columns})"
 
 
@@ -201,7 +201,7 @@ def _(action: AlterClustering, backticked_table_name: str) -> str:
 def _(action: AlterColumnType, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ALTER COLUMN ... TYPE for a validated type widening."""
     column_name = backtick(action.column_name)
-    sql_type = render_data_type(action.data_type)
+    sql_type = render_data_type(action.desired_type)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} TYPE {sql_type}"
 
 
@@ -214,8 +214,8 @@ def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
-    column_clause = ", ".join(backtick(name) for name in action.columns)
-    constraint = backtick(action.constraint_name)
+    column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
+    constraint = backtick(action.primary_key.constraint_name)
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
@@ -225,17 +225,17 @@ def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: DropForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
-    constraint = backtick(action.constraint_name)
+    constraint = backtick(action.constraint.constraint_name)
     return f"ALTER TABLE {backticked_table_name} DROP CONSTRAINT IF EXISTS {constraint}"
 
 
 @_compile_action.register
 def _(action: SetForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
-    constraint = backtick(action.constraint_name)
-    local_cols = ", ".join(backtick(col) for col in action.local_columns)
-    ref_cols = ", ".join(backtick(col) for col in action.referenced_columns)
-    backticked_ref = backtick_qualified_name(action.referenced_table)
+    constraint = backtick(action.constraint.constraint_name)
+    local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)
+    ref_cols = ", ".join(backtick(col) for col in action.constraint.referenced_columns)
+    backticked_ref = backtick_qualified_name(action.constraint.referenced_table)
     return (
         f"ALTER TABLE {backticked_table_name}"
         f" ADD CONSTRAINT {constraint}"
