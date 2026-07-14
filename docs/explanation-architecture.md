@@ -398,12 +398,14 @@ Both arms state the complete intended transition the same way: a
 foreign-key follow-ups — so accepted planning is uniformly "construct an
 `ActionPlan` from the diff's actions" for creation and drift alike.
 
-The domain also owns the operation semantics used to project a validated
-`TableDrift` into its final actions. In particular, the raw diff retains PK/FK
-drops involving a renamed column because validation needs their observed
-constraint state, while the domain's action projection omits drops performed
-atomically by `RENAME COLUMN`. The application layer neither compares schema
-state nor decides which constraint actions a rename supersedes.
+An accepted plan is the diff's actions verbatim; nothing sits between
+validation and plan construction. Constraint replacement around a column
+rename is stated explicitly and sequenced by `ActionPlan` phase ordering:
+PK/FK drops run before the rename, while each constraint still exists under
+its observed name, and declared keys are re-added afterwards. Databricks
+would drop those constraints implicitly as part of `RENAME COLUMN`; the
+engine states the drops instead of relying on that, so the plan is a
+complete transcript of what executes.
 
 Only three findings exist: `ColumnRenameConflict`, `PropertyUndeclared`, and
 `PartitioningChanged`. Each states an ambiguity or unsupported transition

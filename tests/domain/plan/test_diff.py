@@ -890,10 +890,6 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
         ),
         SetPrimaryKey(primary_key=desired_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        SetPrimaryKey(primary_key=desired_key),
-    )
 
 
 def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
@@ -926,10 +922,6 @@ def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
         SetForeignKey(constraint=desired_key),
         DropForeignKey(constraint=observed_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="parent", new_name="parent_id"),
-        SetForeignKey(constraint=desired_key),
-    )
 
 
 def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_actions():
@@ -964,10 +956,6 @@ def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_acti
         SetForeignKey(constraint=desired_key),
         DropForeignKey(constraint=observed_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="id", new_name="employee_id"),
-        SetForeignKey(constraint=desired_key),
-    )
 
 
 def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
@@ -994,4 +982,3 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropForeignKey(constraint=unrelated_key),
     )
-    assert drift.executable_actions == drift.actions
