@@ -28,16 +28,16 @@ path currently produces an incorrect result.
 
 ## Summary
 
-| # | Severity | Finding | Failure mode |
-|---|---|---|---|
-| 1 | High | Non-Delta objects are not rejected | Invalid or partial plans against views, Iceberg, or other formats |
-| 2 | High | Unparseable columns are silently omitted | Existing drift can be reported as synchronized |
-| 3 | High | Required Delta table features are not planned | Valid-looking plans fail during execution |
-| 4 | High | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution |
-| 5 | Medium | Clearing a column comment generates invalid SQL | Warehouse execution fails on `UNSET COMMENT` |
-| 6 | Medium | Identifier normalization disagrees with Unity Catalog | Valid names can change identity; invalid object names pass locally |
-| 7 | Medium | Layout and map-type validation is too permissive | Unsupported declarations reach execution |
-| 8 | Medium | `CREATE TABLE IF NOT EXISTS` can report false success | A concurrent incompatible create is treated as success |
+| #    | Severity | Finding                                                       | Failure mode                                                       |
+| ---- | -------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1    | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
+| 2    | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
+| 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
+| 4    | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
+| 5    | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
+| 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
+| 7    | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
+| 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
 
 ## 1. Reject views and non-Delta tables at the read boundary
 
@@ -279,6 +279,8 @@ These are deterministic declaration errors and need no runtime probing.
 
 ## 8. Remove the false-success race from table creation
 
+**Status:** Done — `IF NOT EXISTS` removed from `compile_create_table`.
+
 ### Cause
 
 Creation compiles to `CREATE TABLE IF NOT EXISTS`. If another writer creates an
@@ -328,7 +330,7 @@ Before the implementation PR is ready for merge, run:
 - [ ] The eight items above are accepted as correctness defects.
 - [ ] The proposed solution for each item is accepted.
 - [ ] Feature enablement will be represented as a visible planned action rather
-  than an out-of-band prerequisite.
+      than an out-of-band prerequisite.
 - [ ] Lossy schema parsing will fail closed now; structured JSON observation is
-  deferred.
+      deferred.
 - [ ] Once agreed, implementation will be isolated in its own PR.

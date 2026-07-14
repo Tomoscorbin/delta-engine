@@ -10,12 +10,12 @@ the page with the detail.
 
 ## Platform
 
-| Requirement           | Supported                                                                                                                                                                                                             |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Requirement           | Supported                                                                                                                                                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader does not yet reliably fail closed on every non-Delta relation, so register Delta tables only ([architecture](explanation-architecture.md)) |
-| Python                | 3.12 or later                                                                                                                                                                                                         |
-| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                          |
-| SQL warehouse backend | Unity Catalog only — every read runs through `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md)) |
+| Python                | 3.12 or later                                                                                                                                                                                                                          |
+| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                           |
+| SQL warehouse backend | Unity Catalog only — every read runs through `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md))                  |
 
 ## Identifier handling
 
@@ -40,7 +40,7 @@ dropping columns](how-to-configure-table.md#column-mapping-and-dropping-columns)
 | Tighten nullability       |       ✗       | Blocked — backfill first, then tighten ([rules](reference-safe-change-rules.md))                                                                                                                                          |
 | Change column type        | Widening only | Safe widenings (e.g. `Integer` → `Long`) apply in place with `delta.enableTypeWidening='true'` declared; anything else is blocked ([type widening](how-to-configure-table.md#type-widening))                              |
 | Rename column             |       ✓       | Declare `renamed_from` on the new column; requires `delta.columnMapping.mode='name'`. Editing a name directly (without the hint) is a drop plus an add ([renaming a column](how-to-configure-table.md#renaming-a-column)) |
-| Rename partition column   |       ✓       | Column mapping preserves the partition column's physical identity, so its layout metadata follows the rename ([rules](reference-safe-change-rules.md))                                                                  |
+| Rename partition column   |       ✓       | Column mapping preserves the partition column's physical identity, so its layout metadata follows the rename ([rules](reference-safe-change-rules.md))                                                                    |
 | Table and column comments |       ✓       | Always managed; an empty declaration clears the comment ([comments](how-to-configure-table.md#comments))                                                                                                                  |
 | Table properties          |       ✓       | Six managed `delta.*` keys; other keys are rejected at declaration ([properties](how-to-configure-table.md#properties))                                                                                                   |
 | Table and column tags     |       ✓       | Full-state: undeclared tags are removed ([tags](how-to-configure-table.md#tags))                                                                                                                                          |
@@ -59,11 +59,11 @@ changes, or drops them, and they produce no drift.
 
 | Not modeled                                                       | Meaning                                                                                                                                                                             |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CHECK constraints                                                 | Cannot be declared; a constraint that references a renamed column must be changed before the rename                                                                                  |
+| CHECK constraints                                                 | Cannot be declared; a constraint that references a renamed column must be changed before the rename                                                                                 |
 | Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key |
-| `UNIQUE` constraints                                             | Cannot be declared or used as a registered foreign-key target, even on Databricks versions that support them                                                                         |
+| `UNIQUE` constraints                                              | Cannot be declared or used as a registered foreign-key target, even on Databricks versions that support them                                                                        |
 | Identity and generated columns                                    | Generation expressions are invisible; one that references a renamed column must be changed before the rename                                                                        |
-| Views and materialized views                                      | Unsupported; the reader does not yet reliably reject every relation before planning, so do not register them                                                                         |
+| Views and materialized views                                      | Unsupported; the reader does not yet reliably reject every relation before planning, so do not register them                                                                        |
 | Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                 |
 | Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                 |
 
@@ -72,12 +72,12 @@ changes, or drops them, and they produce no drift.
 The full matrix is in [data types](reference-data-types.md). The limitations
 in brief:
 
-| Limitation               | Behaviour                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| Limitation               | Behaviour                                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unsupported Spark types  | Non-partition columns are left unmanaged with a warning, so their drift is invisible; an unsupported partition type or wholly unmappable table fails its read |
-| `CHAR(n)` / `VARCHAR(n)` | Treated as `String`; the length bound is not modeled and never altered                            |
-| Struct fields            | Structs change as a whole: any field change is a blocked column type change                       |
-| `Decimal` precision      | Maximum 38, enforced at declaration                                                               |
+| `CHAR(n)` / `VARCHAR(n)` | Treated as `String`; the length bound is not modeled and never altered                                                                                        |
+| Struct fields            | Structs change as a whole: any field change is a blocked column type change                                                                                   |
+| `Decimal` precision      | Maximum 38, enforced at declaration                                                                                                                           |
 
 ## Clustering limits
 
@@ -97,12 +97,11 @@ partitioning:
 ## Concurrent catalog changes
 
 A sync is not transactional across its read, plan, and execute phases. Table
-creation currently compiles as `CREATE TABLE IF NOT EXISTS`: if another writer
-creates the same name after the reader observed it missing, that statement
-becomes a no-op and the current report can say the create succeeded without
-re-reading or reconciling the winner's schema. The next sync reads the table and
-reports any resulting drift. Avoid concurrent creators for the same qualified
-table name.
+creation compiles as a plain `CREATE TABLE`: if another writer creates the same
+name after the reader observed it missing, that statement errors and the table
+is reported as an execution failure rather than a false success. The next sync
+reads the table that actually exists and reports any resulting drift. Avoid
+concurrent creators for the same qualified table name.
 
 ## Runtime features
 
