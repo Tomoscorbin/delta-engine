@@ -166,12 +166,14 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
         foreign_keys=(ForeignKey(columns={"parent_id": "id"}, references=parent),),
         properties=_COLUMN_MAPPING,
     )
-    engine.sync(renamed_child)
+    # The parent rides along: dependency resolution blocks a foreign-key add
+    # whose referenced table is not registered in the same run.
+    engine.sync(renamed_child, parent)
 
     assert read_live_table(live_connection, child_name)["foreign_keys"] == (
         (f"{child_name}_parent_id_fk", "parent_id", parent_name, "id"),
     )
-    assert engine.sync(renamed_child).has_changes is False
+    assert engine.sync(renamed_child, parent).has_changes is False
 
 
 def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
