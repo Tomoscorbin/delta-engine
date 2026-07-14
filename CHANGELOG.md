@@ -1,3 +1,119 @@
+## v0.4.0 (2026-07-14)
+
+### BREAKING CHANGE
+
+- public result/failure types lose statement_preview in
+favour of statement; failure text renders 'SQL:' instead of 'SQL preview:'.
+- install with delta-engine[spark] instead of
+delta-engine[databricks]; import build_spark_engine instead of build_engine
+from delta_engine.databricks.
+- ExecutionFailure.statement_index replaces
+action_index; the run report's execution.total now counts planned
+statements.
+- SyncReport.any_failures is now SyncReport.has_failures,
+mirroring TableRunReport.has_failures.
+
+### Feat
+
+- render column renames in sync reports
+- compile RenameColumn to ALTER TABLE ... RENAME COLUMN
+- reject ambiguous declared renames; point guard at renamed_from
+- relabel observed columns through declared renames in diff_table
+- add ColumnRenamed change and RenameColumn action
+- require column mapping at construction for rename hints
+- enforce rename-hint coherence on DesiredTable
+- add renamed_from declaration hint to Column
+- adopt unified auth and explicit declaration selection in the CLI
+- add DuplicateTableDefinitionError and extract prepare_desired_tables
+- wire the delta-engine console script with graceful degradation
+- add delta-engine apply command
+- add delta-engine plan command
+- add render_planned_sql for planned-statement previews
+- add CLI warehouse connection resolution
+- add CLI declaration loading for module[:attr] specs
+- expose build_sql_engine for PySpark-free warehouse syncs
+- add warehouse plan executor
+- add warehouse catalog state reader
+- add information_schema table-row and columns query builders
+- add PySpark-free DDL type-string parser to the shared sql package
+- export TableRunReport and concrete failure types
+- add to_dict projection on sync and table run reports
+- record compiled SQL statements on every table run report
+- add PlanExecutor.compile returning the plan's SQL statements
+- add has_changes and rename SyncReport.any_failures to has_failures
+- adopt the full Delta type-widening matrix
+- permit safe type widenings gated on delta.enableTypeWidening
+- lower column type changes to AlterColumnType
+- add AlterColumnType action with SQL compilation and diff rendering
+- register delta.enableTypeWidening as a managed property
+
+### Fix
+
+- Update verification table header in conftest.py
+- enforce Databricks 256-character tag key and value limits
+- harden correctness edge cases
+- compile empty column comments as COMMENT '' instead of UNSET COMMENT
+- register the parent in the FK-rename live sync
+- harden declarative column rename planning
+- filter lazy connector warning
+- reject path-like declaration references and honour module __getattr__
+- suppress irrelevant PyArrow warning
+- close a false-positive gap in the CLI PySpark-free contract
+- compile empty column comments as COMMENT '' instead of UNSET COMMENT
+- make WarehouseExecutor.execute total across cursor lifecycle
+- treat pathological nesting depth as unmappable in the type parser
+- lint
+
+### Refactor
+
+- plan explicit constraint drops around column renames
+- rename domain Column to DesiredColumn
+- drop compiler-facing alias properties from actions
+- split table drift into actions and findings
+- remove primary-key replacement correlation
+- clarify planning domain boundaries
+- collapse changes into canonical actions
+- single-source the duplicate-table rule in engine preparation
+- delegate CLI authentication to Databricks SDK
+- narrow CLI to read-only OIDC plans
+- fail fast on a missing HTTP path and pin cwd import precedence
+- remove TableSnapshot in favour of standalone table types
+- readers build ObservedColumn for catalog state
+- split observed catalog columns into ObservedColumn
+- fold desired-table preparation into the engine, move DesiredTableSource to ports
+- route reader imports through the sql facade, widen rows.py framing
+- acquire the warehouse cursor lazily inside the execution loop
+- share exception naming via duck-typed py4j probe, delete the injection seam
+- read Spark catalog types through the shared DDL parser, delete spark/types.py
+- move the shared per-column read policy behind column_from_catalog
+- fuse DESCRIBE DETAIL properties mapping into one boundary function
+- share quoted-token reading between backtick names and string literals
+- narrow the exception seam to type naming, delete errors.py
+- share DESCRIBE DETAIL row mapping, tolerant of both shapes
+- rename sql_type_for_data_type to render_data_type
+- record exact statements and exception messages on failures
+- align execution and error-translation vocabulary
+- move information_schema row mappers into the shared sql package
+- extract shared statement-execution loop from the spark executor
+- extract shared exception-summarising core from the spark backend
+- rename the databricks extra to spark and build_engine to build_spark_engine
+- enforce the PySpark-free shared sql core with import-linter
+- rename Databricks reader and executor to Spark names
+- split Spark type parsing out of the shared sql package
+- move Spark-coupled adapter code into a spark subpackage
+- denominate execution results in statements
+- polish the CI report contract before it ships
+- execute compiled statements instead of recompiling the plan
+- fold compile back into the plan phase
+- extract compile into its own sync phase
+- compile plans unconditionally, dropping the empty-plan guard
+- extract action interpretation into diff_entries module
+- reintroduce _SelfReference class in delta_table.py
+- state the FK name-collision fact without API name-generation advice
+- dedupe partition/clustering key-list validation in TableSnapshot
+- name the resolved referenced side of a foreign key
+- merge partition and clustering validators into _validate_layout
+
 ## v0.3.0 (2026-07-10)
 
 ### BREAKING CHANGE
