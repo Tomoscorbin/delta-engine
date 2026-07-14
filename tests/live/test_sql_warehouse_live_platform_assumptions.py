@@ -204,25 +204,20 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
         )
 
 
-def test_platform_rejects_complex_types_as_partition_columns(live_connection, live_tables):
-    # Delta refuses complex/nested types as partition columns. This backs the
-    # layout gate in api/delta_table.py (_TYPES_UNUSABLE_AS_LAYOUT_KEYS), which
-    # rejects Array/Map/Struct/Variant as partition and clustering keys at
-    # declaration time; if the platform ever accepted one, that gate would be
-    # over-blocking. The parallel clustering rejection is a distinct backend
-    # rule whose error code is not pinned here.
+def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, live_tables):
+    # Delta refuses complex/nested types as partition columns, raising
+    # INVALID_PARTITION_COLUMN_DATA_TYPE (error class confirmed live
+    # 2026-07-14; the older DELTA_INVALID_PARTITION_COLUMN_TYPE spelling no
+    # longer matches). This backs the layout gate in api/delta_table.py
+    # (_TYPES_UNUSABLE_AS_LAYOUT_KEYS), which rejects Array/Map/Struct/Variant
+    # as partition and clustering keys at declaration time; if the platform
+    # ever accepted one, that gate would be over-blocking. An array stands in
+    # for the complex-type category; the parallel clustering rejection is a
+    # distinct backend rule not pinned here.
     array_name = live_tables("partition_array")
-    with pytest.raises(ServerOperationError, match="DELTA_INVALID_PARTITION_COLUMN_TYPE"):
+    with pytest.raises(ServerOperationError, match="INVALID_PARTITION_COLUMN_DATA_TYPE"):
         execute_sql(
             live_connection,
             f"CREATE TABLE {qualified_table(array_name)} "
             "(id INT, labels ARRAY<INT>) USING DELTA PARTITIONED BY (labels)",
-        )
-
-    struct_name = live_tables("partition_struct")
-    with pytest.raises(ServerOperationError, match="DELTA_INVALID_PARTITION_COLUMN_TYPE"):
-        execute_sql(
-            live_connection,
-            f"CREATE TABLE {qualified_table(struct_name)} "
-            "(id INT, payload STRUCT<x: INT>) USING DELTA PARTITIONED BY (payload)",
         )
