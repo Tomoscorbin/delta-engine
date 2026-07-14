@@ -152,7 +152,7 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         "",
         "Verified against a real Databricks SQL warehouse (Unity Catalog).",
         "",
-        "| Area | What it verifies | Result |",
+        "| Area | Checks | Result |",
         "| --- | --- | --- |",
     ]
     for filename, (label, description) in _LIVE_AREAS.items():
