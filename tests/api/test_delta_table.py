@@ -861,8 +861,8 @@ def test_tag_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
 
 
 def test_delta_table_accepts_column_tags_at_the_limits() -> None:
-    # A column is its own securable: 50 tags of 1,000 characters are accepted
-    at_limit = {f"tag_{i}": "x" * 1000 for i in range(50)}
+    # A column is its own securable: 50 tags of 256 characters are accepted
+    at_limit = {f"tag_{i}": "x" * 256 for i in range(50)}
     table = DeltaTable(
         catalog="dev",
         schema="silver",
@@ -1032,17 +1032,39 @@ def test_delta_table_rejects_more_than_fifty_table_tags() -> None:
 
 
 def test_delta_table_rejects_overlong_tag_value_on_a_column() -> None:
-    with pytest.raises(ValueError, match="1000"):
+    with pytest.raises(ValueError, match="256"):
         DeltaTable(
             catalog="dev",
             schema="silver",
             name="orders",
-            columns=[Column("id", Integer(), tags={"note": "x" * 1001})],
+            columns=[Column("id", Integer(), tags={"note": "x" * 257})],
         )
 
 
+def test_delta_table_rejects_overlong_tag_key_on_a_column() -> None:
+    with pytest.raises(ValueError, match="256"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("id", Integer(), tags={"x" * 257: "note"})],
+        )
+
+
+def test_delta_table_accepts_a_tag_key_at_the_length_limit() -> None:
+    # 256 is the accepted boundary, so the guard must reject only beyond it
+    at_limit = "k" * 256
+    table = DeltaTable(
+        catalog="dev",
+        schema="silver",
+        name="orders",
+        columns=[Column("id", Integer(), tags={at_limit: "note"})],
+    )
+    assert at_limit in table.to_desired_table().columns[0].tags
+
+
 def test_delta_table_accepts_tags_at_the_limits() -> None:
-    at_limit = {f"tag_{i}": "x" * 1000 for i in range(50)}
+    at_limit = {f"tag_{i}": "x" * 256 for i in range(50)}
     table = DeltaTable(
         catalog="dev",
         schema="silver",
