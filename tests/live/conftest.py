@@ -95,7 +95,7 @@ _LIVE_AREAS: dict[str, tuple[str, str]] = {
     ),
     "test_sql_warehouse_live_renames.py": (
         "Column renames",
-        "data, tags, and comments travel; keys are replaced; ambiguity is rejected",
+        "data, tags, comments, and layout travel; keys are replaced; ambiguity is rejected",
     ),
     "test_sql_warehouse_live_platform_assumptions.py": (
         "Platform assumptions",

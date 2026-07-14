@@ -135,6 +135,58 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
     assert engine.sync(renamed).has_changes is False
 
 
+def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
+    live_connection, live_tables
+):
+    table_name = live_tables("rename_composite_pk")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(
+                Column("tenant_id", Integer(), nullable=False),
+                Column("customer_nm", String(), nullable=False),
+                Column("amount", Integer()),
+            ),
+            primary_key=("tenant_id", "customer_nm"),
+            properties=_COLUMN_MAPPING,
+        )
+    )
+    assert read_live_table(live_connection, table_name)["primary_key"] == (
+        "tenant_id",
+        "customer_nm",
+    )
+
+    renamed = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(
+            Column("tenant_id", Integer(), nullable=False),
+            Column("customer_name", String(), nullable=False, renamed_from="customer_nm"),
+            Column("amount", Integer()),
+        ),
+        primary_key=("tenant_id", "customer_name"),
+        properties=_COLUMN_MAPPING,
+    )
+    report = engine.sync(renamed)
+
+    # Renaming one member still replaces the whole key: the drop and re-add
+    # bracket the rename, and the untouched member keeps its position.
+    [table_report] = report.table_reports
+    statements = table_report.planned_sql_statements
+    assert len(statements) == 3
+    assert "DROP PRIMARY KEY" in statements[0]
+    assert "RENAME COLUMN" in statements[1]
+    assert "ADD CONSTRAINT" in statements[2]
+    state = read_live_table(live_connection, table_name)
+    assert state["primary_key"] == ("tenant_id", "customer_name")
+    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert engine.sync(renamed).has_changes is False
+
+
 def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connection, live_tables):
     parent_name = live_tables("rename_fk_parent")
     child_name = live_tables("rename_fk_child")
@@ -172,6 +224,72 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
 
     assert read_live_table(live_connection, child_name)["foreign_keys"] == (
         (f"{child_name}_parent_id_fk", "parent_id", parent_name, "id"),
+    )
+    assert engine.sync(renamed_child, parent).has_changes is False
+
+
+def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
+    live_connection, live_tables
+):
+    parent_name = live_tables("rename_composite_fk_parent")
+    child_name = live_tables("rename_composite_fk_child")
+    parent = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        parent_name,
+        columns=(
+            Column("tenant_id", Integer(), nullable=False),
+            Column("account_id", Integer(), nullable=False),
+        ),
+        primary_key=("tenant_id", "account_id"),
+    )
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            child_name,
+            columns=(Column("tenant_id", Integer()), Column("account_num", Integer())),
+            foreign_keys=(
+                ForeignKey(
+                    columns={"tenant_id": "tenant_id", "account_num": "account_id"},
+                    references=parent,
+                ),
+            ),
+            properties=_COLUMN_MAPPING,
+        ),
+        parent,
+    )
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (f"{child_name}_account_num_tenant_id_fk", "account_num", parent_name, "account_id"),
+        (f"{child_name}_account_num_tenant_id_fk", "tenant_id", parent_name, "tenant_id"),
+    )
+
+    renamed_child = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        child_name,
+        columns=(
+            Column("tenant_id", Integer()),
+            Column("account_id", Integer(), renamed_from="account_num"),
+        ),
+        foreign_keys=(
+            ForeignKey(
+                columns={"tenant_id": "tenant_id", "account_id": "account_id"},
+                references=parent,
+            ),
+        ),
+        properties=_COLUMN_MAPPING,
+    )
+    # The parent rides along: dependency resolution blocks a foreign-key add
+    # whose referenced table is not registered in the same run.
+    engine.sync(renamed_child, parent)
+
+    # Renaming one local column replaces the whole composite key: the new
+    # local column set names a new constraint and both pairs survive intact.
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (f"{child_name}_account_id_tenant_id_fk", "account_id", parent_name, "account_id"),
+        (f"{child_name}_account_id_tenant_id_fk", "tenant_id", parent_name, "tenant_id"),
     )
     assert engine.sync(renamed_child, parent).has_changes is False
 
@@ -301,6 +419,49 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
         f"SELECT event_day FROM {qualified_table(table_name)} ORDER BY id",
     )
     assert [row["event_day"] for row in rows] == ["mon", "tue"]
+    assert engine.sync(renamed).has_changes is False
+
+
+def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, live_tables):
+    table_name = live_tables("rename_cluster")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer()), Column("region", String())),
+            clustered_by=("region",),
+            properties=_COLUMN_MAPPING,
+        )
+    )
+    execute_sql(
+        live_connection,
+        f"INSERT INTO {qualified_table(table_name)} VALUES (1, 'emea'), (2, 'apac')",
+    )
+
+    renamed = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer()), Column("sales_region", String(), renamed_from="region")),
+        clustered_by=("sales_region",),
+        properties=_COLUMN_MAPPING,
+    )
+    report = engine.sync(renamed)
+
+    # Clustering keys follow the mapped column's identity, so the whole plan
+    # is the rename itself — no re-clustering action, no layout drift.
+    [table_report] = report.table_reports
+    [statement] = table_report.planned_sql_statements
+    assert "RENAME COLUMN" in statement
+    state = read_live_table(live_connection, table_name)
+    assert state["clustering"] == ("sales_region",)
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT sales_region FROM {qualified_table(table_name)} ORDER BY id",
+    )
+    assert [row["sales_region"] for row in rows] == ["emea", "apac"]
     assert engine.sync(renamed).has_changes is False
 
 
