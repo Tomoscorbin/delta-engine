@@ -281,7 +281,9 @@ table = DeltaTable(
 )
 ```
 
-Tag keys are free-form strings — there is no enum allowlist (unlike properties). Keys are **case-sensitive**: `env` and `Env` are distinct tags.
+Tag keys are strings rather than members of an engine enum (unlike properties),
+but Unity Catalog still applies the character and length restrictions below.
+Keys are **case-sensitive**: `env` and `Env` are distinct tags.
 
 ### Reconciliation is full-state
 
@@ -296,9 +298,19 @@ This means a tag applied outside delta-engine (in the Databricks UI, by another 
 
 ### Requirements
 
-Tags require Unity Catalog on Databricks Runtime 13.3 LTS or later, and the `APPLY TAG` privilege on the table (plus `USE SCHEMA` / `USE CATALOG`). On non-Unity-Catalog environments the engine observes no tags and emits no tag changes.
+Tags require Unity Catalog on Databricks Runtime 13.3 LTS or later, and the
+`APPLY TAG` privilege on the table (plus `USE SCHEMA` / `USE CATALOG`). Applying
+a governed tag also requires `ASSIGN` on that tag. Tags are not supported by
+the plain-Spark fallback: it observes tag state as empty, but a non-empty tag
+declaration still plans `SET TAGS` SQL and fails at execution where that syntax
+is unavailable. Use tag management only against Unity Catalog.
 
-Databricks limits: up to 50 tags per table; keys up to 256 characters and values up to 1,000 characters; tag keys cannot contain `. , - = / :` or leading/trailing spaces. Delta-engine enforces the 50-tag limit and the 1,000-character value limit at declaration time; declarations that violate these limits fail immediately with a `ValueError`.
+Databricks limits each table to 50 tags, tag keys to 256 characters, and tag
+values to 256 characters. Tag keys cannot contain `. , - = / :` or leading or
+trailing spaces. Delta-engine validates only part of this platform contract at
+declaration time, so keep declarations within the Databricks limits even when
+construction succeeds; the catalog can reject the remaining violations at
+execution.
 
 ### Column tags
 
@@ -363,12 +375,12 @@ the sync.
 
 ### Requirements and limits
 
-Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and the
-`APPLY TAG` privilege. Databricks limits: up to 50 tags per column, at most 1,000
-column tags per table across all columns, keys up to 256 characters and values up
-to 1,000 characters, and tag keys cannot contain `. , - = / :` or leading/trailing
-spaces. Delta-engine enforces the 50-tags-per-column limit and the 1,000-character
-value limit at declaration time; violations fail immediately with a `ValueError`.
+Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and
+the `APPLY TAG` privilege; governed tags also require `ASSIGN`. Databricks
+limits each column to 50 tags, each table to 1,000 column tags in total, tag
+keys and values to 256 characters, and forbids `. , - = / :` and leading or
+trailing spaces in tag keys. Delta-engine validates only part of this platform
+contract at declaration time, so other violations surface at execution.
 
 ## Comments
 
@@ -463,10 +475,13 @@ before any sync runs.
 ### Constraints are informational
 
 Databricks primary and foreign key constraints are _informational, not
-enforced_: they do not prevent duplicate or null values at write time. Unity
-Catalog uses them to document intent and to enable query optimizations such as
-eliminating provably redundant joins. Declaring one tells Databricks the key
-holds; the engine does not, and cannot, make Databricks validate it.
+enforced_: they do not prevent duplicate or invalid references at write time.
+The engine does not specify `RELY`, so Databricks records its default `NORELY`
+form. These constraints document relationships in Unity Catalog but are not
+trusted for optimizer rewrites such as join elimination. Those optimizations
+require `RELY`, which delta-engine does not currently model. If you add `RELY`
+out of band, verify the data first; Databricks trusts the assertion, and a later
+engine plan that drops and re-adds the key restores the default `NORELY` form.
 
 ### Drift
 
@@ -529,11 +544,11 @@ orders = DeltaTable(
 ```
 
 Referencing the target `DeltaTable` object — rather than a dotted table name —
-is what lets the engine validate the mapping against that table's actual primary
-key, and keeps the reference valid if the target is renamed. The constraint
-name is generated at lowering as `{table}_{local_columns}_fk`, joining the
-local columns in sorted order (`orders_customer_id_fk` above). The name cannot
-be chosen, and drift matching never depends on it — a foreign key created outside the engine under a
+lets the engine validate the mapping against that declaration's primary key and
+capture the target's qualified name. The constraint name is generated at
+lowering as `{table}_{local_columns}_fk`, joining the local columns in sorted
+order (`orders_customer_id_fk` above). The name cannot be chosen, and drift
+matching never depends on it — a foreign key created outside the engine under a
 different name still matches by content.
 
 Generated names join local columns with underscores, so two foreign keys over
@@ -546,7 +561,12 @@ fails at execution.
 
 Each local column's data type must match its referenced primary-key column's
 type. A mismatch raises `ValueError` when the `DeltaTable` is constructed,
-before any sync runs.
+before any sync runs. That check uses the exact parent object passed to
+`ForeignKey(references=...)`. If the same sync registers a different
+`DeltaTable` instance with the same qualified name but different key types, the
+resolver does not currently repeat the type check against that registered
+instance; Databricks can reject the resulting DDL at execution. Register the
+same parent object used by the foreign-key declaration.
 
 ### Self-referential foreign keys
 
@@ -659,11 +679,12 @@ as its columns and referenced table match the declaration.
 ### Constraints are informational
 
 Like primary keys, Databricks foreign keys are informational, not enforced:
-they do not block inserts that violate referential integrity. The referenced
-table needs a matching primary or unique key for Databricks to accept the
-constraint at execution time. Support, including unique constraints used as
-referenced keys, depends on your Databricks environment; a rejected constraint
-surfaces as an `EXECUTION_FAILED` table with the original error. See
+they do not block inserts that violate referential integrity. Current
+Databricks versions can target a primary key or a supported unique constraint,
+but delta-engine declares and resolves primary keys only. It cannot declare a
+`UNIQUE` constraint or register one as a foreign-key target. A constraint that
+Databricks rejects for runtime or protocol compatibility surfaces as an
+`EXECUTION_FAILED` table with the original error. See
 {ref}`runtime-and-delta-feature-compatibility`.
 
 ## Partitioning
@@ -700,20 +721,19 @@ of partition columns. Because partitioning is fixed at creation (below),
 reordering the list on an existing table reads as a partitioning change and
 fails validation, so declare the nesting order you want up front.
 
-### Partitioning is fixed at creation
+### Partitioning is create-only in delta-engine
 
-Partitioning can only be set when the table is created. Partition columns
-determine how the table's data files are physically laid out on storage, and
-Delta Lake has no `ALTER TABLE` that repartitions an existing table in place.
-Changing the partition columns means rewriting every data file into the new
-layout — a full table rewrite (for example `REPLACE TABLE ... PARTITIONED BY`,
-or an overwrite with a new partitioning), not the in-place DDL delta-engine
-issues.
+Delta-engine sets partitioning only when it creates a table. Changing one
+partition specification to another requires a data rewrite, which is outside
+the engine's DDL-only remit. Databricks Runtime 18.1 and above also provides
+`REPLACE PARTITIONED BY WITH CLUSTER BY` to convert a partitioned Delta table
+to liquid clustering, but delta-engine does not model that layout-strategy
+conversion.
 
-Because that rewrite is a data operation outside the engine's remit, declaring
-a different `partitioned_by` for an existing table fails validation before any
-SQL runs. To change partitioning, rewrite the table out of band, then re-sync
-against the new layout.
+Declaring a different `partitioned_by` for an existing table therefore fails
+validation before any SQL runs. Rewrite the table or perform a supported
+partition-to-clustering conversion out of band, then update the declaration and
+re-sync against the resulting layout.
 
 Partition columns also cannot be of complex type (`Array`, `Map`, `Struct`,
 `Variant`), and a table cannot be partitioned by every column; both are

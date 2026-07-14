@@ -101,13 +101,14 @@ class SparkReader:
 
         Returns ``TablePresent`` carrying the current observed table snapshot;
         ``TableAbsent`` when the table doesn't exist; or
-        ``ReadFailed`` if catalog access raised an exception.
+        ``ReadFailed`` if any part of the read raised an exception.
 
-        Every failure mode is contained: anything that goes wrong reading this
-        table -- a failing existence probe, an unsupported column type, a Spark
-        error mid-read -- becomes a ``ReadFailed`` for this table rather than an
-        exception that aborts the whole sync. The ``CatalogStateReader`` contract
-        promises a ``CatalogState``, so the boundary must be total.
+        Every exception raised while reading -- such as a failing existence
+        probe, an unsupported partition-column type, or a Spark error mid-read
+        -- becomes a ``ReadFailed`` for this table rather than aborting the
+        whole sync. Unmappable non-partition columns are skipped by the mapper
+        and do not raise. The ``CatalogStateReader`` contract promises a
+        ``CatalogState``, so the boundary must be total.
         """
         try:
             return self._read(qualified_name)

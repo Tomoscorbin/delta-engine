@@ -153,8 +153,8 @@ class PlanExecutor(Protocol):
 
     Execution is a two-stage boundary: ``compile`` turns a domain plan into the
     backend statements it lowers to, and ``execute`` runs those statements. The
-    engine compiles once (so a dry run can preview the DDL and a real run applies
-    exactly what was previewed) and passes the same statements to ``execute``.
+    engine compiles once per invocation: a dry run exposes those statements,
+    while a real run passes that invocation's same statements to ``execute``.
 
     Like :class:`CatalogStateReader`, ``execute`` is **total**: a statement that
     fails is captured in the returned ``ExecutionSummary`` (which records both the

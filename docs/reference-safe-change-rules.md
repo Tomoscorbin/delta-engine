@@ -13,7 +13,7 @@ The engine validates the computed diff before executing any SQL. These rules blo
 | `NullabilityTighteningOnExistingColumn` | Changing an existing nullable column to `NOT NULL`                                                                                                                                        | Backfill existing NULLs, set `NOT NULL` outside the engine, then declare `nullable=False`              |
 | `NonWideningColumnTypeChange`           | Changing a column's declared data type outside the widening matrix ([type widening](how-to-configure-table.md#type-widening))                                                             | Drop and recreate the table out of band, then re-sync                                                  |
 | `TypeWideningRequiredForTypeChange`     | A widening type change without `delta.enableTypeWidening='true'` declared                                                                                                                 | Declare the property (it may be set in the same sync as the widen)                                     |
-| `PartitioningChangeNotSupported`        | Changing `partitioned_by` on an existing table                                                                                                                                            | Drop and recreate the table out of band, then re-sync                                                  |
+| `PartitioningChangeNotSupported`        | Changing `partitioned_by` on an existing table                                                                                                                                            | Rewrite/recreate it, or convert it to clustering out of band, then re-sync                             |
 | `PropertyTransitionNotSupported`        | A property transition that is unsafe in place — the catalog rejects it, or applying it would rewrite the table (e.g. `delta.columnMapping.mode` `name` → `none` rewrites every data file) | Update the declaration to match the catalog value                                                      |
 | `PropertyMustBeDeclared`                | A managed property set on the table but missing from the declaration                                                                                                                      | Declare it (or declare it `None` to remove it, where removal is possible)                              |
 | `ColumnMappingRequiredForDrop`          | A plan drops a column but the declaration lacks `delta.columnMapping.mode='name'`                                                                                                         | Declare the property (it may be set in the same sync as the drop)                                      |
@@ -23,14 +23,13 @@ The engine validates the computed diff before executing any SQL. These rules blo
 ## Clustering is not a blocked change
 
 Unlike `partitioned_by`, changing a table's liquid clustering keys has no
-validation rule blocking it, because there is nothing unsafe about it: Delta
-reconciles clustering keys with `ALTER TABLE ... CLUSTER BY (...)` (or
-`CLUSTER BY NONE` to remove them), so the engine plans this in place instead
-of failing validation. `PartitioningChangeNotSupported` blocks
-`partitioned_by` because Delta has no equivalent in-place `ALTER TABLE` for
-partition columns — changing them means physically rewriting every data
-file — while a re-cluster is a metadata change that later `OPTIMIZE` runs
-apply lazily.
+validation rule blocking it: Delta reconciles clustering keys with `ALTER TABLE
+... CLUSTER BY (...)` (or `CLUSTER BY NONE` to remove them), so the engine plans
+this in place. `PartitioningChangeNotSupported` reflects delta-engine's
+create-only partitioning model. Changing one partition specification to another
+requires a data rewrite, and although Databricks Runtime 18.1 and above can
+convert a partitioned table to liquid clustering with `REPLACE PARTITIONED BY
+WITH CLUSTER BY`, the engine does not model that conversion.
 
 Re-clustering only affects data written after the change: existing files
 keep their old clustering layout until they are rewritten by a subsequent

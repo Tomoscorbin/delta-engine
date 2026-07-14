@@ -74,8 +74,9 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     # process creates the table in that window, the statement no-ops rather than
     # erroring. The trade-off is that such a table is reported created without
     # reconciling its schema; the next sync re-reads and plans any drift. This
-    # favours a resilient run over failing loud on a rare race -- see the README
-    # non-goals.
+    # favours a resilient run over failing loud on a rare race. The resulting
+    # false-success window is documented under concurrent catalog changes in
+    # docs/reference-limitations.md.
     parts = [
         f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
         f"({columns_clause})",

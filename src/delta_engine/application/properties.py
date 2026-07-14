@@ -47,7 +47,7 @@ class Property(StrEnum):
 # A single `interval <n> <unit>` term only — deliberately stricter than the
 # catalog, which also accepts compound intervals ("interval 1 hour 30
 # minutes"). One canonical spelling keeps declared and observed values
-# comparable; see docs/how-to-configure-properties.md.
+# comparable; see the properties section in docs/how-to-configure-table.md.
 _INTERVAL_FORMAT = re.compile(
     r"interval\s+\d+\s+(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?",
     re.IGNORECASE,

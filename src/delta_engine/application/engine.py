@@ -151,9 +151,9 @@ class Engine:
             dry_run: When True, run read → diff → plan → resolve
                 but skip execution (zero catalog mutations). Every run's
                 ``execution`` stays ``None`` while its ``plan`` still records
-                the actions that would be applied, and the report is returned
-                instead of raising ``SyncFailedError`` even when a table would
-                fail.
+                the actions compiled from the observed snapshot, and the report
+                is returned instead of raising ``SyncFailedError`` when a
+                pre-execution phase fails.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -235,9 +235,10 @@ class Engine:
         """
         Accept or reject each diff, then compile every accepted plan.
 
-        Compiling here, before the dry-run/execute split, means a dry run can
-        preview the exact DDL. ``plan_diff`` always applies the default policy;
-        rejected runs retain an empty plan and carry validation failures.
+        Compiling here, before the dry-run/execute split, means a dry run exposes
+        the exact DDL for its own snapshot. ``plan_diff`` always applies the
+        default policy; rejected runs retain an empty plan and carry validation
+        failures.
         """
         for run in runs:
             if run.diff is None:
