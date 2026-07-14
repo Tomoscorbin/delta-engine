@@ -1,8 +1,10 @@
 # Credentialed live suite against a real Databricks SQL warehouse.
 #
-# Deliberately not part of regular CI: manual dispatch only, and the run
-# targets whichever ref is selected (`gh workflow run live.yaml --ref <branch>`
-# once this file exists on main).
+# Deliberately not part of PR CI: it runs on a weekly schedule (drift
+# detection against the live warehouse) and on manual dispatch, which targets
+# whichever ref is selected (`gh workflow run live.yaml --ref <branch>` once
+# this file exists on main). Scheduled runs only ever fire from the default
+# branch, so this trigger is inert until merged.
 #
 # Required repository variables:
 #   DATABRICKS_HOST            workspace URL
@@ -18,6 +20,11 @@ name: Live
 
 on:
   workflow_dispatch:
+  schedule:
+    # Weekly drift check (Mondays 07:00 UTC): catches Databricks-side
+    # behaviour changes the hermetic suite cannot see. Non-blocking — it
+    # never gates a PR.
+    - cron: "0 7 * * 1"
 
 # One live run at a time: the suite shares a schema and a warehouse.
 concurrency:
