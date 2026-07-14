@@ -98,11 +98,7 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
                 "account_code",
                 String(),
                 nullable=True,
-                # Clearing a column comment to "" is deliberately not
-                # exercised: it compiles to ALTER COLUMN ... UNSET COMMENT,
-                # which SQL warehouses reject — see the todo on the pending
-                # COMMENT '' compiler fix.
-                comment="code retained for audit",
+                comment="",
                 tags={"classification": "public"},
             ),
             Column("region", String(), comment="sales region"),
@@ -137,7 +133,7 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
     ]
     assert [column["comment"] for column in state["columns"]] == [
         "stable customer id",
-        "code retained for audit",
+        "",
         "sales region",
         "age in years",
     ]
