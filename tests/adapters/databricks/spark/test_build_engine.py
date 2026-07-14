@@ -1,7 +1,11 @@
 import io
 import logging
 
-from delta_engine.adapters.databricks.log_config import LevelColorFormatter, configure_logging
+from delta_engine.adapters.databricks.log_config import (
+    LevelColorFormatter,
+    SafeStreamHandler,
+    configure_logging,
+)
 from delta_engine.adapters.databricks.spark.factory import build_engine
 from delta_engine.application.engine import Engine
 
@@ -70,3 +74,22 @@ def test_configure_logging_routes_records_to_the_given_stream():
     finally:
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
+
+
+def test_safe_stream_handler_ignores_a_stream_closed_during_teardown(capsys):
+    stream = io.StringIO()
+    handler = SafeStreamHandler(stream)
+    stream.close()
+    record = logging.LogRecord(
+        name="delta_engine.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg="late log record",
+        args=(),
+        exc_info=None,
+    )
+
+    handler.emit(record)
+
+    assert "Logging error" not in capsys.readouterr().err

@@ -44,6 +44,22 @@ def test_execute_failure_records_exception_details_and_the_statement():
     assert result.failure.statement == "SELECT * FROM __nope__"
 
 
+def test_execute_contains_an_exception_whose_message_cannot_be_rendered():
+    class UnrenderableError(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("rendering failed")
+
+    def fail(_statement: str) -> None:
+        raise UnrenderableError()
+
+    summary = execute_statements(fail, ("SELECT 1",))
+
+    [result] = summary.results
+    assert isinstance(result, ExecutionFailed)
+    assert result.failure.exception_type == "UnrenderableError"
+    assert result.failure.message == "<exception message unavailable>"
+
+
 def test_execute_failure_names_wrapped_jvm_exceptions_by_java_class():
     # Given a backend failure that wraps a JVM exception, py4j-style
     class WrappingRunner:

@@ -8,7 +8,7 @@ from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
-from delta_engine.adapters.databricks.errors import exception_type_name
+from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
 from delta_engine.adapters.databricks.sql import (
     clustering_columns_from_detail_row,
     column_from_catalog,
@@ -113,7 +113,9 @@ class SparkReader:
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            return ReadFailed(failure=ReadFailure(exception_type_name(exception), str(exception)))
+            return ReadFailed(
+                failure=ReadFailure(exception_type_name(exception), exception_message(exception))
+            )
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""

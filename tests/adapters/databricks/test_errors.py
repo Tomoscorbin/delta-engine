@@ -1,5 +1,5 @@
 """
-Shared exception type naming (Java class preferred, Python fallback).
+Shared exception rendering (Java class preferred, non-throwing message fallback).
 
 The py4j wrapper is detected by duck-typing on ``java_exception``, so these
 tests pin that contract against a real ``Py4JJavaError`` rather than a
@@ -10,11 +10,15 @@ from types import SimpleNamespace
 
 from py4j.protocol import Py4JJavaError
 
-from delta_engine.adapters.databricks.errors import exception_type_name
+from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
 
 
 def test_names_plain_exceptions_by_python_class():
     assert exception_type_name(ValueError("nope")) == "ValueError"
+
+
+def test_renders_plain_exception_messages():
+    assert exception_message(ValueError("nope")) == "nope"
 
 
 def test_names_py4j_errors_by_underlying_java_class():
@@ -37,11 +41,16 @@ def test_names_py4j_errors_by_underlying_java_class():
 
 def test_falls_back_to_wrapper_class_when_the_gateway_is_unreachable():
     # Given a wrapped JVM exception whose remote calls fail (dead gateway)
-    def raise_gateway_error() -> None:
+    def raise_gateway_error(*_args: object) -> None:
         raise RuntimeError("gateway is down")
 
-    java_exception = SimpleNamespace(_target_id="o1", getClass=raise_gateway_error)
+    java_exception = SimpleNamespace(
+        _target_id="o1",
+        _gateway_client=SimpleNamespace(send_command=raise_gateway_error),
+        getClass=raise_gateway_error,
+    )
     error = Py4JJavaError("boom", java_exception)
 
-    # Then naming still succeeds, using the wrapper's own class
+    # Then both parts of the failure record remain constructible without the gateway
     assert exception_type_name(error) == "Py4JJavaError"
+    assert exception_message(error) == "<exception message unavailable>"

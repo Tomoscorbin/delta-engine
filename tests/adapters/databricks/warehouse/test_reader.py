@@ -248,3 +248,17 @@ def test_any_backend_exception_becomes_read_failed():
     assert isinstance(state, ReadFailed)
     assert state.failure.exception_type == "RuntimeError"
     assert "warehouse gone" in state.failure.message
+
+
+def test_exception_with_an_unrenderable_message_becomes_read_failed():
+    class UnrenderableError(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("rendering failed")
+
+    connection = RoutedConnection({table_row_query(QN): UnrenderableError()})
+
+    state = WarehouseReader(connection).fetch_state(QN)
+
+    assert isinstance(state, ReadFailed)
+    assert state.failure.exception_type == "UnrenderableError"
+    assert state.failure.message == "<exception message unavailable>"
