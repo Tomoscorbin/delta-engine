@@ -149,9 +149,10 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
         key=Property.COLUMN_MAPPING_MODE,
         value_description="'none' or 'name'",
         is_valid_value=_is_column_mapping_mode,
-        # The protocol upgrade (minReader 2 / minWriter 5, physical column
-        # names) is permanent: only none -> name is a legal change. The
-        # absence of any (value, None) pair blocks removal by the same
+        # Only none -> name is permitted. Databricks can remove column
+        # mapping (SET mode='none' / DROP FEATURE), but removal rewrites
+        # every data file, so the engine refuses it as an in-place change.
+        # The absence of any (value, None) pair blocks removal by the same
         # mechanism — declaring the key absent is a transition to None.
         permitted_transitions=frozenset({("none", "name")}),
     ),

@@ -53,7 +53,10 @@ class ActionPhase(IntEnum):
     UNSET_TABLE_TAG = auto()
     DROP_FOREIGN_KEY = auto()
     DROP_PRIMARY_KEY = auto()
+    RENAME_COLUMN = auto()
     ADD_COLUMN = auto()
+    ALTER_COLUMN_TYPE = auto()
+    SET_CLUSTERING = auto()
     DROP_COLUMN = auto()
     SET_COLUMN_TAG = auto()
     UNSET_COLUMN_TAG = auto()
@@ -66,6 +69,12 @@ class ActionPhase(IntEnum):
 ```
 
 `ActionPlan` sorts by phase then subject automatically — no changes needed there.
+
+When choosing a phase, mind the rename boundary: a plan may rename columns,
+and `RENAME_COLUMN` is the point where the table's column names switch from
+observed to desired. An action phased before it may reference only observed
+column names (or constraint names, which the rename does not touch); an
+action phased after it must use desired names.
 
 ## 3. Emit the action directly from the differ
 
