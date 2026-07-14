@@ -198,7 +198,7 @@ def test_create_table_renders_columns_nullability_comments_table_comment_and_pro
 
     # Then all CREATE TABLE clauses are rendered
     assert statement == (
-        "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
+        "CREATE TABLE `cat`.`sch`.`tbl`"
         " (`id` INT NOT NULL, `name` STRING COMMENT 'customer')"
         " USING delta"
         " COMMENT 'core table'"
@@ -214,7 +214,7 @@ def test_create_table_omits_comment_clause_when_table_comment_is_empty():
     statement = _compile_single(action)
 
     # Then no empty table COMMENT clause is emitted
-    assert statement == "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl` (`id` INT) USING delta"
+    assert statement == "CREATE TABLE `cat`.`sch`.`tbl` (`id` INT) USING delta"
 
 
 def test_create_table_renders_partition_clause():
@@ -290,7 +290,7 @@ def test_create_table_inlines_primary_key_constraint():
 
     # Then the primary key constraint is inlined in the column list
     assert statement == (
-        "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
+        "CREATE TABLE `cat`.`sch`.`tbl`"
         " (`id` INT NOT NULL, `name` STRING, CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
         " USING delta"
     )
@@ -322,7 +322,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
 
     # Then the struct field name is backtick-quoted and VARIANT is rendered
     assert statement == (
-        "CREATE TABLE IF NOT EXISTS `cat`.`sch`.`tbl`"
+        "CREATE TABLE `cat`.`sch`.`tbl`"
         " (`payload` STRUCT<`order id`: INT>, `attributes` VARIANT)"
         " USING delta"
         " TBLPROPERTIES ('delta.columnMapping.mode'='name')"

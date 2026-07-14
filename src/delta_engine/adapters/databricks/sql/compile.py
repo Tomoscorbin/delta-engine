@@ -69,16 +69,16 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     partition_by = _partitioned_by_clause(table.partitioned_by)
     cluster_by = _clustered_by_clause(table.clustered_by)
 
-    # IF NOT EXISTS, even though CreateTable is only emitted after the reader
-    # reports the table absent. It guards the read-then-create race: if another
-    # process creates the table in that window, the statement no-ops rather than
-    # erroring. The trade-off is that such a table is reported created without
-    # reconciling its schema; the next sync re-reads and plans any drift. This
-    # favours a resilient run over failing loud on a rare race. The resulting
-    # false-success window is documented under concurrent catalog changes in
+    # A plain CREATE TABLE (no IF NOT EXISTS). CreateTable is only emitted after
+    # the reader reports the table absent, but the read and the create are not
+    # atomic: if another process creates the name in that window, this statement
+    # errors and the executor reports ExecutionFailed rather than a false
+    # success. Failing the race explicitly matches the engine's no-retry policy;
+    # the user reruns sync, at which point the reader observes and diffs the
+    # table that actually exists. See concurrent catalog changes in
     # docs/reference-limitations.md.
     parts = [
-        f"CREATE TABLE IF NOT EXISTS {backticked_table_name}",
+        f"CREATE TABLE {backticked_table_name}",
         f"({columns_clause})",
         "USING delta",
         table_comment,
