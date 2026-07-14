@@ -67,6 +67,92 @@ def test_special_characters_in_nested_struct_field_names_require_column_mapping(
     assert "bad name" in state["columns"][0]["full_data_type"]
 
 
+def test_platform_rename_silently_drops_keys_including_other_tables_foreign_keys(
+    live_connection, live_tables
+):
+    # RENAME COLUMN drops any PK/FK using the column, cascading into other
+    # tables' foreign keys with no error (first observed live 2026-07-14).
+    # This is the hazard behind PrimaryKeyReferencedByForeignKeys and the
+    # reason plans state key drops explicitly instead of relying on the
+    # rename: if this ever stops cascading, those become merely redundant.
+    parent_name = live_tables("cascade_parent")
+    child_name = live_tables("cascade_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} (id INT NOT NULL, "
+        f"CONSTRAINT {parent_name}_pk PRIMARY KEY (id)) USING DELTA "
+        "TBLPROPERTIES ('delta.columnMapping.mode'='name')",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (parent_id INT, "
+        f"CONSTRAINT {child_name}_fk FOREIGN KEY (parent_id) "
+        f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
+    )
+
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(parent_name)} RENAME COLUMN id TO account_id",
+    )
+
+    assert read_live_table(live_connection, parent_name)["primary_key"] == ()
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == ()
+
+
+def test_platform_restricts_a_primary_key_drop_while_a_foreign_key_references_it(
+    live_connection, live_tables
+):
+    # DROP PRIMARY KEY defaults to RESTRICT, and IF EXISTS does not bypass
+    # it. This is the engine's fail-closed net: an inbound FK the reader
+    # could not observe (e.g. cross-catalog) fails the compiled drop, and
+    # execution stops before the rename can cascade.
+    parent_name = live_tables("restrict_parent")
+    child_name = live_tables("restrict_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} (id INT NOT NULL, "
+        f"CONSTRAINT {parent_name}_pk PRIMARY KEY (id)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (parent_id INT, "
+        f"CONSTRAINT {child_name}_fk FOREIGN KEY (parent_id) "
+        f"REFERENCES {qualified_table(parent_name)} (id)) USING DELTA",
+    )
+
+    with pytest.raises(ServerOperationError, match="child constraints"):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(parent_name)} DROP PRIMARY KEY IF EXISTS",
+        )
+
+    assert read_live_table(live_connection, parent_name)["primary_key"] == ("id",)
+
+
+def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
+    live_connection, live_tables
+):
+    # The engine does not model CHECK constraints; renames of referenced
+    # columns are documented to fail at execution rather than validation.
+    table_name = live_tables("check_dependent")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (amount INT) USING DELTA "
+        "TBLPROPERTIES ('delta.columnMapping.mode'='name')",
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} "
+        f"ADD CONSTRAINT {table_name}_positive CHECK (amount > 0)",
+    )
+
+    with pytest.raises(ServerOperationError, match="DELTA_CONSTRAINT_DEPENDENT_COLUMN_CHANGE"):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} RENAME COLUMN amount TO amt",
+        )
+
+
 def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_tables):
     # PartitioningChangeNotSupported blocks partitioned->clustered
     # conversions; the platform refuses the direct conversion too, so the
