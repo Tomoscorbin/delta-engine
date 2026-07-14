@@ -44,7 +44,7 @@ def _types(state) -> dict[str, str]:
     }
 
 
-def test_sync_creates_every_supported_column_type(live_connection, live_tables):
+def test_sync_creates_and_round_trips_every_supported_column_type(live_connection, live_tables):
     table_name = live_tables("types")
     table = DeltaTable(
         live_catalog(),
@@ -87,7 +87,8 @@ def test_sync_creates_every_supported_column_type(live_connection, live_tables):
         ),
     )
 
-    build_sql_engine(live_connection).sync(table)
+    engine = build_sql_engine(live_connection)
+    engine.sync(table)
 
     assert _types(read_live_table(live_connection, table_name)) == {
         "tiny": "tinyint",
@@ -108,6 +109,12 @@ def test_sync_creates_every_supported_column_type(live_connection, live_tables):
         "map_value": "map<string,bigint>",
         "struct_value": "struct<name:string,location:struct<latitude:double,longitude:double>>",
     }
+    # Creation is only half the round trip: the reader must parse every nested
+    # and parameterised type — array<int>, map<string,bigint>, the nested
+    # struct, decimal(18,4), variant — back into a domain type equal to the
+    # declaration, or the table would re-diff forever. A converged resync
+    # proves the whole type surface round-trips through the engine's reader.
+    assert engine.sync(table).has_changes is False
 
 
 def test_sync_creates_every_managed_table_property(live_connection, live_tables):
@@ -305,6 +312,7 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
                 Column("tiny", Byte()),
                 Column("small", Short()),
                 Column("count", Integer()),
+                Column("measure", Integer()),
                 Column("ratio", Float()),
                 Column("event_date", Date()),
                 Column("amount", Decimal(10, 2)),
@@ -327,6 +335,7 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
                 Column("tiny", Short()),
                 Column("small", Integer()),
                 Column("count", Long()),
+                Column("measure", Double()),
                 Column("ratio", Double()),
                 Column("event_date", TimestampNtz()),
                 Column("amount", Decimal(12, 3)),
@@ -340,6 +349,7 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
         "tiny": "smallint",
         "small": "int",
         "count": "bigint",
+        "measure": "double",
         "ratio": "double",
         "event_date": "timestamp_ntz",
         "amount": "decimal(12,3)",
