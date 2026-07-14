@@ -11,10 +11,11 @@ only runs when requested explicitly (a manual run or the live CI job):
                                                        # DATABRICKS_CONFIG_PROFILE
     export DATABRICKS_HTTP_PATH=...
     export DELTA_ENGINE_E2E_CATALOG=... DELTA_ENGINE_E2E_SCHEMA=...
-    uv run pytest tests/live -m databricks_e2e --no-cov
+    uv run pytest tests/live -m databricks_e2e --no-cov -n auto
 
 Every test allocates uniquely named tables through the ``live_tables`` factory
-and drops them afterwards, so runs are safe to repeat against a shared schema.
+and drops them afterwards, so runs are safe to repeat against a shared schema
+and safe to run in parallel: ``-n auto`` fans the suite across xdist workers.
 """
 
 from collections.abc import Callable
@@ -37,7 +38,9 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.databricks_e2e)
 
 
-@pytest.fixture(scope="module")
+# Session-scoped so each parallel xdist worker opens one connection and reuses
+# it for every test it runs, rather than reconnecting per module.
+@pytest.fixture(scope="session")
 def live_connection():
     missing = [name for name in _LIVE_REQUIRED_ENV if not os.environ.get(name)]
     if missing:
