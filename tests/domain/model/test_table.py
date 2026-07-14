@@ -695,3 +695,36 @@ def test_desired_table_rejects_clustering_by_a_rename_source() -> None:
             ),
             clustered_by=("day",),
         )
+
+
+def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
+    # Constraint columns name desired columns, exactly like layout keys: a
+    # renamed key column moves the primary_key declaration to the new name.
+    with pytest.raises(ValueError, match="Primary key column not found"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                DesiredColumn(
+                    "customer_name", String(), nullable=False, renamed_from="customer_nm"
+                ),
+            ),
+            primary_key=PrimaryKeyConstraint.generate(
+                table_name="orders", columns=("customer_nm",)
+            ),
+        )
+
+
+def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -> None:
+    with pytest.raises(ValueError, match="Foreign key local column not found"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
+            foreign_keys=(
+                ForeignKeyConstraint(
+                    local_columns=("parent",),
+                    referenced_table=QualifiedName("c", "s", "parent"),
+                    referenced_columns=("id",),
+                    constraint_name="orders_parent_fk",
+                ),
+            ),
+        )
