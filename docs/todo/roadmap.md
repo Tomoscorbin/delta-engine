@@ -7,27 +7,27 @@ this document supersedes their prioritisation but not their detail.
 
 ## Summary
 
-| #   | Item                                              | Tier | Effort | Tracking          |
-| --- | ------------------------------------------------- | ---- | ------ | ----------------- |
-| 1   | Type widening                                     | 1    | M      | tracked           |
-| 2   | Column renames (`renamed_from`)                   | 1    | M      | shipped           |
-| 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | shipped           |
-| 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped           |
-| 5   | Delta-format / view guard in the reader           | 2    | S      | not tracked       |
-| 6   | Identity columns                                  | 2    | M      | not tracked       |
-| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly tracked    |
-| 8   | CHECK constraints                                 | 2    | M      | not tracked       |
-| 9   | `RELY` on PK/FK constraints                       | 2    | S      | tracked           |
-| 10  | External-table (LOCATION) policy                  | 3    | S–M    | not tracked       |
-| 11  | Schema-level orphan detection                     | 3    | M      | not tracked       |
-| 12  | `ignored_properties` escape hatch                 | 3    | S      | tracked           |
-| 13  | Column defaults and generated columns             | 3    | M      | not tracked       |
-| 14  | Declaration-time limit checks                     | 3    | S      | not tracked       |
-| 15  | Multi-environment deployment pattern (docs)       | 3    | S      | not tracked       |
-| 16  | Transient-failure retry                           | 3    | S      | not tracked       |
-| 17  | Metadata read batching                            | 4    | M      | partly tracked    |
-| 18  | Plan artifacts (approve-then-apply)               | 4    | L      | not tracked       |
-| 19  | Existing gated items (UNIQUE, Char/Varchar, ...)  | 4    | —      | tracked           |
+| #   | Item                                              | Tier | Effort | Tracking       |
+| --- | ------------------------------------------------- | ---- | ------ | -------------- |
+| 1   | Type widening                                     | 1    | M      | tracked        |
+| 2   | Column renames (`renamed_from`)                   | 1    | M      | shipped        |
+| 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | shipped        |
+| 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped        |
+| 5   | Delta-format / view guard in the reader           | 2    | S      | not tracked    |
+| 6   | Identity columns                                  | 2    | M      | not tracked    |
+| 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly tracked |
+| 8   | CHECK constraints                                 | 2    | M      | not tracked    |
+| 9   | `RELY` on PK/FK constraints                       | 2    | S      | tracked        |
+| 10  | External-table (LOCATION) policy                  | 3    | S–M    | not tracked    |
+| 11  | Schema-level orphan detection                     | 3    | M      | not tracked    |
+| 12  | `ignored_properties` escape hatch                 | 3    | S      | tracked        |
+| 13  | Column defaults and generated columns             | 3    | M      | not tracked    |
+| 14  | Declaration-time limit checks                     | 3    | S      | not tracked    |
+| 15  | Multi-environment deployment pattern (docs)       | 3    | S      | not tracked    |
+| 16  | Transient-failure retry                           | 3    | S      | not tracked    |
+| 17  | Metadata read batching                            | 4    | M      | partly tracked |
+| 18  | Plan artifacts (approve-then-apply)               | 4    | L      | not tracked    |
+| 19  | Existing gated items (UNIQUE, Char/Varchar, ...)  | 4    | —      | tracked        |
 
 Sequencing note: impact order is not build order. Items 3 and 4 shipped as the
 read-only `delta-engine plan MODULE:ATTRIBUTE` workflow; the remaining items
@@ -87,10 +87,11 @@ only documented (`reference-limitations.md`).
 differ emits a rename when the old name is observed and the new one absent;
 the hint is inert once applied, preserving idempotency. `RenameColumn` compiles
 to `ALTER TABLE ... RENAME COLUMN` and declaration validation requires column
-mapping. The domain's drift projection suppresses PK/FK drops performed
-atomically by the rename while retaining unrelated constraint drops; the
-application planning boundary only validates and constructs the accepted plan.
-The same mechanism can extend to table renames later.
+mapping. Primary and foreign keys touching the renamed column are replaced
+explicitly — the plan states the drops before the rename and the re-adds
+after it, rather than relying on the implicit drops `RENAME COLUMN` performs;
+the application planning boundary only validates and constructs the accepted
+plan. The same mechanism can extend to table renames later.
 
 ### 3. CI-grade dry runs: structured report projection, SQL preview, drift gate
 

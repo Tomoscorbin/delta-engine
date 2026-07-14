@@ -139,11 +139,15 @@ A sync that drops a column without this declaration fails at validation
 same sync as the drop is safe — properties are set before columns are
 dropped.
 
-Two operations on this key are blocked at validation because the table
-protocol upgrade is permanent: changing `name` back to `none`, and
-declaring it `None` (a removal is a transition to absence, judged by the
-same `PropertyTransitionNotSupported` rule). Once a table has column
-mapping, its declaration must carry `Property.COLUMN_MAPPING_MODE: "name"`.
+Two operations on this key are blocked at validation: changing `name` back
+to `none`, and declaring it `None` (a removal is a transition to absence,
+judged by the same `PropertyTransitionNotSupported` rule). Databricks can
+remove column mapping, but doing so rewrites every data file and conflicts
+with concurrent writes, so the engine refuses it as an in-place change —
+the same class of operation as a partitioning change. Once a table has
+column mapping, its declaration must carry
+`Property.COLUMN_MAPPING_MODE: "name"`; remove the feature out of band if
+you truly need to.
 
 ### Renaming a column
 
@@ -193,7 +197,10 @@ renaming a layout key needs no separate layout change.
 
 Change any dependent CHECK constraint or generated-column expression before
 renaming: the engine does not model those dependencies, so Databricks rejects
-the rename at execution if one remains. Struct fields cannot be renamed.
+the rename at execution if one remains
+(`DELTA_CONSTRAINT_DEPENDENT_COLUMN_CHANGE`). The engine cannot rename struct
+fields — `renamed_from` applies only to top-level columns, although
+Databricks itself can rename nested fields.
 
 ### When something else writes a managed key
 

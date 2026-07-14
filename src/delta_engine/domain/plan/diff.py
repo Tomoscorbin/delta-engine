@@ -163,7 +163,11 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
 
     A rename pre-pass projects observed columns and layout names through
     ``renamed_from`` hints so residual drift is expressed under the declared
-    column name. The diff remains scope-blind except for properties, whose
+    column name. The projection covers exactly the aspects ``RENAME COLUMN``
+    preserves (column contents, tags, partitioning, clustering); primary and
+    foreign keys, which the rename drops, are deliberately compared under raw
+    observed names so their replacement is stated as explicit drop and set
+    actions. The diff remains scope-blind except for properties, whose
     declaration has assertion semantics and therefore produces no facts when
     that aspect is unmanaged.
     """
@@ -229,6 +233,9 @@ def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenamePro
         applied_renames[old_name] = new_name
         rename_actions.append(RenameColumn(old_name=old_name, new_name=new_name))
 
+    # A conflicted source yields no column facts — whether it is surplus or
+    # the rename's origin is unknowable, so the conflict finding carries the
+    # difference instead of a DropColumn.
     relabeled = tuple(column for column in relabeled if column.name not in conflicted_sources)
     return _RenameProjection(
         columns=relabeled,
