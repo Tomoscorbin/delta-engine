@@ -72,11 +72,14 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
 # Two distinct backend rules that happen to name the same types today.
 _TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
 
-# Declaration limits currently enforced per securable object. The tag-value
-# ceiling is looser than Unity Catalog's current 256-character limit; aligning
-# it is tracked as a Databricks-correctness follow-up in docs/todo/todo.md.
+# Tag limits enforced per securable object (a table and each of its columns
+# are separate securables). Databricks caps both tag keys and values at 256
+# characters; the platform's rejection of a 300-character key and value is
+# pinned live by test_platform_rejects_an_over_long_column_tag_key_or_value.
+# (A separate 1,000-column-tag-per-table total is not enforced here.)
 _MAX_TAGS_PER_SECURABLE: Final[int] = 50
-_MAX_TAG_VALUE_LENGTH: Final[int] = 1000
+_MAX_TAG_KEY_LENGTH: Final[int] = 256
+_MAX_TAG_VALUE_LENGTH: Final[int] = 256
 
 
 class _SelfReference:
@@ -98,6 +101,11 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
             f" most {_MAX_TAGS_PER_SECURABLE} per securable"
         )
     for key, value in tags.items():
+        if len(key) > _MAX_TAG_KEY_LENGTH:
+            raise ValueError(
+                f"Tag {key!r} on {subject} has a {len(key)}-character"
+                f" key; delta-engine accepts at most {_MAX_TAG_KEY_LENGTH}"
+            )
         if len(value) > _MAX_TAG_VALUE_LENGTH:
             raise ValueError(
                 f"Tag {key!r} on {subject} has a {len(value)}-character"

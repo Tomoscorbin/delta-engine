@@ -172,3 +172,33 @@ def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_t
             live_connection,
             f"ALTER TABLE {qualified_table(table_name)} CLUSTER BY (`id`)",
         )
+
+
+def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, live_tables):
+    # A column tag key or value longer than 256 characters is rejected (first
+    # observed live 2026-07-14). This backs the length gates in
+    # api/delta_table.py (_validate_tags), which reject both at declaration
+    # time; before it was confirmed the value gate allowed 1000 characters and
+    # there was no key gate at all.
+    table_name = live_tables("tag_length")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (id INT) USING DELTA",
+    )
+    over_long = "x" * 300
+
+    # A 300-character tag value (short key).
+    with pytest.raises(ServerOperationError, match=r"(?i)length|character|exceed"):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} ALTER COLUMN id "
+            f"SET TAGS ('team'='{over_long}')",
+        )
+
+    # A 300-character tag key (short value).
+    with pytest.raises(ServerOperationError, match=r"(?i)length|character|exceed"):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} ALTER COLUMN id "
+            f"SET TAGS ('{over_long}'='prod')",
+        )
