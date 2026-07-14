@@ -108,11 +108,18 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     """
     Append a behaviour-area summary of the live suite to the GitHub job summary.
 
-    Only acts in CI (``GITHUB_STEP_SUMMARY`` set) and only counts this
-    directory's tests, so a full-repo run that deselects the live suite writes
-    nothing and non-live files never leak in. Runs once on the xdist
-    controller, with results already aggregated across workers.
+    Only acts in CI (``GITHUB_STEP_SUMMARY`` set), only counts this directory's
+    tests, and writes once from the xdist controller rather than once per
+    worker.
     """
+    # Under ``-n`` parallelism xdist runs this hook on every worker as well as
+    # the controller, but only the controller's stats are aggregated across
+    # workers -- a worker sees just the subset it ran and would append its own
+    # partial, duplicate summary. xdist sets ``workerinput`` on worker configs
+    # only, so this skips workers and leaves the controller to write once.
+    if hasattr(terminalreporter.config, "workerinput"):
+        return
+
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
