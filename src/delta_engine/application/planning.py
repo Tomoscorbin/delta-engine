@@ -50,6 +50,6 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
         case TableMissing() as missing:
             return PlanningSucceeded(plan=ActionPlan(missing.actions))
         case TableDrift() as drift:
-            return PlanningSucceeded(plan=ActionPlan(drift.executable_actions))
+            return PlanningSucceeded(plan=ActionPlan(drift.actions))
         case _ as unreachable:
             assert_never(unreachable)

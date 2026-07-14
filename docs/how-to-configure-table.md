@@ -180,9 +180,12 @@ into a fresh catalog. If both the old and new names exist on the table the
 rename cannot apply and the sync fails (`AmbiguousColumnRename`); if the old
 column should instead be dropped, remove the hint and drop it in its own sync.
 
-Databricks drops a primary or foreign key involving the column as part of a
-successful rename; the engine restores each declared key afterwards. It does
-not pre-drop those keys, so a failed rename does not leave them removed. If
+A primary or foreign key involving the column is replaced across the rename:
+the plan drops the key, renames the column, then re-adds the declared key, so
+every statement the engine runs is stated in the plan. (Databricks would drop
+those keys implicitly during `RENAME COLUMN`; the engine does not rely on
+that.) Keys on Databricks are informational, so if a later statement fails the
+only exposure is a missing key until the next successful sync restores it. If
 **another** table's foreign key references the renamed primary key, sync that
 table without the foreign key first — an inbound reference blocks the change.
 Partitioning and clustering metadata follow the mapped column's identity, so

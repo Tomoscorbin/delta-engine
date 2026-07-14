@@ -20,10 +20,8 @@ from typing import ClassVar
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
-    ForeignKeyConstraint,
     ObservedColumn,
     ObservedTable,
-    QualifiedName,
     TableAspect,
 )
 from delta_engine.domain.plan.actions import (
@@ -155,52 +153,8 @@ class TableDrift:
         managed = self.desired.managed_aspects
         return tuple(finding for finding in self.findings if finding.aspect in managed)
 
-    @property
-    def executable_actions(self) -> tuple[Action, ...]:
-        """
-        Project diff actions through operation semantics owned by the domain.
-
-        The raw diff retains constraint drops because validation needs their
-        observed state. A column rename performs drops for constraints using
-        that column atomically, so those redundant actions are omitted only
-        from this post-validation projection. This property does not imply
-        that the actions are safe; only ``plan_diff`` may construct a plan.
-        """
-        renamed_sources = {
-            action.old_name for action in self.actions if isinstance(action, RenameColumn)
-        }
-        actions: list[Action] = []
-        for action in self.actions:
-            if isinstance(action, DropPrimaryKey) and not renamed_sources.isdisjoint(
-                action.primary_key.columns
-            ):
-                continue
-            if isinstance(action, DropForeignKey) and _foreign_key_uses_renamed_column(
-                action.constraint,
-                renamed_sources=renamed_sources,
-                table_name=self.desired.qualified_name,
-            ):
-                continue
-            actions.append(action)
-        return tuple(actions)
-
 
 type TableDiff = TableMissing | TableDrift
-
-
-def _foreign_key_uses_renamed_column(
-    constraint: ForeignKeyConstraint,
-    *,
-    renamed_sources: set[str],
-    table_name: QualifiedName,
-) -> bool:
-    """Whether a local or self-referenced FK column is renamed by this table."""
-    local_column_renamed = not renamed_sources.isdisjoint(constraint.local_columns)
-    self_reference_renamed = (
-        constraint.referenced_table == table_name
-        and not renamed_sources.isdisjoint(constraint.referenced_columns)
-    )
-    return local_column_renamed or self_reference_renamed
 
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:

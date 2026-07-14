@@ -24,6 +24,7 @@ from delta_engine.domain.plan import (
     AlterColumnType,
     CreateTable,
     DropForeignKey,
+    DropPrimaryKey,
     RenameColumn,
     SetColumnTag,
     SetForeignKey,
@@ -203,7 +204,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     )
 
 
-def test_plan_diff_uses_domain_projected_primary_key_actions_for_rename():
+def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
     desired = _desired(
@@ -219,12 +220,13 @@ def test_plan_diff_uses_domain_projected_primary_key_actions_for_rename():
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
+        DropPrimaryKey(primary_key=observed_key, referencing_foreign_keys=()),
         RenameColumn("customer_nm", "customer_name"),
         SetPrimaryKey(primary_key=desired_key),
     )
 
 
-def test_plan_diff_validates_rename_constraint_drops_before_domain_projection():
+def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
     reference = ForeignKeyReference(
         constraint_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
@@ -250,7 +252,7 @@ def test_plan_diff_validates_rename_constraint_drops_before_domain_projection():
     assert not hasattr(result, "plan")
 
 
-def test_plan_diff_uses_domain_projected_local_foreign_key_actions_for_rename():
+def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = _foreign_key(
         local_columns=("parent_id",),
@@ -276,12 +278,13 @@ def test_plan_diff_uses_domain_projected_local_foreign_key_actions_for_rename():
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
+        DropForeignKey(constraint=observed_key),
         RenameColumn("parent", "parent_id"),
         SetForeignKey(constraint=desired_key),
     )
 
 
-def test_plan_diff_uses_domain_projected_self_referencing_foreign_key_actions_for_rename():
+def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_rename():
     desired_key = _foreign_key(
         local_columns=("manager_id",),
         referenced_table=_NAME,
@@ -310,12 +313,13 @@ def test_plan_diff_uses_domain_projected_self_referencing_foreign_key_actions_fo
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
+        DropForeignKey(constraint=observed_key),
         RenameColumn("id", "employee_id"),
         SetForeignKey(constraint=desired_key),
     )
 
 
-def test_plan_diff_retains_unrelated_foreign_key_drop_before_rename():
+def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
     unrelated_key = _foreign_key(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
