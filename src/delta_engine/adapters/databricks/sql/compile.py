@@ -168,9 +168,10 @@ def _(action: UnsetColumnTag, backticked_table_name: str) -> str:
 
 @_compile_action.register
 def _(action: SetColumnComment, backticked_table_name: str) -> str:
+    # An empty desired comment compiles to COMMENT '' rather than UNSET
+    # COMMENT: SQL warehouses reject the latter, and '' round-trips as the
+    # empty comment the reader observes, keeping resyncs idempotent.
     column_name = backtick(action.column_name)
-    if not action.desired_comment:
-        return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} UNSET COMMENT"
     comment = quote_literal(action.desired_comment)
     return f"ALTER TABLE {backticked_table_name} ALTER COLUMN {column_name} COMMENT {comment}"
 

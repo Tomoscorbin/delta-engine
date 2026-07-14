@@ -355,7 +355,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
         ),
         (
             SetColumnComment(column_name="id", desired_comment="", observed_comment="old"),
-            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET COMMENT",
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT ''",
         ),
         (
             SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=False),
