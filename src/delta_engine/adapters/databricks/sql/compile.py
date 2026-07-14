@@ -73,10 +73,7 @@ def _(action: CreateTable, backticked_table_name: str) -> str:
     # the reader reports the table absent, but the read and the create are not
     # atomic: if another process creates the name in that window, this statement
     # errors and the executor reports ExecutionFailed rather than a false
-    # success. Failing the race explicitly matches the engine's no-retry policy;
-    # the user reruns sync, at which point the reader observes and diffs the
-    # table that actually exists. See concurrent catalog changes in
-    # docs/reference-limitations.md.
+    # success.
     parts = [
         f"CREATE TABLE {backticked_table_name}",
         f"({columns_clause})",
