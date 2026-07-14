@@ -1,5 +1,7 @@
 # delta-engine
 
+[![Live Databricks Tests](https://github.com/Tomoscorbin/delta-engine/actions/workflows/live.yaml/badge.svg?branch=main)](https://github.com/Tomoscorbin/delta-engine/actions/workflows/live.yaml)
+
 Declarative, safety-first schema and metadata management for Delta Lake tables on Databricks.
 
 Define the state your tables should have in Python. Delta Engine reads their current Unity Catalog state, calculates the difference, validates whether each change is safe, and executes only the DDL needed to reconcile them.
