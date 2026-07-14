@@ -22,7 +22,7 @@ from delta_engine.application.report import (
     TableRunStatus,
 )
 from delta_engine.domain.model import (
-    Column,
+    DesiredColumn,
     DesiredTable,
     Integer,
     ObservedColumn,
@@ -47,7 +47,7 @@ def _a_desired_table(name="observed"):
     """Build a minimal real DesiredTable for pipeline-record construction."""
     return DesiredTable(
         qualified_name=QualifiedName("cat", "schema", name),
-        columns=(Column("id", Integer()),),
+        columns=(DesiredColumn("id", Integer()),),
     )
 
 

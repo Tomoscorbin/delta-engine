@@ -19,9 +19,13 @@ def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class Column:
+class DesiredColumn:
     """
-    Immutable, case-insensitive column declaration (desired state).
+    Immutable, case-insensitive column declaration.
+
+    Exposed to users as ``Column`` through ``delta_engine.schema``; the
+    domain name states the desired/observed side explicitly, mirroring
+    :class:`ObservedColumn`.
 
     Attributes:
         name: Column name (normalized to lowercase).
@@ -62,7 +66,7 @@ class ObservedColumn:
     """
     Immutable column as observed in the catalog (current state).
 
-    The observed counterpart of :class:`Column`: the same observable fields,
+    The observed counterpart of :class:`DesiredColumn`: the same observable fields,
     and none of the declaration-only syntax, so catalog state cannot carry
     declaration history by construction. Only reader adapters build these.
     """

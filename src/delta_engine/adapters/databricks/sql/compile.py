@@ -14,7 +14,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     quote_literal,
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
-from delta_engine.domain.model import Column, QualifiedName
+from delta_engine.domain.model import DesiredColumn, QualifiedName
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -246,7 +246,7 @@ def _(action: SetForeignKey, backticked_table_name: str) -> str:
 # ----------- helpers ------------
 
 
-def _column_definition(column: Column) -> str:
+def _column_definition(column: DesiredColumn) -> str:
     """Render a single column definition fragment, including its comment."""
     column_name = backtick(column.name)
     sql_type = render_data_type(column.data_type)

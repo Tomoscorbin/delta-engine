@@ -20,8 +20,8 @@ from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Propert
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Array,
-    Column,
     DataType,
+    DesiredColumn as Column,
     DesiredTable,
     ForeignKeyConstraint,
     Map,

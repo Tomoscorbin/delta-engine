@@ -6,7 +6,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.domain.model.column import Column, ObservedColumn
+from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
@@ -33,7 +33,7 @@ def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: s
 
 
 def _validate_table_structure(
-    columns: tuple[Column | ObservedColumn, ...],
+    columns: tuple[DesiredColumn | ObservedColumn, ...],
     tags: Mapping[str, str],
     partitioned_by: tuple[str, ...],
     clustered_by: tuple[str, ...],
@@ -108,7 +108,7 @@ class DesiredTable:
 
     Attributes:
         qualified_name: Fully qualified table name.
-        columns: Ordered tuple of ``Column`` declarations.
+        columns: Ordered tuple of ``DesiredColumn`` declarations.
         comment: Optional table-level comment (empty string when unset).
         tags: Read-only mapping of Unity Catalog tag keys to values.
         partitioned_by: Ordered tuple of partition column names.
@@ -127,7 +127,7 @@ class DesiredTable:
     """
 
     qualified_name: QualifiedName
-    columns: tuple[Column, ...]
+    columns: tuple[DesiredColumn, ...]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
     partitioned_by: tuple[str, ...] = ()

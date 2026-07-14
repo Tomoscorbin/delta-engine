@@ -2,8 +2,8 @@ import pytest
 
 from delta_engine.domain.model import (
     ALL_ASPECTS,
-    Column,
     Date,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyReference,
     Integer,
@@ -18,7 +18,7 @@ from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "orders")
 _QN = QualifiedName("c", "s", "orders")
-_COL = Column("id", Integer(), nullable=False)
+_COL = DesiredColumn("id", Integer(), nullable=False)
 _OBSERVED_COL = ObservedColumn("id", Integer(), nullable=False)
 
 _EACH_TABLE_TYPE = pytest.mark.parametrize(
@@ -26,7 +26,7 @@ _EACH_TABLE_TYPE = pytest.mark.parametrize(
 )
 _EACH_TABLE_AND_COLUMN_TYPE = pytest.mark.parametrize(
     ("table_type", "column_type"),
-    [(DesiredTable, Column), (ObservedTable, ObservedColumn)],
+    [(DesiredTable, DesiredColumn), (ObservedTable, ObservedColumn)],
     ids=["desired", "observed"],
 )
 
@@ -67,7 +67,7 @@ def test_fails_when_partition_column_name_is_not_lowercase(table_type, column_ty
 
     # When: constructing the table with a mixed-case partition reference
     # Then: validation fails — partition column names must be lowercase, consistent
-    # with Column and QualifiedName which reject non-lowercase identifiers at construction
+    # with DesiredColumn and QualifiedName which reject non-lowercase identifiers at construction
     with pytest.raises(ValueError, match="lowercase"):
         table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
 
@@ -142,7 +142,7 @@ def test_desired_table_rejects_nullable_primary_key_column():
     with pytest.raises(ValueError, match="Primary key column must be NOT NULL"):
         DesiredTable(
             qualified_name=_QN,
-            columns=(Column("id", Integer(), nullable=True),),
+            columns=(DesiredColumn("id", Integer(), nullable=True),),
             primary_key=PrimaryKeyConstraint.generate(table_name="orders", columns=("id",)),
         )
 
@@ -154,8 +154,8 @@ def test_desired_table_reports_the_offending_nullable_primary_key_column():
         DesiredTable(
             qualified_name=_QN,
             columns=(
-                Column("id", Integer(), nullable=False),
-                Column("tenant_id", Integer(), nullable=True),
+                DesiredColumn("id", Integer(), nullable=False),
+                DesiredColumn("tenant_id", Integer(), nullable=True),
             ),
             primary_key=PrimaryKeyConstraint.generate(
                 table_name="orders", columns=("id", "tenant_id")
@@ -180,7 +180,7 @@ def test_desired_table_defaults_to_no_foreign_keys():
     # Given a minimal table definition
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("id", Integer()),),
+        columns=(DesiredColumn("id", Integer()),),
     )
 
     # Then foreign_keys defaults to empty
@@ -197,7 +197,7 @@ def test_desired_table_stores_foreign_keys():
     )
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
         foreign_keys=(fk,),
     )
 
@@ -226,7 +226,7 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
     with pytest.raises(ValueError, match="nonexistent"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(Column("id", Integer()),),
+            columns=(DesiredColumn("id", Integer()),),
             foreign_keys=(fk,),
         )
 
@@ -251,7 +251,7 @@ def test_desired_table_rejects_foreign_keys_with_duplicate_derived_names():
     with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(Column("id", Integer()), Column("customer_id", Integer())),
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
             foreign_keys=(first, second),
         )
 
@@ -276,7 +276,7 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
     with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(Column("customer_id", Integer()),),
+            columns=(DesiredColumn("customer_id", Integer()),),
             foreign_keys=(fk_one, fk_two),
         )
 
@@ -302,10 +302,10 @@ def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "t"),
             columns=(
-                Column("a", Integer()),
-                Column("b_c", Integer()),
-                Column("a_b", Integer()),
-                Column("c", Integer()),
+                DesiredColumn("a", Integer()),
+                DesiredColumn("b_c", Integer()),
+                DesiredColumn("a_b", Integer()),
+                DesiredColumn("c", Integer()),
             ),
             foreign_keys=(first, second),
         )
@@ -331,7 +331,10 @@ def test_desired_table_rejects_foreign_keys_that_differ_only_in_local_column_ord
     with pytest.raises(ValueError, match="same local columns"):
         DesiredTable(
             qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(Column("tenant_id", Integer()), Column("customer_id", Integer())),
+            columns=(
+                DesiredColumn("tenant_id", Integer()),
+                DesiredColumn("customer_id", Integer()),
+            ),
             foreign_keys=(fk_one, fk_two),
         )
 
@@ -348,7 +351,7 @@ def test_desired_table_accepts_an_already_named_foreign_key():
     # When building a DesiredTable with it
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
-        columns=(Column("id", Integer()), Column("customer_id", Integer())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
         foreign_keys=(fk,),
     )
 
@@ -506,7 +509,7 @@ def test_domain_tables_accept_backend_specific_partition_layouts() -> None:
     # API would reject the layout as undeployable.
     desired = DesiredTable(
         qualified_name=QualifiedName("dev", "silver", "orders"),
-        columns=(Column("id", Integer()), Column("day", Date())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("day", Date())),
         partitioned_by=("id", "day"),
     )
     observed = ObservedTable(
@@ -523,7 +526,7 @@ def test_domain_tables_accept_backend_specific_clustering_layouts() -> None:
     # clustering together, more than four clustering keys), but desired and
     # observed state must stay representable: layout deployability is a
     # declaration-time rule, not a snapshot invariant.
-    columns = tuple(Column(name, Integer()) for name in ("a", "b", "c", "d", "e"))
+    columns = tuple(DesiredColumn(name, Integer()) for name in ("a", "b", "c", "d", "e"))
     name = QualifiedName("dev", "silver", "orders")
 
     five_keys = DesiredTable(
@@ -620,8 +623,8 @@ def test_desired_table_rejects_rename_source_that_is_still_declared() -> None:
         DesiredTable(
             qualified_name=_QN,
             columns=(
-                Column("customer_nm", String()),
-                Column("customer_name", String(), renamed_from="customer_nm"),
+                DesiredColumn("customer_nm", String()),
+                DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
             ),
         )
 
@@ -631,8 +634,8 @@ def test_desired_table_rejects_duplicate_rename_sources() -> None:
         DesiredTable(
             qualified_name=_QN,
             columns=(
-                Column("a", String(), renamed_from="customer_nm"),
-                Column("b", String(), renamed_from="customer_nm"),
+                DesiredColumn("a", String(), renamed_from="customer_nm"),
+                DesiredColumn("b", String(), renamed_from="customer_nm"),
             ),
         )
 
@@ -651,7 +654,7 @@ def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
     with pytest.raises(ValueError, match="column structure"):
         DesiredTable(
             qualified_name=_QN,
-            columns=(Column("customer_name", String(), renamed_from="customer_nm"),),
+            columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),),
             managed_aspects=metadata_aspects,
         )
 
@@ -660,8 +663,8 @@ def test_desired_table_accepts_a_valid_rename() -> None:
     table = DesiredTable(
         qualified_name=_QN,
         columns=(
-            Column("id", Integer(), nullable=False),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer(), nullable=False),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         ),
     )
     assert table.columns[1].renamed_from == "customer_nm"

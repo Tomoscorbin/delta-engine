@@ -51,9 +51,10 @@ both names are observed the rename cannot apply and `AmbiguousColumnRename`
 blocks the sync.
 
 Partitioning and clustering metadata follow a mapped column's identity, so a
-layout key rename does not create layout drift. Databricks drops any primary
-or foreign key involving the column as part of a successful rename; the
-engine restores declared keys afterwards without pre-dropping them. An inbound
+layout key rename does not create layout drift. Primary and foreign keys
+involving the column are replaced explicitly: the plan drops each key before
+the rename and re-adds the declared key afterwards, rather than relying on
+the implicit drops Databricks performs during `RENAME COLUMN`. An inbound
 foreign key still blocks a primary-key rename via
 `PrimaryKeyReferencedByForeignKeys`.
 

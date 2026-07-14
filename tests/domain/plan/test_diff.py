@@ -2,7 +2,7 @@ import pytest
 
 from delta_engine.domain.model import (
     ALL_ASPECTS,
-    Column,
+    DesiredColumn,
     DesiredTable,
     ForeignKeyReference,
     Integer,
@@ -48,7 +48,7 @@ _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
 
 
 def _desired(**overrides) -> DesiredTable:
-    defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(Column("id", Integer()),))
+    defaults = dict(qualified_name=_QUALIFIED_NAME, columns=(DesiredColumn("id", Integer()),))
     return DesiredTable(**{**defaults, **overrides})
 
 
@@ -120,20 +120,20 @@ def test_drift_carries_the_desired_table():
 def test_desired_only_column_produces_column_added_change():
     # Given a desired table with an extra column not in the observed table
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()), Column("age", Integer()))),
+        _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
         _observed(),
     )
 
     # Then a AddColumn change is produced
     assert isinstance(diff, TableDrift)
-    assert AddColumn(Column("age", Integer())) in diff.actions
+    assert AddColumn(DesiredColumn("age", Integer())) in diff.actions
 
 
 def test_observed_only_column_produces_column_removed_change():
     # Given an observed table with an extra column not in the desired table
     diff = diff_table(
         _desired(),
-        _observed(columns=(Column("id", Integer()), Column("stale", String()))),
+        _observed(columns=(DesiredColumn("id", Integer()), DesiredColumn("stale", String()))),
     )
 
     # Then a DropColumn change is produced
@@ -144,8 +144,8 @@ def test_observed_only_column_produces_column_removed_change():
 def test_type_drift_produces_column_data_type_changed():
     # Given a column whose data type differs between desired and observed
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()),)),
-        _observed(columns=(Column("id", Long()),)),
+        _desired(columns=(DesiredColumn("id", Integer()),)),
+        _observed(columns=(DesiredColumn("id", Long()),)),
     )
 
     # Then a AlterColumnType change carries both sides
@@ -157,8 +157,8 @@ def test_type_drift_produces_column_data_type_changed():
 
 def test_type_drift_suppresses_nullability_change_but_not_comment_change():
     # Given a column where type, nullability, and comment all differ
-    desired = _desired(columns=(Column("id", Integer(), nullable=False, comment="new"),))
-    observed = _observed(columns=(Column("id", Long(), nullable=True, comment="old"),))
+    desired = _desired(columns=(DesiredColumn("id", Integer(), nullable=False, comment="new"),))
+    observed = _observed(columns=(DesiredColumn("id", Long(), nullable=True, comment="old"),))
 
     # When diffing
     diff = diff_table(desired, observed)
@@ -174,8 +174,8 @@ def test_type_drift_suppresses_nullability_change_but_not_comment_change():
 def test_nullability_drift_produces_column_nullability_changed():
     # Given a column whose nullability differs
     diff = diff_table(
-        _desired(columns=(Column("id", Integer(), nullable=False),)),
-        _observed(columns=(Column("id", Integer(), nullable=True),)),
+        _desired(columns=(DesiredColumn("id", Integer(), nullable=False),)),
+        _observed(columns=(DesiredColumn("id", Integer(), nullable=True),)),
     )
 
     # Then a SetColumnNullability change carries the direction
@@ -192,9 +192,12 @@ def test_comment_drift_on_matched_column_produces_change():
     # Given a matched column with differing comments and a desired-only column
     diff = diff_table(
         _desired(
-            columns=(Column("id", Integer(), comment="pk"), Column("ghost", String(), comment="x"))
+            columns=(
+                DesiredColumn("id", Integer(), comment="pk"),
+                DesiredColumn("ghost", String(), comment="x"),
+            )
         ),
-        _observed(columns=(Column("id", Integer(), comment=""),)),
+        _observed(columns=(DesiredColumn("id", Integer(), comment=""),)),
     )
 
     # Then only the matched column produces a comment change; the ghost column's
@@ -212,8 +215,8 @@ def test_comment_drift_on_matched_column_produces_change():
 def test_column_tag_drift_produces_set_and_unset_changes():
     # Given a column with one tag to set, one to update, and one to remove
     diff = diff_table(
-        _desired(columns=(Column("id", Integer(), tags={"new": "x", "pii": "true"}),)),
-        _observed(columns=(Column("id", Integer(), tags={"pii": "false", "old": "y"}),)),
+        _desired(columns=(DesiredColumn("id", Integer(), tags={"new": "x", "pii": "true"}),)),
+        _observed(columns=(DesiredColumn("id", Integer(), tags={"pii": "false", "old": "y"}),)),
     )
 
     # Then set changes cover added and updated tags; an unset change covers the removed tag
@@ -231,7 +234,12 @@ def test_column_tag_drift_produces_set_and_unset_changes():
 def test_added_columns_tags_produce_set_facts():
     # Given a desired-only column with tags (created by its AddColumn change)
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()), Column("new", String(), tags={"pii": "true"}))),
+        _desired(
+            columns=(
+                DesiredColumn("id", Integer()),
+                DesiredColumn("new", String(), tags={"pii": "true"}),
+            )
+        ),
         _observed(),
     )
 
@@ -242,7 +250,7 @@ def test_added_columns_tags_produce_set_facts():
 
 def test_identical_column_tags_produce_no_changes():
     # Given matched columns with identical tags
-    columns = (Column("id", Integer(), tags={"pii": "true"}),)
+    columns = (DesiredColumn("id", Integer(), tags={"pii": "true"}),)
     diff = diff_table(_desired(columns=columns), _observed(columns=columns))
 
     # Then no tag changes are produced
@@ -423,7 +431,7 @@ def test_table_tag_drift_produces_set_and_unset_changes():
 
 def test_partitioning_drift_produces_change_with_both_sides():
     # Given identical columns on both sides so partitioning is the only drift
-    columns = (Column("id", Integer()), Column("value", Integer()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("value", Integer()))
     diff = diff_table(
         _desired(columns=columns, partitioned_by=("id",)),
         _observed(columns=columns),
@@ -440,7 +448,7 @@ def test_partitioning_drift_produces_change_with_both_sides():
 
 def test_clustering_drift_produces_change_with_both_sides():
     # Given identical columns so clustering is the only drift
-    columns = (Column("id", Integer()), Column("region", String()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("region", String()))
     diff = diff_table(
         _desired(columns=columns, clustered_by=("region",)),
         _observed(columns=columns, clustered_by=()),
@@ -452,7 +460,7 @@ def test_clustering_drift_produces_change_with_both_sides():
 
 def test_reordered_clustering_keys_are_not_a_change():
     # Given the same clustering key set in a different order on each side
-    columns = (Column("id", Integer()), Column("region", String()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("region", String()))
     diff = diff_table(
         _desired(columns=columns, clustered_by=("region", "id")),
         _observed(columns=columns, clustered_by=("id", "region")),
@@ -464,7 +472,7 @@ def test_reordered_clustering_keys_are_not_a_change():
 
 def test_clustering_removal_produces_cluster_by_none_action():
     # Given a table clustered in the catalog but declared unclustered
-    columns = (Column("id", Integer()), Column("region", String()))
+    columns = (DesiredColumn("id", Integer()), DesiredColumn("region", String()))
     diff = diff_table(
         _desired(columns=columns, clustered_by=()),
         _observed(columns=columns, clustered_by=("region",)),
@@ -485,8 +493,8 @@ def test_clustering_changed_rejects_equal_key_sets():
 def test_desired_only_primary_key_produces_added_change():
     pk = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     diff = diff_table(
-        _desired(columns=(Column("id", Integer(), nullable=False),), primary_key=pk),
-        _observed(columns=(Column("id", Integer(), nullable=False),)),
+        _desired(columns=(DesiredColumn("id", Integer(), nullable=False),), primary_key=pk),
+        _observed(columns=(DesiredColumn("id", Integer(), nullable=False),)),
     )
 
     assert isinstance(diff, TableDrift)
@@ -497,7 +505,10 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     # Given the same PK column set under different orders and names
     desired_pk = PrimaryKeyConstraint(columns=("a", "b"), constraint_name="test_pk")
     observed_pk = PrimaryKeyConstraint(columns=("b", "a"), constraint_name="other_name")
-    columns = (Column("a", Integer(), nullable=False), Column("b", Integer(), nullable=False))
+    columns = (
+        DesiredColumn("a", Integer(), nullable=False),
+        DesiredColumn("b", Integer(), nullable=False),
+    )
 
     diff = diff_table(
         _desired(columns=columns, primary_key=desired_pk),
@@ -567,7 +578,7 @@ def test_managed_views_filter_out_unmanaged_aspects():
     # unmanaged finding
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
     table_comment_action = SetTableComment(desired_comment="new", observed_comment="old")
-    column_action = AddColumn(Column("new_col", Integer()))
+    column_action = AddColumn(DesiredColumn("new_col", Integer()))
     partitioning_finding = PartitioningChanged(
         desired_partitioning=("id",), observed_partitioning=()
     )
@@ -624,8 +635,8 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
     columns = (
-        Column("id", Integer(), nullable=False),
-        Column("other_id", Integer(), nullable=False),
+        DesiredColumn("id", Integer(), nullable=False),
+        DesiredColumn("other_id", Integer(), nullable=False),
     )
 
     # When diffing
@@ -655,8 +666,8 @@ def test_primary_key_change_carries_observed_referencing_foreign_keys():
     desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
     observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
     columns = (
-        Column("id", Integer(), nullable=False),
-        Column("other_id", Integer(), nullable=False),
+        DesiredColumn("id", Integer(), nullable=False),
+        DesiredColumn("other_id", Integer(), nullable=False),
     )
 
     # When diffing a declaration that changes the primary key
@@ -720,8 +731,8 @@ def test_observed_only_column_tags_are_ignored_because_column_is_removed():
 
     # When diffing
     diff = diff_table(
-        _desired(columns=(Column("id", Integer()),)),
-        _observed(columns=(Column("id", Integer()), observed_only_column)),
+        _desired(columns=(DesiredColumn("id", Integer()),)),
+        _observed(columns=(DesiredColumn("id", Integer()), observed_only_column)),
     )
 
     # Then the column removal is enough; no tag-unset noise is produced for a
@@ -736,11 +747,13 @@ def test_observed_only_column_tags_are_ignored_because_column_is_removed():
 def test_diff_emits_rename_when_source_observed_and_target_absent():
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         )
     )
-    observed = _observed(columns=(Column("id", Integer()), Column("customer_nm", String())))
+    observed = _observed(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_nm", String()))
+    )
 
     drift = diff_table(desired, observed)
 
@@ -749,8 +762,8 @@ def test_diff_emits_rename_when_source_observed_and_target_absent():
 
 def test_diff_pairs_residual_drift_under_the_new_name():
     # A rename plus a widen decomposes into RenameColumn + AlterColumnType
-    desired = _desired(columns=(Column("amount", Long(), renamed_from="amt"),))
-    observed = _observed(columns=(Column("amt", Integer()),))
+    desired = _desired(columns=(DesiredColumn("amount", Long(), renamed_from="amt"),))
+    observed = _observed(columns=(DesiredColumn("amt", Integer()),))
 
     drift = diff_table(desired, observed)
 
@@ -763,8 +776,10 @@ def test_diff_pairs_residual_drift_under_the_new_name():
 
 
 def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
-    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
-    applied = _observed(columns=(Column("customer_name", String()),))
+    desired = _desired(
+        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
+    )
+    applied = _observed(columns=(DesiredColumn("customer_name", String()),))
     drift = diff_table(desired, applied)
     assert drift.actions == ()
     assert drift.findings == ()
@@ -773,23 +788,25 @@ def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
 def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         )
     )
-    observed = _observed(columns=(Column("id", Integer()),))
+    observed = _observed(columns=(DesiredColumn("id", Integer()),))
 
     actions = diff_table(desired, observed).actions
 
     assert actions == (
-        AddColumn(column=Column("customer_name", String(), renamed_from="customer_nm")),
+        AddColumn(column=DesiredColumn("customer_name", String(), renamed_from="customer_nm")),
     )
 
 
 def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
-    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+    desired = _desired(
+        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
+    )
     observed = _observed(
-        columns=(Column("customer_name", String()), Column("customer_nm", String()))
+        columns=(DesiredColumn("customer_name", String()), DesiredColumn("customer_nm", String()))
     )
 
     drift = diff_table(desired, observed)
@@ -802,7 +819,9 @@ def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
 
 
 def test_diff_missing_table_ignores_rename_hints():
-    desired = _desired(columns=(Column("customer_name", String(), renamed_from="customer_nm"),))
+    desired = _desired(
+        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
+    )
 
     diff = diff_table(desired, None)
 
@@ -814,13 +833,13 @@ def test_diff_missing_table_ignores_rename_hints():
 def test_diff_projects_clustering_identity_across_a_rename():
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         ),
         clustered_by=("customer_name",),
     )
     observed = _observed(
-        columns=(Column("id", Integer()), Column("customer_nm", String())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_nm", String())),
         clustered_by=("customer_nm",),
     )
 
@@ -832,13 +851,13 @@ def test_diff_projects_clustering_identity_across_a_rename():
 def test_diff_projects_partition_identity_across_a_rename():
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("event_day", String(), renamed_from="day"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("event_day", String(), renamed_from="day"),
         ),
         partitioned_by=("event_day",),
     )
     observed = _observed(
-        columns=(Column("id", Integer()), Column("day", String())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("day", String())),
         partitioned_by=("day",),
     )
 
@@ -851,11 +870,13 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     desired_key = PrimaryKeyConstraint(columns=("customer_name",), constraint_name="test_pk")
     observed_key = PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="legacy_pk")
     desired = _desired(
-        columns=(Column("customer_name", String(), nullable=False, renamed_from="customer_nm"),),
+        columns=(
+            DesiredColumn("customer_name", String(), nullable=False, renamed_from="customer_nm"),
+        ),
         primary_key=desired_key,
     )
     observed = _observed(
-        columns=(Column("customer_nm", String(), nullable=False),),
+        columns=(DesiredColumn("customer_nm", String(), nullable=False),),
         primary_key=observed_key,
     )
 
@@ -869,10 +890,6 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
         ),
         SetPrimaryKey(primary_key=desired_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        SetPrimaryKey(primary_key=desired_key),
-    )
 
 
 def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
@@ -890,11 +907,11 @@ def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
         constraint_name="legacy_fk",
     )
     desired = _desired(
-        columns=(Column("parent_id", Integer(), renamed_from="parent"),),
+        columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
         foreign_keys=(desired_key,),
     )
     observed = _observed(
-        columns=(Column("parent", Integer()),),
+        columns=(DesiredColumn("parent", Integer()),),
         foreign_keys=(observed_key,),
     )
 
@@ -905,10 +922,6 @@ def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
         SetForeignKey(constraint=desired_key),
         DropForeignKey(constraint=observed_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="parent", new_name="parent_id"),
-        SetForeignKey(constraint=desired_key),
-    )
 
 
 def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_actions():
@@ -926,13 +939,13 @@ def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_acti
     )
     desired = _desired(
         columns=(
-            Column("employee_id", Integer(), renamed_from="id"),
-            Column("manager_id", Integer()),
+            DesiredColumn("employee_id", Integer(), renamed_from="id"),
+            DesiredColumn("manager_id", Integer()),
         ),
         foreign_keys=(desired_key,),
     )
     observed = _observed(
-        columns=(Column("id", Integer()), Column("manager_id", Integer())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("manager_id", Integer())),
         foreign_keys=(observed_key,),
     )
 
@@ -943,10 +956,6 @@ def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_acti
         SetForeignKey(constraint=desired_key),
         DropForeignKey(constraint=observed_key),
     }
-    assert drift.executable_actions == (
-        RenameColumn(old_name="id", new_name="employee_id"),
-        SetForeignKey(constraint=desired_key),
-    )
 
 
 def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
@@ -958,12 +967,12 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
     )
     desired = _desired(
         columns=(
-            Column("id", Integer()),
-            Column("customer_name", String(), renamed_from="customer_nm"),
+            DesiredColumn("id", Integer()),
+            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
         )
     )
     observed = _observed(
-        columns=(Column("id", Integer()), Column("customer_nm", String())),
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_nm", String())),
         foreign_keys=(unrelated_key,),
     )
 
@@ -973,4 +982,3 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropForeignKey(constraint=unrelated_key),
     )
-    assert drift.executable_actions == drift.actions

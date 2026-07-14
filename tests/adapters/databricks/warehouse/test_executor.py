@@ -3,7 +3,7 @@
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
-from delta_engine.domain.model import Column, ObservedColumn, QualifiedName
+from delta_engine.domain.model import DesiredColumn, ObservedColumn, QualifiedName
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import ActionPlan, AddColumn, DropColumn, SetTableComment
 
@@ -49,7 +49,7 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
     executor = WarehouseExecutor(connection)
     plan = ActionPlan(
         actions=(
-            AddColumn(Column("age", Integer())),
+            AddColumn(DesiredColumn("age", Integer())),
             DropColumn(ObservedColumn("legacy", Integer())),
         )
     )
