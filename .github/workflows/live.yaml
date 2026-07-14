@@ -1,0 +1,86 @@
+# Credentialed live suite against a real Databricks SQL warehouse.
+#
+# Deliberately not part of regular CI: manual dispatch only, and the run
+# targets whichever ref is selected (`gh workflow run live.yaml --ref <branch>`
+# once this file exists on main).
+#
+# Required repository variables:
+#   DATABRICKS_HOST            workspace URL
+#   DATABRICKS_HTTP_PATH       SQL warehouse endpoint path
+#   DELTA_ENGINE_E2E_CATALOG   catalog the suite may create tables in
+#   DELTA_ENGINE_E2E_SCHEMA    schema the suite may create tables in
+# Required repository secret (either one):
+#   DATABRICKS_TOKEN           personal access token, or
+#   DATABRICKS_CLIENT_ID       service principal for OIDC workload identity
+#                              federation (needs a Databricks federation
+#                              policy for this repository)
+name: Live
+
+on:
+  workflow_dispatch:
+
+# One live run at a time: the suite shares a schema and a warehouse.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_HTTP_PATH: ${{ vars.DATABRICKS_HTTP_PATH }}
+      DELTA_ENGINE_E2E_CATALOG: ${{ vars.DELTA_ENGINE_E2E_CATALOG }}
+      DELTA_ENGINE_E2E_SCHEMA: ${{ vars.DELTA_ENGINE_E2E_SCHEMA }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require live configuration
+        # Missing configuration must fail loudly here: without these the
+        # suite's fixtures skip every test and the run would pass green.
+        run: |
+          missing=0
+          for name in DATABRICKS_HOST DATABRICKS_HTTP_PATH DELTA_ENGINE_E2E_CATALOG DELTA_ENGINE_E2E_SCHEMA; do
+            if [ -z "${!name}" ]; then
+              echo "::error::repository variable ${name} is not set"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Select Databricks authentication
+        env:
+          TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+        run: |
+          if [ -n "${TOKEN}" ]; then
+            echo "DATABRICKS_TOKEN=${TOKEN}" >> "$GITHUB_ENV"
+            echo "authenticating with a personal access token"
+          elif [ -n "${CLIENT_ID}" ]; then
+            echo "DATABRICKS_CLIENT_ID=${CLIENT_ID}" >> "$GITHUB_ENV"
+            echo "DATABRICKS_AUTH_TYPE=github-oidc" >> "$GITHUB_ENV"
+            echo "authenticating with OIDC workload identity federation"
+          else
+            echo "::error::set the DATABRICKS_TOKEN or DATABRICKS_CLIENT_ID repository secret"
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run live suite
+        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA
