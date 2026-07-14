@@ -16,7 +16,7 @@
 #   DATABRICKS_CLIENT_ID       service principal for OIDC workload identity
 #                              federation (needs a Databricks federation
 #                              policy for this repository)
-name: Live
+name: Live Databricks Tests
 
 on:
   workflow_dispatch:
