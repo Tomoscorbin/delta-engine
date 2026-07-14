@@ -9,9 +9,10 @@ Run `delta-engine plan` when a trusted same-repository pull request opens. The
 command reads the live Unity Catalog state, prints the target, semantic diff,
 sync report, and exact planned SQL without executing the planned DDL.
 
-Pending valid changes exit successfully. Catalog-read, validation, connection,
-and configuration failures exit unsuccessfully, so one command can act as the
-PR check without making an intentional schema change look like a broken build.
+Pending valid changes exit successfully. Catalog-read, validation,
+foreign-key-resolution, connection, and configuration failures exit
+unsuccessfully, so one command can act as the PR check without making an
+intentional schema change look like a broken build.
 
 ## Prepare one declaration collection
 
@@ -91,7 +92,7 @@ jobs:
       DATABRICKS_AUTH_TYPE: github-oidc
       DATABRICKS_SQL_WAREHOUSE_ID: ${{ vars.DATABRICKS_SQL_WAREHOUSE_ID }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -128,12 +129,14 @@ to the log. The original exit status is preserved after the summary is written.
 | Exit code | Result                                                                       |
 | --------- | ---------------------------------------------------------------------------- |
 | 0         | The live plan completed, with or without pending changes                     |
-| 1         | Configuration, authentication, catalog reading, or validation failed         |
+| 1         | Configuration, authentication, reading, validation, or FK resolution failed  |
 | 2         | The command line was malformed, such as a missing argument or removed option |
 
-Review the `DIFF` section for semantic intent and `PLANNED SQL` for the exact
-DDL a write-capable Python sync would compile. A `VALIDATION_FAILED` or
-`READ_FAILED` row is a failed check and includes detail in the report.
+Review the `DIFF` section for semantic intent and `PLANNED SQL` for the DDL
+compiled from the catalog snapshot read by this plan. A `VALIDATION_FAILED`,
+`READ_FAILED`, or `FOREIGN_KEY_FAILED` row is a failed check and includes detail
+in the report. A later write-capable sync re-reads and re-plans live state, so
+the preview is not a replay artifact and cannot predict execution failures.
 
 `delta-engine plan` always calls the engine with `dry_run=True`; there is no
 apply command or flag to turn the generated plan into a write. Declaration

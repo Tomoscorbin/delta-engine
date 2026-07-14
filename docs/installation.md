@@ -63,6 +63,34 @@ This path requires Unity Catalog: every read runs through
 `information_schema`, which a catalog such as `hive_metastore` does not
 expose (see [limitations](reference-limitations.md)).
 
+Create a connector connection and pass it to `build_sql_engine`. This minimal
+example uses a personal access token; the Databricks SQL connector also supports
+OAuth credential providers for production workloads.
+
+```python
+import os
+
+from databricks import sql
+from delta_engine import render_report
+from delta_engine.databricks import build_sql_engine
+
+from myproject.tables import customers
+
+with sql.connect(
+    server_hostname=os.environ["DATABRICKS_SERVER_HOSTNAME"],
+    http_path=os.environ["DATABRICKS_HTTP_PATH"],
+    access_token=os.environ["DATABRICKS_TOKEN"],
+) as connection:
+    engine = build_sql_engine(connection)
+    report = engine.sync(customers)
+
+print(render_report(report))
+```
+
+The server hostname and HTTP path are available from the SQL warehouse's
+Connection Details. Keep the connection open for the duration of `sync`; the
+engine uses it for both catalog reads and DDL execution.
+
 ## Installing the CLI
 
 The `cli` extra adds the read-only `delta-engine plan` command on top of the

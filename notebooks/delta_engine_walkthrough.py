@@ -159,7 +159,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False, "first sync should fully succeed"
+assert report.has_failures is False, "first sync should fully succeed"
 
 assert spark.catalog.tableExists(inspector.fqname("customers"))
 assert spark.catalog.tableExists(inspector.fqname("orders"))
@@ -209,7 +209,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert all(table_report.execution is None for table_report in report), (
     "a matching resync must execute nothing"
 )
@@ -293,7 +293,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 
 customer_fields = inspector.fields_of("customers")
 assert "email" in customer_fields and customer_fields["email"].nullable is True
@@ -358,7 +358,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert inspector.tags_of("customers") == {"domain": "sales"}
 assert ("email", "pii") not in inspector.column_tags_of("customers")
 print("Step 4b verified: undeclared table and column tags removed by full-state reconciliation.")
@@ -419,7 +419,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert inspector.properties_of("customers").get("delta.enableRowTracking") == row_tracking
 print("Step 4c verified: platform-managed property left untouched by sync.")
 
@@ -477,7 +477,7 @@ events_baseline_columns = [
 report = engine.sync(define_events(columns=events_baseline_columns))
 show_report(report)
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert inspector.partitions_of("events") == ("event_date",)
 print("events baseline created.")
 
@@ -890,12 +890,13 @@ DeltaTable(
 # MAGIC
 # MAGIC **Outcome**
 # MAGIC
-# MAGIC With `scope="metadata"`, the engine updates metadata and ignores column
-# MAGIC and property state entirely (7a). Attempting to create a table that does not
-# MAGIC exist is blocked — column structure management is required for creation (7b).
-# MAGIC Declaring columns that do not match the live table is also blocked — structural
-# MAGIC drift on a metadata-only table is a scope violation the caller must resolve out
-# MAGIC of band (7c).
+# MAGIC With `scope="metadata"`, the engine updates metadata without changing columns
+# MAGIC or properties (7a). The declared columns still guard the expected structure:
+# MAGIC structural drift is compared and blocked, while property state is not compared.
+# MAGIC Attempting to create a table that does not exist is also blocked — column
+# MAGIC structure management is required for creation (7b). Declaring columns that do
+# MAGIC not match the live table is a scope violation the caller must resolve out of
+# MAGIC band (7c).
 
 # COMMAND ----------
 
@@ -904,9 +905,9 @@ DeltaTable(
 
 # COMMAND ----------
 
-# scope="metadata" restricts the sync to comments, tags, and key constraints.
-# Columns and properties are still declared (the engine validates structural
-# alignment) but never compared or changed.
+# scope="metadata" restricts changes to comments, tags, and key constraints.
+# Columns are compared only to validate structural alignment and are never changed;
+# properties may be declared but are neither compared nor changed.
 customers_meta = DeltaTable(
     catalog=CATALOG,
     schema=SCHEMA,
@@ -937,7 +938,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert inspector.table_comment("customers") == "Customer master table (managed externally)"
 assert set(inspector.fields_of("customers")) == {"id", "name", "email", "status"}
 print("Step 7a verified: metadata-only sync updated the comment; columns untouched.")
@@ -1096,7 +1097,7 @@ show_report(report)
 
 # COMMAND ----------
 
-assert report.any_failures is False
+assert report.has_failures is False
 assert "phone" in inspector.fields_of("customers")
 print("Step 8 verified: dry-run previewed the change; real sync applied it.")
 

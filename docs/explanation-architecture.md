@@ -227,7 +227,7 @@ qualified names are rejected, and the desired tables are sorted by qualified
 name so reports and sync behavior do not depend on the order arguments were
 passed.
 
-After preparation, the engine runs six internal phases over private `_TableRun`
+After preparation, the engine runs five internal phases over private `_TableRun`
 objects. A `_TableRun` is a mutable scratch pad for one table. It accumulates
 read state, diff, plan, failures, and execution results before it is frozen into
 an immutable `TableRunReport`.
@@ -482,14 +482,10 @@ finding types, which the current default policy rejects.
 
 `validate_diff` is where policy lives. A missing table passes when the
 declaration manages table existence because creating it from the full
-declaration is safe. A drift is evaluated by the rules in `DEFAULT_RULES`,
-which currently reject:
-
-- adding a non-nullable column to an existing table
-- tightening an existing column to `NOT NULL`
-- changing an existing column's data type outside the Delta widening matrix,
-  or widening it without `delta.enableTypeWidening='true'` declared
-- changing table partitioning in place
+declaration is safe. A drift is evaluated by the rules in `DEFAULT_RULES`.
+The authoritative list and resolution for every current rule lives in
+[safe-change rules](reference-safe-change-rules.md); keeping the inventory in
+one place prevents this architecture overview from drifting when policy grows.
 
 The engine calls `plan_diff` once. A `PlanningFailed` keeps the run's plan empty
 and records its validation failures; a `PlanningSucceeded` supplies the only
@@ -568,10 +564,13 @@ Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evalu
 
 `validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when table existence is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift and aggregates their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
 
-Execution happens after resolution, and there is no second dependency pass after
-an execution failure. A dependency's execution failure is recorded on that
-dependency's report, but it is not retroactively converted into
-`BLOCKED_BY_FAILED_DEPENDENCY` failures on later tables in the same run.
+Execution walks the dependency-first order produced by the resolver and keeps a
+set of every table that has failed so far. Before each table executes, the engine
+re-applies the same blocking rule to its foreign-key dependencies. An execution
+failure in a parent therefore gives every later dependent a
+`BLOCKED_BY_FAILED_DEPENDENCY` failure in the same run, including a dependent
+whose own plan is empty. No second graph ordering pass is needed because the
+resolver already placed parents before their dependents.
 
 ## Public declarations and lowering
 

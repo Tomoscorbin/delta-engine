@@ -5,7 +5,7 @@ tags:
 
 # How to handle sync failures
 
-On a real run, `engine.sync(...)` raises `SyncFailedError` when one or more tables fail; the exception carries the full `SyncReport`. (A [dry run](how-to-preview-changes.md) never raises — it returns the same report for you to inspect.) This guide shows how to catch it and act on the report.
+On a real run, `engine.sync(...)` raises `SyncFailedError` when one or more tables fail; the exception carries the full `SyncReport`. (A [dry run](how-to-preview-changes.md) never raises — it returns the same report type for you to inspect.) This guide shows how to catch it and act on the report.
 
 A table's status names the [phase](explanation-sync-lifecycle.md) at which it failed, so handling a failure is mostly a matter of mapping status to cause.
 
@@ -45,7 +45,7 @@ for table_report in report:
 from delta_engine import TableRunStatus
 
 for table_report in report:
-    if table_report.status == TableRunStatus.VALIDATION_FAILED:
+    if table_report.status == TableRunStatus.READ_FAILED:
         for failure in table_report.failures:
             print("\n".join(failure.format_lines()))
 ```

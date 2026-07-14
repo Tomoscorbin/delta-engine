@@ -32,9 +32,9 @@ is the source of truth; `sync` reconciles the catalog to it, every run.
 pip install delta-engine
 ```
 
-Declaring and planning schemas is pure Python; running a sync needs a Databricks
-environment, which provides Spark and Delta. See [Installation](installation.md)
-for the `[spark]` extra used for local development.
+Declaring schemas is pure Python. A sync can use either a Databricks Spark
+session or a Databricks SQL warehouse connection; the latter needs no PySpark.
+See [Installation](installation.md) for the `[spark]` and `[sql]` paths.
 
 ## What a sync does
 

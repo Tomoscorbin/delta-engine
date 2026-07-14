@@ -25,7 +25,7 @@ class ActionPhase(IntEnum):
     Members are declared in execution order (lower runs first); the order
     encodes dependencies between operations. Centralising the order here keeps
     the full precedence readable in one place while each action declares its
-    own phase by name. See the "Planning and determinism" section of
+    own phase by name. See the "Deterministic action plans" section of
     ``docs/explanation-architecture.md`` for the rationale behind each
     dependency-driven ordering.
     """

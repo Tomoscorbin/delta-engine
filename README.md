@@ -10,7 +10,7 @@ There are no migration scripts to maintain and no DDL statements to hand-order. 
 
 - **Desired-state reconciliation:** declare the complete table state rather than a sequence of migrations.
 - **Safe in-place evolution:** unsafe changes, such as type narrowing, repartitioning or destructive schema changes, are rejected before any SQL runs.
-- **Reviewable plans:** preview the semantic changes and exact DDL with a dry run before applying them.
+- **Reviewable plans:** preview semantic changes and compiled DDL with a dry run before applying them.
 - **Drift detection:** compare version-controlled declarations against the live Unity Catalog state in local workflows or CI.
 - **Scoped ownership:** manage governance metadata without taking ownership of a table’s schema or data lifecycle.
 - **Dependency-aware execution:** synchronise groups of tables in the correct order when primary-key and foreign-key relationships exist.

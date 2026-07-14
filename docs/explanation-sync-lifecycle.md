@@ -87,11 +87,12 @@ declaration side.
 
 ## Dry runs stop before execution
 
-`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, and resolve — the
-full decision-making — and skips only execution. You get the same report with
-every planned action, the exact SQL it would run, and every failure the run
-_would_ have had, with zero catalog mutations, and no exception is raised. See
-[how to preview changes](how-to-preview-changes.md).
+`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, and
+resolve, then skips execution. You get every action and SQL statement planned
+from the catalog snapshot it read, plus any read, validation, or foreign-key
+failure found before execution. It cannot predict execution-time Databricks
+errors. The run makes zero catalog mutations and raises no exception. See [how
+to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down
 

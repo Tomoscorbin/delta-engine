@@ -21,14 +21,15 @@ def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
 @dataclass(frozen=True, slots=True)
 class DesiredColumn:
     """
-    Immutable, case-insensitive column declaration.
+    Immutable column declaration with a casefold-stable name.
 
     Exposed to users as ``Column`` through ``delta_engine.schema``; the
     domain name states the desired/observed side explicitly, mirroring
     :class:`ObservedColumn`.
 
     Attributes:
-        name: Column name (normalized to lowercase).
+        name: Column name. It must currently satisfy
+            ``name == name.casefold()`` and is stored verbatim.
         data_type: Logical data type of the column.
         nullable: Whether the column accepts ``NULL`` values.
         comment: Optional column comment.

@@ -46,11 +46,16 @@ after fixing the declaration is always safe.
 ## Managed aspects: what a declaration is responsible for
 
 Every declaration manages a defined set of _aspects_ of its table — column
-structure, comments, properties, tags, partitioning, and key constraints. The
-engine reconciles drift in managed aspects and refuses to proceed when an
-unmanaged aspect has drifted. It never silently reconciles something a
-declaration didn't claim responsibility for, and it never silently ignores
-drift it isn't allowed to fix — the sync fails and tells you.
+structure, comments, properties, tags, partitioning, and key constraints. For
+catalog state it can represent, the engine reconciles drift in managed aspects
+and refuses to proceed when an unmanaged aspect has drifted. It never silently
+reconciles something a declaration did not claim responsibility for.
+
+There is one current fail-open limitation at the catalog boundary: an observed
+non-partition column whose type the reader cannot parse is skipped with a logged
+warning, so drift in that column is invisible to validation. A table with no
+mappable columns, or an unsupported partition-column type, fails its read
+instead. See [unsupported types](reference-data-types.md#unsupported-types).
 
 There are three public scopes, selected by `DeltaTable`'s `scope` parameter:
 

@@ -68,12 +68,12 @@ class WarehouseReader:
         """
         Fetch the current state of a table: present, absent, or unreadable.
 
-        Every failure mode is contained: anything that goes wrong reading
-        this table — a connection error, an unsupported column type, a
-        mid-read query failure — becomes a ``ReadFailed`` for this table
-        rather than an exception that aborts the whole sync. The
-        ``CatalogStateReader`` contract promises a ``CatalogState``, so the
-        boundary must be total.
+        Every exception raised while reading — such as a connection error, an
+        unsupported partition-column type, or a mid-read query failure —
+        becomes a ``ReadFailed`` for this table rather than aborting the whole
+        sync. Unmappable non-partition columns are skipped by the mapper and do
+        not raise. The ``CatalogStateReader`` contract promises a
+        ``CatalogState``, so the boundary must be total.
         """
         try:
             return self._read(qualified_name)
@@ -168,7 +168,7 @@ def _to_columns(
 
 
 def _partitioned_by(column_rows: Sequence[Any]) -> tuple[str, ...]:
-    """Partition column names in partition order (1-based partition_index)."""
+    """Partition column names in ascending catalog ``partition_index`` order."""
     partition_rows = sorted(
         (row for row in column_rows if row.partition_index is not None),
         key=lambda row: row.partition_index,

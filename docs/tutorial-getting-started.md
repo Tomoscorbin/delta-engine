@@ -43,7 +43,7 @@ Build an engine and pass your table definitions straight to `sync`. The engine r
 from delta_engine.databricks import build_spark_engine
 
 engine = build_spark_engine(spark)
-engine.sync(customers)
+report = engine.sync(customers)
 ```
 
 If the table does not exist, the engine creates it. If it already matches your declaration, `sync` is a no-op.
@@ -56,13 +56,12 @@ to see the outcome:
 ```python
 from delta_engine import render_report
 
-report = engine.sync(customers)
 print(render_report(report))
 ```
 
-On the first run the report shows the `customers` table being created. Run it
-again and the report shows no changes — the declaration and the catalog now
-agree.
+The report above describes that first sync, including the table creation. Run
+`engine.sync(customers)` again and its report shows no changes — the declaration
+and the catalog now agree.
 
 ## Enable logging (optional)
 
@@ -83,7 +82,7 @@ If any table fails validation or execution, `sync` raises `SyncFailedError`. The
 
 - [How a sync works](explanation-sync-lifecycle.md) — what happens between calling `sync` and getting a report back.
 - [How to configure a table](how-to-configure-table.md) — properties, tags, comments, keys, and partitioning.
-- [Preview changes with a dry run](how-to-preview-changes.md) — see what a sync would do before it touches anything.
+- [Preview changes with a dry run](how-to-preview-changes.md) — inspect the current plan without touching the catalog.
 
 ## Walkthrough notebook
 
