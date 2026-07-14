@@ -668,3 +668,30 @@ def test_desired_table_accepts_a_valid_rename() -> None:
         ),
     )
     assert table.columns[1].renamed_from == "customer_nm"
+
+
+def test_desired_table_rejects_partitioning_by_a_rename_source() -> None:
+    # Layout keys name desired columns and are never resolved through rename
+    # hints: renaming a partition column must move partitioned_by to the new
+    # name in the same declaration.
+    with pytest.raises(ValueError, match="Partition column not found: day"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                DesiredColumn("id", Integer()),
+                DesiredColumn("event_day", String(), renamed_from="day"),
+            ),
+            partitioned_by=("day",),
+        )
+
+
+def test_desired_table_rejects_clustering_by_a_rename_source() -> None:
+    with pytest.raises(ValueError, match="Clustering column not found: day"):
+        DesiredTable(
+            qualified_name=_QN,
+            columns=(
+                DesiredColumn("id", Integer()),
+                DesiredColumn("event_day", String(), renamed_from="day"),
+            ),
+            clustered_by=("day",),
+        )
