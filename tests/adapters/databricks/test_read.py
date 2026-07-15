@@ -8,7 +8,7 @@ from delta_engine.adapters.databricks.sql import (
     referencing_foreign_keys_query,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe_json import TableSnapshot
+from delta_engine.adapters.databricks.sql.describe import TableSnapshot
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,

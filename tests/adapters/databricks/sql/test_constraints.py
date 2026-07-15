@@ -2,10 +2,9 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.constraints import (
     ConstraintParseError,
-    ParsedForeignKey,
-    ParsedPrimaryKey,
     parse_table_constraints,
 )
+from delta_engine.domain.model import ForeignKeyConstraint, PrimaryKeyConstraint, QualifiedName
 
 
 def test_none_and_empty_mean_no_constraints():
@@ -17,13 +16,17 @@ def test_none_and_empty_mean_no_constraints():
 
 def test_single_column_primary_key():
     parsed = parse_table_constraints("[(pk_dev_silver_demo_table__id,PRIMARY KEY (`id`))]")
-    assert parsed.primary_key == ParsedPrimaryKey("pk_dev_silver_demo_table__id", ("id",))
+    assert parsed.primary_key == PrimaryKeyConstraint(
+        columns=("id",), constraint_name="pk_dev_silver_demo_table__id"
+    )
     assert parsed.foreign_keys == ()
 
 
 def test_composite_primary_key_preserves_order():
     parsed = parse_table_constraints("[(pk_t,PRIMARY KEY (`a`, `b`, `c`))]")
-    assert parsed.primary_key == ParsedPrimaryKey("pk_t", ("a", "b", "c"))
+    assert parsed.primary_key == PrimaryKeyConstraint(
+        columns=("a", "b", "c"), constraint_name="pk_t"
+    )
 
 
 def test_primary_key_and_foreign_key_from_real_output():
@@ -33,13 +36,15 @@ def test_primary_key_and_foreign_key_from_real_output():
         "FOREIGN KEY (`product_id`) REFERENCES `dev`.`gold`.`product_dimension` (`product_id`))]"
     )
     parsed = parse_table_constraints(value)
-    assert parsed.primary_key == ParsedPrimaryKey("pk_dev_gold_order_fact", ("order_id",))
+    assert parsed.primary_key == PrimaryKeyConstraint(
+        columns=("order_id",), constraint_name="pk_dev_gold_order_fact"
+    )
     assert parsed.foreign_keys == (
-        ParsedForeignKey(
-            constraint_name="fk_dev_gold_order_fact_product_id_to_product_dimension_product_id",
+        ForeignKeyConstraint(
             local_columns=("product_id",),
-            referenced_table=("dev", "gold", "product_dimension"),
+            referenced_table=QualifiedName("dev", "gold", "product_dimension"),
             referenced_columns=("product_id",),
+            constraint_name="fk_dev_gold_order_fact_product_id_to_product_dimension_product_id",
         ),
     )
 
@@ -53,7 +58,7 @@ def test_composite_foreign_key_pairs_positionally():
 
 def test_identifiers_are_casefolded():
     parsed = parse_table_constraints("[(PK_T,PRIMARY KEY (`ID`))]")
-    assert parsed.primary_key == ParsedPrimaryKey("pk_t", ("id",))
+    assert parsed.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="pk_t")
 
 
 def test_doubled_backtick_is_a_literal_backtick():

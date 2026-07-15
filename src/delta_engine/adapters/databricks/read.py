@@ -31,7 +31,7 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_from_rows,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe_json import TableSnapshot, parse_table_snapshot
+from delta_engine.adapters.databricks.sql.describe import TableSnapshot, parse_table_snapshot
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName

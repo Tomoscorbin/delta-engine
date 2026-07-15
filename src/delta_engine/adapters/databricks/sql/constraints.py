@@ -9,11 +9,13 @@ structurally stable than the structured keys, so it is parsed here in
 isolation. Identifiers are backtick-quoted with a doubled backtick escaping a
 literal backtick; the referenced table is always a 3-part backticked name.
 
-The engine only manages primary and foreign keys. A well-formed element whose
-body is a different constraint type (for example ``CHECK`` or ``UNIQUE``) is
-ignored rather than treated as a parse error; only malformed *structure*
-(unbalanced parentheses, a missing name/body separator, a missing or empty
-column list) raises ``ConstraintParseError``.
+Parsing produces the domain ``PrimaryKeyConstraint`` / ``ForeignKeyConstraint``
+directly. The engine only manages primary and foreign keys. A well-formed
+element whose body is a different constraint type (for example ``CHECK`` or
+``UNIQUE``) is ignored rather than treated as a parse error; malformed
+*structure* (unbalanced parentheses, a missing name/body separator, a missing
+or empty column list) and values the domain rejects (duplicate or blank
+columns/names) both raise ``ConstraintParseError``.
 
 Assumption: a constraint name does not contain an unbackticked top-level comma
 or the literal keyword boundary — true for the catalog-generated names this
@@ -23,35 +25,19 @@ reads. Names are returned casefolded, matching the domain's lowercase identity.
 from dataclasses import dataclass, field
 from typing import Final
 
+from delta_engine.domain.model import ForeignKeyConstraint, PrimaryKeyConstraint, QualifiedName
+
 
 class ConstraintParseError(Exception):
     """The table_constraints string is not in the expected format."""
 
 
 @dataclass(frozen=True, slots=True)
-class ParsedPrimaryKey:
-    """A primary key parsed from the constraint string: its name and ordered columns."""
-
-    constraint_name: str
-    columns: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ParsedForeignKey:
-    """A foreign key parsed from the constraint string: name, columns, and referenced table."""
-
-    constraint_name: str
-    local_columns: tuple[str, ...]
-    referenced_table: tuple[str, str, str]
-    referenced_columns: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class ParsedConstraints:
     """The primary key and foreign keys parsed from a ``table_constraints`` string."""
 
-    primary_key: ParsedPrimaryKey | None = None
-    foreign_keys: tuple[ParsedForeignKey, ...] = field(default_factory=tuple)
+    primary_key: PrimaryKeyConstraint | None = None
+    foreign_keys: tuple[ForeignKeyConstraint, ...] = field(default_factory=tuple)
 
 
 _PRIMARY_KEY: Final = "PRIMARY KEY"
@@ -60,7 +46,7 @@ _REFERENCES: Final = "REFERENCES"
 
 
 def parse_table_constraints(value: str | None) -> ParsedConstraints:
-    """Parse the ``table_constraints`` string into structured constraints."""
+    """Parse the ``table_constraints`` string into domain constraints."""
     if value is None:
         return ParsedConstraints()
     text = value.strip()
@@ -69,21 +55,66 @@ def parse_table_constraints(value: str | None) -> ParsedConstraints:
     if not (text.startswith("[") and text.endswith("]")):
         raise ConstraintParseError(f"expected a bracketed list: {value!r}")
 
-    primary_key: ParsedPrimaryKey | None = None
-    foreign_keys: list[ParsedForeignKey] = []
-    for element in _split_top_level_elements(text[1:-1]):
-        name, body = _split_name_and_body(element)
-        upper = body.upper()
-        if upper.startswith(_PRIMARY_KEY):
-            columns = _read_identifier_list(body[len(_PRIMARY_KEY) :])
-            if not columns:
-                raise ConstraintParseError(f"primary key has no columns: {body!r}")
-            primary_key = ParsedPrimaryKey(name.casefold(), columns)
-        elif upper.startswith(_FOREIGN_KEY):
-            foreign_keys.append(_parse_foreign_key(name.casefold(), body))
-        # else: a well-formed but unrecognized constraint type (CHECK, UNIQUE, …)
-        # is not managed by the engine, so it is ignored rather than raised.
+    primary_key: PrimaryKeyConstraint | None = None
+    foreign_keys: list[ForeignKeyConstraint] = []
+    try:
+        for element in _split_top_level_elements(text[1:-1]):
+            name, body = _split_name_and_body(element)
+            upper = body.upper()
+            if upper.startswith(_PRIMARY_KEY):
+                primary_key = _parse_primary_key(name.casefold(), body)
+            elif upper.startswith(_FOREIGN_KEY):
+                foreign_keys.append(_parse_foreign_key(name.casefold(), body))
+            # else: a well-formed but unrecognized constraint type (CHECK, UNIQUE, …)
+            # is not managed by the engine, so it is ignored rather than raised.
+    except ValueError as error:
+        # The domain key constructors validate (duplicate or blank columns and
+        # names); surface their rejection as this module's own parse error.
+        raise ConstraintParseError(str(error)) from error
     return ParsedConstraints(primary_key=primary_key, foreign_keys=tuple(foreign_keys))
+
+
+def _parse_primary_key(name: str, body: str) -> PrimaryKeyConstraint:
+    columns = _read_identifier_list(body[len(_PRIMARY_KEY) :])
+    if not columns:
+        raise ConstraintParseError(f"primary key has no columns: {body!r}")
+    return PrimaryKeyConstraint(columns=columns, constraint_name=name)
+
+
+def _parse_foreign_key(name: str, body: str) -> ForeignKeyConstraint:
+    local_open = _require_index(body, "(")
+    local_close = _matching_paren(body, local_open)
+    local_columns = _read_identifiers(body[local_open + 1 : local_close])
+
+    rest = body[local_close + 1 :]
+    references_at = rest.upper().find(_REFERENCES)
+    if references_at < 0:
+        raise ConstraintParseError(f"foreign key missing REFERENCES: {body!r}")
+    after = rest[references_at + len(_REFERENCES) :]
+
+    ref_open = _require_index(after, "(")
+    ref_close = _matching_paren(after, ref_open)
+    referenced_table = _parse_referenced_table(after[:ref_open])
+    referenced_columns = _read_identifiers(after[ref_open + 1 : ref_close])
+
+    if not local_columns or len(local_columns) != len(referenced_columns):
+        raise ConstraintParseError(
+            f"foreign key column count mismatch "
+            f"({len(local_columns)} local, {len(referenced_columns)} referenced): {body!r}"
+        )
+    return ForeignKeyConstraint(
+        local_columns=local_columns,
+        referenced_table=referenced_table,
+        referenced_columns=referenced_columns,
+        constraint_name=name,
+    )
+
+
+def _parse_referenced_table(text: str) -> QualifiedName:
+    parts = _read_identifiers(text)
+    if len(parts) != 3:
+        raise ConstraintParseError(f"expected a 3-part referenced table: {text!r}")
+    return QualifiedName(parts[0], parts[1], parts[2])
 
 
 def _split_top_level_elements(text: str) -> list[str]:
@@ -124,37 +155,6 @@ def _split_name_and_body(element: str) -> tuple[str, str]:
     if comma is None:
         raise ConstraintParseError(f"element missing name/body separator: {element!r}")
     return content[:comma].strip(), content[comma + 1 :].strip()
-
-
-def _parse_foreign_key(name: str, body: str) -> ParsedForeignKey:
-    local_open = _require_index(body, "(")
-    local_close = _matching_paren(body, local_open)
-    local_columns = _read_identifiers(body[local_open + 1 : local_close])
-
-    rest = body[local_close + 1 :]
-    references_at = rest.upper().find(_REFERENCES)
-    if references_at < 0:
-        raise ConstraintParseError(f"foreign key missing REFERENCES: {body!r}")
-    after = rest[references_at + len(_REFERENCES) :]
-
-    ref_open = _require_index(after, "(")
-    ref_close = _matching_paren(after, ref_open)
-    referenced_table = _parse_referenced_table(after[:ref_open])
-    referenced_columns = _read_identifiers(after[ref_open + 1 : ref_close])
-
-    if not local_columns or len(local_columns) != len(referenced_columns):
-        raise ConstraintParseError(
-            f"foreign key column count mismatch "
-            f"({len(local_columns)} local, {len(referenced_columns)} referenced): {body!r}"
-        )
-    return ParsedForeignKey(name, local_columns, referenced_table, referenced_columns)
-
-
-def _parse_referenced_table(text: str) -> tuple[str, str, str]:
-    parts = _read_identifiers(text)
-    if len(parts) != 3:
-        raise ConstraintParseError(f"expected a 3-part referenced table: {text!r}")
-    return (parts[0], parts[1], parts[2])
 
 
 def _read_identifier_list(text: str) -> tuple[str, ...]:

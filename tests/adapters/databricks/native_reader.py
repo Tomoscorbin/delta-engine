@@ -30,7 +30,7 @@ import pyspark.sql.types as T
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
 from delta_engine.adapters.databricks.read import observed_table_from_snapshot
-from delta_engine.adapters.databricks.sql.describe_json import TableSnapshot
+from delta_engine.adapters.databricks.sql.describe import TableSnapshot
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
