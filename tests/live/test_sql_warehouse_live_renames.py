@@ -36,6 +36,7 @@ _COLUMN_MAPPING = {Property.COLUMN_MAPPING_MODE: "name"}
 
 
 def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection, live_tables):
+    """Renaming a column carries its data, tags, and comment, converging in one sync."""
     table_name = live_tables("rename_travel")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -90,6 +91,7 @@ def test_sync_renames_a_column_preserving_data_tags_and_comment(live_connection,
 
 
 def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection, live_tables):
+    """Renaming a primary-key column replaces the key explicitly in one plan."""
     table_name = live_tables("rename_pk")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -138,6 +140,7 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
 def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
     live_connection, live_tables
 ):
+    """Renaming one member of a composite primary key replaces the whole key."""
     table_name = live_tables("rename_composite_pk")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -188,6 +191,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
 
 
 def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connection, live_tables):
+    """Renaming a local foreign-key column replaces the foreign key in one plan."""
     parent_name = live_tables("rename_fk_parent")
     child_name = live_tables("rename_fk_child")
     parent = DeltaTable(
@@ -231,6 +235,7 @@ def test_sync_replaces_a_foreign_key_across_a_local_column_rename(live_connectio
 def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
     live_connection, live_tables
 ):
+    """Renaming one local column of a composite foreign key replaces the whole key."""
     parent_name = live_tables("rename_composite_fk_parent")
     child_name = live_tables("rename_composite_fk_child")
     parent = DeltaTable(
@@ -297,6 +302,7 @@ def test_sync_replaces_a_composite_foreign_key_when_one_local_column_is_renamed(
 def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
     live_connection, live_tables
 ):
+    """Renaming a primary key an FK references is rejected, touching neither table."""
     parent_name = live_tables("rename_blocked_parent")
     child_name = live_tables("rename_blocked_child")
     parent = DeltaTable(
@@ -345,6 +351,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
 
 
 def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection, live_tables):
+    """An ambiguous column rename is rejected, and the catalog is left unchanged."""
     table_name = live_tables("rename_ambiguous")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -380,6 +387,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
 
 
 def test_sync_renames_a_partition_column_without_layout_drift(live_connection, live_tables):
+    """Renaming a partition column carries the layout with no partitioning drift."""
     table_name = live_tables("rename_partition")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -423,6 +431,7 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
 
 
 def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, live_tables):
+    """Renaming a clustering key carries the layout with no clustering drift."""
     table_name = live_tables("rename_cluster")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -468,6 +477,7 @@ def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, liv
 def test_declaration_with_a_rename_hint_creates_a_fresh_table_under_the_new_name(
     live_connection, live_tables
 ):
+    """A rename hint on a fresh catalog is inert; the table is created under the new name."""
     table_name = live_tables("rename_fresh")
     declaration = DeltaTable(
         live_catalog(),

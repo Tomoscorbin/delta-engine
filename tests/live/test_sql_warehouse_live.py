@@ -18,6 +18,7 @@ from tests.live.sql_warehouse_live_helpers import (
 
 
 def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_tables):
+    """Creates a table with columns, comments, tags, clustering, keys, and properties."""
     table_name = live_tables("create")
     table = DeltaTable(
         catalog=live_catalog(),
@@ -58,6 +59,7 @@ def test_sync_builds_feature_rich_table_in_live_catalog(live_connection, live_ta
 
 
 def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection, live_tables):
+    """Evolves columns, comments, clustering, tags, and properties in a single sync."""
     table_name = live_tables("lifecycle")
     initial = DeltaTable(
         live_catalog(),
@@ -152,6 +154,7 @@ def test_sync_changes_every_mutable_table_aspect_in_live_catalog(live_connection
 
 
 def test_identical_sync_does_not_alter_live_catalog(live_connection, live_tables):
+    """Re-applying an identical declaration leaves the catalog byte-for-byte unchanged."""
     table_name = live_tables("idempotent")
     table = DeltaTable(
         live_catalog(),
@@ -172,6 +175,7 @@ def test_identical_sync_does_not_alter_live_catalog(live_connection, live_tables
 
 
 def test_dry_run_previews_creation_sql_without_creating_the_table(live_connection, live_tables):
+    """A dry run previews the CREATE TABLE SQL without creating the table."""
     table_name = live_tables("dry_run_create")
     table = DeltaTable(
         live_catalog(),
@@ -188,6 +192,7 @@ def test_dry_run_previews_creation_sql_without_creating_the_table(live_connectio
 
 
 def test_dry_run_previews_alterations_without_changing_the_live_table(live_connection, live_tables):
+    """A dry run previews ALTER SQL without changing the live table."""
     table_name = live_tables("dry_run_alter")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -224,6 +229,7 @@ def test_dry_run_previews_alterations_without_changing_the_live_table(live_conne
 
 
 def test_sync_alters_preserve_existing_rows(live_connection, live_tables):
+    """Widening, adding a column, and re-clustering preserve every existing row."""
     table_name = live_tables("data_preserved")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -274,6 +280,7 @@ def test_sync_alters_preserve_existing_rows(live_connection, live_tables):
 
 
 def test_sync_round_trips_quoted_identifiers_and_unicode_metadata(live_connection, live_tables):
+    """Quoted identifiers and Unicode comments, tags, and names round-trip intact."""
     table_name = live_tables("quoted")
     table = DeltaTable(
         live_catalog(),

@@ -26,6 +26,7 @@ def _read(live_connection, table_name: str) -> CatalogState:
 
 
 def test_view_is_rejected_at_the_read_boundary(live_connection, live_tables):
+    """A view is rejected at the read boundary rather than read as a table."""
     table_name = live_tables("guard_base")
     view_name = live_tables("guard_view")
     execute_sql(
@@ -47,6 +48,7 @@ def test_view_is_rejected_at_the_read_boundary(live_connection, live_tables):
 
 
 def test_streaming_table_is_rejected_at_the_read_boundary(live_connection, live_tables):
+    """A streaming table is rejected at the read boundary despite reporting Delta format."""
     # A streaming table reports format='delta'; only the relation-kind guard
     # rejects it. Skip cleanly if the workspace cannot create one.
     table_name = live_tables("guard_stream")
