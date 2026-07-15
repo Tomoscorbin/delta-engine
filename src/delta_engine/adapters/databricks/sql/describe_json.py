@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Final
 
 from delta_engine.adapters.databricks.sql.constraints import (
+    ConstraintParseError,
     ParsedConstraints,
     parse_table_constraints,
 )
@@ -175,7 +176,11 @@ def parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> Table
         raise MetadataParseError(f"{qualified_name}: expected a JSON object")
 
     partitioned_by = _casefolded_list(document.get("partition_columns"))
-    constraints = _lower_constraints(parse_table_constraints(document.get("table_constraints")))
+    try:
+        parsed_constraints = parse_table_constraints(document.get("table_constraints"))
+    except ConstraintParseError as error:
+        raise MetadataParseError(f"{qualified_name}: malformed table_constraints") from error
+    constraints = _lower_constraints(parsed_constraints)
     return TableSnapshot(
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name, set(partitioned_by)),

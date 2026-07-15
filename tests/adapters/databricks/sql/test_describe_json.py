@@ -211,6 +211,38 @@ def test_malformed_json_and_missing_columns_raise():
         parse_table_snapshot('{"comment": ""}', QN)
 
 
+def test_malformed_table_constraints_raises_metadata_error():
+    with pytest.raises(MetadataParseError):
+        parse_table_snapshot(_doc(table_constraints="[(pk_x,PRIMARY KEY)]"), QN)
+
+
+def test_non_object_document_raises():
+    with pytest.raises(MetadataParseError):
+        parse_table_snapshot("[1, 2, 3]", QN)
+
+
+def test_malformed_column_entry_raises():
+    with pytest.raises(MetadataParseError):
+        parse_table_snapshot(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]), QN)
+
+
+def test_skipping_unmappable_column_logs_a_warning(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        snap = parse_table_snapshot(
+            _doc(
+                columns=[
+                    {"name": "ok", "type": {"name": "int"}, "nullable": True},
+                    {"name": "weird", "type": {"name": "geography"}, "nullable": True},
+                ]
+            ),
+            QN,
+        )
+    assert [c.name for c in snap.columns] == ["ok"]
+    assert any("weird" in record.message for record in caplog.records)
+
+
 _FIXTURES = Path(__file__).parent / "fixtures"
 
 
