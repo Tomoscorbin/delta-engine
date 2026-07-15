@@ -538,10 +538,6 @@ class MissingTableUnmanaged:
         )
 
 
-_UNMANAGED_ASPECT_DRIFT: Final = UnmanagedAspectDrift()
-_MISSING_TABLE_UNMANAGED: Final = MissingTableUnmanaged()
-
-
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
     """
     Evaluate a table diff and return the verdict.
@@ -574,10 +570,13 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
 
 def _scope_failures(diff: TableDiff) -> tuple[ValidationFailure, ...]:
     """Return the scope-gate failures for either diff arm; empty when in scope."""
+    # TODO: these are stateless single-method classes, constructed per call and
+    # invoked directly here (not pluggable rules in DEFAULT_RULES). Reconsider
+    # whether they should be plain module-level functions rather than classes.
     match diff:
         case TableMissing() as missing:
-            return _MISSING_TABLE_UNMANAGED.evaluate(missing)
+            return MissingTableUnmanaged().evaluate(missing)
         case TableDrift() as drift:
-            return _UNMANAGED_ASPECT_DRIFT.evaluate(drift)
+            return UnmanagedAspectDrift().evaluate(drift)
         case _ as unreachable:
             assert_never(unreachable)
