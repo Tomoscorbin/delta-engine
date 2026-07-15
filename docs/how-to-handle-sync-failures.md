@@ -35,7 +35,7 @@ for table_report in report:
 | -------------------- | --------------------------------------------------------------- |
 | `SUCCESS`            | Table synced without issues                                     |
 | `READ_FAILED`        | Could not read current catalog state                            |
-| `VALIDATION_FAILED`  | Plan was rejected before any SQL ran                            |
+| `PLANNING_FAILED`    | Plan was rejected before any SQL ran                            |
 | `FOREIGN_KEY_FAILED` | A foreign key could not be applied, or a dependency won't build |
 | `EXECUTION_FAILED`   | SQL ran but a statement failed                                  |
 
@@ -50,7 +50,7 @@ for table_report in report:
             print("\n".join(failure.format_lines()))
 ```
 
-`table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → validation → foreign key → execution). Each `Failure` renders itself via `format_lines()`. The concrete failure classes — `ReadFailure`, `ValidationFailure`, `ForeignKeyFailure`, and `ExecutionFailure` — are importable from `delta_engine`, so a caller can branch on failure type with `isinstance` rather than on `status` alone.
+`table_report.failures` is the single phase-ordered stream of every `Failure` for that table (read → planning → foreign key → execution). Each `Failure` renders itself via `format_lines()`. The concrete failure classes — `ReadFailure`, `ValidationFailure`, `ForeignKeyFailure`, and `ExecutionFailure` — are importable from `delta_engine`, so a caller can branch on failure type with `isinstance` rather than on `status` alone.
 
 For a machine-readable view of the whole run — each table's status, planned changes, SQL, and failures as plain JSON — call `report.to_dict()`; the `failures` list in each table record carries the `phase`, `type`, and `message` of every failure. See [the run report schema](reference-run-report.md).
 
@@ -81,7 +81,7 @@ Validation failures mean no SQL ran for that table. The failure message names th
 
 ```python
 for table_report in report:
-    if table_report.status == TableRunStatus.VALIDATION_FAILED:
+    if table_report.status == TableRunStatus.PLANNING_FAILED:
         # Safe to retry after fixing the declaration
         for failure in table_report.failures:
             print(failure.format_lines()[0])
@@ -91,7 +91,7 @@ See [reference-safe-change-rules.md](reference-safe-change-rules.md) for the ful
 
 ## Act on foreign key failures
 
-A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an unregistered table, a dependency cycle, a foreign key that does not target the referenced table's primary key, or a dependency that won't reach its desired state this sync — whether it failed before execution (read or validation) or while executing earlier in the same run. When a dependency fails, every table downstream of it is blocked too — so fix the upstream table first, then re-run.
+A `FOREIGN_KEY_FAILED` table ran no SQL. The cause is one of: a reference to an unregistered table, a dependency cycle, a foreign key that does not target the referenced table's primary key, or a dependency that won't reach its desired state this sync — whether it failed before execution (read or planning) or while executing earlier in the same run. When a dependency fails, every table downstream of it is blocked too — so fix the upstream table first, then re-run.
 
 ```python
 for table_report in report:

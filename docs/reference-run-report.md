@@ -16,12 +16,16 @@ that appears in the run-level `tables` list.
 
 ## Stability
 
-The field names below are a **public contract**, versioned by
+The fields and enumerated values below are a **public contract**, versioned by
 `schema_version`. Adding a field is backwards-compatible; renaming or removing
-one is a breaking change and increments `schema_version`. The projection is
-deterministic: tables appear in run order, and changes and statements in
-action-plan order, so two projections of the same report compare equal —
-successive dry-run outputs can be diffed.
+one, or renaming an enumerated value, is a breaking change and increments
+`schema_version`. The projection is deterministic: tables appear in run order,
+and changes and statements in action-plan order, so two projections of the same
+report compare equal — successive dry-run outputs can be diffed.
+
+Version 2 renamed the planning-phase status from `VALIDATION_FAILED` to
+`PLANNING_FAILED` and the corresponding failure phase from `VALIDATION` to
+`PLANNING`.
 
 ## Run-level fields
 
@@ -29,7 +33,7 @@ successive dry-run outputs can be diffed.
 
 | Field            | Type         | Meaning                                       |
 | ---------------- | ------------ | --------------------------------------------- |
-| `schema_version` | `int`        | Version of this payload schema; currently `1` |
+| `schema_version` | `int`        | Version of this payload schema; currently `2` |
 | `started_at`     | `str`        | ISO 8601 timestamp when the run began         |
 | `ended_at`       | `str`        | ISO 8601 timestamp when the run ended         |
 | `dry_run`        | `bool`       | Whether execution was skipped                 |
@@ -44,7 +48,7 @@ Each entry in `tables`, and the whole of `TableRunReport.to_dict()`:
 | Field                    | Type             | Meaning                                                      |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |
 | `name`                   | `str`            | Dotted, unquoted qualified name, e.g. `cat.schema.orders`    |
-| `status`                 | `str`            | A `TableRunStatus` value (`SUCCESS`, `VALIDATION_FAILED`, …) |
+| `status`                 | `str`            | A `TableRunStatus` value (`SUCCESS`, `PLANNING_FAILED`, …)  |
 | `has_changes`            | `bool`           | True if this table has a planned change                      |
 | `has_failures`           | `bool`           | True if this table failed a phase                            |
 | `changes`                | `list[dict]`     | Summaries of the planned changes, in plan order (see below)  |
@@ -73,7 +77,7 @@ Each entry in `failures`:
 
 | Field     | Type  | Meaning                                                                      |
 | --------- | ----- | ---------------------------------------------------------------------------- |
-| `phase`   | `str` | The phase that produced it: `READ`, `VALIDATION`, `FOREIGN_KEY`, `EXECUTION` |
+| `phase`   | `str` | The phase that produced it: `READ`, `PLANNING`, `FOREIGN_KEY`, `EXECUTION` |
 | `type`    | `str` | The concrete failure class name, e.g. `ValidationFailure`                    |
 | `message` | `str` | The rendered failure message                                                 |
 

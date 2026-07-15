@@ -76,7 +76,7 @@ engine.sync(customers)
 
 ## What to do when sync fails
 
-If any table fails validation or execution, `sync` raises `SyncFailedError`. The exception message shows which tables failed and why. See [how to handle sync failures](how-to-handle-sync-failures.md) for how to inspect the report programmatically.
+If any table fails planning or execution, `sync` raises `SyncFailedError`. The exception message shows which tables failed and why. See [how to handle sync failures](how-to-handle-sync-failures.md) for how to inspect the report programmatically.
 
 ## Next steps
 

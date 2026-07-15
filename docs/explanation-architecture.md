@@ -69,7 +69,7 @@ through a sync.
 | `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                  |
 | `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                        |
 | `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                |
-| `ResolveResult`    | The foreign-key dependency order plus any FK-specific failures.                                                                                         |
+| `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.              |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.               |
 | `TableRunReport`   | The complete per-table outcome, including read state, plan, planned SQL statements, failures, and execution.                                            |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                               |
@@ -682,7 +682,7 @@ Failures are phase-tagged application values. A `TableRunReport` derives its
 status from the earliest failing phase:
 
 - `READ_FAILED`
-- `VALIDATION_FAILED`
+- `PLANNING_FAILED`
 - `FOREIGN_KEY_FAILED`
 - `EXECUTION_FAILED`
 - `SUCCESS`

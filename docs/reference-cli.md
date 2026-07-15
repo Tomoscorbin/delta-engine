@@ -145,7 +145,7 @@ the report explains why those statements were not eligible to run.
 | Code | Meaning                                                                      |
 | ---- | ---------------------------------------------------------------------------- |
 | 0    | The plan completed successfully, whether in sync or carrying pending changes |
-| 1    | Configuration, catalog read, or validation failed                            |
+| 1    | Configuration, catalog read, or planning failed                              |
 | 2    | Typer/Click rejected malformed command-line usage                            |
 
 Unexpected declaration-code and engine defects propagate with tracebacks and

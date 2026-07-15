@@ -250,7 +250,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     assert report.failures[0].format_lines()[0].startswith("Foreign key")
 
 
-def test_table_run_report_status_is_validation_failed_when_only_validation_failure_present():
+def test_table_run_report_status_is_planning_failed_when_only_validation_failure_present():
     # Given a table that read cleanly but has a validation failure and no FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
@@ -261,12 +261,12 @@ def test_table_run_report_status_is_validation_failed_when_only_validation_failu
         ),
     )
 
-    # Then its status is VALIDATION_FAILED (no FK failure takes priority)
-    assert report.status is TableRunStatus.VALIDATION_FAILED
+    # Then its status is PLANNING_FAILED (no FK failure takes priority)
+    assert report.status is TableRunStatus.PLANNING_FAILED
     assert report.has_failures is True
 
 
-def test_table_run_report_status_is_validation_failed_when_both_fk_and_validation_present():
+def test_table_run_report_status_is_planning_failed_when_both_fk_and_validation_present():
     # Given a table with both a validation failure and an FK failure
     report = TableRunReport(
         qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -283,8 +283,8 @@ def test_table_run_report_status_is_validation_failed_when_both_fk_and_validatio
         ),
     )
 
-    # Then VALIDATION_FAILED wins: it is the earlier phase and the actionable root cause
-    assert report.status is TableRunStatus.VALIDATION_FAILED
+    # Then PLANNING_FAILED wins: it is the earlier phase and the actionable root cause
+    assert report.status is TableRunStatus.PLANNING_FAILED
     assert len(report.failures) == 2
 
 
@@ -383,10 +383,10 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
     )
     payload = report.to_dict()
 
-    assert payload["status"] == "VALIDATION_FAILED"
+    assert payload["status"] == "PLANNING_FAILED"
     assert payload["failures"] == [
         {
-            "phase": "VALIDATION",
+            "phase": "PLANNING",
             "type": "ValidationFailure",
             "message": "Validation failed: SomeRule - unsafe",
         }
@@ -415,7 +415,7 @@ def test_sync_report_to_dict_is_json_serialisable_and_complete():
     )
     payload = report.to_dict()
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["started_at"] == _t0().isoformat()
     assert payload["ended_at"] == _t1().isoformat()
     assert payload["dry_run"] is True

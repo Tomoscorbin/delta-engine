@@ -19,7 +19,7 @@ class FailurePhase(IntEnum):
     """The sync phase that produced a failure. Ordered so the earliest wins."""
 
     READ = 1
-    VALIDATION = 2
+    PLANNING = 2
     FOREIGN_KEY = 3
     EXECUTION = 4
 
@@ -64,7 +64,7 @@ def _message_head(message: str) -> str:
 class Failure(ABC):
     """A failure that can render itself as display lines, tagged with its phase."""
 
-    phase: ClassVar[FailurePhase]
+    phase: ClassVar[FailurePhase]  # TODO: enforce phase
 
     @abstractmethod
     def format_lines(self) -> tuple[str, ...]:
@@ -96,7 +96,7 @@ class ReadFailure(Failure):
 class ValidationFailure(Failure):
     """Description of a validation rule failure."""
 
-    phase: ClassVar[FailurePhase] = FailurePhase.VALIDATION
+    phase: ClassVar[FailurePhase] = FailurePhase.PLANNING
     rule_name: str
     message: str
 

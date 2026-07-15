@@ -129,11 +129,11 @@ to the log. The original exit status is preserved after the summary is written.
 | Exit code | Result                                                                       |
 | --------- | ---------------------------------------------------------------------------- |
 | 0         | The live plan completed, with or without pending changes                     |
-| 1         | Configuration, authentication, reading, validation, or FK resolution failed  |
+| 1         | Configuration, authentication, reading, planning, or FK resolution failed    |
 | 2         | The command line was malformed, such as a missing argument or removed option |
 
 Review the `DIFF` section for semantic intent and `PLANNED SQL` for the DDL
-compiled from the catalog snapshot read by this plan. A `VALIDATION_FAILED`,
+compiled from the catalog snapshot read by this plan. A `PLANNING_FAILED`,
 `READ_FAILED`, or `FOREIGN_KEY_FAILED` row is a failed check and includes detail
 in the report. A later write-capable sync re-reads and re-plans live state, so
 the preview is not a replay artifact and cannot predict execution failures.

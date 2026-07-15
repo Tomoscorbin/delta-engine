@@ -5,7 +5,7 @@ tags:
 
 # Safe-change rules
 
-The engine validates the computed diff before executing any SQL. These rules block changes that cannot be made safely in place. Each fires a `VALIDATION_FAILED` status with a message naming the rule and the affected column or table. They are the validation-rules layer of [the safety model](explanation-safety-model.md), which explains how they fit alongside declaration-time checks and managed aspects.
+The engine validates the computed diff before executing any SQL. These rules block changes that cannot be made safely in place. Each produces a validation failure and a `PLANNING_FAILED` status with a message naming the rule and the affected column or table. They are the validation-rules layer of [the safety model](explanation-safety-model.md), which explains how they fit alongside declaration-time checks and managed aspects.
 
 | Rule                                    | What it blocks                                                                                                                                                                            | How to resolve                                                                                         |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
