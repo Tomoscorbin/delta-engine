@@ -25,6 +25,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     referencing_foreign_keys_query,
     table_row_query,
     table_tags_query,
+    table_type_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
     clustering_columns_from_detail_row,
@@ -62,4 +63,5 @@ __all__ = [
     "table_row_query",
     "table_tags_from_rows",
     "table_tags_query",
+    "table_type_query",
 ]

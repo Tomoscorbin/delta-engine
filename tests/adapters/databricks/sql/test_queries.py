@@ -10,6 +10,7 @@ from delta_engine.adapters.databricks.sql import (
     referencing_foreign_keys_query,
     table_row_query,
     table_tags_query,
+    table_type_query,
 )
 from delta_engine.domain.model import QualifiedName
 
@@ -142,7 +143,16 @@ def test_information_schema_probe_query_golden():
 
 def test_table_row_query_golden():
     assert table_row_query(QN) == (
-        "SELECT comment"
+        "SELECT comment, table_type"
+        " FROM `cat`.information_schema.tables"
+        " WHERE table_schema = 'sch'"
+        " AND table_name = 'tbl'"
+    )
+
+
+def test_table_type_query_golden():
+    assert table_type_query(QN) == (
+        "SELECT table_type"
         " FROM `cat`.information_schema.tables"
         " WHERE table_schema = 'sch'"
         " AND table_name = 'tbl'"

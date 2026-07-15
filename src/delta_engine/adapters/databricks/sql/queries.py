@@ -185,15 +185,34 @@ def table_row_query(qualified_name: QualifiedName) -> str:
     """
     Render the information_schema query for a table's ``tables`` row.
 
-    One row when the table exists — carrying its comment — and no rows when
-    it does not: the warehouse reader's existence probe and comment fetch in
-    a single query. Views also have a ``tables`` row; the warehouse reader
-    inherits the Spark reader's behaviour of discovering them later in the
-    read (DESCRIBE DETAIL fails), pending the roadmap's read-guard item.
+    One row when the object exists — carrying its ``comment`` and its
+    ``table_type`` (the relation kind: ``MANAGED``, ``EXTERNAL``, ``VIEW``,
+    ``STREAMING_TABLE``, and so on) — and no rows when it does not: the
+    warehouse reader's existence probe, comment fetch, and relation-kind guard
+    in a single query.
     """
     catalog = backtick(qualified_name.catalog)
     return (
-        f"SELECT comment"
+        f"SELECT comment, table_type"
+        f" FROM {catalog}.information_schema.tables"
+        f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND table_name = {quote_literal(qualified_name.name)}"
+    )
+
+
+def table_type_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema query for a table's relation kind only.
+
+    The Spark reader establishes existence through ``spark.catalog`` (which
+    works without Unity Catalog) and reads the relation kind separately from
+    here when information_schema is available. The warehouse reader gets
+    ``table_type`` from :func:`table_row_query`'s existence probe instead, so
+    it does not use this builder.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT table_type"
         f" FROM {catalog}.information_schema.tables"
         f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
         f" AND table_name = {quote_literal(qualified_name.name)}"
