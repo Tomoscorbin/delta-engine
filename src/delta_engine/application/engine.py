@@ -247,7 +247,7 @@ class Engine:
             if isinstance(result, PlanningFailed):
                 run.failures.extend(result.failures)
                 logger.error(
-                    "Validation failed for %s (%d failure(s))",
+                    "Planning failed for %s (%d failure(s))",
                     run.qualified_name,
                     len(result.failures),
                 )
