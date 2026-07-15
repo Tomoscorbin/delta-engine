@@ -7,7 +7,14 @@ classification, cycle detection, self-reference handling, and propagation from
 failed dependencies.
 """
 
-from delta_engine.application.dependency_resolution import ResolveResult, resolve
+import pytest
+
+from delta_engine.application.dependency_resolution import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+    ResolveResult,
+    resolve,
+)
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
@@ -163,11 +170,33 @@ def _tag_scoped_table_with_fk(fqn: str, references: str) -> DesiredTable:
 
 
 def _names(result: ResolveResult) -> list[str]:
-    return [str(name) for name in result.ordered_names]
+    return [str(resolution.qualified_name) for resolution in result]
 
 
 def _failures_for(result: ResolveResult, fqn: str) -> tuple:
-    return result.fk_failures.get(_qualified_name(fqn), ())
+    qualified_name = _qualified_name(fqn)
+    for resolution in result:
+        if resolution.qualified_name != qualified_name:
+            continue
+        if isinstance(resolution, ResolutionFailed):
+            return resolution.failures
+        return ()
+    raise AssertionError(f"No resolution for {qualified_name}")
+
+
+def _failed_resolutions(result: ResolveResult) -> tuple[ResolutionFailed, ...]:
+    return tuple(resolution for resolution in result if isinstance(resolution, ResolutionFailed))
+
+
+def _successful_resolution(result: ResolveResult, fqn: str) -> ResolutionSucceeded:
+    qualified_name = _qualified_name(fqn)
+    for resolution in result:
+        if resolution.qualified_name != qualified_name:
+            continue
+        if isinstance(resolution, ResolutionSucceeded):
+            return resolution
+        raise AssertionError(f"Expected successful resolution for {qualified_name}")
+    raise AssertionError(f"No resolution for {qualified_name}")
 
 
 def _failure_reasons_for(
@@ -215,8 +244,18 @@ def test_resolve_with_empty_tables_returns_empty_result():
     result = resolve(())
 
     # Then the result is empty
-    assert result.ordered_names == ()
-    assert result.fk_failures == {}
+    assert result == ()
+
+
+def test_resolution_failed_requires_at_least_one_failure():
+    with pytest.raises(
+        ValueError,
+        match="ResolutionFailed requires at least one foreign-key failure",
+    ):
+        ResolutionFailed(
+            qualified_name=_qualified_name("cat.sch.orders"),
+            failures=(),
+        )
 
 
 def test_resolve_with_no_fks_preserves_prepared_input_order():
@@ -232,7 +271,7 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
 
     # Then the independent tables stay in prepared input order
     assert _names(result) == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
-    assert not result.fk_failures
+    assert all(isinstance(resolution, ResolutionSucceeded) for resolution in result)
 
 
 def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
@@ -244,7 +283,7 @@ def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
 
     # Then the carried FK does not produce an unresolvable-reference failure
     assert _names(result) == ["cat.sch.orders"]
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_does_not_order_by_unmanaged_foreign_keys():
@@ -259,7 +298,7 @@ def test_resolve_does_not_order_by_unmanaged_foreign_keys():
 
     # Then the unmanaged FK does not impose parent-before-child ordering
     assert _names(result) == ["cat.sch.orders", "cat.sch.customers"]
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_orders_referenced_table_before_dependent():
@@ -274,7 +313,15 @@ def test_resolve_orders_referenced_table_before_dependent():
 
     # Then customers appears before orders
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
+
+    # And orders retains the resolved edge needed during execution
+    [dependency] = _successful_resolution(result, "cat.sch.orders").dependencies
+    assert dependency.referenced_table == _qualified_name("cat.sch.customers")
+    assert dependency.blocked_failure.table == _qualified_name("cat.sch.orders")
+    assert dependency.blocked_failure.local_columns == ("ref_id",)
+    assert dependency.blocked_failure.references == _qualified_name("cat.sch.customers")
+    assert dependency.blocked_failure.reason is ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
 
 
 def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
@@ -305,7 +352,7 @@ def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
 
     # Then the referenced tag-scoped table is ordered before its managed dependent
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_handles_chain_of_dependencies():
@@ -322,7 +369,7 @@ def test_resolve_handles_chain_of_dependencies():
     # Then dependencies are ordered before their dependents
     _assert_before(result, "cat.sch.a", "cat.sch.b")
     _assert_before(result, "cat.sch.b", "cat.sch.c")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_orders_table_after_all_fk_parents():
@@ -339,7 +386,7 @@ def test_resolve_orders_table_after_all_fk_parents():
     # Then both parent tables appear before the dependent table
     _assert_before(result, "cat.sch.orders", "cat.sch.order_items")
     _assert_before(result, "cat.sch.products", "cat.sch.order_items")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_fails_table_with_unresolvable_reference():
@@ -655,6 +702,7 @@ def test_resolve_treats_self_referential_fk_as_applicable():
     # Then the self-reference does not prevent the table from executing
     assert _names(result) == ["cat.sch.employees"]
     assert _failures_for(result, "cat.sch.employees") == ()
+    assert _successful_resolution(result, "cat.sch.employees").dependencies == ()
 
 
 def test_resolve_propagates_block_through_a_diamond():
@@ -708,27 +756,27 @@ def test_resolve_propagates_block_through_a_diamond():
     }
 
 
-def test_resolve_records_no_fk_failure_for_table_passed_in_blocked_set():
-    # Given one table is already blocked by an earlier phase
+def test_resolve_records_no_fk_failure_for_table_passed_in_failed_names():
+    # Given one table already failed in an earlier phase
     table = _table("cat.sch.orders")
-    blocked = {_qualified_name("cat.sch.orders")}
+    failed_names = {_qualified_name("cat.sch.orders")}
 
     # When resolving dependencies
-    result = resolve((table,), blocked=blocked)
+    result = resolve((table,), failed_names=failed_names)
 
     # Then resolve does not claim ownership of that table's external failure
     assert _failures_for(result, "cat.sch.orders") == ()
 
 
-def test_resolve_blocks_fk_dependent_of_a_blocked_table():
-    # Given orders is blocked externally and shipments depends on orders
+def test_resolve_blocks_fk_dependent_of_a_failed_table():
+    # Given orders failed externally and shipments depends on orders
     orders = _table("cat.sch.orders")
     shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
 
-    blocked = {_qualified_name("cat.sch.orders")}
+    failed_names = {_qualified_name("cat.sch.orders")}
 
     # When resolving dependencies
-    result = resolve((orders, shipments), blocked=blocked)
+    result = resolve((orders, shipments), failed_names=failed_names)
 
     # Then shipments is blocked by orders, but orders gets no FK failure
     assert _failures_for(result, "cat.sch.orders") == ()
@@ -740,18 +788,18 @@ def test_resolve_blocks_fk_dependent_of_a_blocked_table():
     )
 
 
-def test_resolve_propagates_external_block_along_dependency_chain():
-    # Given a is blocked externally, b depends on a, and c depends on b
+def test_resolve_propagates_external_failure_along_dependency_chain():
+    # Given a failed externally, b depends on a, and c depends on b
     table_a = _table("cat.sch.a")
     table_b = _table_with_fk("cat.sch.b", "cat.sch.a")
     table_c = _table_with_fk("cat.sch.c", "cat.sch.b")
 
-    blocked = {_qualified_name("cat.sch.a")}
+    failed_names = {_qualified_name("cat.sch.a")}
 
     # When resolving dependencies
-    result = resolve((table_a, table_b, table_c), blocked=blocked)
+    result = resolve((table_a, table_b, table_c), failed_names=failed_names)
 
-    # Then the externally blocked table gets no FK failure,
+    # Then the externally failed table gets no FK failure,
     # and the block propagates transitively
     assert _failures_for(result, "cat.sch.a") == ()
     _assert_has_failure(
@@ -879,7 +927,7 @@ def test_resolve_valid_chain_where_middle_table_has_pk_and_fk_executes():
     # Then the whole chain is valid and dependency-first ordered
     _assert_before(result, "cat.sch.b", "cat.sch.a")
     _assert_before(result, "cat.sch.a", "cat.sch.c")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_passes_when_fk_targets_composite_primary_key():
@@ -900,7 +948,7 @@ def test_resolve_passes_when_fk_targets_composite_primary_key():
 
     # Then the composite-key FK is valid
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_fails_when_fk_references_only_part_of_composite_primary_key():
@@ -976,4 +1024,4 @@ def test_resolve_treats_composite_pk_referenced_column_order_as_irrelevant():
 
     # Then the FK is valid because the referenced column set is the parent's PK
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
-    assert not result.fk_failures
+    assert not _failed_resolutions(result)
