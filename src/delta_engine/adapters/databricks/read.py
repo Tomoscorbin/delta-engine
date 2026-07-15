@@ -38,17 +38,19 @@ def observed_table_from_snapshot(
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
         for column in snapshot.columns
     )
+    table_tags = table_tags_from_rows(run_info_schema_query(table_tags_query(qualified_name)))
+    referencing_foreign_keys = referencing_foreign_keys_from_rows(
+        run_info_schema_query(referencing_foreign_keys_query(qualified_name))
+    )
     return ObservedTable(
         qualified_name=qualified_name,
         columns=tagged_columns,
         comment=snapshot.comment,
         properties=snapshot.properties,
-        tags=table_tags_from_rows(run_info_schema_query(table_tags_query(qualified_name))),
+        tags=table_tags,
         partitioned_by=snapshot.partitioned_by,
         clustered_by=snapshot.clustered_by,
         primary_key=snapshot.primary_key,
         foreign_keys=snapshot.foreign_keys,
-        referencing_foreign_keys=referencing_foreign_keys_from_rows(
-            run_info_schema_query(referencing_foreign_keys_query(qualified_name))
-        ),
+        referencing_foreign_keys=referencing_foreign_keys,
     )
