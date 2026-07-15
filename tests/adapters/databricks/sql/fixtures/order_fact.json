@@ -1,0 +1,94 @@
+{
+  "table_name": "order_fact",
+  "catalog_name": "dev",
+  "namespace": ["gold"],
+  "schema_name": "gold",
+  "columns": [
+    {
+      "name": "order_id",
+      "type": { "name": "int" },
+      "nullable": false,
+      "comment": "Unique identifier for the order"
+    },
+    {
+      "name": "user_id",
+      "type": { "name": "int" },
+      "nullable": false,
+      "comment": "Identifier for the user who placed the order"
+    },
+    {
+      "name": "order_number",
+      "type": { "name": "int" },
+      "nullable": false,
+      "comment": "Sequential number of the order for the user"
+    },
+    {
+      "name": "order_day_of_week",
+      "type": { "name": "int" },
+      "nullable": false,
+      "comment": "Day of the week when the order was placed"
+    },
+    {
+      "name": "order_hour",
+      "type": { "name": "int" },
+      "nullable": false,
+      "comment": "Hour of the day the order was placed"
+    },
+    {
+      "name": "days_since_prior_order",
+      "type": { "name": "int" },
+      "nullable": true,
+      "comment": "Days elapsed since the previous order"
+    },
+    {
+      "name": "product_id",
+      "type": { "name": "int" },
+      "nullable": true,
+      "comment": "Unique identifier for a product"
+    }
+  ],
+  "type": "MANAGED",
+  "comment": "Fact table capturing core metrics for each order",
+  "collation": "UTF8_BINARY",
+  "location": "",
+  "provider": "delta",
+  "owner": "tom_corbin1@hotmail.com",
+  "is_managed_location": true,
+  "predictive_optimization": "ENABLE (inherited from METASTORE metastore_aws_eu_west_1)",
+  "table_properties": {
+    "delta.columnMapping.maxColumnId": "7",
+    "delta.columnMapping.mode": "name",
+    "delta.enableDeletionVectors": "true",
+    "delta.feature.appendOnly": "supported",
+    "delta.feature.columnMapping": "supported",
+    "delta.feature.deletionVectors": "supported",
+    "delta.feature.invariants": "supported",
+    "delta.minReaderVersion": "3",
+    "delta.minWriterVersion": "7"
+  },
+  "created_time": "2025-08-02T21:49:32Z",
+  "last_access": "UNKNOWN",
+  "created_by": "Spark ",
+  "statistics": {
+    "size_in_bytes": 24031181,
+    "num_rows": 3421083,
+    "data_skipping_columns": [
+      "order_id",
+      "days_since_prior_order",
+      "user_id",
+      "order_hour",
+      "col-b76d3d9e-a915-403c-aaf1-23a0346f55c7",
+      "order_day_of_week",
+      "order_number"
+    ],
+    "column_selection_method": "first-32"
+  },
+  "partition_provider": "Catalog",
+  "table_constraints": "[(pk_dev_gold_order_fact,PRIMARY KEY (`order_id`)), (fk_dev_gold_order_fact_product_id_to_product_dimension_product_id,FOREIGN KEY (`product_id`) REFERENCES `dev`.`gold`.`product_dimension` (`product_id`))]",
+  "predictive_optimization_evaluations": {
+    "VACUUM": {
+      "last_run_status": "SUCCESSFUL",
+      "last_run_time": "2026-07-14T10:32:19Z"
+    }
+  }
+}

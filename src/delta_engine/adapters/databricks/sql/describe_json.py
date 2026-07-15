@@ -7,8 +7,18 @@ The one embedded formatted string — ``table_constraints`` — is parsed by
 ``constraints.py`` and is documented there as less structurally stable.
 """
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+import json
+import logging
+from types import MappingProxyType
 from typing import Final
 
+from delta_engine.adapters.databricks.sql.constraints import (
+    ParsedConstraints,
+    parse_table_constraints,
+)
+from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -19,9 +29,13 @@ from delta_engine.domain.model import (
     Decimal,
     Double,
     Float,
+    ForeignKeyConstraint,
     Integer,
     Long,
     Map,
+    ObservedColumn,
+    PrimaryKeyConstraint,
+    QualifiedName,
     Short,
     String,
     Struct,
@@ -126,3 +140,130 @@ def _struct_from_json(type_obj: dict) -> DataType | None:
         return Struct(tuple(fields))
     except ValueError:
         return None
+
+
+logger = logging.getLogger(__name__)
+
+
+class MetadataParseError(Exception):
+    """A DESCRIBE … AS JSON document is missing required structure."""
+
+
+@dataclass(frozen=True, slots=True)
+class TableSnapshot:
+    """Backend-neutral table-local state parsed from one AS JSON document."""
+
+    qualified_name: QualifiedName
+    columns: tuple[ObservedColumn, ...]
+    comment: str
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    properties: Mapping[str, str]
+    primary_key: PrimaryKeyConstraint | None
+    foreign_keys: tuple[ForeignKeyConstraint, ...]
+
+
+def parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> TableSnapshot:
+    """Parse one AS JSON document into a ``TableSnapshot``."""
+    try:
+        document = json.loads(json_text)
+    except (ValueError, TypeError) as error:
+        raise MetadataParseError(
+            f"{qualified_name}: DESCRIBE AS JSON was not valid JSON"
+        ) from error
+    if not isinstance(document, dict):
+        raise MetadataParseError(f"{qualified_name}: expected a JSON object")
+
+    partitioned_by = _casefolded_list(document.get("partition_columns"))
+    constraints = _lower_constraints(parse_table_constraints(document.get("table_constraints")))
+    return TableSnapshot(
+        qualified_name=qualified_name,
+        columns=_columns_from_json(document, qualified_name, set(partitioned_by)),
+        comment=document.get("comment") or "",
+        partitioned_by=partitioned_by,
+        clustered_by=_casefolded_list(document.get("clustering_columns")),
+        properties=_managed_properties(document.get("table_properties"), qualified_name),
+        primary_key=constraints[0],
+        foreign_keys=constraints[1],
+    )
+
+
+def _columns_from_json(
+    document: dict, qualified_name: QualifiedName, partition_names: set[str]
+) -> tuple[ObservedColumn, ...]:
+    columns_json = document.get("columns")
+    if not isinstance(columns_json, list) or not columns_json:
+        raise MetadataParseError(f"{qualified_name}: AS JSON has no columns array")
+
+    columns: list[ObservedColumn] = []
+    for entry in columns_json:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+            raise MetadataParseError(f"{qualified_name}: malformed column entry {entry!r}")
+        name = entry["name"].casefold()
+        data_type = data_type_from_json(entry.get("type"))
+        if data_type is None:
+            if name in partition_names:
+                raise MetadataParseError(
+                    f"Partition column {name!r} in {qualified_name} has an unmappable"
+                    f" type {entry.get('type')!r}; observed partitioning cannot be"
+                    " determined, so the table cannot be read safely."
+                )
+            logger.warning(
+                "Skipping column %r in %s: unrecognised type %r",
+                name,
+                qualified_name,
+                entry.get("type"),
+            )
+            continue
+        columns.append(
+            ObservedColumn(
+                name=name,
+                data_type=data_type,
+                nullable=bool(entry.get("nullable", True)),
+                comment=entry.get("comment") or "",
+            )
+        )
+    if not columns:
+        raise MetadataParseError(f"{qualified_name}: no mappable columns")
+    return tuple(columns)
+
+
+def _managed_properties(
+    table_properties: object, qualified_name: QualifiedName
+) -> Mapping[str, str]:
+    if table_properties is None:
+        return MappingProxyType({})
+    if not isinstance(table_properties, dict):
+        raise MetadataParseError(f"{qualified_name}: table_properties is not an object")
+    return MappingProxyType(
+        {name: value for name, value in table_properties.items() if name in DELTA_PROPERTY_REGISTRY}
+    )
+
+
+def _lower_constraints(
+    parsed: ParsedConstraints,
+) -> tuple[PrimaryKeyConstraint | None, tuple[ForeignKeyConstraint, ...]]:
+    primary_key = None
+    if parsed.primary_key is not None:
+        primary_key = PrimaryKeyConstraint(
+            columns=parsed.primary_key.columns,
+            constraint_name=parsed.primary_key.constraint_name,
+        )
+    foreign_keys = tuple(
+        ForeignKeyConstraint(
+            local_columns=fk.local_columns,
+            referenced_table=QualifiedName(*fk.referenced_table),
+            referenced_columns=fk.referenced_columns,
+            constraint_name=fk.constraint_name,
+        )
+        for fk in parsed.foreign_keys
+    )
+    return primary_key, foreign_keys
+
+
+def _casefolded_list(value: object) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(item).casefold() for item in value)
