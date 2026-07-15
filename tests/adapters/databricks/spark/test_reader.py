@@ -24,6 +24,7 @@ from delta_engine.adapters.databricks.sql import (
     primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
+    table_type_query,
 )
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ForeignKeyReference, QualifiedName
@@ -51,8 +52,13 @@ class FakeDetailRow(dict):
     ``row.asDict()``; a plain dict supports neither. The shared detail-row
     mappers read ``properties`` by attribute and ``clusteringColumns`` via
     ``asDict().get(...)`` to tolerate the field's absence on older Delta
-    versions, so detail-row fakes need both.
+    versions, so detail-row fakes need both. ``format`` defaults to ``delta``
+    so a row stands in for an ordinary Delta table unless a test says otherwise.
     """
+
+    def __init__(self, **fields):
+        fields.setdefault("format", "delta")
+        super().__init__(**fields)
 
     def __getattr__(self, name):
         try:
@@ -70,11 +76,13 @@ class FakeCatalog:
         *,
         columns_by_table=None,
         table_comments=None,
+        table_types=None,
         exists: bool = True,
         exists_exc: Exception | None = None,
     ):
         self._columns_by_table = columns_by_table or {}
         self._table_comments = table_comments or {}
+        self._table_types = table_types or {}
         self._exists = exists
         self._exists_exc = exists_exc
 
@@ -87,8 +95,11 @@ class FakeCatalog:
         return self._columns_by_table.get(fully_qualified_name, [])
 
     def getTable(self, fully_qualified_name: str):
-        # Only `description` is read by the code under test
-        return SimpleNamespace(description=self._table_comments.get(fully_qualified_name, ""))
+        # `description` (comment) and `tableType` (relation kind) are read.
+        return SimpleNamespace(
+            description=self._table_comments.get(fully_qualified_name, ""),
+            tableType=self._table_types.get(fully_qualified_name, "MANAGED"),
+        )
 
 
 class RoutedSpark:
@@ -122,6 +133,7 @@ def routed_spark(
     qn: QualifiedName,
     *,
     catalog: FakeCatalog,
+    table_type="MANAGED",
     describe=None,
     pk=(),
     fks=(),
@@ -132,6 +144,7 @@ def routed_spark(
 ):
     """Build a RoutedSpark with a full default response set for one table."""
     responses = {
+        table_type_query(qn): [SimpleNamespace(table_type=table_type)],
         describe_detail_query(qn): (
             describe if describe is not None else [FakeDetailRow(properties={})]
         ),
@@ -309,6 +322,61 @@ def test_fetch_state_returns_failed_when_all_columns_are_unsupported(qn):
     result = SparkReader(routed_spark(qn, catalog=catalog)).fetch_state(qn)
 
     assert isinstance(result, ReadFailed)
+
+
+# ---------- relation kind & format ----------
+
+
+def test_view_is_rejected_via_information_schema(qn):
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), table_type="VIEW")
+    result = SparkReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "UnsupportedCatalogRelationError"
+
+
+def test_streaming_table_is_rejected_even_though_its_format_is_delta(qn):
+    # Only the relation-kind guard catches a streaming table; it reports
+    # format='delta', so the format guard alone would admit it.
+    spark = routed_spark(qn, catalog=single_column_catalog(qn), table_type="STREAMING_TABLE")
+    result = SparkReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "UnsupportedCatalogRelationError"
+
+
+def test_non_delta_format_is_rejected(qn):
+    spark = routed_spark(
+        qn,
+        catalog=single_column_catalog(qn),
+        describe=[FakeDetailRow(properties={}, format="iceberg")],
+    )
+    result = SparkReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "UnsupportedCatalogRelationError"
+
+
+def test_relation_kind_falls_back_to_catalog_object_when_information_schema_absent(qn):
+    # Plain Spark: the probe reports no information_schema, so the relation kind
+    # comes from the catalog object's own tableType — which still names a view.
+    catalog = FakeCatalog(
+        columns_by_table={str(qn): [make_catalog_col("id", dataType="int")]},
+        table_types={str(qn): "VIEW"},
+    )
+    spark = routed_spark(
+        qn,
+        catalog=catalog,
+        probe=AnalysisException(
+            message="no information_schema",
+            errorClass="TABLE_OR_VIEW_NOT_FOUND",
+            messageParameters={},
+        ),
+    )
+    result = SparkReader(spark).fetch_state(qn)
+
+    assert isinstance(result, ReadFailed)
+    assert result.failure.exception_type == "UnsupportedCatalogRelationError"
 
 
 # ---------- table comment ----------

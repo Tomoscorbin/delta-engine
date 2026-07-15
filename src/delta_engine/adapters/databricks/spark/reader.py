@@ -23,8 +23,11 @@ from delta_engine.adapters.databricks.sql import (
     primary_key_query,
     referencing_foreign_keys_from_rows,
     referencing_foreign_keys_query,
+    require_delta_format,
+    require_supported_relation,
     table_tags_from_rows,
     table_tags_query,
+    table_type_query,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
@@ -122,6 +125,12 @@ class SparkReader:
         if not self._table_exists(qualified_name):
             return TableAbsent()
         catalog = qualified_name.catalog
+        require_supported_relation(self._relation_kind(qualified_name), qualified_name)
+
+        # Fetch detail and check format before mapping columns, so a non-Delta
+        # table fails as "unsupported format" rather than in the column mapper.
+        detail_row = self._describe_detail_row(qualified_name)
+        require_delta_format(detail_row, qualified_name)
 
         candidate_mappings = (
             _to_column_mapping(spark_column, qualified_name)
@@ -138,7 +147,6 @@ class SparkReader:
             )
             for mapping in mappings
         )
-        detail_row = self._describe_detail_row(qualified_name)
         observed = ObservedTable(
             qualified_name=qualified_name,
             columns=columns,
@@ -164,6 +172,25 @@ class SparkReader:
             ),
         )
         return TablePresent(table=observed)
+
+    def _relation_kind(self, qualified_name: QualifiedName) -> str:
+        """
+        Return the catalog object's relation kind (``table_type``) for the read guard.
+
+        Reads it from information_schema where the catalog has one (Unity
+        Catalog), which reports the full relation taxonomy — including the
+        pipeline-owned kinds (streaming table, materialized view) that
+        ``spark.catalog.getTable`` does not distinguish. Falls back to the
+        catalog object's own ``tableType`` only where information_schema is
+        absent (plain Spark), which still separates a view from a table; the
+        kinds the fallback cannot name do not exist without Unity Catalog.
+        """
+        rows = self._information_schema_rows(
+            qualified_name.catalog, table_type_query(qualified_name)
+        )
+        if rows:
+            return rows[0].table_type
+        return self.spark.catalog.getTable(str(qualified_name)).tableType
 
     def _table_exists(self, qualified_name: QualifiedName) -> bool:
         """

@@ -9,11 +9,16 @@ parser, so no live SparkSession is needed anywhere here.
 
 from types import SimpleNamespace
 
+from pyspark.errors.exceptions.base import AnalysisException
 from pyspark.sql import Row
 from pyspark.sql.catalog import Column as SparkColumn
 import pytest
 
 from delta_engine.adapters.databricks.spark.reader import SparkReader, _to_column_mapping
+from delta_engine.adapters.databricks.sql import (
+    describe_detail_query,
+    information_schema_probe_query,
+)
 from delta_engine.adapters.databricks.sql.rows import clustering_columns_from_detail_row
 from delta_engine.application.ports import ReadFailed
 from delta_engine.domain.model import QualifiedName
@@ -77,16 +82,34 @@ def test_unmappable_non_partition_column_is_still_skipped() -> None:
 
 def test_fetch_state_returns_read_failed_for_unmappable_partition_column() -> None:
     # Given a catalog whose table has a partition column the engine cannot map
+    qn = QualifiedName("dev", "silver", "orders")
     bad_column = spark_column(name="part", dataType="void", isPartition=True)
+
+    def sql(query: str):
+        # The relation-kind and format guards run before column mapping, so the
+        # stub must answer them (as an ordinary Delta table) to reach the
+        # column mapper this test is exercising.
+        if query == information_schema_probe_query(qn.catalog):
+            raise AnalysisException(
+                message="no information_schema",
+                errorClass="TABLE_OR_VIEW_NOT_FOUND",
+                messageParameters={},
+            )
+        if query == describe_detail_query(qn):
+            return SimpleNamespace(first=lambda: Row(properties={}, format="delta"))
+        raise AssertionError(f"unexpected query: {query!r}")
+
     stub_spark = SimpleNamespace(
         catalog=SimpleNamespace(
             tableExists=lambda name: True,
             listColumns=lambda name: [bad_column],
-        )
+            getTable=lambda name: SimpleNamespace(tableType="MANAGED"),
+        ),
+        sql=sql,
     )
 
     # When fetching state through the port
-    state = SparkReader(stub_spark).fetch_state(QualifiedName("dev", "silver", "orders"))
+    state = SparkReader(stub_spark).fetch_state(qn)
 
     # Then the mapper's refusal surfaces as a typed ReadFailed, not an exception
     assert isinstance(state, ReadFailed)
