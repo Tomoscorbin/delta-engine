@@ -66,3 +66,29 @@ def test_malformed_raises():
         parse_table_constraints("not a bracketed list")
     with pytest.raises(ConstraintParseError):
         parse_table_constraints("[(only_a_name)]")
+
+
+def test_primary_key_without_column_list_raises():
+    with pytest.raises(ConstraintParseError):
+        parse_table_constraints("[(pk_x,PRIMARY KEY)]")
+
+
+def test_foreign_key_without_references_raises():
+    with pytest.raises(ConstraintParseError):
+        parse_table_constraints("[(fk_x,FOREIGN KEY (`a`) REFERENCES `c`.`s`.`t`)]")
+
+
+def test_foreign_key_cardinality_mismatch_raises():
+    with pytest.raises(ConstraintParseError):
+        parse_table_constraints("[(fk_x,FOREIGN KEY (`a`, `b`) REFERENCES `c`.`s`.`t` (`x`))]")
+
+
+def test_empty_primary_key_columns_raises():
+    with pytest.raises(ConstraintParseError):
+        parse_table_constraints("[(pk_x,PRIMARY KEY ())]")
+
+
+def test_unrecognized_constraint_type_is_ignored():
+    parsed = parse_table_constraints("[(pk_t,PRIMARY KEY (`id`)), (chk_amt,CHECK (`amount` > 0))]")
+    assert parsed.primary_key.columns == ("id",)
+    assert parsed.foreign_keys == ()

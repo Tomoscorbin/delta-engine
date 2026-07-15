@@ -9,6 +9,12 @@ structurally stable than the structured keys, so it is parsed here in
 isolation. Identifiers are backtick-quoted with a doubled backtick escaping a
 literal backtick; the referenced table is always a 3-part backticked name.
 
+The engine only manages primary and foreign keys. A well-formed element whose
+body is a different constraint type (for example ``CHECK`` or ``UNIQUE``) is
+ignored rather than treated as a parse error; only malformed *structure*
+(unbalanced parentheses, a missing name/body separator, a missing or empty
+column list) raises ``ConstraintParseError``.
+
 Assumption: a constraint name does not contain an unbackticked top-level comma
 or the literal keyword boundary — true for the catalog-generated names this
 reads. Names are returned casefolded, matching the domain's lowercase identity.
@@ -64,11 +70,13 @@ def parse_table_constraints(value: str | None) -> ParsedConstraints:
         upper = body.upper()
         if upper.startswith(_PRIMARY_KEY):
             columns = _read_identifier_list(body[len(_PRIMARY_KEY) :])
+            if not columns:
+                raise ConstraintParseError(f"primary key has no columns: {body!r}")
             primary_key = ParsedPrimaryKey(name.casefold(), columns)
         elif upper.startswith(_FOREIGN_KEY):
             foreign_keys.append(_parse_foreign_key(name.casefold(), body))
-        else:
-            raise ConstraintParseError(f"unknown constraint body: {body!r}")
+        # else: a well-formed but unrecognized constraint type (CHECK, UNIQUE, …)
+        # is not managed by the engine, so it is ignored rather than raised.
     return ParsedConstraints(primary_key=primary_key, foreign_keys=tuple(foreign_keys))
 
 
@@ -113,7 +121,7 @@ def _split_name_and_body(element: str) -> tuple[str, str]:
 
 
 def _parse_foreign_key(name: str, body: str) -> ParsedForeignKey:
-    local_open = body.index("(")
+    local_open = _require_index(body, "(")
     local_close = _matching_paren(body, local_open)
     local_columns = _read_identifiers(body[local_open + 1 : local_close])
 
@@ -123,10 +131,16 @@ def _parse_foreign_key(name: str, body: str) -> ParsedForeignKey:
         raise ConstraintParseError(f"foreign key missing REFERENCES: {body!r}")
     after = rest[references_at + len(_REFERENCES) :]
 
-    ref_open = after.index("(")
+    ref_open = _require_index(after, "(")
     ref_close = _matching_paren(after, ref_open)
     referenced_table = _parse_referenced_table(after[:ref_open])
     referenced_columns = _read_identifiers(after[ref_open + 1 : ref_close])
+
+    if not local_columns or len(local_columns) != len(referenced_columns):
+        raise ConstraintParseError(
+            f"foreign key column count mismatch "
+            f"({len(local_columns)} local, {len(referenced_columns)} referenced): {body!r}"
+        )
     return ParsedForeignKey(name, local_columns, referenced_table, referenced_columns)
 
 
@@ -138,9 +152,17 @@ def _parse_referenced_table(text: str) -> tuple[str, str, str]:
 
 
 def _read_identifier_list(text: str) -> tuple[str, ...]:
-    open_paren = text.index("(")
+    open_paren = _require_index(text, "(")
     close_paren = _matching_paren(text, open_paren)
     return _read_identifiers(text[open_paren + 1 : close_paren])
+
+
+def _require_index(text: str, char: str) -> int:
+    """Return the index of ``char`` in ``text``, or raise if it is absent."""
+    position = text.find(char)
+    if position < 0:
+        raise ConstraintParseError(f"expected {char!r} in constraint body: {text!r}")
+    return position
 
 
 def _read_identifiers(text: str) -> tuple[str, ...]:
@@ -214,13 +236,4 @@ def _matching_paren(text: str, open_index: int) -> int:
 
 def _skip_backtick(text: str, index: int) -> int:
     """Return the index just past a backtick-quoted span starting at ``index``."""
-    index += 1
-    length = len(text)
-    while index < length:
-        if text[index] == "`":
-            if index + 1 < length and text[index + 1] == "`":
-                index += 2
-                continue
-            return index + 1
-        index += 1
-    raise ConstraintParseError("unterminated backtick identifier")
+    return _read_backtick_identifier(text, index)[1]
