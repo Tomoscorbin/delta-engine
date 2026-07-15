@@ -26,11 +26,6 @@ class PlanningFailed:
 
     failures: tuple[ValidationFailure, ...]
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "failures", tuple(self.failures))
-        if not self.failures:
-            raise ValueError("PlanningFailed requires at least one validation failure")
-
 
 type PlanningResult = PlanningSucceeded | PlanningFailed
 
@@ -44,7 +39,7 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     has no plan, making execution of unvalidated drift unrepresentable.
     """
     validation = validate_diff(diff)
-    if validation.failures:
+    if validation.failed:
         return PlanningFailed(failures=validation.failures)
     match diff:
         case TableMissing() as missing:
