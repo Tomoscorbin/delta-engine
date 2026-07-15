@@ -18,28 +18,15 @@ either connection mode reads correctly.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import replace
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
+from delta_engine.adapters.databricks.read import observed_table_from_reads
 from delta_engine.adapters.databricks.sql import (
-    clustering_columns_from_detail_row,
     column_from_catalog,
-    column_tags_from_rows,
-    column_tags_query,
     columns_query,
     describe_detail_query,
-    foreign_keys_from_rows,
-    foreign_keys_query,
-    managed_properties_from_detail_row,
-    primary_key_from_rows,
-    primary_key_query,
-    referencing_foreign_keys_from_rows,
-    referencing_foreign_keys_query,
     table_row_query,
-    table_tags_from_rows,
-    table_tags_query,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
@@ -50,7 +37,6 @@ from delta_engine.application.ports import (
 )
 from delta_engine.domain.model import (
     ObservedColumn,
-    ObservedTable,
     QualifiedName,
 )
 
@@ -88,35 +74,15 @@ class WarehouseReader:
             table_rows = _fetch_all(cursor, table_row_query(qualified_name))
             if not table_rows:
                 return TableAbsent()
-            comment = table_rows[0].comment or ""
 
             column_rows = _fetch_all(cursor, columns_query(qualified_name))
-            column_tags = column_tags_from_rows(
-                _fetch_all(cursor, column_tags_query(qualified_name))
-            )
-            columns = tuple(
-                replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
-                for column in _to_columns(column_rows, qualified_name)
-            )
-
-            detail = _describe_detail_row(cursor, qualified_name)
-            observed = ObservedTable(
-                qualified_name=qualified_name,
-                columns=columns,
-                comment=comment,
-                properties=managed_properties_from_detail_row(detail),
-                tags=table_tags_from_rows(_fetch_all(cursor, table_tags_query(qualified_name))),
+            observed = observed_table_from_reads(
+                qualified_name,
+                columns=_to_columns(column_rows, qualified_name),
+                comment=table_rows[0].comment or "",
+                detail_row=_describe_detail_row(cursor, qualified_name),
                 partitioned_by=_partitioned_by(column_rows),
-                clustered_by=clustering_columns_from_detail_row(detail),
-                primary_key=primary_key_from_rows(
-                    _fetch_all(cursor, primary_key_query(qualified_name))
-                ),
-                foreign_keys=foreign_keys_from_rows(
-                    _fetch_all(cursor, foreign_keys_query(qualified_name))
-                ),
-                referencing_foreign_keys=referencing_foreign_keys_from_rows(
-                    _fetch_all(cursor, referencing_foreign_keys_query(qualified_name))
-                ),
+                run_info_schema_query=lambda query: _fetch_all(cursor, query),
             )
         return TablePresent(table=observed)
 
