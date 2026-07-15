@@ -58,6 +58,7 @@ class DetailRow(dict):
 
 
 def detail_row(properties: str | None = "{}", **extra) -> DetailRow:
+    extra.setdefault("format", "delta")
     return DetailRow(properties=properties, **extra)
 
 
@@ -99,6 +100,7 @@ class RoutedConnection:
 def routed_connection(
     *,
     table_rows=None,
+    table_type="MANAGED",
     columns=None,
     detail=None,
     pk=(),
@@ -109,7 +111,7 @@ def routed_connection(
 ) -> RoutedConnection:
     """Wire a fake connection for one table read with sensible defaults."""
     if table_rows is None:
-        table_rows = [SimpleNamespace(comment=None)]
+        table_rows = [SimpleNamespace(comment=None, table_type=table_type)]
     if columns is None:
         # A table with zero columns is not a valid domain object (`ObservedTable`
         # requires at least one column), so tests that don't care about column
@@ -159,8 +161,33 @@ def test_maps_columns_with_types_nullability_and_comments():
 
 
 def test_table_comment_read_from_tables_row():
-    connection = routed_connection(table_rows=[SimpleNamespace(comment="orders table")])
+    connection = routed_connection(
+        table_rows=[SimpleNamespace(comment="orders table", table_type="MANAGED")]
+    )
     assert fetch_present(connection).table.comment == "orders table"
+
+
+def test_view_is_rejected_as_read_failed():
+    connection = routed_connection(table_type="VIEW")
+    state = WarehouseReader(connection).fetch_state(QN)
+    assert isinstance(state, ReadFailed)
+    assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+
+
+def test_streaming_table_is_rejected_even_though_its_format_is_delta():
+    # A streaming table reports format='delta', so only the relation-kind guard
+    # catches it — the format guard would wave it through.
+    connection = routed_connection(table_type="STREAMING_TABLE")
+    state = WarehouseReader(connection).fetch_state(QN)
+    assert isinstance(state, ReadFailed)
+    assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+
+
+def test_non_delta_format_is_rejected_as_read_failed():
+    connection = routed_connection(detail=detail_row(format="iceberg"))
+    state = WarehouseReader(connection).fetch_state(QN)
+    assert isinstance(state, ReadFailed)
+    assert state.failure.exception_type == "UnsupportedCatalogRelationError"
 
 
 def test_partition_columns_ordered_by_partition_index():

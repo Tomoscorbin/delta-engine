@@ -37,6 +37,8 @@ from delta_engine.adapters.databricks.sql import (
     primary_key_query,
     referencing_foreign_keys_from_rows,
     referencing_foreign_keys_query,
+    require_delta_format,
+    require_supported_relation,
     table_row_query,
     table_tags_from_rows,
     table_tags_query,
@@ -88,7 +90,14 @@ class WarehouseReader:
             table_rows = _fetch_all(cursor, table_row_query(qualified_name))
             if not table_rows:
                 return TableAbsent()
+            require_supported_relation(table_rows[0].table_type, qualified_name)
             comment = table_rows[0].comment or ""
+
+            # Fetch detail and check format before mapping columns: a non-Delta
+            # table fails as "unsupported format" rather than tripping the
+            # column mapper on a type it cannot parse.
+            detail = _describe_detail_row(cursor, qualified_name)
+            require_delta_format(detail, qualified_name)
 
             column_rows = _fetch_all(cursor, columns_query(qualified_name))
             column_tags = column_tags_from_rows(
@@ -99,7 +108,6 @@ class WarehouseReader:
                 for column in _to_columns(column_rows, qualified_name)
             )
 
-            detail = _describe_detail_row(cursor, qualified_name)
             observed = ObservedTable(
                 qualified_name=qualified_name,
                 columns=columns,
