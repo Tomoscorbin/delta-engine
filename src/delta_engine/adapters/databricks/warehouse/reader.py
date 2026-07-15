@@ -97,7 +97,7 @@ class WarehouseReader:
             # table fails as "unsupported format" rather than tripping the
             # column mapper on a type it cannot parse.
             detail = _describe_detail_row(cursor, qualified_name)
-            require_delta_format(detail, qualified_name)
+            require_delta_format(detail.format, qualified_name)
 
             column_rows = _fetch_all(cursor, columns_query(qualified_name))
             column_tags = column_tags_from_rows(

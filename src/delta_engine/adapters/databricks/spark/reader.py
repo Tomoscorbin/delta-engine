@@ -130,7 +130,7 @@ class SparkReader:
         # Fetch detail and check format before mapping columns, so a non-Delta
         # table fails as "unsupported format" rather than in the column mapper.
         detail_row = self._describe_detail_row(qualified_name)
-        require_delta_format(detail_row, qualified_name)
+        require_delta_format(detail_row.format, qualified_name)
 
         candidate_mappings = (
             _to_column_mapping(spark_column, qualified_name)

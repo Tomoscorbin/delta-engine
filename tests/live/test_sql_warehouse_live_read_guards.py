@@ -69,3 +69,24 @@ def test_streaming_table_is_rejected_at_the_read_boundary(live_connection, live_
         execute_sql(
             live_connection, f"DROP STREAMING TABLE IF EXISTS {qualified_table(table_name)}"
         )
+
+
+def test_non_delta_format_is_rejected_at_the_read_boundary(live_connection, live_tables):
+    """A non-Delta (Iceberg) table is rejected at the read boundary by the format guard."""
+    # DESCRIBE DETAIL succeeds on an Iceberg table and reports format='iceberg',
+    # so the format guard — not the relation-kind guard — rejects it. The
+    # live_tables fixture drops it with DROP TABLE, which is correct for an
+    # Iceberg table. Skip cleanly if the workspace cannot create one.
+    table_name = live_tables("guard_iceberg")
+    try:
+        execute_sql(
+            live_connection,
+            f"CREATE TABLE {qualified_table(table_name)} (id INT) USING ICEBERG",
+        )
+    except Exception as exc:  # intentional broad except: environment capability probe
+        pytest.skip(f"workspace cannot create an Iceberg table here: {exc}")
+
+    state = _read(live_connection, table_name)
+
+    assert isinstance(state, ReadFailed), state
+    assert state.failure.exception_type == "UnsupportedCatalogRelationError", state.failure

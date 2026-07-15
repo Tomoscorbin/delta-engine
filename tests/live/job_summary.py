@@ -49,7 +49,7 @@ LIVE_AREAS: dict[str, tuple[str, str]] = {
     ),
     "test_sql_warehouse_live_read_guards.py": (
         "Read guards",
-        "views and streaming tables are rejected at the read boundary",
+        "views, streaming tables, and non-Delta formats are rejected at the read boundary",
     ),
 }
 

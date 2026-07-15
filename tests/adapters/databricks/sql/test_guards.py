@@ -1,6 +1,5 @@
 """Behaviour tests for the read-boundary representability guards."""
 
-from pyspark.sql import Row
 import pytest
 
 from delta_engine.adapters.databricks.sql.guards import (
@@ -49,10 +48,10 @@ def test_require_supported_relation_names_the_object_and_kind():
 
 @pytest.mark.parametrize("table_format", ["delta", "DELTA", "Delta"])
 def test_require_delta_format_admits_delta(table_format):
-    require_delta_format(Row(format=table_format), QN)  # does not raise
+    require_delta_format(table_format, QN)  # does not raise
 
 
 @pytest.mark.parametrize("table_format", ["iceberg", "parquet", "csv"])
 def test_require_delta_format_rejects_non_delta(table_format):
     with pytest.raises(UnsupportedCatalogRelationError):
-        require_delta_format(Row(format=table_format), QN)
+        require_delta_format(table_format, QN)

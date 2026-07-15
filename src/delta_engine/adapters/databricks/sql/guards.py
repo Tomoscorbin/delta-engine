@@ -10,10 +10,10 @@ boundary turns into ``ReadFailed`` — rather than admitted as observed state.
 The guards decide *representability* (is this an ordinary managed Delta table
 the engine can model), not *safety* (is a change to it allowed), so they live
 in the adapter, not application validation. PySpark-free like the rest of the
-shared SQL core; the DESCRIBE DETAIL row is duck-typed (attribute access).
+shared SQL core.
 """
 
-from typing import Any, Final
+from typing import Final
 
 from delta_engine.domain.model import QualifiedName
 
@@ -52,18 +52,15 @@ def require_supported_relation(table_type: str, qualified_name: QualifiedName) -
         )
 
 
-def require_delta_format(detail_row: Any, qualified_name: QualifiedName) -> None:
+def require_delta_format(table_format: str, qualified_name: QualifiedName) -> None:
     """
-    Raise unless a DESCRIBE DETAIL row reports Delta format.
+    Raise unless a table's storage format is Delta.
 
-    A managed relation can still be non-Delta (Parquet, Iceberg);
-    ``DESCRIBE DETAIL.format`` is the documented delta/iceberg discriminator and
-    the reader has already fetched the row. Like the relation-kind guard, this
-    fails closed to ``ReadFailed``. A missing ``format`` field raises (an
-    ``AttributeError`` caught by the same boundary): DESCRIBE DETAIL always
-    carries it, so its absence is a read gone wrong.
+    A managed relation can still be non-Delta (Iceberg); ``DESCRIBE DETAIL.format``
+    is the documented delta/iceberg discriminator, which the reader reads from the
+    detail row and passes here. Like the relation-kind guard, this fails closed to
+    ``ReadFailed``.
     """
-    table_format = detail_row.format
     if table_format.casefold() != "delta":
         raise UnsupportedCatalogRelationError(
             f"{qualified_name} has format {table_format!r}; delta-engine manages Delta tables only"
