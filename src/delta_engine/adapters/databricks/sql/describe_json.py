@@ -11,9 +11,9 @@ undocumented formatted constraint string or runtime-specific extra fields.
 
 from dataclasses import dataclass
 import json
-import logging
 from typing import Final
 
+from delta_engine.adapters.databricks.sql.rows import column_from_catalog
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -37,8 +37,6 @@ from delta_engine.domain.model import (
     TimestampNtz,
     Variant,
 )
-
-logger = logging.getLogger(__name__)
 
 _SIMPLE_TYPES: Final[dict[str, DataType]] = {
     "int": Integer(),
@@ -78,23 +76,23 @@ class MetadataParseError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class DescribedTable:
-    """Table-local facts sourced from one structured description document."""
+class _DescribeJsonMetadata:
+    """Private carrier for the supported facts in one description document."""
 
     columns: tuple[ObservedColumn, ...]
     comment: str
     partitioned_by: tuple[str, ...]
 
 
-def data_type_from_json(type_object: object) -> DataType | None:
+def _data_type_from_json(type_object: object) -> DataType | None:
     """Map a structured Databricks type object to a domain type, or ``None``."""
     try:
-        return _data_type_from_json(type_object)
+        return _data_type_from_json_unchecked(type_object)
     except (ValueError, RecursionError):
         return None
 
 
-def parse_described_table(json_text: str, qualified_name: QualifiedName) -> DescribedTable:
+def parse_described_table(json_text: str, qualified_name: QualifiedName) -> _DescribeJsonMetadata:
     """Parse and validate the supported facts in one AS JSON document."""
     try:
         document = json.loads(json_text)
@@ -117,7 +115,7 @@ def parse_described_table(json_text: str, qualified_name: QualifiedName) -> Desc
     if not isinstance(comment, str):
         raise MetadataParseError(f"{qualified_name}: comment is not a string")
 
-    return DescribedTable(
+    return _DescribeJsonMetadata(
         columns=_columns_from_json(document, qualified_name, set(partitioned_by)),
         comment=comment,
         partitioned_by=partitioned_by,
@@ -175,28 +173,21 @@ def _columns_from_json(
                 f"{qualified_name}: column {raw_name!r} has a non-string comment"
             )
 
-        data_type = data_type_from_json(entry.get("type"))
-        if data_type is None:
-            if name in partition_names:
-                raise MetadataParseError(
-                    f"Partition column {name!r} in {qualified_name} has an unmappable"
-                    f" type {entry.get('type')!r}; partitioning cannot be read safely."
-                )
-            logger.warning(
-                "Skipping column %r in %s: unrecognised type %r",
-                name,
-                qualified_name,
-                entry.get("type"),
-            )
-            continue
-        columns.append(
-            ObservedColumn(
-                name=name,
-                data_type=data_type,
+        reported_type = entry.get("type")
+        try:
+            column = column_from_catalog(
+                name=raw_name,
+                data_type=_data_type_from_json(reported_type),
+                reported_type=reported_type,
                 nullable=nullable,
                 comment=comment,
+                is_partition=name in partition_names,
+                qualified_name=qualified_name,
             )
-        )
+        except RuntimeError as error:
+            raise MetadataParseError(str(error)) from error
+        if column is not None:
+            columns.append(column)
 
     missing_partition_columns = partition_names - described_names
     if missing_partition_columns:
@@ -230,7 +221,7 @@ def _casefolded_string_list(
     return tuple(normalized)
 
 
-def _data_type_from_json(type_object: object) -> DataType | None:
+def _data_type_from_json_unchecked(type_object: object) -> DataType | None:
     if not isinstance(type_object, dict):
         return None
     raw_name = type_object.get("name")
@@ -245,11 +236,11 @@ def _data_type_from_json(type_object: object) -> DataType | None:
     if name in ("decimal", "dec", "numeric"):
         return _decimal_from_json(type_object)
     if name == "array":
-        element = data_type_from_json(type_object.get("element_type"))
+        element = _data_type_from_json(type_object.get("element_type"))
         return Array(element) if element is not None else None
     if name == "map":
-        key = data_type_from_json(type_object.get("key_type"))
-        value = data_type_from_json(type_object.get("value_type"))
+        key = _data_type_from_json(type_object.get("key_type"))
+        value = _data_type_from_json(type_object.get("value_type"))
         return Map(key, value) if key is not None and value is not None else None
     if name == "struct":
         return _struct_from_json(type_object)
@@ -276,7 +267,7 @@ def _struct_from_json(type_object: dict) -> DataType | None:
         if not isinstance(entry, dict):
             return None
         raw_name = entry.get("name")
-        data_type = data_type_from_json(entry.get("type"))
+        data_type = _data_type_from_json(entry.get("type"))
         if not isinstance(raw_name, str) or data_type is None:
             return None
         fields.append(StructField(raw_name.casefold(), data_type))

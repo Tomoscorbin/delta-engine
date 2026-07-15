@@ -13,6 +13,7 @@ from delta_engine.adapters.databricks.sql import (
     column_from_catalog,
     describe_detail_query,
     information_schema_probe_query,
+    parse_data_type,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
@@ -48,9 +49,9 @@ def _to_column_mapping(
     """
     Convert a Spark catalog column into an ``ObservedColumn`` and its partition flag.
 
-    Unity Catalog reports a column's type as a DDL string (e.g. ``"array<int>"``),
-    the same shape information_schema gives the warehouse backend, so both
-    readers share one type parser and one unmappable-column policy through
+    Spark reports a column's type as a DDL string (e.g. ``"array<int>"``).
+    This function parses that source-specific representation, then both readers
+    share normalization and the unmappable-column policy through
     ``column_from_catalog`` (skip and warn; raise for partition columns).
 
     The partition name in ``_ColumnMapping`` is derived from the
@@ -62,9 +63,11 @@ def _to_column_mapping(
     # the nullable/isPartition flags, so a missing flag means "nullable" /
     # "not a partition" rather than an error.
     is_partition = bool(getattr(spark_column, "isPartition", False))
+    reported_type = spark_column.dataType
     column = column_from_catalog(
         name=spark_column.name,
-        type_text=spark_column.dataType,
+        data_type=parse_data_type(reported_type),
+        reported_type=reported_type,
         nullable=bool(getattr(spark_column, "nullable", True)),
         comment=spark_column.description or "",
         is_partition=is_partition,

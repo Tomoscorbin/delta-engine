@@ -9,12 +9,7 @@ cycles.
 """
 
 from delta_engine.adapters.databricks.sql.compile import compile_plan
-from delta_engine.adapters.databricks.sql.describe_json import (
-    DescribedTable,
-    MetadataParseError,
-    data_type_from_json,
-    parse_described_table,
-)
+from delta_engine.adapters.databricks.sql.describe_json import parse_described_table
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
     backtick_qualified_name,
@@ -44,8 +39,6 @@ from delta_engine.adapters.databricks.sql.rows import (
 from delta_engine.adapters.databricks.sql.types import render_data_type
 
 __all__ = [
-    "DescribedTable",
-    "MetadataParseError",
     "backtick",
     "backtick_qualified_name",
     "clustering_columns_from_detail_row",
@@ -53,7 +46,6 @@ __all__ = [
     "column_tags_from_rows",
     "column_tags_query",
     "compile_plan",
-    "data_type_from_json",
     "describe_detail_query",
     "describe_json_query",
     "foreign_keys_from_rows",

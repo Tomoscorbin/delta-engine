@@ -6,7 +6,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.describe_json import (
     MetadataParseError,
-    data_type_from_json,
+    _data_type_from_json,
     parse_described_table,
 )
 from delta_engine.domain.model import (
@@ -59,11 +59,11 @@ def document(**overrides: object) -> str:
     ],
 )
 def test_maps_structured_type_objects(type_object, expected):
-    assert data_type_from_json(type_object) == expected
+    assert _data_type_from_json(type_object) == expected
 
 
 def test_maps_nested_struct_and_preserves_direct_field_names():
-    assert data_type_from_json(
+    assert _data_type_from_json(
         {
             "name": "struct",
             "fields": [
@@ -98,14 +98,14 @@ def test_maps_nested_struct_and_preserves_direct_field_names():
     ],
 )
 def test_unmappable_or_malformed_types_return_none(type_object):
-    assert data_type_from_json(type_object) is None
+    assert _data_type_from_json(type_object) is None
 
 
 def test_pathologically_deep_type_returns_none():
     payload: object = {"name": "int"}
     for _ in range(6000):
         payload = {"name": "array", "element_type": payload}
-    assert data_type_from_json(payload) is None
+    assert _data_type_from_json(payload) is None
 
 
 def test_parses_columns_comment_and_partition_order():
