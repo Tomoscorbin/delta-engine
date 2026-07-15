@@ -51,7 +51,7 @@ but ignore its `format` field.
 Relevant code:
 
 - `src/delta_engine/adapters/databricks/sql/queries.py` (`table_row_query`)
-- `src/delta_engine/adapters/databricks/sql/rows.py` (shared guard policy)
+- `src/delta_engine/adapters/databricks/sql/guards.py` (relation-kind and format guards)
 - `src/delta_engine/adapters/databricks/warehouse/reader.py` (`fetch_state`)
 - `src/delta_engine/adapters/databricks/spark/reader.py` (`fetch_state`)
 
@@ -80,11 +80,15 @@ and the
 ### Proposed solution
 
 1. Expand `table_row_query` to return `table_type`, and admit only an allowlist
-   of `{MANAGED, EXTERNAL}`. Every other kind — view, materialized view,
-   streaming table, foreign table, shallow clone, and any future kind — raises a
+   of `{MANAGED}`. Every other kind — view, materialized view, streaming table,
+   foreign table, shallow clone, `EXTERNAL`, and any future kind — raises a
    single typed adapter error (`UnsupportedCatalogRelationError`) that the
    reader's existing exception boundary turns into `ReadFailed`. An allowlist
    fails closed on kinds the engine has not verified it can reconcile.
+   `EXTERNAL` is Delta and reconcilable in principle, but the engine only ever
+   creates managed tables (`compile_create_table` emits no `LOCATION`) and has
+   no external-table declaration, so it stays out of the allowlist until a live
+   test is added — the same treatment as shallow clones.
 2. For an admitted table, require `DESCRIBE DETAIL.format` == `delta`, rejecting
    any other format through the same error. This is the secondary filter for a
    non-Delta _ordinary_ table, which the relation-kind guard alone does not
@@ -92,8 +96,9 @@ and the
 3. Order the guards: relation kind first, before `DESCRIBE DETAIL`, so a view
    never reaches it; format before column mapping, so a non-Delta table fails as
    "unsupported format" rather than as an unmappable column (finding 2).
-4. Keep the guard policy and the exception in `rows.py`, shared by both readers,
-   as `column_from_catalog`'s unmappable-type policy already is.
+4. Keep the guards and the exception in a dedicated `guards.py` module, shared
+   by both readers — a representability decision, not a safety one, so it stays
+   in the adapter rather than application validation.
 5. Source `table_type` per backend: the warehouse reader from the expanded
    `table_row_query`; the Spark reader from `information_schema.tables` where it
    is available, falling back to the catalog object only where it is not (local

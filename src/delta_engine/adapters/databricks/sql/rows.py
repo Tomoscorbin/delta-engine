@@ -23,7 +23,7 @@ from itertools import groupby
 import json
 import logging
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any
 
 from delta_engine.adapters.databricks.sql.parse import parse_data_type
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
@@ -36,53 +36,6 @@ from delta_engine.domain.model import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class UnsupportedCatalogRelationError(Exception):
-    """A catalog object delta-engine does not manage as an ordinary Delta table."""
-
-
-# The engine's whole action set is expressed in ``ALTER TABLE`` DDL, which only
-# ordinary Delta tables accept. Every other relation kind — views, materialized
-# views, streaming tables, foreign tables, shallow clones — has its own DDL
-# surface and restricted capabilities, so it is rejected here rather than read
-# and mismanaged. An allowlist (not a blocklist) fails closed on future kinds.
-_SUPPORTED_RELATION_KINDS: Final[frozenset[str]] = frozenset({"MANAGED", "EXTERNAL"})
-
-
-def require_supported_relation(table_type: str, qualified_name: QualifiedName) -> None:
-    """
-    Raise unless ``table_type`` is a relation kind the engine can reconcile.
-
-    This is a representability guard, not a safety rule: an unsupported kind is
-    not a Delta table the engine can diff, so it is failed at the read boundary
-    (turning into ``ReadFailed``) rather than admitted as observed state. A
-    streaming table or materialized view reports Delta format, so only the
-    relation kind — not the format guard — catches it.
-    """
-    if table_type.upper() not in _SUPPORTED_RELATION_KINDS:
-        raise UnsupportedCatalogRelationError(
-            f"{qualified_name} is a {table_type} relation; delta-engine manages"
-            " ordinary Delta tables (MANAGED or EXTERNAL) only"
-        )
-
-
-def require_delta_format(detail_row: Any, qualified_name: QualifiedName) -> None:
-    """
-    Raise unless a DESCRIBE DETAIL row reports Delta format.
-
-    A ``MANAGED``/``EXTERNAL`` relation can still be non-Delta (Parquet,
-    Iceberg); ``DESCRIBE DETAIL.format`` is the documented delta/iceberg
-    discriminator and the reader has already fetched the row. Like the
-    relation-kind guard, this fails closed to ``ReadFailed``. A missing
-    ``format`` field raises (an ``AttributeError`` caught by the same boundary):
-    DESCRIBE DETAIL always carries it, so its absence is a read gone wrong.
-    """
-    table_format = detail_row.format
-    if table_format.casefold() != "delta":
-        raise UnsupportedCatalogRelationError(
-            f"{qualified_name} has format {table_format!r}; delta-engine manages Delta tables only"
-        )
 
 
 def column_from_catalog(
