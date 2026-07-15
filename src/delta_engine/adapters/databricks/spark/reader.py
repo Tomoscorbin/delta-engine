@@ -1,7 +1,6 @@
 """Reader adapter for Databricks Unity Catalog."""
 
-from dataclasses import dataclass, replace
-from types import MappingProxyType
+from dataclasses import dataclass
 from typing import Final
 
 from pyspark.errors.exceptions.base import AnalysisException
@@ -9,22 +8,11 @@ from pyspark.sql import Row, SparkSession
 from pyspark.sql.catalog import Column as SparkColumn
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
+from delta_engine.adapters.databricks.read import observed_table_from_reads
 from delta_engine.adapters.databricks.sql import (
-    clustering_columns_from_detail_row,
     column_from_catalog,
-    column_tags_from_rows,
-    column_tags_query,
     describe_detail_query,
-    foreign_keys_from_rows,
-    foreign_keys_query,
     information_schema_probe_query,
-    managed_properties_from_detail_row,
-    primary_key_from_rows,
-    primary_key_query,
-    referencing_foreign_keys_from_rows,
-    referencing_foreign_keys_query,
-    table_tags_from_rows,
-    table_tags_query,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
@@ -35,7 +23,6 @@ from delta_engine.application.ports import (
 )
 from delta_engine.domain.model import (
     ObservedColumn,
-    ObservedTable,
     QualifiedName,
 )
 
@@ -128,40 +115,15 @@ class SparkReader:
             for spark_column in self.spark.catalog.listColumns(str(qualified_name))
         )
         mappings = tuple(mapping for mapping in candidate_mappings if mapping is not None)
-        column_tags = column_tags_from_rows(
-            self._information_schema_rows(catalog, column_tags_query(qualified_name))
-        )
-        columns = tuple(
-            replace(
-                mapping.column,
-                tags=column_tags.get(mapping.column.name, MappingProxyType({})),
-            )
-            for mapping in mappings
-        )
-        detail_row = self._describe_detail_row(qualified_name)
-        observed = ObservedTable(
-            qualified_name=qualified_name,
-            columns=columns,
+        observed = observed_table_from_reads(
+            qualified_name,
+            columns=tuple(mapping.column for mapping in mappings),
             comment=self._fetch_table_comment(qualified_name),
-            properties=managed_properties_from_detail_row(detail_row),
-            tags=table_tags_from_rows(
-                self._information_schema_rows(catalog, table_tags_query(qualified_name))
-            ),
+            detail_row=self._describe_detail_row(qualified_name),
             partitioned_by=tuple(
                 mapping.column.name for mapping in mappings if mapping.is_partition
             ),
-            clustered_by=clustering_columns_from_detail_row(detail_row),
-            primary_key=primary_key_from_rows(
-                self._information_schema_rows(catalog, primary_key_query(qualified_name))
-            ),
-            foreign_keys=foreign_keys_from_rows(
-                self._information_schema_rows(catalog, foreign_keys_query(qualified_name))
-            ),
-            referencing_foreign_keys=referencing_foreign_keys_from_rows(
-                self._information_schema_rows(
-                    catalog, referencing_foreign_keys_query(qualified_name)
-                )
-            ),
+            run_info_schema_query=lambda query: self._information_schema_rows(catalog, query),
         )
         return TablePresent(table=observed)
 

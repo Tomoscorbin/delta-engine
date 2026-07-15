@@ -273,7 +273,7 @@ def _properties_clause(props: Mapping[str, str | None]) -> str:
     return f"TBLPROPERTIES ({pairs})"
 
 
-def _partitioned_by_clause(partitioned_by: tuple[str, ...] = ()) -> str:
+def _partitioned_by_clause(partitioned_by: tuple[str, ...]) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
@@ -281,7 +281,7 @@ def _partitioned_by_clause(partitioned_by: tuple[str, ...] = ()) -> str:
     return f"PARTITIONED BY ({quoted_columns})"
 
 
-def _clustered_by_clause(clustered_by: tuple[str, ...] = ()) -> str:
+def _clustered_by_clause(clustered_by: tuple[str, ...]) -> str:
     """Return CLUSTER BY (...) or '' when the table declares no clustering."""
     if not clustered_by:
         return ""
