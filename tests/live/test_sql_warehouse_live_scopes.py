@@ -16,6 +16,7 @@ from tests.live.sql_warehouse_live_helpers import (
 
 
 def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connection, live_tables):
+    """A metadata-scoped sync updates governed metadata but preserves external structure."""
     table_name = live_tables("metadata_scope")
     execute_sql(
         live_connection,
@@ -60,6 +61,7 @@ def test_metadata_scope_changes_metadata_and_preserves_external_ddl(live_connect
 
 
 def test_tag_scope_changes_only_table_and_column_tags(live_connection, live_tables):
+    """A tags-scoped sync changes only table and column tags, leaving all else intact."""
     table_name = live_tables("tag_scope")
     execute_sql(
         live_connection,

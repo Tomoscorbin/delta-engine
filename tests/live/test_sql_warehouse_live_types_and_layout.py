@@ -45,6 +45,7 @@ def _types(state) -> dict[str, str]:
 
 
 def test_sync_creates_and_round_trips_every_supported_column_type(live_connection, live_tables):
+    """Every supported column type, including nested and parameterised ones, round-trips."""
     table_name = live_tables("types")
     table = DeltaTable(
         live_catalog(),
@@ -118,6 +119,7 @@ def test_sync_creates_and_round_trips_every_supported_column_type(live_connectio
 
 
 def test_sync_creates_every_managed_table_property(live_connection, live_tables):
+    """Every managed table property is written and read back on creation."""
     table_name = live_tables("properties")
     declared = {
         Property.COLUMN_MAPPING_MODE: "name",
@@ -143,6 +145,7 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
 
 
 def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tables):
+    """A freshly created table carries none of the managed property keys."""
     # Registry admission policy: a key belongs in the managed registry only
     # if Databricks does not auto-write it, otherwise every undeclared table
     # would fail validation on resync.
@@ -161,6 +164,7 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
 
 
 def test_unregistered_properties_are_invisible_to_a_full_sync(live_connection, live_tables):
+    """Properties outside the managed registry are neither drift nor unset on a full sync."""
     # The reader filters unregistered keys out of observed state, so keys
     # owned by other tooling or the platform are neither drift nor unset.
     table_name = live_tables("custom_properties")
@@ -185,6 +189,7 @@ def test_unregistered_properties_are_invisible_to_a_full_sync(live_connection, l
 
 
 def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_tables):
+    """Partition, clustering, and primary-key columns can all be widened."""
     # The engine does not model platform restrictions on which column roles
     # may widen; Unity Catalog imposes none for these roles, so the plain
     # widening path must succeed on partition, clustering, and key columns.
@@ -244,6 +249,7 @@ def test_sync_widens_partition_clustering_and_key_columns(live_connection, live_
 def test_sync_creates_partitioned_table_with_ordered_partition_columns(
     live_connection, live_tables
 ):
+    """A partitioned table is created with its partition columns in declared order."""
     table_name = live_tables("partitioned")
     build_sql_engine(live_connection).sync(
         DeltaTable(
@@ -269,6 +275,7 @@ def test_sync_creates_partitioned_table_with_ordered_partition_columns(
 
 
 def test_sync_changes_and_removes_liquid_clustering(live_connection, live_tables):
+    """Liquid clustering keys can be changed and then removed entirely."""
     table_name = live_tables("clustering")
     columns = (Column("id", Integer()), Column("region", String()))
     engine = build_sql_engine(live_connection)
@@ -301,6 +308,7 @@ def test_sync_changes_and_removes_liquid_clustering(live_connection, live_tables
 
 
 def test_sync_widens_supported_column_types_in_live_catalog(live_connection, live_tables):
+    """Supported numeric, decimal, and temporal column types widen in place."""
     table_name = live_tables("widen")
     engine = build_sql_engine(live_connection)
     engine.sync(

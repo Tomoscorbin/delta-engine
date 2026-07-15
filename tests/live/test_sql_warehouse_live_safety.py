@@ -42,6 +42,7 @@ def _assert_rejected_without_catalog_change(connection, table_name, declaration)
 
 
 def test_non_nullable_column_add_is_rejected_without_catalog_change(live_connection, live_tables):
+    """Adding a non-nullable column is rejected, and the catalog is left unchanged."""
     table_name = live_tables("reject_required_add")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -66,6 +67,7 @@ def test_non_nullable_column_add_is_rejected_without_catalog_change(live_connect
 
 
 def test_nullability_tightening_is_rejected_without_catalog_change(live_connection, live_tables):
+    """Tightening a column to non-nullable is rejected, and the catalog is unchanged."""
     table_name = live_tables("reject_not_null")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -90,6 +92,7 @@ def test_nullability_tightening_is_rejected_without_catalog_change(live_connecti
 
 
 def test_type_narrowing_is_rejected_without_catalog_change(live_connection, live_tables):
+    """Narrowing a column's type is rejected, and the catalog is left unchanged."""
     table_name = live_tables("reject_narrow")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -116,6 +119,7 @@ def test_type_narrowing_is_rejected_without_catalog_change(live_connection, live
 def test_column_drop_without_column_mapping_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """Dropping a column without column mapping is rejected; the catalog is unchanged."""
     table_name = live_tables("reject_drop")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -140,6 +144,7 @@ def test_column_drop_without_column_mapping_is_rejected_without_catalog_change(
 
 
 def test_partitioning_change_is_rejected_without_catalog_change(live_connection, live_tables):
+    """Changing an existing table's partitioning is rejected; the catalog is unchanged."""
     table_name = live_tables("reject_partition")
     columns = (Column("id", Integer()), Column("region", String()))
     engine = build_sql_engine(live_connection)
@@ -161,6 +166,7 @@ def test_partitioning_change_is_rejected_without_catalog_change(live_connection,
 def test_partitioned_to_clustered_conversion_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """Converting a partitioned table to clustering is rejected, and nothing changes."""
     table_name = live_tables("reject_convert")
     execute_sql(
         live_connection,
@@ -184,6 +190,7 @@ def test_partitioned_to_clustered_conversion_is_rejected_without_catalog_change(
 def test_permanent_column_mapping_transition_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """Turning column mapping off is rejected, and the catalog is left unchanged."""
     table_name = live_tables("reject_mapping")
     columns = (Column("id", Integer()),)
     engine = build_sql_engine(live_connection)
@@ -213,6 +220,7 @@ def test_permanent_column_mapping_transition_is_rejected_without_catalog_change(
 def test_referenced_primary_key_change_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """Changing a primary key referenced by another table's FK is rejected client-side."""
     parent_name = live_tables("referenced_parent")
     child_name = live_tables("referencing_child")
     parent_columns = (Column("id", Integer(), nullable=False),)
@@ -257,6 +265,7 @@ def test_referenced_primary_key_change_is_rejected_without_catalog_change(
 
 
 def test_restricted_scope_drift_is_rejected_without_catalog_change(live_connection, live_tables):
+    """Drift outside a restricted scope is rejected, and the catalog is left unchanged."""
     table_name = live_tables("reject_scope_drift")
     execute_sql(
         live_connection,
@@ -278,6 +287,7 @@ def test_restricted_scope_drift_is_rejected_without_catalog_change(live_connecti
 
 
 def test_restricted_scope_does_not_create_missing_table(live_connection, live_tables):
+    """A restricted-scope declaration refuses to create a missing table."""
     table_name = live_tables("missing_scope")
     declaration = DeltaTable(
         live_catalog(),
@@ -297,6 +307,7 @@ def test_restricted_scope_does_not_create_missing_table(live_connection, live_ta
 def test_independent_table_still_changes_when_another_table_is_rejected(
     live_connection, live_tables
 ):
+    """An independent table still syncs when another table in the run is rejected."""
     unsafe_name = live_tables("batch_unsafe")
     healthy_name = live_tables("batch_healthy")
     engine = build_sql_engine(live_connection)
@@ -335,6 +346,7 @@ def test_independent_table_still_changes_when_another_table_is_rejected(
 def test_server_rejected_statement_surfaces_as_typed_execution_failure(
     live_connection, live_tables
 ):
+    """A warehouse-rejected statement surfaces as a typed execution failure with its SQL."""
     table_name = live_tables("reject_execution")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -375,6 +387,7 @@ def test_server_rejected_statement_surfaces_as_typed_execution_failure(
 def test_widening_without_the_type_widening_property_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """Widening without the type-widening property is rejected, and nothing changes."""
     table_name = live_tables("reject_widen")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -401,6 +414,7 @@ def test_widening_without_the_type_widening_property_is_rejected_without_catalog
 def test_undeclared_managed_property_is_rejected_without_catalog_change(
     live_connection, live_tables
 ):
+    """A managed property set outside the declaration is rejected, not reconciled."""
     # Exact-declaration semantics: a managed key set outside the declaration
     # is drift the sync must refuse to reconcile silently, not quietly unset.
     table_name = live_tables("reject_undeclared")
@@ -424,6 +438,7 @@ def test_undeclared_managed_property_is_rejected_without_catalog_change(
 def test_child_with_foreign_key_is_blocked_when_its_parent_is_rejected(
     live_connection, live_tables
 ):
+    """A child table is blocked when its foreign-key parent is rejected in the same run."""
     parent_name = live_tables("blocked_parent")
     child_name = live_tables("blocked_child")
     engine = build_sql_engine(live_connection)
@@ -475,6 +490,7 @@ def test_child_with_foreign_key_is_blocked_when_its_parent_is_rejected(
 
 
 def test_unreadable_catalog_surfaces_as_typed_read_failure(live_connection):
+    """An unreadable catalog surfaces as a typed read failure, not a raw connector error."""
     declaration = DeltaTable(
         "de_live_nonexistent_catalog",
         live_schema(),

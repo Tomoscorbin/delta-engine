@@ -24,6 +24,7 @@ from tests.live.sql_warehouse_live_helpers import (
 
 
 def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
+    """Adds, widens to composite, and drops a primary key across successive syncs."""
     table_name = live_tables("pk_lifecycle")
     columns = (
         Column("tenant_id", Integer(), nullable=False),
@@ -62,6 +63,7 @@ def test_sync_adds_changes_and_drops_primary_key(live_connection, live_tables):
 def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
     live_connection, live_tables
 ):
+    """Creates a composite foreign key parent-first from reversed input, then drops it."""
     parent_name = live_tables("accounts")
     child_name = live_tables("orders")
     parent_columns = (
@@ -126,6 +128,7 @@ def test_sync_creates_composite_foreign_key_in_dependency_order_and_removes_it(
 
 
 def test_sync_creates_self_referential_foreign_key(live_connection, live_tables):
+    """Creates a self-referential foreign key on a single table."""
     table_name = live_tables("employees")
     table = DeltaTable(
         live_catalog(),
@@ -149,6 +152,7 @@ def test_sync_creates_self_referential_foreign_key(live_connection, live_tables)
 def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
     live_connection, live_tables
 ):
+    """Adopts a live key created under foreign constraint names, finding no drift."""
     # Constraint identity is structural: a live PK/FK created under names the
     # engine would never generate is still the declared constraint, so a sync
     # finds no drift and the foreign names survive.
@@ -187,6 +191,7 @@ def test_structurally_matching_constraints_adopt_foreign_names_without_drift(
 def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     live_connection, live_tables
 ):
+    """Drops a primary key even while a UNIQUE constraint outside the model backs an FK."""
     # given a parent whose primary key has no referencing foreign keys, but
     # whose UNIQUE constraint backs one (UNIQUE constraints are DBR 18.2+
     # Public Preview and outside the engine's model)

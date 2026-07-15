@@ -22,6 +22,7 @@ from tests.live.sql_warehouse_live_helpers import (
 def test_cdf_enablement_fails_on_a_table_carrying_reserved_cdf_columns(
     live_connection, live_tables
 ):
+    """Databricks blocks enabling change data feed on a table with reserved CDF columns."""
     # The API refuses declarations that combine change data feed with
     # _change_type/_commit_version/_commit_timestamp columns because the
     # platform enforces the same rule at enablement time.
@@ -42,6 +43,7 @@ def test_cdf_enablement_fails_on_a_table_carrying_reserved_cdf_columns(
 def test_special_characters_in_nested_struct_field_names_require_column_mapping(
     live_connection, live_tables
 ):
+    """Databricks needs column mapping for special characters in nested struct fields."""
     # The declaration gate recursively rejects special characters in nested
     # struct field names unless column mapping is on — both directions of
     # that assumption must match the platform. (The engine deliberately does
@@ -70,6 +72,7 @@ def test_special_characters_in_nested_struct_field_names_require_column_mapping(
 def test_platform_rename_silently_drops_keys_including_other_tables_foreign_keys(
     live_connection, live_tables
 ):
+    """RENAME COLUMN silently drops keys, cascading into other tables' foreign keys."""
     # RENAME COLUMN drops any PK/FK using the column, cascading into other
     # tables' foreign keys with no error (first observed live 2026-07-14).
     # This is the hazard behind PrimaryKeyReferencedByForeignKeys and the
@@ -102,6 +105,7 @@ def test_platform_rename_silently_drops_keys_including_other_tables_foreign_keys
 def test_platform_restricts_a_primary_key_drop_while_a_foreign_key_references_it(
     live_connection, live_tables
 ):
+    """DROP PRIMARY KEY is RESTRICTed while a foreign key references it, even IF EXISTS."""
     # DROP PRIMARY KEY defaults to RESTRICT, and IF EXISTS does not bypass
     # it. This is the engine's fail-closed net: an inbound FK the reader
     # could not observe (e.g. cross-catalog) fails the compiled drop, and
@@ -132,6 +136,7 @@ def test_platform_restricts_a_primary_key_drop_while_a_foreign_key_references_it
 def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
     live_connection, live_tables
 ):
+    """Databricks blocks renaming a column a CHECK constraint references."""
     # The engine does not model CHECK constraints; renames of referenced
     # columns are documented to fail at execution rather than validation.
     table_name = live_tables("check_dependent")
@@ -154,6 +159,7 @@ def test_platform_blocks_renaming_a_column_referenced_by_a_check_constraint(
 
 
 def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_tables):
+    """Databricks refuses to cluster a partitioned table."""
     # PartitioningChangeNotSupported blocks partitioned->clustered
     # conversions; the platform refuses the direct conversion too, so the
     # engine is not withholding a supported operation.
@@ -175,6 +181,7 @@ def test_platform_refuses_clustering_a_partitioned_table(live_connection, live_t
 
 
 def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, live_tables):
+    """Databricks rejects a column tag key or value longer than 256 characters."""
     # A column tag key or value longer than 256 characters is rejected (first
     # observed live 2026-07-14). This backs the length gates in
     # api/delta_table.py (_validate_tags), which reject both at declaration
@@ -205,6 +212,7 @@ def test_platform_rejects_an_over_long_column_tag_key_or_value(live_connection, 
 
 
 def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, live_tables):
+    """Databricks rejects a complex type as a partition column."""
     # Delta refuses complex/nested types as partition columns, raising
     # INVALID_PARTITION_COLUMN_DATA_TYPE (error class confirmed live
     # 2026-07-14; the older DELTA_INVALID_PARTITION_COLUMN_TYPE spelling no
