@@ -67,6 +67,13 @@ def data_type_from_json(type_obj: object) -> DataType | None:
     policy. Domain constructor rejections (decimal over the Delta limit,
     struct fields colliding after casefold) also yield ``None``.
     """
+    try:
+        return _data_type_from_json(type_obj)
+    except (ValueError, RecursionError):
+        return None
+
+
+def _data_type_from_json(type_obj: object) -> DataType | None:
     if not isinstance(type_obj, dict):
         return None
     name = type_obj.get("name")

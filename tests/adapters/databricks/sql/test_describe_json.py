@@ -73,3 +73,21 @@ def test_unmappable_returns_none():
     )  # duplicate field name after casefold
     assert data_type_from_json({"not": "a type"}) is None
     assert data_type_from_json("string") is None
+
+
+def test_blank_struct_field_name_returns_none():
+    assert (
+        data_type_from_json({"name": "struct", "fields": [{"name": "  ", "type": {"name": "int"}}]})
+        is None
+    )
+
+
+def test_decimal_over_delta_limit_returns_none():
+    assert data_type_from_json({"name": "decimal", "precision": 40, "scale": 2}) is None
+
+
+def test_pathologically_deep_nesting_returns_none():
+    payload = {"name": "int"}
+    for _ in range(6000):
+        payload = {"name": "array", "element_type": payload}
+    assert data_type_from_json(payload) is None
