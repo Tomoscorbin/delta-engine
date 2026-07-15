@@ -1,15 +1,12 @@
 """Validated boundary from raw table diffs to executable action plans."""
 
 from dataclasses import dataclass
-from typing import assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
-    TableDrift,
-    TableMissing,
 )
 
 
@@ -41,10 +38,5 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     validation = validate_diff(diff)
     if validation.failed:
         return PlanningFailed(failures=validation.failures)
-    match diff:
-        case TableMissing() as missing:
-            return PlanningSucceeded(plan=ActionPlan(missing.actions))
-        case TableDrift() as drift:
-            return PlanningSucceeded(plan=ActionPlan(drift.actions))
-        case _ as unreachable:
-            assert_never(unreachable)
+    else:
+        return PlanningSucceeded(plan=ActionPlan(diff.actions))
