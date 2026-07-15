@@ -1,10 +1,12 @@
 """
 Parse Databricks DDL type strings into domain data types.
 
-The read half of the shared SQL type mapping — the twin of :mod:`types`,
-which renders domain types as DDL text. Input is the type string catalogs
-report (``information_schema.columns.full_data_type``), e.g.
-``"decimal(10,2)"`` or ``"struct<id: bigint, tags: array<string>>"``.
+The read half of the Spark SQL type mapping — the twin of :mod:`types`,
+which renders domain types as DDL text. Input is the DDL type string Spark's
+catalog reports, e.g.
+``"decimal(10,2)"`` or ``"struct<id: bigint, tags: array<string>>"``. This
+parser remains the Spark reader's compatibility path; the warehouse reader
+receives structured type objects from ``DESCRIBE TABLE … AS JSON``.
 
 Returns ``None`` for any type the domain does not model (``interval``,
 ``void``, geospatial, collated strings, future types) and for malformed

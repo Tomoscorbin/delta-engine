@@ -131,12 +131,11 @@ The Databricks adapters also own backend normalization, most of it shared
 between the two backends through the `sql` core: lowercasing catalog
 identifiers, reading Unity Catalog constraints and tags through the same
 information_schema queries and row mappers, and quoting SQL identifiers.
-DDL type-string parsing is shared too — `sql/parse.py` turns catalog type
-text into domain data types for both backends, since Unity Catalog reports
-column types as DDL strings on the Spark path (`listColumns`) and the
-warehouse path (`information_schema.columns`) alike. The per-column read
-policy is equally shared: an unmappable type skips the column with a
-warning, unless it is a partition column, which fails the read.
+The readers receive column types in different shapes: the Spark path maps DDL
+strings from `listColumns` through `sql/parse.py`, while the warehouse path
+maps the structured type objects returned by `DESCRIBE TABLE EXTENDED … AS
+JSON`. The per-column read policy is shared: an unmappable type skips the
+column with a warning, unless it is a partition column, which fails the read.
 Exception translation is where the backends
 genuinely diverge: the Spark backend unwraps `Py4JJavaError` to report the
 underlying JVM exception class, while the warehouse backend has no such
@@ -367,9 +366,11 @@ does not depend on which one ran it, and both read mostly the same shared
 `information_schema` and `DESCRIBE DETAIL` queries — differing in the
 transport those queries run over: in-process Spark SQL versus the warehouse
 connection's cursor. The read-side split is narrow: the Spark backend takes
-table existence, column listing, and the table comment from Spark catalog
-calls instead of `information_schema`, which is why only the Spark backend
-can read catalogs without one, such as `hive_metastore`.
+table existence, columns, and the table comment from Spark catalog calls; the
+warehouse backend takes those facts from one structured `DESCRIBE TABLE`
+document. The warehouse path still requires `information_schema` for keys and
+tags, which is why only the Spark backend can read catalogs without it, such as
+`hive_metastore`.
 
 ## Diff-first planning
 

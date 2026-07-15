@@ -118,6 +118,33 @@ def test_sync_creates_and_round_trips_every_supported_column_type(live_connectio
     assert engine.sync(table).has_changes is False
 
 
+def test_reader_round_trips_a_special_character_nested_field_name(
+    live_connection, live_tables
+):
+    """Structured warehouse metadata preserves a nested field name that DDL text loses."""
+    table_name = live_tables("nested_special_name")
+    table = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(
+            Column(
+                "payload",
+                Struct((StructField("bad name", Integer()),)),
+            ),
+        ),
+        properties={Property.COLUMN_MAPPING_MODE: "name"},
+    )
+    engine = build_sql_engine(live_connection)
+
+    created = engine.sync(table)
+    converged = engine.sync(table)
+
+    assert created.has_failures is False
+    assert converged.has_failures is False
+    assert converged.has_changes is False
+
+
 def test_sync_creates_every_managed_table_property(live_connection, live_tables):
     """Every managed table property is written and read back on creation."""
     table_name = live_tables("properties")

@@ -1,13 +1,15 @@
 """
 Reader adapter for Databricks SQL warehouses.
 
-Unity Catalog only: every read comes from information_schema and
-DESCRIBE DETAIL over a databricks-sql connection — there is no fallback for
-catalogs without information_schema (e.g. hive_metastore); such reads
-surface as ``ReadFailed`` with the backend's error. The connector is never
-imported at runtime: the connection is duck-typed (``.cursor()`` context
-manager with ``execute``/``fetchall``), so this backend imports nothing
-beyond the shared adapter core.
+Unity Catalog only. ``DESCRIBE TABLE EXTENDED … AS JSON`` supplies relation,
+provider, column, comment, and partition metadata; ``DESCRIBE DETAIL`` remains
+the authoritative source for managed Delta properties and clustering; and
+documented information_schema relations supply keys and tags. There is no
+fallback for catalogs without information_schema (e.g. hive_metastore).
+
+The connector is never imported at runtime: the connection is duck-typed
+(``.cursor()`` context manager with ``execute``/``fetchone``/``fetchall``),
+so this backend imports nothing beyond the shared adapter core.
 
 Complex-typed DESCRIBE DETAIL fields (the ``properties`` map,
 ``clusteringColumns``) arrive as JSON strings from the connector by default;
@@ -17,16 +19,18 @@ either connection mode reads correctly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
+from delta_engine.adapters.databricks.errors import (
+    exception_message,
+    exception_type_name,
+    is_missing_table,
+)
 from delta_engine.adapters.databricks.read import observed_table_from_reads
 from delta_engine.adapters.databricks.sql import (
-    column_from_catalog,
-    columns_query,
     describe_detail_query,
-    table_row_query,
+    describe_json_query,
+    parse_described_table,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import (
@@ -35,10 +39,7 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.domain.model import (
-    ObservedColumn,
-    QualifiedName,
-)
+from delta_engine.domain.model import QualifiedName
 
 if TYPE_CHECKING:
     from databricks.sql.client import Connection
@@ -71,17 +72,22 @@ class WarehouseReader:
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         """Read current state, letting any failure propagate to ``fetch_state``."""
         with self._connection.cursor() as cursor:
-            table_rows = _fetch_all(cursor, table_row_query(qualified_name))
-            if not table_rows:
-                return TableAbsent()
-
-            column_rows = _fetch_all(cursor, columns_query(qualified_name))
+            try:
+                cursor.execute(describe_json_query(qualified_name))
+            except Exception as exception:
+                if is_missing_table(exception):
+                    return TableAbsent()
+                raise
+            row = cursor.fetchone()
+            if row is None:
+                raise RuntimeError(f"DESCRIBE TABLE AS JSON returned no row for {qualified_name}")
+            described = parse_described_table(row[0], qualified_name)
             observed = observed_table_from_reads(
                 qualified_name,
-                columns=_to_columns(column_rows, qualified_name),
-                comment=table_rows[0].comment or "",
+                columns=described.columns,
+                comment=described.comment,
                 detail_row=_describe_detail_row(cursor, qualified_name),
-                partitioned_by=_partitioned_by(column_rows),
+                partitioned_by=described.partitioned_by,
                 run_info_schema_query=lambda query: _fetch_all(cursor, query),
             )
         return TablePresent(table=observed)
@@ -97,8 +103,8 @@ def _describe_detail_row(cursor: Any, qualified_name: QualifiedName) -> Any:
     """
     Return the table's DESCRIBE DETAIL row.
 
-    Raises when the query yields no row for a table information_schema just
-    reported present: an empty result there is not "a table with no
+    Raises when the query yields no row for a table just described as present:
+    an empty result there is not "a table with no
     properties" (that is a present row with an empty map) but a race or a
     catalog inconsistency. Failing loud lets ``fetch_state``'s error
     boundary return ``ReadFailed`` — the honest outcome for "could not
@@ -110,35 +116,7 @@ def _describe_detail_row(cursor: Any, qualified_name: QualifiedName) -> Any:
     if not rows:
         raise RuntimeError(
             f"DESCRIBE DETAIL returned no rows for {qualified_name}, which"
-            " information_schema just reported as present — the table was"
+            " DESCRIBE TABLE just reported as present — the table was"
             " dropped mid-read or the catalog is inconsistent."
         )
     return rows[0]
-
-
-def _to_columns(
-    column_rows: Sequence[Any], qualified_name: QualifiedName
-) -> tuple[ObservedColumn, ...]:
-    """Map information_schema.columns rows to observed columns, skipping unmappable types."""
-    columns = []
-    for row in column_rows:
-        column = column_from_catalog(
-            name=row.column_name,
-            type_text=row.full_data_type,
-            nullable=row.is_nullable == "YES",
-            comment=row.comment or "",
-            is_partition=row.partition_index is not None,
-            qualified_name=qualified_name,
-        )
-        if column is not None:
-            columns.append(column)
-    return tuple(columns)
-
-
-def _partitioned_by(column_rows: Sequence[Any]) -> tuple[str, ...]:
-    """Partition column names in ascending catalog ``partition_index`` order."""
-    partition_rows = sorted(
-        (row for row in column_rows if row.partition_index is not None),
-        key=lambda row: row.partition_index,
-    )
-    return tuple(row.column_name.casefold() for row in partition_rows)

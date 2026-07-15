@@ -10,7 +10,11 @@ from types import SimpleNamespace
 
 from py4j.protocol import Py4JJavaError
 
-from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
+from delta_engine.adapters.databricks.errors import (
+    exception_message,
+    exception_type_name,
+    is_missing_table,
+)
 
 
 def test_names_plain_exceptions_by_python_class():
@@ -54,3 +58,24 @@ def test_falls_back_to_wrapper_class_when_the_gateway_is_unreachable():
     # Then both parts of the failure record remain constructible without the gateway
     assert exception_type_name(error) == "Py4JJavaError"
     assert exception_message(error) == "<exception message unavailable>"
+
+
+class AnalysisError(Exception):
+    def __init__(self, condition: str) -> None:
+        self.condition = condition
+
+    def getCondition(self) -> str:
+        return self.condition
+
+
+def test_missing_table_uses_structured_backend_condition_when_available():
+    assert is_missing_table(AnalysisError("TABLE_OR_VIEW_NOT_FOUND")) is True
+    assert is_missing_table(AnalysisError("SCHEMA_NOT_FOUND")) is False
+    assert is_missing_table(AnalysisError("INSUFFICIENT_PERMISSIONS")) is False
+
+
+def test_missing_table_uses_warehouse_message_prefix_as_fallback():
+    assert is_missing_table(RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] missing")) is True
+    assert is_missing_table(RuntimeError(" [TABLE_OR_VIEW_NOT_FOUND] missing")) is True
+    assert is_missing_table(RuntimeError("[SCHEMA_NOT_FOUND] missing")) is False
+    assert is_missing_table(RuntimeError("connection reset")) is False

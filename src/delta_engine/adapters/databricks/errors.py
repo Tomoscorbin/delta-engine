@@ -17,7 +17,12 @@ the import-linter contracts), and the duck-typing matches how this layer
 already treats catalog rows and connections.
 """
 
+import re
+from typing import Final
+
 _MESSAGE_UNAVAILABLE = "<exception message unavailable>"
+_MISSING_TABLE_CONDITION: Final = "TABLE_OR_VIEW_NOT_FOUND"
+_CONDITION_PREFIX: Final = re.compile(r"\s*\[([A-Z0-9_.]+)\]")
 
 
 def exception_type_name(exception: Exception) -> str:
@@ -53,3 +58,18 @@ def exception_message(exception: Exception) -> str:
         return str(exception)
     except Exception:
         return _MESSAGE_UNAVAILABLE
+
+
+def is_missing_table(exception: Exception) -> bool:
+    """Whether a backend exception specifically reports a missing table or view."""
+    getter = getattr(exception, "getCondition", None)
+    if callable(getter):
+        try:
+            condition = getter()
+        except Exception:
+            condition = None
+        if isinstance(condition, str):
+            return condition == _MISSING_TABLE_CONDITION
+
+    match = _CONDITION_PREFIX.match(exception_message(exception))
+    return bool(match and match.group(1) == _MISSING_TABLE_CONDITION)

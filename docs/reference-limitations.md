@@ -12,10 +12,10 @@ the page with the detail.
 
 | Requirement           | Supported                                                                                                                                                                                                                              |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader does not yet reliably fail closed on every non-Delta relation, so register Delta tables only ([architecture](explanation-architecture.md)) |
+| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today. The SQL warehouse reader fails closed on non-table and non-Delta descriptions; the Spark reader's equivalent guard remains outstanding ([architecture](explanation-architecture.md)) |
 | Python                | 3.12 or later                                                                                                                                                                                                                          |
 | PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                           |
-| SQL warehouse backend | Unity Catalog only — every read runs through `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md))                  |
+| SQL warehouse backend | Unity Catalog only — keys and tags require `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md))                  |
 
 ## Identifier handling
 

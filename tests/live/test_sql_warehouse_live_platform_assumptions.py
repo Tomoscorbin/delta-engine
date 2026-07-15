@@ -46,10 +46,8 @@ def test_special_characters_in_nested_struct_field_names_require_column_mapping(
     """Databricks needs column mapping for special characters in nested struct fields."""
     # The declaration gate recursively rejects special characters in nested
     # struct field names unless column mapping is on — both directions of
-    # that assumption must match the platform. (The engine deliberately does
-    # not round-trip such tables yet: the reader cannot parse the unquoted
-    # DDL rendering `struct<bad name:int>`; see the todo on special-character
-    # field names.)
+    # that assumption must match the platform. The warehouse reader's
+    # structured metadata round trip is covered in the types-and-layout suite.
     rejected_name = live_tables("nested_plain")
     with pytest.raises(ServerOperationError, match="DELTA_INVALID_CHARACTERS_IN_COLUMN_NAMES"):
         execute_sql(
