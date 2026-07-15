@@ -133,9 +133,9 @@ def test_failure_headlines_summarize_without_the_detail_message():
 
 def test_each_failure_kind_declares_its_producing_phase():
     # Given the four failure kinds
-    # Then each declares the phase that produced it, ordered read < validation < fk < execution
+    # Then each declares the phase that produced it, ordered read < planning < fk < execution
     assert ReadFailure("E", "m").phase is FailurePhase.READ
-    assert ValidationFailure("R", "m").phase is FailurePhase.VALIDATION
+    assert ValidationFailure("R", "m").phase is FailurePhase.PLANNING
     assert (
         ForeignKeyFailure(
             table=QualifiedName("c", "s", "t"),
@@ -151,7 +151,7 @@ def test_each_failure_kind_declares_its_producing_phase():
     )
     assert (
         FailurePhase.READ
-        < FailurePhase.VALIDATION
+        < FailurePhase.PLANNING
         < FailurePhase.FOREIGN_KEY
         < FailurePhase.EXECUTION
     )

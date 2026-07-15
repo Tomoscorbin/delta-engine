@@ -141,10 +141,10 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, temp_schema):
             )
         )
 
-    # Then the table is reported VALIDATION_FAILED with a validation failure,
+    # Then the table is reported PLANNING_FAILED with a validation failure,
     # and the error message names the offending column so an operator can act
     [table_report] = excinfo.value.report.table_reports
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any(isinstance(f, ValidationFailure) for f in table_report.failures)
     assert "age" in str(excinfo.value)
 
@@ -389,7 +389,7 @@ def test_engine_metadata_scope_fails_when_column_type_has_drifted(spark, temp_sc
 
     # Then validation failed before execution and the table is unchanged
     report = exc_info.value.report.table_reports[0]
-    assert report.status is TableRunStatus.VALIDATION_FAILED
+    assert report.status is TableRunStatus.PLANNING_FAILED
     assert {f.name for f in spark.table(fq).schema.fields} == {"id"}
 
 

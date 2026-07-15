@@ -255,7 +255,7 @@ def test_referenced_primary_key_change_is_rejected_without_catalog_change(
         for table_report in error.value.report.table_reports
         if table_report.qualified_name.name == parent_name
     ]
-    assert parent_report.status is TableRunStatus.VALIDATION_FAILED
+    assert parent_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = parent_report.failures
     assert isinstance(failure, ValidationFailure)
     assert f"{child_name}_parent_id_fk" in failure.message

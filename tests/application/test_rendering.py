@@ -504,7 +504,7 @@ def test_grid_aligns_the_status_column_across_header_and_rows():
     # Then the STATUS column starts at the same offset in every line
     status_offset = header.index("STATUS")
     assert changed_row.index("SUCCESS") == status_offset
-    assert failed_row.index("VALIDATION_FAILED") == status_offset
+    assert failed_row.index("PLANNING_FAILED") == status_offset
 
 
 # ---------- run summary footer ----------

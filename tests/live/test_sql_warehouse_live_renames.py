@@ -341,7 +341,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
     # child's foreign key, so the engine refuses client-side: nothing was
     # planned and neither table changed.
     [parent_report] = error.value.report.table_reports
-    assert parent_report.status is TableRunStatus.VALIDATION_FAILED
+    assert parent_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = parent_report.failures
     assert isinstance(failure, ValidationFailure)
     assert failure.rule_name == "PrimaryKeyReferencedByForeignKeys"
@@ -377,7 +377,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
         )
 
     [table_report] = error.value.report.table_reports
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert "AmbiguousColumnRename" in {
         failure.rule_name
         for failure in table_report.failures

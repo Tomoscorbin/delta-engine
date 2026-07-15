@@ -29,7 +29,7 @@ class TableRunStatus(StrEnum):
 
     SUCCESS = "SUCCESS"
     READ_FAILED = "READ_FAILED"
-    VALIDATION_FAILED = "VALIDATION_FAILED"
+    PLANNING_FAILED = "PLANNING_FAILED"
     FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
 
@@ -40,7 +40,7 @@ class TableRunStatus(StrEnum):
 _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyType(
     {
         FailurePhase.READ: TableRunStatus.READ_FAILED,
-        FailurePhase.VALIDATION: TableRunStatus.VALIDATION_FAILED,
+        FailurePhase.PLANNING: TableRunStatus.PLANNING_FAILED,
         FailurePhase.FOREIGN_KEY: TableRunStatus.FOREIGN_KEY_FAILED,
         FailurePhase.EXECUTION: TableRunStatus.EXECUTION_FAILED,
     }
@@ -189,7 +189,7 @@ class SyncReport:
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "dry_run": self.dry_run,

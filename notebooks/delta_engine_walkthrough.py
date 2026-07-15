@@ -432,7 +432,7 @@ print("Step 4c verified: platform-managed property left untouched by sync.")
 # MAGIC
 # MAGIC Attempt four changes that would silently break data or require a rewrite,
 # MAGIC against a dedicated, foreign-key-free `events` table. The foreign-key-free
-# MAGIC table keeps each failure a clean `VALIDATION_FAILED` (a foreign-key failure
+# MAGIC table keeps each failure a clean `PLANNING_FAILED` (a foreign-key failure
 # MAGIC would otherwise take precedence and mask it).
 # MAGIC
 # MAGIC **Outcome**
@@ -504,7 +504,7 @@ report = sync_expecting_failure(define_events(columns=[*events_baseline_columns,
 
 # The report shows the change was planned but blocked at validation — nothing ran.
 [events_report] = report.table_reports
-assert events_report.status is TableRunStatus.VALIDATION_FAILED
+assert events_report.status is TableRunStatus.PLANNING_FAILED
 assert "region" not in inspector.fields_of("events")
 print("Step 5a verified: NOT NULL add blocked, table untouched.")
 
@@ -536,7 +536,7 @@ report = sync_expecting_failure(
 )
 
 [events_report] = report.table_reports
-assert events_report.status is TableRunStatus.VALIDATION_FAILED
+assert events_report.status is TableRunStatus.PLANNING_FAILED
 assert inspector.fields_of("events")["event_date"].nullable is True
 print("Step 5b verified: tightening blocked, event_date still nullable.")
 
@@ -571,7 +571,7 @@ report = sync_expecting_failure(
 )
 
 [events_report] = report.table_reports
-assert events_report.status is TableRunStatus.VALIDATION_FAILED
+assert events_report.status is TableRunStatus.PLANNING_FAILED
 assert isinstance(inspector.fields_of("events")["amount"].dataType, T.DecimalType)
 print("Step 5c verified: type change blocked, amount still Decimal.")
 
@@ -595,7 +595,7 @@ print("Step 5c verified: type change blocked, amount still Decimal.")
 report = sync_expecting_failure(define_events(columns=events_baseline_columns, partitioned_by=()))
 
 [events_report] = report.table_reports
-assert events_report.status is TableRunStatus.VALIDATION_FAILED
+assert events_report.status is TableRunStatus.PLANNING_FAILED
 assert inspector.partitions_of("events") == ("event_date",)
 print("Step 5d verified: partitioning change blocked, partitions unchanged.")
 
@@ -698,7 +698,7 @@ report = sync_expecting_failure(customers_without_pk)  # <-- orders not passed
 # COMMAND ----------
 
 [customers_report] = report.table_reports
-assert customers_report.status is TableRunStatus.VALIDATION_FAILED
+assert customers_report.status is TableRunStatus.PLANNING_FAILED
 assert inspector.has_primary_key("customers")
 assert inspector.has_foreign_key("orders")
 print("Step 5f verified: primary key drop blocked while orders' foreign key references it.")
@@ -981,7 +981,7 @@ report = sync_expecting_failure(new_table_meta_only)
 # COMMAND ----------
 
 [report_entry] = report.table_reports
-assert report_entry.status is TableRunStatus.VALIDATION_FAILED
+assert report_entry.status is TableRunStatus.PLANNING_FAILED
 assert spark.catalog.tableExists(inspector.fqname("never_created")) is False
 print("Step 7b verified: metadata-only declaration blocked from creating a missing table.")
 
@@ -1029,7 +1029,7 @@ report = sync_expecting_failure(customers_meta_drifted)
 # COMMAND ----------
 
 [customers_report] = report.table_reports
-assert customers_report.status is TableRunStatus.VALIDATION_FAILED
+assert customers_report.status is TableRunStatus.PLANNING_FAILED
 assert "ghost" not in inspector.fields_of("customers")
 print("Step 7c verified: structural drift on metadata-only table blocked.")
 

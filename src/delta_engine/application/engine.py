@@ -31,11 +31,17 @@ complete.
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
+from typing import assert_never
 
-from delta_engine.application.dependency_resolution import blocking_failures, resolve
+from delta_engine.application.dependency_resolution import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+    TableResolution,
+    resolve,
+)
 from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import Failure
-from delta_engine.application.planning import PlanningFailed, plan_diff
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded, plan_diff
 from delta_engine.application.ports import (
     CatalogState,
     CatalogStateReader,
@@ -43,13 +49,14 @@ from delta_engine.application.ports import (
     ExecutionSummary,
     PlanExecutor,
     ReadFailed,
+    TableAbsent,
     TablePresent,
 )
 from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
@@ -86,8 +93,8 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the read phase, it accretes its diff, plan, failures, and execution
-    as the phase chain proceeds, then is frozen into a public
+    Born in the read phase, it accretes its diff, plan, resolution, failures,
+    and execution as the phase chain proceeds, then is frozen into a public
     :class:`TableRunReport` once complete. Kept private to the engine so the
     published report stays immutable while the phases mutate in place.
     """
@@ -99,7 +106,13 @@ class _TableRun:
     planned_sql_statements: tuple[str, ...] = ()
     diff: TableDiff | None = None
     failures: list[Failure] = field(default_factory=list)
+    resolution: TableResolution | None = None
     execution: ExecutionSummary | None = None
+
+    @property
+    def has_failures(self) -> bool:
+        """True when any completed phase has failed for this table."""
+        return bool(self.failures)
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
@@ -175,7 +188,9 @@ class Engine:
         runs = self._diff(runs)
         runs = self._plan(runs)
         runs = self._resolve(runs)
-        runs = self._execute(runs, dry_run=dry_run)
+
+        if not dry_run:
+            runs = self._execute(runs)
 
         report = SyncReport(
             started_at=run_started,
@@ -204,30 +219,38 @@ class Engine:
             qualified_name = table.qualified_name
             state = self.reader.fetch_state(qualified_name)
             run = _TableRun(qualified_name=qualified_name, desired=table, read=state)
-            if isinstance(state, ReadFailed):
-                logger.error(
-                    "Read failed for %s: %s - %s",
-                    qualified_name,
-                    state.failure.exception_type,
-                    state.failure.message,
-                )
-                run.failures.append(state.failure)
-            else:
-                logger.info(
-                    "Read state for %s: %s",
-                    qualified_name,
-                    "present" if isinstance(state, TablePresent) else "absent",
-                )
+
+            match state:
+                case ReadFailed(failure=failure):
+                    run.failures.append(failure)
+                    logger.error(
+                        "Read failed for %s: %s - %s",
+                        qualified_name,
+                        failure.exception_type,
+                        failure.message,
+                    )
+                case TablePresent():
+                    logger.info("Table present: %s", qualified_name)
+                case TableAbsent():
+                    logger.info("Table absent: %s", qualified_name)
+                case _ as unreachable:
+                    assert_never(unreachable)
+
             runs.append(run)
         return tuple(runs)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
         for run in runs:
-            if isinstance(run.read, ReadFailed):
-                continue
-            # An absent table diffs against None, which yields TableMissing — a create.
-            observed = run.read.table if isinstance(run.read, TablePresent) else None
+            observed: ObservedTable | None
+            match run.read:
+                case ReadFailed():
+                    continue
+                case TablePresent(table=table):
+                    observed = table
+                case TableAbsent():
+                    observed = None
+
             run.diff = diff_table(desired=run.desired, observed=observed)
         return runs
 
@@ -243,89 +266,111 @@ class Engine:
         for run in runs:
             if run.diff is None:
                 continue
-            result = plan_diff(run.diff)
-            if isinstance(result, PlanningFailed):
-                run.failures.extend(result.failures)
-                logger.error(
-                    "Validation failed for %s (%d failure(s))",
-                    run.qualified_name,
-                    len(result.failures),
-                )
-                continue
-            logger.info("Validation passed for %s", run.qualified_name)
-            run.plan = result.plan
-            run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
-            logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+
+            match plan_diff(run.diff):
+                case PlanningFailed(failures=failures):
+                    run.failures.extend(failures)
+                    logger.error(
+                        "Planning failed for %s",
+                        run.qualified_name,
+                    )
+                case PlanningSucceeded(plan=plan):
+                    run.plan = plan
+                    run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
+                    logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
+                case _ as unreachable:
+                    assert_never(unreachable)
         return runs
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
         Order runs by FK dependency and fold in FK failures.
 
-        Runs that already carry a failure (read or validation) seed the
-        blocked set, so their FK dependents are blocked with
+        Runs that already carry a failure (read or planning) seed the
+        failed-name set, so their FK dependents are blocked with
         BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
         """
-        blocked = {run.qualified_name for run in runs if run.failures}
-        result = resolve(tuple(run.desired for run in runs), blocked=blocked)
-        by_name = {run.qualified_name: run for run in runs}
-        for name, fk_failures in result.fk_failures.items():
-            if fk_failures:
-                logger.error(
-                    "Foreign key resolution failed for %s (%d failure(s))",
-                    name,
-                    len(fk_failures),
-                )
-                by_name[name].failures.extend(fk_failures)
-        return tuple(by_name[name] for name in result.ordered_names)
+        failed_names = {run.qualified_name for run in runs if run.has_failures}
+        ordered_resolutions = resolve(
+            tuple(run.desired for run in runs),
+            failed_names=failed_names,
+        )
+        runs_by_name = {run.qualified_name: run for run in runs}
+        ordered_runs: list[_TableRun] = []
 
-    def _execute(self, runs: tuple[_TableRun, ...], *, dry_run: bool) -> tuple[_TableRun, ...]:
+        for resolution in ordered_resolutions:
+            match resolution:
+                case ResolutionSucceeded(qualified_name=name):
+                    run = runs_by_name[name]
+                    run.resolution = resolution
+                    ordered_runs.append(run)
+                case ResolutionFailed(qualified_name=name, failures=failures):
+                    run = runs_by_name[name]
+                    run.resolution = resolution
+                    run.failures.extend(failures)
+                    ordered_runs.append(run)
+                    logger.error("Foreign key resolution failed for %s", name)
+                case _ as unreachable:
+                    assert_never(unreachable)
+
+        return tuple(ordered_runs)
+
+    def _execute(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
         Execute the plan of every run with no failures and a non-empty plan.
 
-        Walks the runs in dependency-first order, tracking every table that has
-        failed so far. A run whose foreign key references a failed table is
+        Walks the resolved runs in dependency-first order, tracking tables that
+        fail during execution. A run whose resolved dependency references one is
         blocked with BLOCKED_BY_FAILED_DEPENDENCY instead of executed, so an
         execution failure in a parent blocks its FK dependents in the same
         sync — even dependents with no work of their own. A run with an empty
         plan and no blocking failures is skipped and counts as a healthy
         parent. Execution failures are appended to the run's ``failures`` and
-        the summary is set on ``execution``. A dry run executes nothing and
-        returns the runs unchanged.
+        the summary is set on ``execution``.
         """
-        if dry_run:
-            return runs
-        failed: set[QualifiedName] = set()
+        failed_during_execution: set[QualifiedName] = set()
+
         for run in runs:
-            if run.failures:
-                failed.add(run.qualified_name)
+            if run.has_failures:
                 continue
-            # _resolve propagated failures known before execution; a parent can
-            # also fail while executing, so re-apply the same blocking rule as
-            # the walk reaches each run.
-            blocking = blocking_failures(run.desired, failed)
-            if blocking:
+
+            resolution = run.resolution
+            if not isinstance(resolution, ResolutionSucceeded):
+                raise RuntimeError(
+                    f"Executable table was not successfully resolved: {run.qualified_name}"
+                )
+
+            dependency_failures = tuple(
+                dependency.blocked_failure
+                for dependency in resolution.dependencies
+                if dependency.referenced_table in failed_during_execution
+            )
+            if dependency_failures:
+                run.failures.extend(dependency_failures)
+                failed_during_execution.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",
                     run.qualified_name,
-                    len(blocking),
+                    len(dependency_failures),
                 )
-                run.failures.extend(blocking)
-                failed.add(run.qualified_name)
                 continue
-            # Checked after blocking, so a no-op dependent of a failed parent is
-            # still blocked; a healthy no-op run counts as a healthy parent.
+
+            # A no-op table must still be blocked when its dependency failed.
             if not run.plan:
                 continue
+
             summary = self.executor.execute(run.planned_sql_statements)
+            run.execution = summary
+            run.failures.extend(summary.failures)
+
+            if summary.failed:
+                failed_during_execution.add(run.qualified_name)
+
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
                 run.qualified_name,
                 summary.failed_count,
             )
-            run.execution = summary
-            run.failures.extend(summary.failures)
-            if run.failures:
-                failed.add(run.qualified_name)
+
         return runs
