@@ -101,6 +101,10 @@ _LIVE_AREAS: dict[str, tuple[str, str]] = {
         "Platform assumptions",
         "Databricks behaviours the engine's safety gates rely on",
     ),
+    "test_sql_warehouse_live_read_guards.py": (
+        "Read guards",
+        "views and streaming tables are rejected at the read boundary",
+    ),
 }
 
 
