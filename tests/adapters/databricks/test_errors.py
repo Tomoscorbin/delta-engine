@@ -54,3 +54,28 @@ def test_falls_back_to_wrapper_class_when_the_gateway_is_unreachable():
     # Then both parts of the failure record remain constructible without the gateway
     assert exception_type_name(error) == "Py4JJavaError"
     assert exception_message(error) == "<exception message unavailable>"
+
+
+# is_missing_relation tests
+
+
+class _AnalysisError(Exception):
+    def __init__(self, condition: str) -> None:
+        self._condition = condition
+
+    def getCondition(self) -> str:
+        return self._condition
+
+
+def test_missing_relation_from_spark_condition() -> None:
+    from delta_engine.adapters.databricks.errors import is_missing_relation
+
+    assert is_missing_relation(_AnalysisError("TABLE_OR_VIEW_NOT_FOUND")) is True
+    assert is_missing_relation(_AnalysisError("INSUFFICIENT_PERMISSIONS")) is False
+
+
+def test_missing_relation_from_warehouse_message_prefix() -> None:
+    from delta_engine.adapters.databricks.errors import is_missing_relation
+
+    assert is_missing_relation(RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] Table … not found")) is True
+    assert is_missing_relation(RuntimeError("connection reset")) is False

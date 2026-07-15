@@ -164,3 +164,10 @@ def test_new_queries_quote_identifiers_and_escape_literals():
     assert "`c``at`" in table_row_query(tricky)
     assert "'s''ch'" in columns_query(tricky)
     assert "'t''bl'" in columns_query(tricky)
+
+
+def test_describe_json_query_is_extended_and_backticked():
+    from delta_engine.adapters.databricks.sql import describe_json_query
+
+    query = describe_json_query(QN)
+    assert query == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"

@@ -218,3 +218,16 @@ def columns_query(qualified_name: QualifiedName) -> str:
         f" AND table_name = {quote_literal(qualified_name.name)}"
         f" ORDER BY ordinal_position"
     )
+
+
+def describe_json_query(qualified_name: QualifiedName) -> str:
+    """
+    Render ``DESCRIBE TABLE EXTENDED <table> AS JSON``.
+
+    The one primary read: it returns columns (structured types), the table
+    comment, partition and clustering columns, table properties, and the
+    ``table_constraints`` string in a single JSON document. ``AS JSON``
+    requires ``EXTENDED``. Requires DBR 16.2+ (constraints: 17.3+ or a SQL
+    warehouse); older runtimes surface as ``ReadFailed``.
+    """
+    return f"DESCRIBE TABLE EXTENDED {backtick_qualified_name(qualified_name)} AS JSON"
