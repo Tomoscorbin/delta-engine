@@ -1,6 +1,5 @@
 """
-Parse a Databricks ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a
-backend-neutral table snapshot.
+Parse a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a table snapshot.
 
 Column types arrive as structured objects keyed by ``name`` (never DDL
 strings), so this is the structured twin of the write path's type rendering.

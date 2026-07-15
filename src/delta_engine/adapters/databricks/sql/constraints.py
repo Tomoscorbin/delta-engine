@@ -30,12 +30,16 @@ class ConstraintParseError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ParsedPrimaryKey:
+    """A primary key parsed from the constraint string: its name and ordered columns."""
+
     constraint_name: str
     columns: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class ParsedForeignKey:
+    """A foreign key parsed from the constraint string: name, columns, and referenced table."""
+
     constraint_name: str
     local_columns: tuple[str, ...]
     referenced_table: tuple[str, str, str]
@@ -44,6 +48,8 @@ class ParsedForeignKey:
 
 @dataclass(frozen=True, slots=True)
 class ParsedConstraints:
+    """The primary key and foreign keys parsed from a ``table_constraints`` string."""
+
     primary_key: ParsedPrimaryKey | None = None
     foreign_keys: tuple[ParsedForeignKey, ...] = field(default_factory=tuple)
 
