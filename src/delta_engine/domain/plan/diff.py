@@ -134,24 +134,14 @@ class TableDrift:
 
     ``actions`` are remedied differences, each carrying the executable
     operation that closes its gap. ``findings`` are differences no action
-    can close; they exist to be judged by validation.
+    can close; they exist to be judged by validation. Both state every
+    difference regardless of scope; deciding which the declaration is
+    allowed to make is validation's scope gate, not the diff's concern.
     """
 
     desired: DesiredTable
     actions: tuple[Action, ...] = ()
     findings: tuple[Finding, ...] = ()
-
-    @property
-    def managed_actions(self) -> tuple[Action, ...]:
-        """Return actions whose aspect the declaration manages."""
-        managed = self.desired.managed_aspects
-        return tuple(action for action in self.actions if action.aspect in managed)
-
-    @property
-    def managed_findings(self) -> tuple[Finding, ...]:
-        """Return findings whose aspect the declaration manages."""
-        managed = self.desired.managed_aspects
-        return tuple(finding for finding in self.findings if finding.aspect in managed)
 
 
 type TableDiff = TableMissing | TableDrift
@@ -347,6 +337,12 @@ def _diff_properties(
     desired: DesiredTable, observed: ObservedTable
 ) -> list[SetProperty | UnsetProperty]:
     """Return exact-declaration property actions for declared keys."""
+    # Properties are the sole aspect the differ scopes, and this is fact
+    # production, not enforcement (enforcement is validation's scope gate):
+    # exact-declaration semantics mean an unmanaged PROPERTIES aspect asserts
+    # nothing and so yields no facts. Without this, every managed catalog
+    # property the declaration omits would read as unmanaged drift and fail
+    # the gate on every restricted sync.
     if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 
@@ -371,6 +367,8 @@ def _diff_undeclared_properties(
     desired: DesiredTable, observed: ObservedTable
 ) -> list[PropertyUndeclared]:
     """Return findings for managed catalog keys the declaration omits."""
+    # See _diff_properties: exact-declaration semantics, so an unmanaged
+    # PROPERTIES aspect produces no findings for the scope gate to reject.
     if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 

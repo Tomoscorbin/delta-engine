@@ -573,27 +573,6 @@ def test_partitioning_changed_rejects_equal_specs():
         PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
-def test_managed_views_filter_out_unmanaged_aspects():
-    # Given a drift with one managed action, one unmanaged action, and an
-    # unmanaged finding
-    desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
-    table_comment_action = SetTableComment(desired_comment="new", observed_comment="old")
-    column_action = AddColumn(DesiredColumn("new_col", Integer()))
-    partitioning_finding = PartitioningChanged(
-        desired_partitioning=("id",), observed_partitioning=()
-    )
-
-    drift = TableDrift(
-        desired=desired,
-        actions=(column_action, table_comment_action),
-        findings=(partitioning_finding,),
-    )
-
-    # Then only managed differences are exposed to validation rules
-    assert drift.managed_actions == (table_comment_action,)
-    assert drift.managed_findings == ()
-
-
 def test_observed_only_primary_key_produces_removed_change():
     # Given a catalog primary key that is absent from the declaration
     primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="legacy_pk")

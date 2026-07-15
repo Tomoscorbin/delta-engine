@@ -58,13 +58,14 @@ class Rule(Protocol):
     """
     Interface for drift validation rules.
 
-    A rule judges whether a managed difference is safe, given the declaration
-    it belongs to. It receives the whole ``TableDrift`` — the self-contained
-    diff — and reads what it needs: ``drift.managed_actions`` or
-    ``drift.managed_findings`` for the differences to judge (unmanaged drift
-    is a scope violation the validator reports separately, never rule input),
-    and ``drift.desired`` for declaration context such as declared
-    properties. Never called for a ``TableMissing`` diff.
+    A rule judges whether a change is safe, given the declaration it belongs
+    to. It receives the whole ``TableDrift`` and reads ``drift.actions`` or
+    ``drift.findings`` for the differences to judge, and ``drift.desired``
+    for declaration context such as declared properties. Because the scope
+    gate runs first and short-circuits, a rule is only ever evaluated on a
+    fully in-scope diff, so its actions and findings are exactly the ones the
+    declaration manages — it does no scope filtering of its own. Never called
+    for a ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -88,7 +89,7 @@ class NonNullableColumnAdd:
                     f"Operation not allowed: cannot add non-nullable column '{change.column.name}'"
                 ),
             )
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, AddColumn) and not change.column.nullable
         )
 
@@ -111,7 +112,7 @@ class NullabilityTighteningOnExistingColumn:
                     " nullable=False — the next sync sees no drift."
                 ),
             )
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, SetColumnNullability) and not change.desired_nullable
         )
 
@@ -187,7 +188,7 @@ class NonWideningColumnTypeChange:
                     " TimestampNtz); recreate the table to make any other type change."
                 ),
             )
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, AlterColumnType)
             and not _is_safe_widening(change.observed_type, change.desired_type)
         )
@@ -219,7 +220,7 @@ class TypeWideningRequiredForTypeChange:
                     f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
                 ),
             )
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, AlterColumnType)
             and _is_safe_widening(change.observed_type, change.desired_type)
         )
@@ -242,7 +243,7 @@ class PartitioningChangeNotSupported:
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for finding in drift.managed_findings
+            for finding in drift.findings
             if isinstance(finding, PartitioningChanged)
         )
 
@@ -265,7 +266,7 @@ class PropertyTransitionNotSupported:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every restricted-key transition that is not permitted."""
         failures: list[ValidationFailure] = []
-        for change in drift.managed_actions:
+        for change in drift.actions:
             match change:
                 case SetProperty(
                     name=name, desired_value=desired_value, observed_value=str() as observed_value
@@ -316,7 +317,7 @@ class PropertyMustBeDeclared:
         """Flag every registered key set on the table but absent from the declaration."""
         return tuple(
             ValidationFailure(rule_name=self.name, message=self._message(finding))
-            for finding in drift.managed_findings
+            for finding in drift.findings
             if isinstance(finding, PropertyUndeclared)
         )
 
@@ -357,7 +358,7 @@ class ColumnMappingRequiredForDrop:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a column drop when the declaration lacks column mapping."""
-        drops_a_column = any(isinstance(change, DropColumn) for change in drift.managed_actions)
+        drops_a_column = any(isinstance(change, DropColumn) for change in drift.actions)
         if not drops_a_column:
             return ()
         if drift.desired.properties.get(Property.COLUMN_MAPPING_MODE) == "name":
@@ -391,7 +392,7 @@ class AmbiguousColumnRename:
                     " renamed_from hint and drop it in its own sync."
                 ),
             )
-            for finding in drift.managed_findings
+            for finding in drift.findings
             if isinstance(finding, ColumnRenameConflict)
         )
 
@@ -419,11 +420,11 @@ class PrimaryKeyReferencedByForeignKeys:
         """Flag every PK drop/change still referenced by a surviving foreign key."""
         dropped_here = {
             change.constraint.constraint_name
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, DropForeignKey)
         }
         failures: list[ValidationFailure] = []
-        for change in drift.managed_actions:
+        for change in drift.actions:
             if not isinstance(change, DropPrimaryKey):
                 continue
             blockers = tuple(
@@ -470,17 +471,17 @@ class UnmanagedAspectDrift:
     """
     Fail once per unmanaged aspect that has drifted.
 
-    A scope invariant with the ``Rule`` interface, but not a member of
-    ``DEFAULT_RULES``: it defines what a declaration is allowed to govern
-    and runs unconditionally in ``validate_diff``. It must not be
-    suppressible: the accepted planning boundary turns every validated action
+    The drift arm of the scope gate: it defines what a declaration is allowed
+    to govern and runs before any safety rule, short-circuiting
+    ``validate_diff``. It is not a member of ``DEFAULT_RULES`` and cannot be
+    suppressed — the accepted planning boundary turns every validated action
     into executable work, so ``rules=()`` still cannot admit actions from an
     aspect the declaration does not manage.
 
-    Unlike the safety rules it reads the unfiltered actions and findings:
-    its subject is exactly the differences the managed views exclude.
-    dict.fromkeys deduplicates the aspects while preserving first-seen
-    order, so failure order follows diff order deterministically.
+    It reads the diff's raw actions and findings — its subject is exactly the
+    out-of-scope differences the gate exists to reject. dict.fromkeys
+    deduplicates the aspects while preserving first-seen order, so failure
+    order follows diff order deterministically.
     """
 
     name: ClassVar[str] = "UnmanagedAspectDrift"
@@ -537,40 +538,45 @@ class MissingTableUnmanaged:
         )
 
 
-_SCOPE_INVARIANTS: Final[tuple[Rule, ...]] = (UnmanagedAspectDrift(),)
-_MISSING_TABLE_UNMANAGED: Final = MissingTableUnmanaged()
-
-
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
     """
     Evaluate a table diff and return the verdict.
 
-    Two scope invariants are checked unconditionally — they define what a
-    declaration is allowed to govern, and cannot be suppressed via ``rules``:
+    Scope is a gate, checked before any safety rule. An out-of-scope
+    difference — a drifted aspect the declaration does not manage, or a
+    missing table it may not create — fails here and short-circuits, so the
+    safety rules never run on a diff the engine has already rejected on
+    scope grounds. This is what makes an unmanaged difference produce
+    exactly the scope failure rather than also tripping rules for work the
+    user never requested. The gate cannot be suppressed via ``rules``.
 
-    - ``MissingTableUnmanaged`` judges the missing arm: a table that does
-      not exist cannot be created by a declaration that does not manage
-      table existence.
-    - ``UnmanagedAspectDrift`` judges the drift arm: one failure per
-      drifted unmanaged aspect. It shares the ``Rule`` interface but runs
-      from its own always-on tier, prepended to whatever ``rules`` are
-      supplied.
-
-    Rules are safety policy over the drift the declaration *does* manage:
-    each reads ``drift.managed_actions`` or ``drift.managed_findings``, so
-    unmanaged drift produces exactly one scope failure rather than also
-    tripping safety rules for differences the user never requested.
+    Past the gate every difference is in scope, so the safety rules judge
+    the managed drift. A missing table that clears the gate is a
+    fully-managed create and needs no safety judgement.
     """
+    scope_failures = _scope_failures(diff)
+    if scope_failures:
+        return ValidationResult(failures=scope_failures)
     match diff:
-        case TableMissing() as missing:
-            return ValidationResult(failures=_MISSING_TABLE_UNMANAGED.evaluate(missing))
+        case TableMissing():
+            return ValidationResult()
         case TableDrift() as drift:
             return ValidationResult(
-                failures=tuple(
-                    failure
-                    for rule in (*_SCOPE_INVARIANTS, *rules)
-                    for failure in rule.evaluate(drift)
-                )
+                failures=tuple(failure for rule in rules for failure in rule.evaluate(drift))
             )
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
+def _scope_failures(diff: TableDiff) -> tuple[ValidationFailure, ...]:
+    """Return the scope-gate failures for either diff arm; empty when in scope."""
+    # TODO: these are stateless single-method classes, constructed per call and
+    # invoked directly here (not pluggable rules in DEFAULT_RULES). Reconsider
+    # whether they should be plain module-level functions rather than classes.
+    match diff:
+        case TableMissing() as missing:
+            return MissingTableUnmanaged().evaluate(missing)
+        case TableDrift() as drift:
+            return UnmanagedAspectDrift().evaluate(drift)
         case _ as unreachable:
             assert_never(unreachable)
