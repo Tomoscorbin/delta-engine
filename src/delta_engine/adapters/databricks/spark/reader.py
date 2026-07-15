@@ -177,13 +177,15 @@ class SparkReader:
         """
         Return the catalog object's relation kind (``table_type``) for the read guard.
 
-        Reads it from information_schema where the catalog has one (Unity
-        Catalog), which reports the full relation taxonomy — including the
-        pipeline-owned kinds (streaming table, materialized view) that
-        ``spark.catalog.getTable`` does not distinguish. Falls back to the
-        catalog object's own ``tableType`` only where information_schema is
-        absent (plain Spark), which still separates a view from a table; the
-        kinds the fallback cannot name do not exist without Unity Catalog.
+        Reads it from information_schema, which on Unity Catalog reports the
+        full relation taxonomy — including the pipeline-owned kinds (streaming
+        table, materialized view) that ``spark.catalog.getTable`` collapses to
+        a coarser type. Falls back to the catalog object's own ``tableType``
+        whenever that query yields no row — normally because the catalog has no
+        information_schema (plain Spark), where the only non-table kind is a
+        view and the pipeline-owned kinds cannot exist. On Unity Catalog a
+        present object is itself a row in ``information_schema.tables``, so the
+        fallback is not reached for it.
         """
         rows = self._information_schema_rows(
             qualified_name.catalog, table_type_query(qualified_name)
