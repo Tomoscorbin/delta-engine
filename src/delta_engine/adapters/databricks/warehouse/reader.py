@@ -1,31 +1,29 @@
 """
 Reader adapter for Databricks SQL warehouses.
 
-Unity Catalog only. One ``DESCRIBE TABLE EXTENDED … AS JSON`` yields the
-table-local state; three information_schema queries add tags and inbound
-foreign keys. The connector is never imported at runtime: the connection is
-duck-typed (``.cursor()`` context manager with ``execute``/``fetchone``/
-``fetchall``), so this backend imports nothing beyond the shared adapter core.
+Unity Catalog only. Reads one table's state through the shared
+``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus three
+information_schema queries). The connector is never imported at runtime: the
+connection is duck-typed (``.cursor()`` yielding ``execute``/``fetchall``). One
+cursor is acquired lazily on the first query and runs every statement — the
+describe and the information_schema follow-ups — then closed when the read
+finishes. Acquiring it lazily, inside the runner, keeps cursor acquisition
+within the shared total boundary, so a dead connection becomes a ``ReadFailed``
+rather than an escaping exception. This mirrors ``WarehouseExecutor.execute``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+import contextlib
 from typing import TYPE_CHECKING, Any
 
-from delta_engine.adapters.databricks.errors import (
-    exception_message,
-    exception_type_name,
-    is_missing_relation,
-)
-from delta_engine.adapters.databricks.read import observed_table_from_snapshot
-from delta_engine.adapters.databricks.sql import describe_json_query
-from delta_engine.adapters.databricks.sql.describe_json import parse_table_snapshot
-from delta_engine.application.failures import ReadFailure
-from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
+from delta_engine.adapters.databricks.read import read_catalog_state
+from delta_engine.application.ports import CatalogState
 from delta_engine.domain.model import QualifiedName
 
 if TYPE_CHECKING:
-    from databricks.sql.client import Connection
+    from databricks.sql.client import Connection, Cursor
 
 
 class WarehouseReader:
@@ -36,31 +34,18 @@ class WarehouseReader:
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """Return ``TablePresent``, ``TableAbsent``, or ``ReadFailed`` — the boundary is total."""
+        cursor: Cursor | None = None
+
+        def run_query(sql: str) -> Sequence[Any]:
+            nonlocal cursor
+            if cursor is None:
+                cursor = self._connection.cursor()
+            cursor.execute(sql)
+            return cursor.fetchall()
+
         try:
-            return self._read(qualified_name)
-        except Exception as exception:
-            return ReadFailed(
-                failure=ReadFailure(exception_type_name(exception), exception_message(exception))
-            )
-
-    def _read(self, qualified_name: QualifiedName) -> CatalogState:
-        with self._connection.cursor() as cursor:
-            try:
-                cursor.execute(describe_json_query(qualified_name))
-            except Exception as exception:
-                if is_missing_relation(exception):
-                    return TableAbsent()
-                raise
-            row = cursor.fetchone()
-            if row is None:
-                raise RuntimeError(f"DESCRIBE AS JSON returned no row for {qualified_name}")
-            snapshot = parse_table_snapshot(row[0], qualified_name)
-            observed = observed_table_from_snapshot(
-                snapshot, run_info_schema_query=lambda query: _fetch_all(cursor, query)
-            )
-        return TablePresent(table=observed)
-
-
-def _fetch_all(cursor: Any, query: str) -> list[Any]:
-    cursor.execute(query)
-    return cursor.fetchall()
+            return read_catalog_state(run_query, qualified_name)
+        finally:
+            if cursor is not None:
+                with contextlib.suppress(Exception):
+                    cursor.close()

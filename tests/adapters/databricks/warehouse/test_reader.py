@@ -36,12 +36,7 @@ class RoutedCursor:
     def __init__(self, responses):
         self._responses = responses
         self.queries = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+        self.closed = False
 
     def execute(self, query):
         self.queries.append(query)
@@ -50,11 +45,11 @@ class RoutedCursor:
             raise value
         self._current = value if value is not None else []
 
-    def fetchone(self):
-        return self._current[0] if self._current else None
-
     def fetchall(self):
         return list(self._current)
+
+    def close(self):
+        self.closed = True
 
 
 class RoutedConnection:
@@ -109,3 +104,16 @@ def test_other_backend_error_is_read_failed():
     state = WarehouseReader(RoutedConnection(responses)).fetch_state(QN)
     assert isinstance(state, ReadFailed)
     assert "warehouse gone" in state.failure.message
+
+
+def test_cursor_is_closed_after_a_successful_read():
+    connection = RoutedConnection(_responses())
+    WarehouseReader(connection).fetch_state(QN)
+    assert connection.cursor_fake.closed is True
+
+
+def test_cursor_is_closed_when_the_read_fails():
+    responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
+    connection = RoutedConnection(responses)
+    WarehouseReader(connection).fetch_state(QN)
+    assert connection.cursor_fake.closed is True

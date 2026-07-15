@@ -1,12 +1,15 @@
+import json
 from types import SimpleNamespace
 
-from delta_engine.adapters.databricks.read import observed_table_from_snapshot
+from delta_engine.adapters.databricks.read import observed_table_from_snapshot, read_catalog_state
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
+    describe_json_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.describe_json import TableSnapshot
+from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
     Integer,
@@ -35,7 +38,13 @@ def _snapshot(**overrides):
 
 
 def _router(responses):
-    return lambda query: responses.get(query, [])
+    def run(query):
+        value = responses.get(query, [])
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    return run
 
 
 def test_tags_and_inbound_fks_attached():
@@ -92,3 +101,78 @@ def test_all_snapshot_fields_pass_through():
     assert observed.primary_key.columns == ("id",)
     assert observed.foreign_keys[0].constraint_name == "t_fk"
     assert dict(observed.columns[0].tags) == {}
+
+
+_DESCRIBE_DOC = json.dumps(
+    {
+        "table_name": "tbl",
+        "catalog_name": "cat",
+        "schema_name": "sch",
+        "columns": [{"name": "id", "type": {"name": "int"}, "nullable": False}],
+        "comment": "",
+        "table_properties": {},
+    }
+)
+
+
+def _describe_responses(**overrides):
+    responses = {
+        describe_json_query(QN): [(_DESCRIBE_DOC,)],
+        table_tags_query(QN): [],
+        column_tags_query(QN): [],
+        referencing_foreign_keys_query(QN): [],
+    }
+    responses.update(overrides)
+    return responses
+
+
+def test_read_catalog_state_returns_the_present_table():
+    state = read_catalog_state(_router(_describe_responses()), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.columns[0].data_type == Integer()
+
+
+def test_read_catalog_state_describes_first_then_reads_info_schema():
+    responses = _describe_responses()
+    calls = []
+
+    def run_query(query):
+        calls.append(query)
+        return responses[query]
+
+    read_catalog_state(run_query, QN)
+
+    assert calls[0] == describe_json_query(QN)
+    assert len(calls) == 4
+
+
+def test_missing_relation_on_describe_reads_as_absent():
+    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+
+    assert isinstance(read_catalog_state(_router(responses), QN), TableAbsent)
+
+
+def test_other_describe_error_reads_as_failed():
+    responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, ReadFailed)
+    assert "warehouse gone" in state.failure.message
+
+
+def test_empty_describe_result_reads_as_failed():
+    responses = _describe_responses(**{describe_json_query(QN): []})
+
+    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent():
+    # Missing-relation means "table absent" only for the describe. A failure while
+    # attaching tags means the table was found but the read could not complete.
+    responses = _describe_responses(
+        **{table_tags_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] tags view")}
+    )
+
+    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
