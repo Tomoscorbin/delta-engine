@@ -28,51 +28,82 @@ path currently produces an incorrect result.
 
 ## Summary
 
-| #    | Severity | Finding                                                       | Failure mode                                                       |
-| ---- | -------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1    | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
-| 2    | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
-| 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
-| 4    | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
-| 5    | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
-| 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
-| 7    | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
-| 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
+| #    | Severity | Finding                                                           | Failure mode                                                                   |
+| ---- | -------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 1    | High     | Unsupported relation kinds and non-Delta formats are not rejected | Delta DDL is planned against views, streaming tables, MVs, or non-Delta tables |
+| 2    | High     | Unparseable columns are silently omitted                          | Existing drift can be reported as synchronized                                 |
+| 3    | High     | Required Delta table features are not planned                     | Valid-looking plans fail during execution                                      |
+| 4    | High     | Foreign-key types are checked against the wrong parent object     | Invalid constraints pass declaration and resolution                            |
+| 5    | Medium   | Clearing a column comment generates invalid SQL                   | Warehouse execution fails on `UNSET COMMENT`                                   |
+| 6    | Medium   | Identifier normalization disagrees with Unity Catalog             | Valid names can change identity; invalid object names pass locally             |
+| 7    | Medium   | Layout and map-type validation is too permissive                  | Unsupported declarations reach execution                                       |
+| 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success             | A concurrent incompatible create is treated as success                         |
 
-## 1. Reject views and non-Delta tables at the read boundary
+## 1. Reject unsupported relation kinds and non-Delta formats at the read boundary
 
 ### Cause
 
-`table_row_query` establishes that a catalog object exists but does not
-distinguish a table from a view. Both readers subsequently fetch `DESCRIBE
-DETAIL`, but they ignore its `format` field when constructing the observed
-table.
+`table_row_query` establishes that a catalog object exists but does not report
+its relation kind, so a view, materialized view, streaming table, or foreign
+table all read as an ordinary table. Both readers then fetch `DESCRIBE DETAIL`
+but ignore its `format` field.
 
 Relevant code:
 
 - `src/delta_engine/adapters/databricks/sql/queries.py` (`table_row_query`)
+- `src/delta_engine/adapters/databricks/sql/rows.py` (shared guard policy)
 - `src/delta_engine/adapters/databricks/warehouse/reader.py` (`fetch_state`)
 - `src/delta_engine/adapters/databricks/spark/reader.py` (`fetch_state`)
 
-A view reaches `DESCRIBE DETAIL` and fails with a confusing read error. A
-non-Delta table for which detail succeeds is more dangerous: the engine can
-diff it as though it were Delta and plan properties, constraints, clustering,
-or other Delta-specific DDL against it.
+This admits three failure modes of increasing danger:
 
-`DESCRIBE DETAIL` exposes `format` as `delta` or `iceberg`, so the format is
-already available at the point where the reader decides what kind of state it
-has observed. See the
-[Databricks table-detail reference](https://docs.databricks.com/gcp/en/tables/operations/table-details).
+- A **view** reaches `DESCRIBE DETAIL` and fails with a confusing read error.
+- A **non-Delta table** (Parquet, Iceberg) for which detail succeeds is diffed
+  as though it were Delta, planning Delta-specific DDL against it.
+- A **streaming table or materialized view** is worst: it reports `format` =
+  `delta` and its `DESCRIBE DETAIL` succeeds, so it reads all the way to a full
+  `TablePresent`, is diffed as an ordinary table, and plans
+  `ALTER TABLE ... SET TAGS` (and similar) that Databricks rejects — these
+  objects require their own DDL (`ALTER STREAMING TABLE`,
+  `ALTER MATERIALIZED VIEW`). A format check does not catch them; only the
+  relation kind does.
+
+`information_schema.tables.table_type` reports the relation kind directly —
+`MANAGED`, `EXTERNAL`, `VIEW`, `FOREIGN`, `STREAMING_TABLE`, `MATERIALIZED_VIEW`,
+`MANAGED_SHALLOW_CLONE`, `EXTERNAL_SHALLOW_CLONE` — and `DESCRIBE DETAIL.format`
+distinguishes `delta` from `iceberg`. Both facts are available where the reader
+decides what state it observed. See the
+[Databricks TABLES reference](https://docs.databricks.com/aws/en/sql/language-manual/information-schema/tables)
+and the
+[table-detail reference](https://docs.databricks.com/gcp/en/tables/operations/table-details).
 
 ### Proposed solution
 
-1. Read the catalog object type and reject views with a specific `ReadFailed`.
-2. Require the detail format to be `delta` in both readers.
-3. Return a clear `ReadFailed` for every other format before mapping columns or
-   planning changes.
+1. Expand `table_row_query` to return `table_type`, and admit only an allowlist
+   of `{MANAGED, EXTERNAL}`. Every other kind — view, materialized view,
+   streaming table, foreign table, shallow clone, and any future kind — raises a
+   single typed adapter error (`UnsupportedCatalogRelationError`) that the
+   reader's existing exception boundary turns into `ReadFailed`. An allowlist
+   fails closed on kinds the engine has not verified it can reconcile.
+2. For an admitted table, require `DESCRIBE DETAIL.format` == `delta`, rejecting
+   any other format through the same error. This is the secondary filter for a
+   non-Delta _ordinary_ table, which the relation-kind guard alone does not
+   catch.
+3. Order the guards: relation kind first, before `DESCRIBE DETAIL`, so a view
+   never reaches it; format before column mapping, so a non-Delta table fails as
+   "unsupported format" rather than as an unmappable column (finding 2).
+4. Keep the guard policy and the exception in `rows.py`, shared by both readers,
+   as `column_from_catalog`'s unmappable-type policy already is.
+5. Source `table_type` per backend: the warehouse reader from the expanded
+   `table_row_query`; the Spark reader from `information_schema.tables` where it
+   is available, falling back to the catalog object only where it is not (local
+   Spark). Streaming tables and materialized views do not exist in local Spark,
+   so the fallback's narrower coverage is harmless there.
 
-Add shared mapper tests plus live coverage for a view and, where the test
-workspace supports it, a non-Delta table.
+Add shared mapper tests for the allowlist and format guards. A view is coverable
+on the Spark path without a workspace (local Spark supports `CREATE VIEW`). Add
+live coverage for a view, a streaming table, and — where the test workspace
+supports it — a non-Delta table.
 
 ## 2. Fail closed when any observed column type cannot be mapped
 
@@ -303,6 +334,38 @@ would add a second read/execution protocol solely to preserve the guard. Failing
 the race explicitly is simpler and consistent with the engine's no-retry
 policy.
 
+## Deferred: manage streaming tables and other non-`ALTER TABLE` relation kinds
+
+Finding 1 rejects streaming tables, materialized views, foreign tables, and
+shallow clones because the engine's action set is expressed entirely in
+`ALTER TABLE` DDL, which these kinds do not accept. Rejection is the correct fix
+for this review, but it forecloses a capability Databricks supports: a streaming
+table can carry managed tags and column comments through `ALTER STREAMING
+TABLE`.
+
+Supporting these kinds is a separate feature, not a correctness fix, because it
+requires relation-kind-aware behaviour in two layers:
+
+- **Validation** must restrict the kind to the action subset its DDL allows.
+  `ALTER STREAMING TABLE` supports `SET`/`UNSET TAGS` and `ALTER COLUMN`, but not
+  `SET TBLPROPERTIES`, `ADD COLUMN`, constraints, or clustering; planning any of
+  those would fail at execution — the class of bug this review closes.
+- **Compilation** must emit the kind's own statement (`ALTER STREAMING TABLE`,
+  `ALTER MATERIALIZED VIEW`) instead of `ALTER TABLE`, which requires the
+  relation kind to reach the compiler. The compiler reads a backend-neutral plan
+  today, so this is a deliberate design change, not a local patch.
+
+A `scope="tags"` declaration already narrows the plan to tag actions via
+`managed_aspects`, so the tags-only case is closer to "pick the right statement
+keyword" than a full capability matrix — but table comments and other scopes
+reopen the capability question, so this remains its own PR with its own design
+note.
+
+Until this lands, `docs/how-to-configure-table.md` should say that the
+`scope="tags"` guidance for streaming-pipeline outputs is not yet supported
+(tracked here) rather than implying it works today. That doc correction belongs
+to the final documentation-review phase.
+
 ## Proposed implementation boundary
 
 The implementation PR for this review should contain all eight corrections,
@@ -313,7 +376,11 @@ with these deliberate limits:
 - model required table-feature enablement because it is part of converging a
   supported declared type, but do not add general runtime/version preflight;
 - enforce the current Databricks platform constraints without adding new
-  declaration capabilities; and
+  declaration capabilities;
+- reject relation kinds the engine cannot express in `ALTER TABLE` (streaming
+  tables, materialized views, foreign tables, shallow clones) rather than
+  managing them; capability-aware support is deferred (see "Deferred" above);
+  and
 - keep documentation restructuring and general documentation accuracy work for
   the final documentation-review phase.
 
@@ -333,4 +400,7 @@ Before the implementation PR is ready for merge, run:
       than an out-of-band prerequisite.
 - [ ] Lossy schema parsing will fail closed now; structured JSON observation is
       deferred.
+- [ ] Unsupported relation kinds (views, materialized views, streaming tables,
+      foreign tables, shallow clones) are rejected now; capability-aware support
+      for them is deferred to a separate feature.
 - [ ] Once agreed, implementation will be isolated in its own PR.
