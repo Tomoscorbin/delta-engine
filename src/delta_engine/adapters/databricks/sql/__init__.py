@@ -28,6 +28,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     table_type_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
+    UnsupportedCatalogRelationError,
     clustering_columns_from_detail_row,
     column_from_catalog,
     column_tags_from_rows,
@@ -35,11 +36,14 @@ from delta_engine.adapters.databricks.sql.rows import (
     managed_properties_from_detail_row,
     primary_key_from_rows,
     referencing_foreign_keys_from_rows,
+    require_delta_format,
+    require_supported_relation,
     table_tags_from_rows,
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
 
 __all__ = [
+    "UnsupportedCatalogRelationError",
     "backtick",
     "backtick_qualified_name",
     "clustering_columns_from_detail_row",
@@ -60,6 +64,8 @@ __all__ = [
     "referencing_foreign_keys_from_rows",
     "referencing_foreign_keys_query",
     "render_data_type",
+    "require_delta_format",
+    "require_supported_relation",
     "table_row_query",
     "table_tags_from_rows",
     "table_tags_query",
