@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("databricks.sql")
 
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
-from delta_engine.application.ports import ReadFailed
+from delta_engine.application.ports import CatalogState, ReadFailed
 from delta_engine.domain.model import QualifiedName
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
@@ -20,7 +20,7 @@ from tests.live.sql_warehouse_live_helpers import (
 )
 
 
-def _read(live_connection, table_name: str):
+def _read(live_connection, table_name: str) -> CatalogState:
     reader = WarehouseReader(live_connection)
     return reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
 
@@ -37,10 +37,13 @@ def test_view_is_rejected_at_the_read_boundary(live_connection, live_tables):
         f"CREATE VIEW {qualified_table(view_name)} AS SELECT id FROM {qualified_table(table_name)}",
     )
 
-    state = _read(live_connection, view_name)
+    try:
+        state = _read(live_connection, view_name)
 
-    assert isinstance(state, ReadFailed)
-    assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+    finally:
+        execute_sql(live_connection, f"DROP VIEW IF EXISTS {qualified_table(view_name)}")
 
 
 def test_streaming_table_is_rejected_at_the_read_boundary(live_connection, live_tables):
@@ -52,10 +55,15 @@ def test_streaming_table_is_rejected_at_the_read_boundary(live_connection, live_
             live_connection,
             f"CREATE STREAMING TABLE {qualified_table(table_name)} AS SELECT 1 AS id",
         )
-    except Exception as exc:
+    except Exception as exc:  # intentional broad except: environment capability probe
         pytest.skip(f"workspace cannot create a streaming table here: {exc}")
 
-    state = _read(live_connection, table_name)
+    try:
+        state = _read(live_connection, table_name)
 
-    assert isinstance(state, ReadFailed)
-    assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedCatalogRelationError"
+    finally:
+        execute_sql(
+            live_connection, f"DROP STREAMING TABLE IF EXISTS {qualified_table(table_name)}"
+        )
