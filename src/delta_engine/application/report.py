@@ -189,7 +189,7 @@ class SyncReport:
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "dry_run": self.dry_run,
