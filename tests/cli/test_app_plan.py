@@ -68,7 +68,7 @@ def test_validation_failure_prints_the_plan_report_and_exits_one(
     assert result.exit_code == 1
     assert "TARGET" in result.stdout
     assert "DIFF" in result.stdout
-    assert "VALIDATION_FAILED" in result.stdout
+    assert "PLANNING_FAILED" in result.stdout
     assert "Failures" in result.stdout
 
 

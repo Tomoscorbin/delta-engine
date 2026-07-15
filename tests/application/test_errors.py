@@ -97,7 +97,7 @@ def test_message_renders_validation_failure_detail():
     message = _message_for(report)
 
     # Then the validation failure line is present
-    assert "cat.sch.tbl [VALIDATION_FAILED]" in message
+    assert "cat.sch.tbl [PLANNING_FAILED]" in message
     assert "Validation failed: DisallowPartitioningChange - cannot repartition" in message
 
 

@@ -627,7 +627,7 @@ def test_validation_failed_table_is_not_executed_but_independent_table_still_run
 
     # Then the invalid table is skipped and the independent table succeeds
     report = exc_info.value.report
-    table_a = _assert_status(report, "c.s.a", TableRunStatus.VALIDATION_FAILED)
+    table_a = _assert_status(report, "c.s.a", TableRunStatus.PLANNING_FAILED)
     table_b = _assert_status(report, "c.s.b", TableRunStatus.SUCCESS)
 
     assert table_a.execution is None
@@ -798,7 +798,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     customers = _assert_status(
         report,
         "cat.sch.customers",
-        TableRunStatus.VALIDATION_FAILED,
+        TableRunStatus.PLANNING_FAILED,
     )
     orders = _assert_status(
         report,
@@ -1209,7 +1209,7 @@ def test_dry_run_returns_validation_failures_without_raising_or_executing():
     # Then the failure is reported without raising or executing
     [table_report] = list(report)
     assert report.has_failures is True
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert table_report.execution is None
     assert executor.executed_names == []
 
@@ -1277,7 +1277,7 @@ def test_metadata_scoped_sync_fails_when_table_is_missing():
 
     # Then validation fails and nothing executes
     [table_report] = list(exc_info.value.report)
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert table_report.execution is None
     assert executor.executed_names == []
     assert any("does not exist" in failure.message for failure in table_report.failures)
@@ -1306,7 +1306,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
 
     # Then it fails at validation, naming the property to declare
     table_report = excinfo.value.report.table_reports[0]
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
@@ -1332,7 +1332,7 @@ def test_sync_fails_loud_on_undeclared_registered_property():
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(spec)
     table_report = excinfo.value.report.table_reports[0]
-    assert table_report.status is TableRunStatus.VALIDATION_FAILED
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
