@@ -202,13 +202,11 @@ class Engine:
         if not dry_run and report.has_failures:
             raise SyncFailedError(report)
 
-        if dry_run:
-            logger.info(
-                "Dry run complete for %d table(s); no changes were applied",
-                len(report.table_reports),
-            )
-        else:
-            logger.info("Sync completed successfully for %d table(s)", len(report.table_reports))
+        logger.info(
+            "%s completed successfully for %d table(s)",
+            "Dry run" if dry_run else "Sync",
+            len(report.table_reports),
+        )
 
         return report
 
