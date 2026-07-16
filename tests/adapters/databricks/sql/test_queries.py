@@ -6,6 +6,7 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.domain.model import QualifiedName
@@ -15,6 +16,12 @@ QN = QualifiedName("cat", "sch", "tbl")
 
 def test_describe_json_query_is_extended_and_backticked():
     assert describe_json_query(QN) == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"
+
+
+def test_schema_exists_query_golden():
+    assert schema_exists_query(QN) == (
+        "SELECT schema_name FROM `cat`.information_schema.schemata WHERE schema_name = 'sch'"
+    )
 
 
 def test_primary_key_query_golden():
