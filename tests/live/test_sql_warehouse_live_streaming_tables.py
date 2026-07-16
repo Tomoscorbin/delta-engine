@@ -3,7 +3,7 @@ Live pins for the streaming-table facts the tags scope is built on.
 
 A streaming table's definition — schema, comments, properties — is owned by
 its pipeline; Unity Catalog tags are the one aspect durably manageable from
-outside it, and only through the ALTER STREAMING TABLE dialect. Each pin
+outside it, via the documented ALTER STREAMING TABLE dialect. Each pin
 states platform facts the engine's reader gate, validation gate, or SQL
 dialect dispatch assumes.
 
@@ -21,7 +21,6 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
-from databricks.sql.exc import ServerOperationError
 
 from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
 from tests.live.sql_warehouse_live_helpers import (
@@ -91,18 +90,19 @@ def _column_tags(live_connection, table_name: str) -> dict[tuple[str, str], str]
     return {(row["column_name"], row["tag_name"]): row["tag_value"] for row in rows}
 
 
-def test_a_streaming_table_reports_its_kind_and_rejects_plain_alter_table(
+def test_describe_as_json_reports_the_streaming_table_kind_and_provider(
     live_connection, live_tables
 ):
-    """DESCRIBE AS JSON reports type=STREAMING_TABLE, provider=delta; ALTER TABLE is rejected."""
-    # Two facts on one provisioned table. First: the admit gate in
-    # adapters/databricks/read.py is written against exactly the type and
-    # provider values asserted here — on failure the assertion output carries
-    # the whole document; update the gate and the unit fixtures to the
-    # observed values, not this test. Second: plain ALTER TABLE ... SET TAGS
-    # is rejected — the premise of the dialect dispatch (_ALTER_CLAUSES in
-    # sql/compile.py). If Databricks ever accepts it, the dispatch is
-    # obsolete and this pin says so.
+    """DESCRIBE AS JSON reports type=STREAMING_TABLE, provider=delta for a streaming table."""
+    # The admit gate in adapters/databricks/read.py is written against
+    # exactly these two values. If this pin fails, the gate and the unit
+    # fixtures are wrong, not this test: the assertion output carries the
+    # whole document — update them to the observed values.
+    #
+    # A rejection pin for plain ALTER TABLE ... SET TAGS deliberately does
+    # not exist: the platform was observed tolerating it on a streaming
+    # table (2026-07-16). The engine emits the documented ALTER STREAMING
+    # TABLE dialect and relies on nothing being rejected.
     table_name = _create_streaming_table(live_connection, live_tables)
 
     [row] = fetch_rows(
@@ -112,12 +112,6 @@ def test_a_streaming_table_reports_its_kind_and_rejects_plain_alter_table(
     document = json.loads(row["json_metadata"])
     assert document.get("type") == "STREAMING_TABLE", document
     assert document.get("provider") == "delta", document
-
-    with pytest.raises(ServerOperationError):
-        execute_sql(
-            live_connection,
-            f"ALTER TABLE {qualified_table(table_name)} SET TAGS ('owner'='governance')",
-        )
 
 
 def test_alter_streaming_table_tags_round_through_information_schema(live_connection, live_tables):

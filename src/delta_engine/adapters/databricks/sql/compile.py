@@ -42,8 +42,11 @@ from delta_engine.domain.plan import (
     UnsetTableTag,
 )
 
-# Streaming tables reject plain ALTER TABLE and take their own dialect
-# (pinned live: tests/live/test_sql_warehouse_live_streaming_tables.py).
+# ALTER STREAMING TABLE is the documented dialect for altering a streaming
+# table; its tag statements are pinned live in
+# tests/live/test_sql_warehouse_live_streaming_tables.py. The platform was
+# observed tolerating plain ALTER TABLE for table-level tags (2026-07-16),
+# but the engine emits the documented form.
 _ALTER_CLAUSES: Final[Mapping[TableKind, str]] = MappingProxyType(
     {
         TableKind.TABLE: "ALTER TABLE",

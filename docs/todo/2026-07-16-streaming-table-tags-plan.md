@@ -260,6 +260,8 @@ Expected: the whole live suite passes, including the four new pins. On failure, 
 
 **Adjustment (2026-07-16, after the first Live run):** the run surfaced a fourth outcome — the pins skipped on `QUOTA_EXCEEDED_EXCEPTION` because the workspace tier allows **one active DBSQL pipeline at a time** and the suite's parallel per-test provisioning raced it. The pinned values were still confirmed from the same run's log (the pre-existing streaming-table test created a real streaming table, and its `DESCRIBE … AS JSON` reported `type="STREAMING_TABLE"`, `provider="delta"`). Agreed resolution (Tom, this session): every live test that provisions a streaming table carries `@pytest.mark.xdist_group("streaming_table")`, the Live workflow adds `--dist loadgroup` so those tests serialize on one worker, `_create_streaming_table` retries bounded on the quota error, and the four fact pins are merged into two tests sharing a provisioned table each. Task 10's reader pin and round-trip merge into one test the same way, so a full Live run provisions three streaming tables, sequentially.
 
+**Second adjustment (2026-07-16, after the second Live run):** the serialized run confirmed the describe values and all four `ALTER STREAMING TABLE` tag statements, but the premise pin **failed in the informative direction** — plain `ALTER TABLE ... SET TAGS` was _tolerated_ on a streaming table (table level). Agreed resolution (Tom, this session): keep emitting the documented `ALTER STREAMING TABLE` dialect (all four statements live-verified); the rejection pin is removed because the engine relies on nothing being rejected. The spec's Problem, live-pin list, and Risks sections carry the dated correction.
+
 ---
 
 ### Task 3: Domain — `TableKind` on `ObservedTable`

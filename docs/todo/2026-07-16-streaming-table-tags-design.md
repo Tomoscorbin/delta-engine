@@ -5,12 +5,14 @@ Status: approved
 
 ## Problem
 
-Databricks rejects `ALTER TABLE` statements against streaming tables; that
-relation kind requires `ALTER STREAMING TABLE`. The tags scope
-(`DeltaTable(scope="tags")`) was built assuming one ALTER dialect for all
-tables, and its motivating use case — managing tags on tables owned
-elsewhere, e.g. by a streaming pipeline — is exactly the case the assumption
-breaks on.
+Databricks documents `ALTER STREAMING TABLE` as the statement for altering a
+streaming table. The tags scope (`DeltaTable(scope="tags")`) was built
+assuming one ALTER dialect for all tables, and its motivating use case —
+managing tags on tables owned elsewhere, e.g. by a streaming pipeline — is
+exactly the case the assumption breaks on. (Live verification during
+implementation, 2026-07-16, found plain `ALTER TABLE ... SET TAGS` tolerated
+on a streaming table at table level; the engine emits the documented dialect
+regardless rather than relying on undocumented tolerance.)
 
 Nothing is silently broken today: the reader admits only `MANAGED` and
 `EXTERNAL` Delta relations, so a streaming table becomes `ReadFailed` before
@@ -159,9 +161,10 @@ translate into statement-level failures in `ExecutionSummary`, as today.
    table — the reader gate is written against these.
 2. `ALTER STREAMING TABLE` `SET TAGS`, `UNSET TAGS`, and
    `ALTER COLUMN ... SET TAGS` succeed.
-3. Plain `ALTER TABLE ... SET TAGS` against a streaming table fails —
-   pinning the premise of the feature; if Databricks ever accepts it, the
-   pin flags the dispatch as obsolete.
+3. ~~Plain `ALTER TABLE ... SET TAGS` against a streaming table fails~~ —
+   disproven live (2026-07-16): the statement is tolerated at table level,
+   so no rejection pin exists; the engine emits the documented dialect and
+   relies on nothing being rejected.
 4. information_schema tag reads return streaming-table tags.
 5. Round-trip: a tags-scope sync against a live streaming table reconciles
    a tag set and a tag unset.
@@ -221,4 +224,7 @@ pipeline spin-up; the Live run gets slower), with a teardown drop.
 - Live provisioning cost: streaming-table creation spins up a managed
   pipeline per Live run (accepted).
 - If Databricks later accepts `ALTER TABLE` on streaming tables, the
-  dispatch becomes unnecessary but harmless; live pin 3 detects the shift.
+  dispatch becomes unnecessary but harmless. (Materialised immediately:
+  the first live run, 2026-07-16, observed table-level `SET TAGS` tolerated
+  via plain `ALTER TABLE`. Decision: keep emitting the documented
+  `ALTER STREAMING TABLE` dialect.)
