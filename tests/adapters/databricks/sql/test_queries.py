@@ -3,6 +3,8 @@
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
+    foreign_keys_query,
+    primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
@@ -13,6 +15,59 @@ QN = QualifiedName("cat", "sch", "tbl")
 
 def test_describe_json_query_is_extended_and_backticked():
     assert describe_json_query(QN) == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"
+
+
+def test_primary_key_query_golden():
+    assert primary_key_query(QN) == (
+        "SELECT tc.constraint_name, kcu.column_name"
+        " FROM `cat`.information_schema.table_constraints AS tc"
+        " JOIN `cat`.information_schema.key_column_usage AS kcu"
+        " ON tc.constraint_catalog = kcu.constraint_catalog"
+        " AND tc.constraint_schema = kcu.constraint_schema"
+        " AND tc.constraint_name = kcu.constraint_name"
+        " WHERE tc.table_schema = 'sch'"
+        " AND tc.table_name = 'tbl'"
+        " AND tc.constraint_type = 'PRIMARY KEY'"
+        " ORDER BY kcu.ordinal_position"
+    )
+
+
+def test_foreign_keys_query_golden():
+    assert foreign_keys_query(QN) == (
+        "SELECT fk.constraint_name,"
+        " fk.column_name AS local_column,"
+        " parent_table.table_catalog AS referenced_catalog,"
+        " parent_table.table_schema AS referenced_schema,"
+        " parent_table.table_name AS referenced_table,"
+        " parent_key.column_name AS referenced_column"
+        " FROM `cat`.information_schema.referential_constraints AS rc"
+        " JOIN `cat`.information_schema.key_column_usage AS fk"
+        " ON rc.constraint_catalog = fk.constraint_catalog"
+        " AND rc.constraint_schema = fk.constraint_schema"
+        " AND rc.constraint_name = fk.constraint_name"
+        " JOIN `cat`.information_schema.key_column_usage AS parent_key"
+        " ON rc.unique_constraint_catalog = parent_key.constraint_catalog"
+        " AND rc.unique_constraint_schema = parent_key.constraint_schema"
+        " AND rc.unique_constraint_name = parent_key.constraint_name"
+        " AND fk.position_in_unique_constraint = parent_key.ordinal_position"
+        " JOIN `cat`.information_schema.table_constraints AS parent_table"
+        " ON rc.unique_constraint_catalog = parent_table.constraint_catalog"
+        " AND rc.unique_constraint_schema = parent_table.constraint_schema"
+        " AND rc.unique_constraint_name = parent_table.constraint_name"
+        " WHERE fk.table_schema = 'sch'"
+        " AND fk.table_name = 'tbl'"
+        " ORDER BY fk.constraint_name, fk.ordinal_position"
+    )
+
+
+def test_foreign_keys_query_pairs_columns_by_position_in_unique_constraint():
+    # A composite foreign key's local and referenced columns are aligned by the
+    # local column's position in the parent key, so a key that references its
+    # parent's columns in a different order than they are declared still pairs
+    # correctly instead of relying on both sides sharing an order.
+    assert "fk.position_in_unique_constraint = parent_key.ordinal_position" in foreign_keys_query(
+        QN
+    )
 
 
 def test_referencing_foreign_keys_query_golden():

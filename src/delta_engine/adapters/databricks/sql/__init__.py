@@ -17,11 +17,15 @@ from delta_engine.adapters.databricks.sql.dialect import (
 from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
     describe_json_query,
+    foreign_keys_query,
+    primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
     column_tags_from_rows,
+    foreign_keys_from_rows,
+    primary_key_from_rows,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
@@ -34,6 +38,10 @@ __all__ = [
     "column_tags_query",
     "compile_plan",
     "describe_json_query",
+    "foreign_keys_from_rows",
+    "foreign_keys_query",
+    "primary_key_from_rows",
+    "primary_key_query",
     "quote_literal",
     "referencing_foreign_keys_from_rows",
     "referencing_foreign_keys_query",

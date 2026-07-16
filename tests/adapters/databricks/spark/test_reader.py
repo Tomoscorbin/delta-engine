@@ -6,6 +6,8 @@ from delta_engine.adapters.databricks.spark.reader import SparkReader
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
+    foreign_keys_query,
+    primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
@@ -66,6 +68,8 @@ def _responses(describe=_DOC, **overrides):
         describe_json_query(QN): [(describe,)],
         table_tags_query(QN): [],
         column_tags_query(QN): [],
+        primary_key_query(QN): [],
+        foreign_keys_query(QN): [],
         referencing_foreign_keys_query(QN): [],
     }
     responses.update(overrides)
@@ -79,10 +83,10 @@ def test_present_table_reads_via_as_json():
     assert state.table.columns[0].data_type == Integer()
 
 
-def test_present_table_uses_four_queries():
+def test_present_table_uses_six_queries():
     spark = FakeSpark(_responses())
     SparkReader(spark).fetch_state(QN)
-    assert len(spark.queries) == 4
+    assert len(spark.queries) == 6
     assert spark.queries[0] == describe_json_query(QN)
 
 

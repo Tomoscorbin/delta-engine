@@ -11,10 +11,123 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.rows import (
     column_tags_from_rows,
+    foreign_keys_from_rows,
+    primary_key_from_rows,
     referencing_foreign_keys_from_rows,
     table_tags_from_rows,
 )
-from delta_engine.domain.model import ForeignKeyReference, QualifiedName
+from delta_engine.domain.model import (
+    ForeignKeyConstraint,
+    ForeignKeyReference,
+    PrimaryKeyConstraint,
+    QualifiedName,
+)
+
+# ---------- primary key ----------
+
+
+def test_primary_key_rows_map_to_ordered_casefolded_columns() -> None:
+    rows = [
+        SimpleNamespace(constraint_name="Orders_PK", column_name="Order_Id"),
+        SimpleNamespace(constraint_name="Orders_PK", column_name="Line_No"),
+    ]
+
+    result = primary_key_from_rows(rows)
+
+    assert result == PrimaryKeyConstraint(
+        columns=("order_id", "line_no"), constraint_name="orders_pk"
+    )
+
+
+def test_primary_key_empty_rows_map_to_none() -> None:
+    assert primary_key_from_rows([]) is None
+
+
+# ---------- owned foreign keys ----------
+
+
+def test_foreign_key_rows_map_to_casefolded_constraint() -> None:
+    rows = [
+        SimpleNamespace(
+            constraint_name="Orders_Customer_FK",
+            local_column="Customer_Id",
+            referenced_catalog="Dev",
+            referenced_schema="Silver",
+            referenced_table="Customer",
+            referenced_column="Id",
+        ),
+    ]
+
+    result = foreign_keys_from_rows(rows)
+
+    assert result == (
+        ForeignKeyConstraint(
+            local_columns=("customer_id",),
+            referenced_table=QualifiedName("dev", "silver", "customer"),
+            referenced_columns=("id",),
+            constraint_name="orders_customer_fk",
+        ),
+    )
+
+
+def test_composite_foreign_key_keeps_each_local_referenced_pair_together() -> None:
+    # Rows arrive in the foreign key's column order; the mapper preserves each
+    # (local, referenced) pair so the domain's canonical sort keeps them aligned.
+    rows = [
+        SimpleNamespace(
+            constraint_name="fk_ab",
+            local_column="b",
+            referenced_catalog="c",
+            referenced_schema="s",
+            referenced_table="parent",
+            referenced_column="y",
+        ),
+        SimpleNamespace(
+            constraint_name="fk_ab",
+            local_column="a",
+            referenced_catalog="c",
+            referenced_schema="s",
+            referenced_table="parent",
+            referenced_column="x",
+        ),
+    ]
+
+    [fk] = foreign_keys_from_rows(rows)
+
+    assert fk.local_columns == ("a", "b")
+    assert fk.referenced_columns == ("x", "y")  # a->x and b->y preserved through the sort
+    assert fk.referenced_table == QualifiedName("c", "s", "parent")
+
+
+def test_multiple_foreign_keys_group_by_constraint_name() -> None:
+    rows = [
+        SimpleNamespace(
+            constraint_name="fk_one",
+            local_column="a",
+            referenced_catalog="c",
+            referenced_schema="s",
+            referenced_table="p1",
+            referenced_column="x",
+        ),
+        SimpleNamespace(
+            constraint_name="fk_two",
+            local_column="b",
+            referenced_catalog="c",
+            referenced_schema="s",
+            referenced_table="p2",
+            referenced_column="y",
+        ),
+    ]
+
+    result = foreign_keys_from_rows(rows)
+
+    assert len(result) == 2
+    assert {fk.constraint_name for fk in result} == {"fk_one", "fk_two"}
+
+
+def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
+    assert foreign_keys_from_rows([]) == ()
+
 
 # ---------- referencing foreign keys ----------
 

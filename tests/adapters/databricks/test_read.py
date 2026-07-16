@@ -8,6 +8,8 @@ from delta_engine.adapters.databricks.read import (
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
+    foreign_keys_query,
+    primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
@@ -33,8 +35,6 @@ def _description(**overrides):
         partitioned_by=(),
         clustered_by=(),
         properties={},
-        primary_key=None,
-        foreign_keys=(),
     )
     base.update(overrides)
     return TableDescription(**base)
@@ -76,6 +76,36 @@ def test_tags_and_inbound_fks_attached():
     )
 
 
+def test_primary_and_foreign_keys_attached_from_info_schema():
+    responses = {
+        primary_key_query(QN): [SimpleNamespace(constraint_name="tbl_pk", column_name="id")],
+        foreign_keys_query(QN): [
+            SimpleNamespace(
+                constraint_name="tbl_fk",
+                local_column="id",
+                referenced_catalog="cat",
+                referenced_schema="sch",
+                referenced_table="other",
+                referenced_column="other_id",
+            ),
+        ],
+    }
+
+    observed = observed_table_from_description(
+        _description(), run_info_schema_query=_router(responses)
+    )
+
+    assert observed.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="tbl_pk")
+    assert observed.foreign_keys == (
+        ForeignKeyConstraint(
+            local_columns=("id",),
+            referenced_table=QualifiedName("cat", "sch", "other"),
+            referenced_columns=("other_id",),
+            constraint_name="tbl_fk",
+        ),
+    )
+
+
 def test_all_description_fields_pass_through():
     description = _description(
         columns=(
@@ -86,15 +116,6 @@ def test_all_description_fields_pass_through():
         partitioned_by=("region",),
         clustered_by=("id",),
         properties={"delta.columnMapping.mode": "name"},
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
-        foreign_keys=(
-            ForeignKeyConstraint(
-                local_columns=("id",),
-                referenced_table=QualifiedName("cat", "sch", "other"),
-                referenced_columns=("other_id",),
-                constraint_name="t_fk",
-            ),
-        ),
     )
 
     observed = observed_table_from_description(description, run_info_schema_query=_router({}))
@@ -103,8 +124,6 @@ def test_all_description_fields_pass_through():
     assert observed.partitioned_by == ("region",)
     assert observed.clustered_by == ("id",)
     assert dict(observed.properties) == {"delta.columnMapping.mode": "name"}
-    assert observed.primary_key.columns == ("id",)
-    assert observed.foreign_keys[0].constraint_name == "t_fk"
     assert dict(observed.columns[0].tags) == {}
 
 
@@ -125,6 +144,8 @@ def _describe_responses(**overrides):
         describe_json_query(QN): [(_DESCRIBE_DOC,)],
         table_tags_query(QN): [],
         column_tags_query(QN): [],
+        primary_key_query(QN): [],
+        foreign_keys_query(QN): [],
         referencing_foreign_keys_query(QN): [],
     }
     responses.update(overrides)
@@ -149,7 +170,7 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
     read_catalog_state(run_query, QN)
 
     assert calls[0] == describe_json_query(QN)
-    assert len(calls) == 4
+    assert len(calls) == 6
 
 
 def test_missing_relation_on_describe_reads_as_absent():

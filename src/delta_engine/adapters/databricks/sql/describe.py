@@ -1,11 +1,11 @@
 """
 Parse a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a table description.
 
-Everything but one field arrives structured: columns carry type objects (mapped
-by ``types.data_type_from_json``), and comment, partitioning, clustering, and
-properties are plain JSON. The one embedded formatted string —
-``table_constraints`` — is parsed by ``constraints.py`` and documented there as
-less structurally stable.
+Columns carry type objects (mapped by ``types.data_type_from_json``); comment,
+partitioning, clustering, and properties are plain JSON. Key constraints and
+tags are not read from this document — they come from information_schema as
+structured rows (see ``queries`` and ``rows``), so the one embedded formatted
+``table_constraints`` string this document also carries is left unread.
 """
 
 from collections.abc import Mapping
@@ -14,18 +14,9 @@ import json
 import logging
 from types import MappingProxyType
 
-from delta_engine.adapters.databricks.sql.constraints import (
-    ConstraintParseError,
-    parse_table_constraints,
-)
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
-from delta_engine.domain.model import (
-    ForeignKeyConstraint,
-    ObservedColumn,
-    PrimaryKeyConstraint,
-    QualifiedName,
-)
+from delta_engine.domain.model import ObservedColumn, QualifiedName
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +27,7 @@ class MetadataParseError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class TableDescription:
-    """Backend-neutral table-local state parsed from one AS JSON document."""
+    """Backend-neutral columns and layout parsed from one AS JSON document."""
 
     qualified_name: QualifiedName
     columns: tuple[ObservedColumn, ...]
@@ -44,8 +35,6 @@ class TableDescription:
     partitioned_by: tuple[str, ...]
     clustered_by: tuple[str, ...]
     properties: Mapping[str, str]
-    primary_key: PrimaryKeyConstraint | None
-    foreign_keys: tuple[ForeignKeyConstraint, ...]
 
 
 def parse_table_description(json_text: str, qualified_name: QualifiedName) -> TableDescription:
@@ -59,20 +48,13 @@ def parse_table_description(json_text: str, qualified_name: QualifiedName) -> Ta
     if not isinstance(document, dict):
         raise MetadataParseError(f"{qualified_name}: expected a JSON object")
 
-    partitioned_by = _casefolded_list(document.get("partition_columns"))
-    try:
-        constraints = parse_table_constraints(document.get("table_constraints"))
-    except ConstraintParseError as error:
-        raise MetadataParseError(f"{qualified_name}: malformed table_constraints") from error
     return TableDescription(
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name),
         comment=document.get("comment") or "",
-        partitioned_by=partitioned_by,
+        partitioned_by=_casefolded_list(document.get("partition_columns")),
         clustered_by=_casefolded_list(document.get("clustering_columns")),
         properties=_managed_properties(document.get("table_properties"), qualified_name),
-        primary_key=constraints.primary_key,
-        foreign_keys=constraints.foreign_keys,
     )
 
 

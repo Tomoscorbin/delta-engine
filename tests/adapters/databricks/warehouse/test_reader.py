@@ -3,6 +3,8 @@ import json
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
+    foreign_keys_query,
+    primary_key_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
@@ -65,6 +67,8 @@ def _responses(describe=_DOC, **overrides):
         describe_json_query(QN): [(describe,)] if describe is not None else describe,
         table_tags_query(QN): [],
         column_tags_query(QN): [],
+        primary_key_query(QN): [],
+        foreign_keys_query(QN): [],
         referencing_foreign_keys_query(QN): [],
     }
     responses.update(overrides)
@@ -82,13 +86,15 @@ def test_present_table_reads_via_as_json():
     assert observed.comment == "orders"
     assert observed.clustered_by == ("id",)
     assert dict(observed.properties) == {"delta.columnMapping.mode": "name"}
-    assert observed.primary_key.columns == ("id",)
+    # The table_constraints embedded in the AS JSON doc is not read: the primary
+    # key comes from information_schema, which returns nothing here.
+    assert observed.primary_key is None
 
 
-def test_present_table_uses_four_queries():
+def test_present_table_uses_six_queries():
     connection = RoutedConnection(_responses())
     WarehouseReader(connection).fetch_state(QN)
-    assert len(connection.cursor_fake.queries) == 4
+    assert len(connection.cursor_fake.queries) == 6
     assert connection.cursor_fake.queries[0] == describe_json_query(QN)
 
 

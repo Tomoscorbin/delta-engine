@@ -2,14 +2,15 @@
 Shared catalog-state read for the Databricks backends.
 
 Both backends read a table the same way: one ``DESCRIBE TABLE EXTENDED … AS
-JSON`` parsed into a backend-neutral ``TableDescription``, then the metadata the
-JSON omits — Unity Catalog tags and inbound foreign keys — attached from
-information_schema. Only how a query is physically run differs per backend, so
-it is injected as a callable: ``read_catalog_state`` is the read-side twin of
-the write side's ``execution.execute_statements``. Each backend supplies only
-how a query runs (returning its rows) and owns its own connection resource;
-the describe, parsing, assembly, and the total failure boundary all live here.
-This module stays PySpark-free.
+JSON`` parsed into a backend-neutral ``TableDescription`` for the columns and
+layout, then the constraint and tag metadata read from information_schema as
+structured rows — Unity Catalog tags, this table's own primary and foreign
+keys, and inbound foreign keys. Only how a query is physically run differs per
+backend, so it is injected as a callable: ``read_catalog_state`` is the
+read-side twin of the write side's ``execution.execute_statements``. Each
+backend supplies only how a query runs (returning its rows) and owns its own
+connection resource; the describe, parsing, assembly, and the total failure
+boundary all live here. This module stays PySpark-free.
 """
 
 from collections.abc import Callable, Sequence
@@ -26,6 +27,10 @@ from delta_engine.adapters.databricks.sql import (
     column_tags_from_rows,
     column_tags_query,
     describe_json_query,
+    foreign_keys_from_rows,
+    foreign_keys_query,
+    primary_key_from_rows,
+    primary_key_query,
     referencing_foreign_keys_from_rows,
     referencing_foreign_keys_query,
     table_tags_from_rows,
@@ -85,6 +90,8 @@ def observed_table_from_description(
         for column in description.columns
     )
     table_tags = table_tags_from_rows(run_info_schema_query(table_tags_query(qualified_name)))
+    primary_key = primary_key_from_rows(run_info_schema_query(primary_key_query(qualified_name)))
+    foreign_keys = foreign_keys_from_rows(run_info_schema_query(foreign_keys_query(qualified_name)))
     referencing_foreign_keys = referencing_foreign_keys_from_rows(
         run_info_schema_query(referencing_foreign_keys_query(qualified_name))
     )
@@ -96,7 +103,7 @@ def observed_table_from_description(
         tags=table_tags,
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,
-        primary_key=description.primary_key,
-        foreign_keys=description.foreign_keys,
+        primary_key=primary_key,
+        foreign_keys=foreign_keys,
         referencing_foreign_keys=referencing_foreign_keys,
     )

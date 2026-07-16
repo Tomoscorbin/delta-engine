@@ -79,15 +79,6 @@ def test_properties_filtered_to_registry():
     assert dict(description.properties) == {"delta.columnMapping.mode": "name"}
 
 
-def test_constraints_lowered_to_domain():
-    description = parse_table_description(
-        _doc(table_constraints="[(pk_demo,PRIMARY KEY (`id`))]"), QN
-    )
-    assert description.primary_key is not None
-    assert description.primary_key.columns == ("id",)
-    assert description.primary_key.constraint_name == "pk_demo"
-
-
 def test_unmappable_non_partition_column_is_skipped():
     description = parse_table_description(
         _doc(
@@ -106,11 +97,6 @@ def test_malformed_json_and_missing_columns_raise():
         parse_table_description("{not json", QN)
     with pytest.raises(MetadataParseError):
         parse_table_description('{"comment": ""}', QN)
-
-
-def test_malformed_table_constraints_raises_metadata_error():
-    with pytest.raises(MetadataParseError):
-        parse_table_description(_doc(table_constraints="[(pk_x,PRIMARY KEY)]"), QN)
 
 
 def test_non_object_document_raises():
@@ -149,7 +135,4 @@ def test_real_order_fact_fixture():
     assert len(description.columns) == 7
     assert description.columns[0].name == "order_id"
     assert description.columns[0].nullable is False
-    assert description.primary_key.columns == ("order_id",)
-    [fk] = description.foreign_keys
-    assert fk.referenced_table == QualifiedName("dev", "gold", "product_dimension")
     assert dict(description.properties) == {"delta.columnMapping.mode": "name"}

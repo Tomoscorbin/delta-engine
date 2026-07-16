@@ -163,8 +163,6 @@ class NativeSparkReader:
             partitioned_by=tuple(c.casefold() for c in (detail["partitionColumns"] or [])),
             clustered_by=tuple(c.casefold() for c in (detail["clusteringColumns"] or [])),
             properties=_managed_properties(detail["properties"]),
-            primary_key=None,
-            foreign_keys=(),
         )
         observed = observed_table_from_description(
             description, run_info_schema_query=lambda query: []
