@@ -42,11 +42,11 @@ from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName
 
+# Runs one SQL statement and returns its rows — the one fact a backend supplies.
+type RunQuery = Callable[[str], Sequence[Any]]
 
-def read_catalog_state(
-    run_query: Callable[[str], Sequence[Any]],
-    qualified_name: QualifiedName,
-) -> CatalogState:
+
+def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
     """
     Read one table's catalog state: ``TablePresent`` | ``TableAbsent`` | ``ReadFailed``.
 
@@ -64,7 +64,7 @@ def read_catalog_state(
         )
 
 
-def _read(run_query: Callable[[str], Sequence[Any]], qualified_name: QualifiedName) -> CatalogState:
+def _read(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
     try:
         rows = run_query(describe_json_query(qualified_name))
     except Exception as exception:
@@ -77,10 +77,7 @@ def _read(run_query: Callable[[str], Sequence[Any]], qualified_name: QualifiedNa
     return TablePresent(table=_observed_table(run_query, description))
 
 
-def _observed_table(
-    run_query: Callable[[str], Sequence[Any]],
-    description: TableDescription,
-) -> ObservedTable:
+def _observed_table(run_query: RunQuery, description: TableDescription) -> ObservedTable:
     """Attach the information_schema metadata (tags, keys, inbound FKs) to the description."""
     qualified_name = description.qualified_name
     column_tags = column_tags_from_rows(run_query(column_tags_query(qualified_name)))
