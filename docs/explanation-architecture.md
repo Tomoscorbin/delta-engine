@@ -136,8 +136,9 @@ the comment, partitioning, clustering, and registry-filtered properties.
 `information_schema` supplies the constraint and tag metadata as structured rows
 — Unity Catalog tags, the table's own primary and foreign keys, and inbound
 foreign keys (the JSON document's embedded `table_constraints` string is left
-unread) — and the shared `read.observed_table_from_description` assembly attaches
-them. The per-column read policy is shared and fails closed: a column whose type
+unread) — which the shared read attaches during assembly. The whole read is one
+entry point, `read.read_catalog_state`, and each backend supplies only how a
+query runs. The per-column read policy is shared and fails closed: a column whose type
 the domain cannot model fails the read rather than being dropped, because a
 silently omitted column would read as "in sync" against a declaration that still
 owns it. Statement execution and exception

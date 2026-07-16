@@ -6,11 +6,12 @@ JSON`` parsed into a backend-neutral ``TableDescription`` for the columns and
 layout, then the constraint and tag metadata read from information_schema as
 structured rows — Unity Catalog tags, this table's own primary and foreign
 keys, and inbound foreign keys. Only how a query is physically run differs per
-backend, so it is injected as a callable: ``read_catalog_state`` is the
-read-side twin of the write side's ``execution.execute_statements``. Each
-backend supplies only how a query runs (returning its rows) and owns its own
-connection resource; the describe, parsing, assembly, and the total failure
-boundary all live here. This module stays PySpark-free.
+backend, so it is injected as a callable: ``read_catalog_state`` is the one
+entry point both readers call, the read-side twin of the write side's
+``execution.execute_statements``. Each backend supplies only how a query runs
+(returning its rows) and owns its own connection resource; the describe,
+parsing, assembly, and the total failure boundary all live here. This module
+stays PySpark-free.
 """
 
 from collections.abc import Callable, Sequence
@@ -73,27 +74,25 @@ def _read(run_query: Callable[[str], Sequence[Any]], qualified_name: QualifiedNa
     if not rows:
         raise RuntimeError(f"DESCRIBE AS JSON returned no row for {qualified_name}")
     description = parse_table_description(rows[0][0], qualified_name)
-    observed = observed_table_from_description(description, run_info_schema_query=run_query)
-    return TablePresent(table=observed)
+    return TablePresent(table=_observed_table(run_query, description))
 
 
-def observed_table_from_description(
+def _observed_table(
+    run_query: Callable[[str], Sequence[Any]],
     description: TableDescription,
-    *,
-    run_info_schema_query: Callable[[str], Sequence[Any]],
 ) -> ObservedTable:
-    """Assemble the domain ``ObservedTable`` from a description plus information_schema."""
+    """Attach the information_schema metadata (tags, keys, inbound FKs) to the description."""
     qualified_name = description.qualified_name
-    column_tags = column_tags_from_rows(run_info_schema_query(column_tags_query(qualified_name)))
+    column_tags = column_tags_from_rows(run_query(column_tags_query(qualified_name)))
     tagged_columns = tuple(
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
         for column in description.columns
     )
-    table_tags = table_tags_from_rows(run_info_schema_query(table_tags_query(qualified_name)))
-    primary_key = primary_key_from_rows(run_info_schema_query(primary_key_query(qualified_name)))
-    foreign_keys = foreign_keys_from_rows(run_info_schema_query(foreign_keys_query(qualified_name)))
+    table_tags = table_tags_from_rows(run_query(table_tags_query(qualified_name)))
+    primary_key = primary_key_from_rows(run_query(primary_key_query(qualified_name)))
+    foreign_keys = foreign_keys_from_rows(run_query(foreign_keys_query(qualified_name)))
     referencing_foreign_keys = referencing_foreign_keys_from_rows(
-        run_info_schema_query(referencing_foreign_keys_query(qualified_name))
+        run_query(referencing_foreign_keys_query(qualified_name))
     )
     return ObservedTable(
         qualified_name=qualified_name,

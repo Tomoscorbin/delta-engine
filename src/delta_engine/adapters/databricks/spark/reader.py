@@ -10,7 +10,7 @@ and the total boundary are shared with the warehouse backend.
 
 from __future__ import annotations
 
-from pyspark.sql import SparkSession
+from pyspark.sql import Row, SparkSession
 
 from delta_engine.adapters.databricks.read import read_catalog_state
 from delta_engine.application.ports import CatalogState
@@ -25,4 +25,8 @@ class SparkReader:
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """Return ``TablePresent``, ``TableAbsent``, or ``ReadFailed`` — the boundary is total."""
-        return read_catalog_state(lambda sql: self.spark.sql(sql).collect(), qualified_name)
+        return read_catalog_state(self._run_query, qualified_name)
+
+    def _run_query(self, sql: str) -> list[Row]:
+        """Run one SQL statement on the session and return its rows."""
+        return self.spark.sql(sql).collect()
