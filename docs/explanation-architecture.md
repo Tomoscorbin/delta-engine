@@ -441,13 +441,15 @@ properties diff runs only when the declaration manages `PROPERTIES` (see
 Diff-first planning). The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableMissing`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in
-validation, as an unconditional invariant rather than an optional rule:
-`validate_diff` fails the sync once per unmanaged aspect that has drifted
-(`UnmanagedAspectDrift`), and rules read `drift.managed_actions` and
-`drift.managed_findings` — so unmanaged drift produces exactly one scope
-failure rather than also tripping safety rules for differences the user never
-requested. If planning succeeds, every difference belongs to a managed aspect
-and the plan holds executable actions only.
+validation, as a gate rather than an optional rule. Before any safety rule
+runs, `validate_diff` fails the sync once per unmanaged aspect that has
+drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
+difference produces exactly the scope failure rather than also tripping
+safety rules for differences the user never requested. Because the gate runs
+first, the safety rules only ever see a fully in-scope diff and read
+`drift.actions` and `drift.findings` directly. If planning succeeds, every
+difference belongs to a managed aspect and the plan holds executable actions
+only.
 
 The public API exposes named scopes only: `DeltaTable`'s `scope` parameter
 maps `"metadata"` to the metadata aspects (comments, tags, key constraints)
@@ -562,9 +564,9 @@ connected components to produce a dependency-first order. It reports:
   a read failure, validation failure, unresolvable FK, invalid FK target, or FK
   cycle.
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.managed_actions` or `drift.managed_findings` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure.
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.actions` or `drift.findings` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gate runs before any rule and short-circuits on out-of-scope drift, so a rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` dispatches on the diff variant first: a `TableMissing` passes automatically when table existence is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table. For a `TableDrift`, `validate_diff` calls every rule in `DEFAULT_RULES` with the drift and aggregates their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
+`validate_diff` checks the scope gate first: a `TableMissing` clears it when table existence is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table; a `TableDrift` clears it when no unmanaged aspect has drifted. Only past the gate does `validate_diff` call every rule in `DEFAULT_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
 
 Execution walks the dependency-first order produced by the resolver and keeps a
 set of every table that has failed so far. Before each table executes, the engine

@@ -135,8 +135,11 @@ An action may emit several entries across categories (`CreateTable` lists its co
 
 If the new action can be unsafe, add a rule in
 `src/delta_engine/application/validation.py`. Rules receive the self-contained
-drift and match concrete types from `drift.managed_actions` (or
-`drift.managed_findings` when judging findings):
+drift and match concrete types from `drift.actions` (or `drift.findings` when
+judging findings). The scope gate runs before any rule and short-circuits on
+out-of-scope drift, so a rule only ever sees differences the declaration
+manages — declare the correct `TableAspect` on the action (step 1) and no
+scope filtering is needed here:
 
 ```python
 from typing import ClassVar
@@ -154,7 +157,7 @@ class NoUnsafeCommentChange:
                 rule_name=self.name,
                 message=f"Operation not allowed: ...",
             )
-            for change in drift.managed_actions
+            for change in drift.actions
             if isinstance(change, UpdateComment) and <condition>
         )
 ```

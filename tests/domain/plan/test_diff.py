@@ -155,19 +155,18 @@ def test_type_drift_produces_column_data_type_changed():
     )
 
 
-def test_type_drift_suppresses_nullability_change_but_not_comment_change():
-    # Given a column where type, nullability, and comment all differ
+def test_type_nullability_and_comment_drift_on_one_column_each_produce_a_change():
+    # Given one column whose type, nullability, and comment all differ
     desired = _desired(columns=(DesiredColumn("id", Integer(), nullable=False, comment="new"),))
     observed = _observed(columns=(DesiredColumn("id", Long(), nullable=True, comment="old"),))
 
     # When diffing
     diff = diff_table(desired, observed)
 
-    # Then the type change is present and nullability is suppressed (the column
-    # must be recreated first); comment drift is independent and not suppressed
+    # Then each aspect drifts independently and produces its own change
     assert isinstance(diff, TableDrift)
     assert any(isinstance(change, AlterColumnType) for change in diff.actions)
-    assert not any(isinstance(change, SetColumnNullability) for change in diff.actions)
+    assert any(isinstance(change, SetColumnNullability) for change in diff.actions)
     assert any(isinstance(change, SetColumnComment) for change in diff.actions)
 
 
@@ -571,27 +570,6 @@ def test_table_comment_changed_rejects_equal_comments():
 def test_partitioning_changed_rejects_equal_specs():
     with pytest.raises(ValueError, match="no difference"):
         PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
-
-
-def test_managed_views_filter_out_unmanaged_aspects():
-    # Given a drift with one managed action, one unmanaged action, and an
-    # unmanaged finding
-    desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
-    table_comment_action = SetTableComment(desired_comment="new", observed_comment="old")
-    column_action = AddColumn(DesiredColumn("new_col", Integer()))
-    partitioning_finding = PartitioningChanged(
-        desired_partitioning=("id",), observed_partitioning=()
-    )
-
-    drift = TableDrift(
-        desired=desired,
-        actions=(column_action, table_comment_action),
-        findings=(partitioning_finding,),
-    )
-
-    # Then only managed differences are exposed to validation rules
-    assert drift.managed_actions == (table_comment_action,)
-    assert drift.managed_findings == ()
 
 
 def test_observed_only_primary_key_produces_removed_change():

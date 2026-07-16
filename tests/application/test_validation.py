@@ -642,6 +642,22 @@ def test_managed_drift_still_trips_safety_rules():
     assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
 
 
+def test_out_of_scope_drift_short_circuits_safety_rules():
+    # Given a declaration that manages column structure but not table comment,
+    # with both a managed-and-unsafe column add and out-of-scope comment drift
+    diff = _drift(
+        AddColumn(DesiredColumn("x", Integer(), nullable=False)),
+        SetTableComment(desired_comment="new", observed_comment="old"),
+        managed_aspects=frozenset({TableAspect.COLUMN_STRUCTURE}),
+    )
+
+    # When validating
+    result = validate_diff(diff)
+
+    # Then the scope violation is reported alone; the safety rule never runs
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
     # Given a metadata-only drift where only a managed aspect drifted
     diff = _drift(
