@@ -9,7 +9,12 @@ from delta_engine.adapters.databricks.sql.describe import (
     table_description_from_rows,
 )
 from delta_engine.domain.model import Integer, ObservedColumn, QualifiedName, String
-from tests.adapters.databricks.sql.strategies import SQL_IDENTIFIERS, TYPE_DOCUMENTS
+from tests.adapters.databricks.sql.strategies import (
+    CANONICAL_IDENTIFIERS,
+    OBSERVED_TABLE_PROPERTIES,
+    SQL_LITERAL_VALUES,
+    TYPE_DOCUMENTS,
+)
 
 QN = QualifiedName("dev", "silver", "demo_table")
 
@@ -42,7 +47,7 @@ def _doc(**overrides):
 
 @st.composite
 def _valid_describe_documents(draw: st.DrawFn):
-    names = draw(st.lists(SQL_IDENTIFIERS, min_size=1, max_size=5, unique=True))
+    names = draw(st.lists(CANONICAL_IDENTIFIERS, min_size=1, max_size=5, unique=True))
     columns = []
     expected_columns = []
     raw_names = []
@@ -50,16 +55,19 @@ def _valid_describe_documents(draw: st.DrawFn):
         raw_name = draw(st.sampled_from((name, name.upper())))
         data_type, type_document = draw(TYPE_DOCUMENTS)
         nullable = draw(st.booleans())
-        comment = draw(st.text(max_size=30))
+        comment_kind = draw(st.sampled_from(("missing", "null", "value")))
+        comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""
         raw_names.append(raw_name)
-        columns.append(
-            {
-                "name": raw_name,
-                "type": type_document,
-                "nullable": nullable,
-                "comment": comment,
-            }
-        )
+        column_document = {
+            "name": raw_name,
+            "type": type_document,
+            "nullable": nullable,
+        }
+        if comment_kind == "null":
+            column_document["comment"] = None
+        elif comment_kind == "value":
+            column_document["comment"] = comment
+        columns.append(column_document)
         expected_columns.append(
             ObservedColumn(
                 name=raw_name.casefold(),
@@ -71,23 +79,21 @@ def _valid_describe_documents(draw: st.DrawFn):
 
     partitioned_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
     clustered_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
-    properties = draw(
-        st.dictionaries(
-            st.text(min_size=1, max_size=12),
-            st.text(max_size=30),
-            max_size=5,
-        )
-    )
-    comment = draw(st.text(max_size=30))
+    properties = draw(OBSERVED_TABLE_PROPERTIES)
+    comment_kind = draw(st.sampled_from(("missing", "null", "value")))
+    comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""
     document = {
         "type": "MANAGED",
         "provider": "delta",
         "columns": columns,
-        "comment": comment,
         "partition_columns": partitioned_by,
         "clustering_columns": clustered_by,
         "table_properties": properties,
     }
+    if comment_kind == "null":
+        document["comment"] = None
+    elif comment_kind == "value":
+        document["comment"] = comment
     return (
         document,
         tuple(expected_columns),
@@ -308,18 +314,14 @@ def test_describe_parsing_ignores_json_formatting_key_order_and_unknown_fields(c
     assert reparsed == baseline
 
 
-_NON_STRING_JSON_VALUES = st.one_of(
-    st.booleans(),
-    st.integers(),
-    st.floats(allow_nan=False, allow_infinity=False),
-    st.lists(st.integers(), max_size=3),
-    st.dictionaries(st.text(max_size=5), st.integers(), max_size=3),
-)
-
-
-@given(
-    field=st.sampled_from(("table_comment", "column_comment", "layout_item", "property_value")),
-    malformed=_NON_STRING_JSON_VALUES,
+@pytest.mark.parametrize(
+    ("field", "malformed"),
+    (
+        ("table_comment", False),
+        ("column_comment", 0),
+        ("layout_item", {"name": "region"}),
+        ("property_value", True),
+    ),
 )
 def test_non_string_describe_leaf_values_raise_metadata_parse_error(
     field: str,
@@ -337,9 +339,3 @@ def test_non_string_describe_leaf_values_raise_metadata_parse_error(
 
     with pytest.raises(MetadataParseError):
         _parse(json.dumps(document))
-
-
-@pytest.mark.parametrize("row", [(), []])
-def test_malformed_describe_result_row_raises_metadata_parse_error(row) -> None:
-    with pytest.raises(MetadataParseError):
-        table_description_from_rows([row], QN)

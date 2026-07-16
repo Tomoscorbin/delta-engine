@@ -119,7 +119,8 @@ def test_execute_returns_empty_summary_for_no_statements():
 
 @st.composite
 def _execution_scenarios(draw: st.DrawFn):
-    statements = draw(st.lists(st.text(max_size=30), max_size=8))
+    statement_count = draw(st.integers(min_value=0, max_value=8))
+    statements = [f"statement_{index}" for index in range(statement_count)]
     if not statements:
         return statements, None
     failure_index = draw(

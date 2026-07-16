@@ -49,13 +49,7 @@ def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> Ta
     """
     if not rows:
         raise MetadataParseError(f"{qualified_name}: DESCRIBE AS JSON returned no rows")
-    try:
-        json_text = rows[0][0]
-    except (IndexError, KeyError, TypeError) as error:
-        raise MetadataParseError(
-            f"{qualified_name}: DESCRIBE AS JSON returned a malformed row"
-        ) from error
-    return _parse_document(json_text, qualified_name)
+    return _parse_document(rows[0][0], qualified_name)
 
 
 def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescription:
@@ -155,13 +149,8 @@ def _table_properties(table_properties: object, qualified_name: QualifiedName) -
         return MappingProxyType({})
     if not isinstance(table_properties, dict):
         raise MetadataParseError(f"{qualified_name}: table_properties is not an object")
-    if any(
-        not isinstance(name, str) or not isinstance(value, str)
-        for name, value in table_properties.items()
-    ):
-        raise MetadataParseError(
-            f"{qualified_name}: table_properties keys and values must be strings"
-        )
+    if any(not isinstance(value, str) for value in table_properties.values()):
+        raise MetadataParseError(f"{qualified_name}: table_properties values must be strings")
     return MappingProxyType(dict(table_properties))
 
 

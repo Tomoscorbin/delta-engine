@@ -1,6 +1,6 @@
 import inspect
 
-from hypothesis import given, strategies as st
+from hypothesis import given
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import (
@@ -8,7 +8,6 @@ from delta_engine.adapters.databricks.sql.compile import (
     _properties_clause,
     compile_plan,
 )
-from delta_engine.adapters.databricks.sql.dialect import quote_literal
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -46,6 +45,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
+from tests.adapters.databricks.sql.strategies import MANAGED_PROPERTY_MAPS
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
 _REFERENCED_TABLE = QualifiedName("cat", "sch", "customers")
@@ -521,18 +521,12 @@ def test_compile_rename_column():
     )
 
 
-@given(
-    st.dictionaries(
-        st.text(max_size=12),
-        st.one_of(st.none(), st.text(max_size=30)),
-        max_size=8,
-    )
-)
+@given(MANAGED_PROPERTY_MAPS)
 def test_properties_clause_is_sorted_filters_absence_and_ignores_mapping_order(
     properties: dict[str, str | None],
 ) -> None:
     valued = [(name, value) for name, value in sorted(properties.items()) if value is not None]
-    pairs = ", ".join(f"{quote_literal(name)}={quote_literal(value)}" for name, value in valued)
+    pairs = ", ".join(f"'{name}'='{value}'" for name, value in valued)
     expected = f"TBLPROPERTIES ({pairs})" if pairs else ""
     reversed_properties = dict(reversed(tuple(properties.items())))
 

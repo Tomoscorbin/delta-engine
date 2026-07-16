@@ -291,11 +291,11 @@ def test_sync_round_trips_quoted_identifiers_and_unicode_metadata(live_connectio
             Column(
                 "display name",
                 String(),
-                comment="visitor's preferred name — café",
+                comment=r"visitor's preferred path C:\landing\new — café",
                 tags={"classification": "équipe's data"},
             ),
         ),
-        comment="O'Reilly's live table — 東京",
+        comment=r"O'Reilly's live table — C:\landing\new — 東京",
         properties={Property.COLUMN_MAPPING_MODE: "name"},
         tags={"owner": "data platform's team"},
     )
@@ -304,7 +304,7 @@ def test_sync_round_trips_quoted_identifiers_and_unicode_metadata(live_connectio
 
     state = read_live_table(live_connection, table_name)
     assert [column["column_name"] for column in state["columns"]] == ["id", "display name"]
-    assert state["columns"][1]["comment"] == "visitor's preferred name — café"
-    assert state["comment"] == "O'Reilly's live table — 東京"
+    assert state["columns"][1]["comment"] == r"visitor's preferred path C:\landing\new — café"
+    assert state["comment"] == r"O'Reilly's live table — C:\landing\new — 東京"
     assert state["table_tags"] == {"owner": "data platform's team"}
     assert state["column_tags"] == {("display name", "classification"): "équipe's data"}
