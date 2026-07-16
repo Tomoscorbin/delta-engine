@@ -5,7 +5,7 @@ OSS Spark's ``DESCRIBE TABLE ... AS JSON`` rejects Delta tables, so the local
 ``local_e2e`` suite cannot exercise ``SparkReader`` directly. This reader
 reaches the same observed state a different way: columns come from the
 native ``StructType``, layout and properties come from ``DESCRIBE DETAIL``,
-and the result feeds the same ``observed_table_from_snapshot`` assembly the
+and the result feeds the same ``observed_table_from_description`` assembly the
 shipped readers use. Unity Catalog tags, inbound foreign keys, and
 primary/foreign key constraints have no OSS Spark equivalent, so those come
 back empty; no local e2e test declares them.
@@ -29,8 +29,8 @@ from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
-from delta_engine.adapters.databricks.read import observed_table_from_snapshot
-from delta_engine.adapters.databricks.sql.describe import TableSnapshot
+from delta_engine.adapters.databricks.read import observed_table_from_description
+from delta_engine.adapters.databricks.sql.describe import TableDescription
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
@@ -156,7 +156,7 @@ class NativeSparkReader:
         fq = str(qualified_name)
         struct = self.spark.table(fq).schema
         detail = self.spark.sql(f"DESCRIBE DETAIL {fq}").first()
-        snapshot = TableSnapshot(
+        description = TableDescription(
             qualified_name=qualified_name,
             columns=_observed_columns(struct),
             comment=self.spark.catalog.getTable(fq).description or "",
@@ -166,5 +166,7 @@ class NativeSparkReader:
             primary_key=None,
             foreign_keys=(),
         )
-        observed = observed_table_from_snapshot(snapshot, run_info_schema_query=lambda query: [])
+        observed = observed_table_from_description(
+            description, run_info_schema_query=lambda query: []
+        )
         return TablePresent(table=observed)

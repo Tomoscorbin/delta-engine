@@ -2,7 +2,7 @@
 Shared catalog-state read for the Databricks backends.
 
 Both backends read a table the same way: one ``DESCRIBE TABLE EXTENDED … AS
-JSON`` parsed into a backend-neutral ``TableSnapshot``, then the metadata the
+JSON`` parsed into a backend-neutral ``TableDescription``, then the metadata the
 JSON omits — Unity Catalog tags and inbound foreign keys — attached from
 information_schema. Only how a query is physically run differs per backend, so
 it is injected as a callable: ``read_catalog_state`` is the read-side twin of
@@ -31,7 +31,7 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_from_rows,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe import TableSnapshot, parse_table_snapshot
+from delta_engine.adapters.databricks.sql.describe import TableDescription, parse_table_description
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName
@@ -67,22 +67,22 @@ def _read(run_query: Callable[[str], Sequence[Any]], qualified_name: QualifiedNa
         raise
     if not rows:
         raise RuntimeError(f"DESCRIBE AS JSON returned no row for {qualified_name}")
-    snapshot = parse_table_snapshot(rows[0][0], qualified_name)
-    observed = observed_table_from_snapshot(snapshot, run_info_schema_query=run_query)
+    description = parse_table_description(rows[0][0], qualified_name)
+    observed = observed_table_from_description(description, run_info_schema_query=run_query)
     return TablePresent(table=observed)
 
 
-def observed_table_from_snapshot(
-    snapshot: TableSnapshot,
+def observed_table_from_description(
+    description: TableDescription,
     *,
     run_info_schema_query: Callable[[str], Sequence[Any]],
 ) -> ObservedTable:
-    """Assemble the domain ``ObservedTable`` from a snapshot plus information_schema."""
-    qualified_name = snapshot.qualified_name
+    """Assemble the domain ``ObservedTable`` from a description plus information_schema."""
+    qualified_name = description.qualified_name
     column_tags = column_tags_from_rows(run_info_schema_query(column_tags_query(qualified_name)))
     tagged_columns = tuple(
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
-        for column in snapshot.columns
+        for column in description.columns
     )
     table_tags = table_tags_from_rows(run_info_schema_query(table_tags_query(qualified_name)))
     referencing_foreign_keys = referencing_foreign_keys_from_rows(
@@ -91,12 +91,12 @@ def observed_table_from_snapshot(
     return ObservedTable(
         qualified_name=qualified_name,
         columns=tagged_columns,
-        comment=snapshot.comment,
-        properties=snapshot.properties,
+        comment=description.comment,
+        properties=description.properties,
         tags=table_tags,
-        partitioned_by=snapshot.partitioned_by,
-        clustered_by=snapshot.clustered_by,
-        primary_key=snapshot.primary_key,
-        foreign_keys=snapshot.foreign_keys,
+        partitioned_by=description.partitioned_by,
+        clustered_by=description.clustered_by,
+        primary_key=description.primary_key,
+        foreign_keys=description.foreign_keys,
         referencing_foreign_keys=referencing_foreign_keys,
     )

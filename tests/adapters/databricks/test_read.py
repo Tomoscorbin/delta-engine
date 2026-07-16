@@ -1,14 +1,17 @@
 import json
 from types import SimpleNamespace
 
-from delta_engine.adapters.databricks.read import observed_table_from_snapshot, read_catalog_state
+from delta_engine.adapters.databricks.read import (
+    observed_table_from_description,
+    read_catalog_state,
+)
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
     referencing_foreign_keys_query,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe import TableSnapshot
+from delta_engine.adapters.databricks.sql.describe import TableDescription
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
@@ -22,7 +25,7 @@ from delta_engine.domain.model import (
 QN = QualifiedName("cat", "sch", "tbl")
 
 
-def _snapshot(**overrides):
+def _description(**overrides):
     base = dict(
         qualified_name=QN,
         columns=(ObservedColumn("id", Integer(), nullable=False),),
@@ -34,7 +37,7 @@ def _snapshot(**overrides):
         foreign_keys=(),
     )
     base.update(overrides)
-    return TableSnapshot(**base)
+    return TableDescription(**base)
 
 
 def _router(responses):
@@ -62,7 +65,9 @@ def test_tags_and_inbound_fks_attached():
             ),
         ],
     }
-    observed = observed_table_from_snapshot(_snapshot(), run_info_schema_query=_router(responses))
+    observed = observed_table_from_description(
+        _description(), run_info_schema_query=_router(responses)
+    )
 
     assert dict(observed.tags) == {"Owner": "Data"}
     assert dict(observed.columns[0].tags) == {"pii": "low"}
@@ -71,8 +76,8 @@ def test_tags_and_inbound_fks_attached():
     )
 
 
-def test_all_snapshot_fields_pass_through():
-    snapshot = _snapshot(
+def test_all_description_fields_pass_through():
+    description = _description(
         columns=(
             ObservedColumn("id", Integer(), nullable=False),
             ObservedColumn("region", String()),
@@ -92,7 +97,7 @@ def test_all_snapshot_fields_pass_through():
         ),
     )
 
-    observed = observed_table_from_snapshot(snapshot, run_info_schema_query=_router({}))
+    observed = observed_table_from_description(description, run_info_schema_query=_router({}))
 
     assert observed.comment == "orders"
     assert observed.partitioned_by == ("region",)

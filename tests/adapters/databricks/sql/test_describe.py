@@ -5,7 +5,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.describe import (
     MetadataParseError,
-    parse_table_snapshot,
+    parse_table_description,
 )
 from delta_engine.domain.model import Integer, QualifiedName, String
 
@@ -32,24 +32,24 @@ def _doc(**overrides):
 
 
 def test_columns_types_nullability_comments_and_order():
-    snap = parse_table_snapshot(_doc(), QN)
-    assert [c.name for c in snap.columns] == ["id", "name"]
-    assert snap.columns[0].data_type == Integer()
-    assert snap.columns[0].nullable is False
-    assert snap.columns[0].comment == "pk"
-    assert snap.columns[1].data_type == String()
-    assert snap.columns[1].comment == ""  # omitted -> empty
+    description = parse_table_description(_doc(), QN)
+    assert [c.name for c in description.columns] == ["id", "name"]
+    assert description.columns[0].data_type == Integer()
+    assert description.columns[0].nullable is False
+    assert description.columns[0].comment == "pk"
+    assert description.columns[1].data_type == String()
+    assert description.columns[1].comment == ""  # omitted -> empty
 
 
 def test_empty_table_comment_is_empty_string():
-    assert parse_table_snapshot(_doc(comment=""), QN).comment == ""
+    assert parse_table_description(_doc(comment=""), QN).comment == ""
     doc = json.loads(_doc())
     doc.pop("comment")
-    assert parse_table_snapshot(json.dumps(doc), QN).comment == ""
+    assert parse_table_description(json.dumps(doc), QN).comment == ""
 
 
 def test_partitioning_and_clustering_casefolded_in_order():
-    snap = parse_table_snapshot(
+    description = parse_table_description(
         _doc(
             partition_columns=["Region", "Store"],
             clustering_columns=["ID"],
@@ -61,12 +61,12 @@ def test_partitioning_and_clustering_casefolded_in_order():
         ),
         QN,
     )
-    assert snap.partitioned_by == ("region", "store")
-    assert snap.clustered_by == ("id",)
+    assert description.partitioned_by == ("region", "store")
+    assert description.clustered_by == ("id",)
 
 
 def test_properties_filtered_to_registry():
-    snap = parse_table_snapshot(
+    description = parse_table_description(
         _doc(
             table_properties={
                 "delta.columnMapping.mode": "name",
@@ -76,18 +76,20 @@ def test_properties_filtered_to_registry():
         ),
         QN,
     )
-    assert dict(snap.properties) == {"delta.columnMapping.mode": "name"}
+    assert dict(description.properties) == {"delta.columnMapping.mode": "name"}
 
 
 def test_constraints_lowered_to_domain():
-    snap = parse_table_snapshot(_doc(table_constraints="[(pk_demo,PRIMARY KEY (`id`))]"), QN)
-    assert snap.primary_key is not None
-    assert snap.primary_key.columns == ("id",)
-    assert snap.primary_key.constraint_name == "pk_demo"
+    description = parse_table_description(
+        _doc(table_constraints="[(pk_demo,PRIMARY KEY (`id`))]"), QN
+    )
+    assert description.primary_key is not None
+    assert description.primary_key.columns == ("id",)
+    assert description.primary_key.constraint_name == "pk_demo"
 
 
 def test_unmappable_non_partition_column_is_skipped():
-    snap = parse_table_snapshot(
+    description = parse_table_description(
         _doc(
             columns=[
                 {"name": "ok", "type": {"name": "int"}, "nullable": True},
@@ -96,12 +98,12 @@ def test_unmappable_non_partition_column_is_skipped():
         ),
         QN,
     )
-    assert [c.name for c in snap.columns] == ["ok"]
+    assert [c.name for c in description.columns] == ["ok"]
 
 
 def test_unmappable_partition_column_raises():
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot(
+        parse_table_description(
             _doc(
                 partition_columns=["p"],
                 columns=[{"name": "p", "type": {"name": "geography"}, "nullable": True}],
@@ -112,31 +114,31 @@ def test_unmappable_partition_column_raises():
 
 def test_malformed_json_and_missing_columns_raise():
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot("{not json", QN)
+        parse_table_description("{not json", QN)
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot('{"comment": ""}', QN)
+        parse_table_description('{"comment": ""}', QN)
 
 
 def test_malformed_table_constraints_raises_metadata_error():
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot(_doc(table_constraints="[(pk_x,PRIMARY KEY)]"), QN)
+        parse_table_description(_doc(table_constraints="[(pk_x,PRIMARY KEY)]"), QN)
 
 
 def test_non_object_document_raises():
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot("[1, 2, 3]", QN)
+        parse_table_description("[1, 2, 3]", QN)
 
 
 def test_malformed_column_entry_raises():
     with pytest.raises(MetadataParseError):
-        parse_table_snapshot(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]), QN)
+        parse_table_description(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]), QN)
 
 
 def test_skipping_unmappable_column_logs_a_warning(caplog):
     import logging
 
     with caplog.at_level(logging.WARNING):
-        snap = parse_table_snapshot(
+        description = parse_table_description(
             _doc(
                 columns=[
                     {"name": "ok", "type": {"name": "int"}, "nullable": True},
@@ -145,7 +147,7 @@ def test_skipping_unmappable_column_logs_a_warning(caplog):
             ),
             QN,
         )
-    assert [c.name for c in snap.columns] == ["ok"]
+    assert [c.name for c in description.columns] == ["ok"]
     assert any("weird" in record.message for record in caplog.records)
 
 
@@ -154,11 +156,11 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 def test_real_order_fact_fixture():
     text = (_FIXTURES / "order_fact.json").read_text()
-    snap = parse_table_snapshot(text, QualifiedName("dev", "gold", "order_fact"))
-    assert len(snap.columns) == 7
-    assert snap.columns[0].name == "order_id"
-    assert snap.columns[0].nullable is False
-    assert snap.primary_key.columns == ("order_id",)
-    [fk] = snap.foreign_keys
+    description = parse_table_description(text, QualifiedName("dev", "gold", "order_fact"))
+    assert len(description.columns) == 7
+    assert description.columns[0].name == "order_id"
+    assert description.columns[0].nullable is False
+    assert description.primary_key.columns == ("order_id",)
+    [fk] = description.foreign_keys
     assert fk.referenced_table == QualifiedName("dev", "gold", "product_dimension")
-    assert dict(snap.properties) == {"delta.columnMapping.mode": "name"}
+    assert dict(description.properties) == {"delta.columnMapping.mode": "name"}

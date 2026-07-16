@@ -1,5 +1,5 @@
 """
-Parse a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a table snapshot.
+Parse a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a table description.
 
 Everything but one field arrives structured: columns carry type objects (mapped
 by ``types.data_type_from_json``), and comment, partitioning, clustering, and
@@ -35,7 +35,7 @@ class MetadataParseError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class TableSnapshot:
+class TableDescription:
     """Backend-neutral table-local state parsed from one AS JSON document."""
 
     qualified_name: QualifiedName
@@ -48,8 +48,8 @@ class TableSnapshot:
     foreign_keys: tuple[ForeignKeyConstraint, ...]
 
 
-def parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> TableSnapshot:
-    """Parse one AS JSON document into a ``TableSnapshot``."""
+def parse_table_description(json_text: str, qualified_name: QualifiedName) -> TableDescription:
+    """Parse one AS JSON document into a ``TableDescription``."""
     try:
         document = json.loads(json_text)
     except (ValueError, TypeError) as error:
@@ -64,7 +64,7 @@ def parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> Table
         constraints = parse_table_constraints(document.get("table_constraints"))
     except ConstraintParseError as error:
         raise MetadataParseError(f"{qualified_name}: malformed table_constraints") from error
-    return TableSnapshot(
+    return TableDescription(
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name, set(partitioned_by)),
         comment=document.get("comment") or "",
