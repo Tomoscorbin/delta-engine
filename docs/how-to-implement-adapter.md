@@ -103,7 +103,7 @@ engine.sync(customers, orders)  # your DeltaTable definitions
 `plan.actions` is a sorted tuple containing only `Action` objects. Each action
 has a `TableAspect`, a `subject`, and an `ActionPhase`; richer actions also keep
 the desired/observed semantic state while exposing stable compiler-facing
-properties such as `DropColumn.column_name`. You can inspect the action type
+properties such as `SetColumnComment.column_name`. You can inspect the action type
 with `isinstance` or `match`/`case`:
 
 ```python
