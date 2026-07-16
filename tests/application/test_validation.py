@@ -27,6 +27,7 @@ from delta_engine.domain.model import (
     Short,
     String,
     TableAspect,
+    TableKind,
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
@@ -91,12 +92,13 @@ def _drift(
     *differences: Action | Unresolvable,
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
     desired: DesiredTable | None = None,
+    kind: TableKind = TableKind.TABLE,
 ) -> TableDrift:
     if desired is None:
         desired = _desired_table(managed_aspects=managed_aspects)
     actions = tuple(item for item in differences if isinstance(item, Action))
     unresolvable = tuple(item for item in differences if not isinstance(item, Action))
-    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable)
+    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable, kind=kind)
 
 
 def _validate(
@@ -1001,3 +1003,113 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
     result = validate_diff(drift)
 
     assert not any(f.rule_name == "AmbiguousColumnRename" for f in result.failures)
+
+
+# ---- streaming tables
+
+
+_TAG_ASPECTS_ONLY = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+
+
+def test_streaming_table_passes_when_the_declaration_manages_only_tags():
+    # Given a tags-scope declaration over a streaming table with tag drift
+    diff = _drift(
+        SetColumnTag(column_name="id", name="pii", value="true"),
+        managed_aspects=_TAG_ASPECTS_ONLY,
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    # Then the tag work is allowed
+    assert validate_diff(diff).failed is False
+
+
+def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
+    # Given a fully-managed declaration over an in-sync streaming table
+    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+
+    # When validating
+    result = validate_diff(diff)
+
+    # Then the declaration is rejected on kind alone: it claims authority the
+    # engine must never exercise on a pipeline-owned table
+    assert result.failed is True
+    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+    assert 'scope="tags"' in result.failures[0].message
+
+
+def test_streaming_table_fails_a_metadata_scope_declaration():
+    # Given a declaration managing comments as well as tags
+    diff = _drift(
+        managed_aspects=frozenset(
+            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
+        ),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    # Then managing anything beyond tags is rejected
+    result = validate_diff(diff)
+    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+
+
+def test_streaming_table_gate_cannot_be_suppressed_by_empty_rules():
+    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+
+    result = validate_diff(diff, rules=())
+
+    assert result.failed is True
+    assert result.failures[0].rule_name == "StreamingTableTagsOnly"
+
+
+def test_streaming_table_gate_short_circuits_safety_rules():
+    # Given a full-scope declaration over a streaming table with an unsafe
+    # type change
+    diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+
+    # Then the kind violation is reported alone; no safety rule runs
+    result = validate_diff(diff)
+    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+
+
+def test_streaming_table_gate_reports_before_unmanaged_aspect_drift():
+    # Given a metadata-ish scope with structure drift on a streaming table —
+    # both scope-gate arms fire, kind first
+    diff = _drift(
+        AddColumn(DesiredColumn("extra", Integer())),
+        managed_aspects=frozenset(
+            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
+        ),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    result = validate_diff(diff)
+
+    assert [failure.rule_name for failure in result.failures] == [
+        "StreamingTableTagsOnly",
+        "UnmanagedAspectDrift",
+    ]
+
+
+def test_streaming_table_under_tags_scope_still_fails_unmanaged_drift():
+    # Given a tags-scope declaration over a streaming table whose comment drifted
+    diff = _drift(
+        SetTableComment(desired_comment="new", observed_comment="old"),
+        managed_aspects=_TAG_ASPECTS_ONLY,
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    # Then the kind gate stays silent (tags scope is allowed here) and the
+    # unmanaged comment drift is the failure
+    result = validate_diff(diff)
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
+def test_an_absent_streaming_table_under_tags_scope_still_fails_missing_table():
+    # Given a tags-scope declaration whose table does not exist — absence has
+    # no observed kind, so the existing TableMissing arm judges it unchanged
+    desired = _desired_table(managed_aspects=_TAG_ASPECTS_ONLY)
+
+    # When validating the diff of a missing table
+    result = _validate(desired, None)
+
+    # Then tags scope does not manage existence; nothing streaming-specific fires
+    assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
