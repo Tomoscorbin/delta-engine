@@ -1,6 +1,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
+import delta_engine.application.engine as engine_module
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
 from delta_engine.application.failures import (
@@ -526,9 +527,22 @@ def test_real_run_records_dry_run_false():
 # ---------------------------------------------------------------------------
 
 
-def test_read_phase_attempts_all_tables_before_any_execution():
+def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
+    monkeypatch: pytest.MonkeyPatch,
+):
     # Given three tables where the middle read fails
     events: list[str] = []
+
+    # This intentionally observes private phase order. Compiling accepted plans
+    # before resolution keeps the compiler independent of resolution failures
+    # while preserving SQL previews for plans that dependency checks later block.
+    original_resolve = engine_module.resolve
+
+    def recording_resolve(*args, **kwargs):
+        events.append("resolve")
+        return original_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(engine_module, "resolve", recording_resolve)
 
     class _EventRecordingReader:
         def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
@@ -539,9 +553,8 @@ def test_read_phase_attempts_all_tables_before_any_execution():
 
     class _EventRecordingExecutor:
         def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-            # Silent by design: the plan phase compiles every table, but this
-            # test asserts read/execute event ordering, not compilation. The
-            # name is embedded so execute can name the table in its event.
+            events.append(f"compile:{qualified_name}")
+            # The name is embedded so execute can recover the target table.
             return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
 
         def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
@@ -567,7 +580,12 @@ def test_read_phase_attempts_all_tables_before_any_execution():
         "read:c.s.b",
         "read:c.s.c",
     ]
-    assert events[3:] == [
+    assert events[3:5] == [
+        "compile:c.s.a",
+        "compile:c.s.c",
+    ]
+    assert events[5] == "resolve"
+    assert events[6:] == [
         "execute:c.s.a",
         "execute:c.s.c",
     ]
@@ -1173,8 +1191,8 @@ def test_failed_table_records_no_planned_sql():
 
 def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
     # Given an absent table whose FK references a table not in the sync.
-    # FK resolution runs after planning, so the plan and its SQL are already
-    # legitimate facts about the table — only the ordering/dependency failed.
+    # FK resolution runs after planning and compilation, so the plan and its
+    # SQL are already legitimate facts — only the dependency check failed.
     reader = _RecordingReader()
     executor = _RecordingExecutor(per_call_results=[])
     engine = Engine(reader=reader, executor=executor)

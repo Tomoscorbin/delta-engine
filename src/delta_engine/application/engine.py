@@ -6,14 +6,21 @@ runs — one `TableRunReport` is born per table in the read phase and accretes
 its plan, SQL, failures, and execution as the chain proceeds. On a real run, if
 any table fails, `SyncFailedError` is raised with a formatted summary.
 
-The five phases, each taking the runs and returning them:
+The six phases, each taking the runs and returning them:
   1. Read     — fetch current catalog state; birth one run per table
   2. Diff     — compute direct actions and non-action differences
   3. Plan     — validate each diff, then accept a plan or append failures
-  4. Resolve  — order runs by FK dependency; append FK failures and
+  4. Compile  — lower every accepted plan to its exact backend statements
+  5. Resolve  — order runs by FK dependency; append FK failures and
                 propagate blocking to dependents
-  5. Execute  — run the plan of every run with no failures and a non-empty
+  6. Execute  — run the plan of every run with no failures and a non-empty
                 plan, blocking FK dependents of runs that fail mid-execution
+
+Compilation deliberately precedes resolution. An accepted plan is a
+table-local fact, so it receives the exact SQL exposed on the report before
+cross-table dependency checks decide whether it may execute. A later FK failure
+therefore does not erase a valid preview or force compilation to understand
+resolution failures.
 
 Running `resolve()` after validation means a table that fails validation
 blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
@@ -93,10 +100,11 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the read phase, it accretes its diff, plan, resolution, failures,
-    and execution as the phase chain proceeds, then is frozen into a public
-    :class:`TableRunReport` once complete. Kept private to the engine so the
-    published report stays immutable while the phases mutate in place.
+    Born in the read phase, it accretes its diff, plan, compiled SQL,
+    resolution, failures, and execution as the phase chain proceeds, then is
+    frozen into a public :class:`TableRunReport` once complete. Kept private to
+    the engine so the published report stays immutable while the phases mutate
+    in place.
     """
 
     qualified_name: QualifiedName
@@ -150,9 +158,9 @@ class Engine:
         Synchronize all registered tables to their desired state.
 
         Runs the phases as a chain, each transforming the per-table runs:
-        read → diff → plan → resolve → execute. Each
+        read → diff → plan → compile → resolve → execute. Each
         ``TableRunReport`` is born in the read phase and accretes its diff,
-        plan, failures, and execution as later phases run.
+        plan, compiled SQL, failures, and execution as later phases run.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -161,7 +169,7 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, run read → diff → plan → resolve
+            dry_run: When True, run read → diff → plan → compile → resolve
                 but skip execution (zero catalog mutations). Every run's
                 ``execution`` stays ``None`` while its ``plan`` still records
                 the actions compiled from the observed snapshot, and the report
@@ -187,6 +195,7 @@ class Engine:
         runs = self._read(desired)
         runs = self._diff(runs)
         runs = self._plan(runs)
+        runs = self._compile(runs)
         runs = self._resolve(runs)
 
         if not dry_run:
@@ -254,12 +263,10 @@ class Engine:
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
-        Accept or reject each diff, then compile every accepted plan.
+        Accept or reject each diff according to the default planning policy.
 
-        Compiling here, before the dry-run/execute split, means a dry run exposes
-        the exact DDL for its own snapshot. ``plan_diff`` always applies the
-        default policy; rejected runs retain an empty plan and carry validation
-        failures.
+        Rejected runs retain an empty plan and carry validation failures;
+        accepted runs carry the validated action plan into compilation.
         """
         for run in runs:
             if run.diff is None:
@@ -274,10 +281,29 @@ class Engine:
                     )
                 case PlanningSucceeded(plan=plan):
                     run.plan = plan
-                    run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
                     logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
                 case _ as unreachable:
                     assert_never(unreachable)
+        return runs
+
+    def _compile(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+        """
+        Lower every accepted plan to the exact statements exposed and executed.
+
+        Compilation is a distinct backend boundary after planning: a dry run
+        reports these statements, while a real run passes the same tuple to
+        execution. Runs rejected by an earlier phase carry no compiled SQL.
+        """
+        for run in runs:
+            if run.diff is None or run.has_failures:
+                continue
+
+            run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
+            logger.info(
+                "Compiled %d statement(s) for %s",
+                len(run.planned_sql_statements),
+                run.qualified_name,
+            )
         return runs
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
@@ -290,7 +316,7 @@ class Engine:
         """
         failed_names = {run.qualified_name for run in runs if run.has_failures}
         ordered_resolutions = resolve(
-            tuple(run.desired for run in runs),
+            tables=tuple(run.desired for run in runs),
             failed_names=failed_names,
         )
         runs_by_name = {run.qualified_name: run for run in runs}
