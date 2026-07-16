@@ -93,11 +93,12 @@ if desired.comment != observed.comment:
 ```
 
 Actions join the diff's `actions` tuple, so no union edit is needed. If the
-comparison cannot be represented as an action, add a frozen finding in
-`diff.py`, name it in `Finding`, and emit it into the diff's `findings`.
-Decide whether it is accepted or rejected in application validation; the
-current three findings are rejected by the default policy. Successful
-`plan_diff` results must contain actions only.
+comparison cannot be represented as an action, add a frozen difference type in
+`unresolvable.py`, name it in `Unresolvable`, and emit it into the diff's
+`unresolvable` tuple from `diff.py`. Decide whether it is accepted or
+rejected in application validation; the current three unresolvable
+differences are rejected by the default policy. Successful `plan_diff`
+results must contain actions only.
 
 ## 4. Register a SQL compiler
 
@@ -135,11 +136,11 @@ An action may emit several entries across categories (`CreateTable` lists its co
 
 If the new action can be unsafe, add a rule in
 `src/delta_engine/application/validation.py`. Rules receive the self-contained
-drift and match concrete types from `drift.actions` (or `drift.findings` when
-judging findings). The scope gate runs before any rule and short-circuits on
-out-of-scope drift, so a rule only ever sees differences the declaration
-manages — declare the correct `TableAspect` on the action (step 1) and no
-scope filtering is needed here:
+drift and match concrete types from `drift.actions` (or `drift.unresolvable`
+when judging unresolvable differences). The scope gate runs before any rule
+and short-circuits on out-of-scope drift, so a rule only ever sees
+differences the declaration manages — declare the correct `TableAspect` on
+the action (step 1) and no scope filtering is needed here:
 
 ```python
 from typing import ClassVar

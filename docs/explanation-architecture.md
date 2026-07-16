@@ -57,22 +57,22 @@ flowchart TB
 The architecture is easiest to follow if you start with the data that moves
 through a sync.
 
-| Concept            | Role                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                                        |
-| `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape.                     |
-| `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                 |
-| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                        |
-| `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `findings`. |
-| `Finding`          | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                  |
-| `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.   |
-| `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                  |
-| `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                        |
-| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                |
-| `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.              |
-| `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.               |
-| `TableRunReport`   | The complete per-table outcome, including read state, plan, planned SQL statements, failures, and execution.                                            |
-| `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                               |
+| Concept            | Role                                                                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                                            |
+| `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape.                         |
+| `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                     |
+| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                            |
+| `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
+| `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
+| `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
+| `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                      |
+| `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
+| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                    |
+| `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.                  |
+| `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
+| `TableRunReport`   | The complete per-table outcome, including read state, plan, planned SQL statements, failures, and execution.                                                |
+| `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
 For example, the domain has `DesiredColumn`, `QualifiedName`, `PrimaryKeyConstraint`,
@@ -284,17 +284,17 @@ Execution is gated by accumulated failures. A table that failed read,
 validation, or foreign-key resolution keeps its failure in the report and is
 skipped during execution. The engine still processes other tables.
 
-| Shape              | Produced by            | Consumed by                      | Purpose                                |
-| ------------------ | ---------------------- | -------------------------------- | -------------------------------------- |
-| `DeltaTable`       | User code              | Application preparation          | Public declaration object              |
-| `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                 |
-| `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                |
-| `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and findings            |
-| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Ordered, validated table-local actions |
-| `CatalogState`     | Reader port            | Engine                           | Present, absent, or read-failed state  |
-| SQL statements     | Executor (`compile`)   | Executor (`execute`), report     | The DDL a plan lowers to               |
-| `ExecutionSummary` | Executor port          | Engine, report                   | Attempted statement outcomes           |
-| `SyncReport`       | Engine                 | User code                        | Immutable run result                   |
+| Shape              | Produced by            | Consumed by                      | Purpose                                     |
+| ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
+| `DeltaTable`       | User code              | Application preparation          | Public declaration object                   |
+| `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                      |
+| `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
+| `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
+| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Ordered, validated table-local actions      |
+| `CatalogState`     | Reader port            | Engine                           | Present, absent, or read-failed state       |
+| SQL statements     | Executor (`compile`)   | Executor (`execute`), report     | The DDL a plan lowers to                    |
+| `ExecutionSummary` | Executor port          | Engine, report                   | Attempted statement outcomes                |
+| `SyncReport`       | Engine                 | User code                        | Immutable run result                        |
 
 ## Package map
 
@@ -380,7 +380,7 @@ either.
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
 observed)` produces a `TableDiff` — `TableMissing` when the table does not
 exist, else a `TableDrift` holding executable `actions` and non-action
-`findings` as two typed tuples. Actions carry their `TableAspect` plus the
+`unresolvable` differences as two typed tuples. Actions carry their `TableAspect` plus the
 complete desired/observed state needed by validation and reporting;
 `CreateTable` uses the table-existence aspect because it realizes a missing
 table's complete desired state rather than belonging to one schema dimension.
@@ -411,11 +411,11 @@ would drop those constraints implicitly as part of `RENAME COLUMN`; the
 engine states the drops instead of relying on that, so the plan is a
 complete transcript of what executes.
 
-Only three findings exist: `ColumnRenameConflict`, `PropertyUndeclared`, and
-`PartitioningChanged`. Each states an ambiguity or unsupported transition
-without deciding its policy outcome. The `Finding` union names them, they
-live structurally apart from the actions, and the application default rules
-decide to reject each one.
+Only three unresolvable differences exist: `ColumnRenameConflict`,
+`PropertyUndeclared`, and `PartitioningChanged`. Each states an ambiguity or
+unsupported transition without deciding its policy outcome. The
+`Unresolvable` union names them, they live structurally apart from the
+actions, and the application default rules decide to reject each one.
 
 Whether a difference is permitted is application policy. `plan_diff` always runs
 the default policy and returns either `PlanningSucceeded(plan)` or
@@ -449,7 +449,7 @@ drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
 difference produces exactly the scope failure rather than also tripping
 safety rules for differences the user never requested. Because the gate runs
 first, the safety rules only ever see a fully in-scope diff and read
-`drift.actions` and `drift.findings` directly. If planning succeeds, every
+`drift.actions` and `drift.unresolvable` directly. If planning succeeds, every
 difference belongs to a managed aspect and the plan holds executable actions
 only.
 
@@ -465,7 +465,7 @@ never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
 `diff_table(desired, observed)` produces a `TableDiff`:
 
 - `TableMissing` means the catalog has no table at that name.
-- `TableDrift` means the table exists and carries its actions and findings.
+- `TableDrift` means the table exists and carries its actions and unresolvable differences.
 
 The diff produces backend-neutral commands but does not decide whether they are
 safe, and it does not talk to the backend. For an existing table, differences span
@@ -484,7 +484,7 @@ Each dimension produces canonical actions directly. For example, column
 additions produce `AddColumn` plus any `SetColumnTag` actions, table tag
 removals produce `UnsetTableTag`, and foreign-key additions produce
 `SetForeignKey`. Unsupported or ambiguous states use one of the three
-finding types, which the current default policy rejects.
+unresolvable difference types, which the current default policy rejects.
 
 `validate_diff` is where policy lives. A missing table passes when the
 declaration manages table existence because creating it from the full
@@ -566,7 +566,7 @@ connected components to produce a dependency-first order. It reports:
   a read failure, validation failure, unresolvable FK, invalid FK target, or FK
   cycle.
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.actions` or `drift.findings` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gate runs before any rule and short-circuits on out-of-scope drift, so a rule only ever sees differences the declaration manages and does no scope filtering of its own.
+Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gate runs before any rule and short-circuits on out-of-scope drift, so a rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
 `validate_diff` checks the scope gate first: a `TableMissing` clears it when table existence is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table; a `TableDrift` clears it when no unmanaged aspect has drifted. Only past the gate does `validate_diff` call every rule in `DEFAULT_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
 
@@ -728,18 +728,18 @@ dependency cost.
 
 ## Where to make changes
 
-| Change                          | Main location                                                              | Notes                                                                                                                                                                                                       |
-| ------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new backend               | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                              |
-| Add a new executable difference | `delta_engine.domain.plan.actions`, differ, and adapter compiler           | Define the rich action, its aspect and phase in `actions.py`; emit it directly from the relevant `_diff_*` helper; add policy rules if needed; compile it in the backend adapter.                           |
-| Add a new finding               | `delta_engine.domain.plan.diff` and application validation                 | Add the frozen domain difference to `Finding`, emit it into the diff's findings, then make the rejection or acceptance decision in application policy. Successful planning must still contain actions only. |
-| Add a safety rule               | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and findings and return `ValidationFailure` values.                                                                                                               |
-| Add a data type                 | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                |
-| Change public declarations      | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                     |
-| Change FK ordering or blocking  | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                       |
-| Change report output            | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                              |
-| Change Databricks SQL           | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                       |
-| Change CLI commands or output   | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                     |
+| Change                            | Main location                                                              | Notes                                                                                                                                                                                                                                       |
+| --------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new backend                 | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                              |
+| Add a new executable difference   | `delta_engine.domain.plan.actions`, differ, and adapter compiler           | Define the rich action, its aspect and phase in `actions.py`; emit it directly from the relevant `_diff_*` helper; add policy rules if needed; compile it in the backend adapter.                                                           |
+| Add a new unresolvable difference | `delta_engine.domain.plan.unresolvable` and application validation         | Add the frozen domain difference to `Unresolvable`, emit it into the diff's `unresolvable` tuple from `diff.py`, then make the rejection or acceptance decision in application policy. Successful planning must still contain actions only. |
+| Add a safety rule                 | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and unresolvable differences and return `ValidationFailure` values.                                                                                                                               |
+| Add a data type                   | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                |
+| Change public declarations        | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                     |
+| Change FK ordering or blocking    | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                       |
+| Change report output              | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                              |
+| Change Databricks SQL             | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                       |
+| Change CLI commands or output     | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                     |
 
 ## Architectural rules
 

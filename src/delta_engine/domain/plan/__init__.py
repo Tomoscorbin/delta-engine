@@ -23,14 +23,16 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
-    ColumnRenameConflict,
-    Finding,
-    PartitioningChanged,
-    PropertyUndeclared,
     TableDiff,
     TableDrift,
     TableMissing,
     diff_table,
+)
+from delta_engine.domain.plan.unresolvable import (
+    ColumnRenameConflict,
+    PartitioningChanged,
+    PropertyUndeclared,
+    Unresolvable,
 )
 
 __all__ = [
@@ -45,7 +47,6 @@ __all__ = [
     "DropColumn",
     "DropForeignKey",
     "DropPrimaryKey",
-    "Finding",
     "PartitioningChanged",
     "PropertyUndeclared",
     "RenameColumn",
@@ -60,6 +61,7 @@ __all__ = [
     "TableDiff",
     "TableDrift",
     "TableMissing",
+    "Unresolvable",
     "UnsetColumnTag",
     "UnsetProperty",
     "UnsetTableTag",

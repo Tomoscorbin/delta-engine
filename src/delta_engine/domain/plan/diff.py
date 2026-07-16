@@ -1,5 +1,5 @@
 """
-Diff desired and observed table state into actions and findings.
+Diff desired and observed table state into actions and unresolvable differences.
 
 ``diff_table`` states every difference separating the observed table from
 its declaration, deciding nothing about safety or scope. Differences come
@@ -8,14 +8,13 @@ in two structural kinds:
 - Actions — remedied differences. Each carries the one executable
   operation that closes its gap, plus the desired/observed state
   validation and reporting need.
-- Findings — differences no action can close (an ambiguous rename, an
+- Unresolvable — differences no action can close (an ambiguous rename, an
   undeclared managed property, a partitioning change). They exist to be
   judged; the default validation policy rejects each one.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import ClassVar
 
 from delta_engine.domain.model import (
     DesiredColumn,
@@ -46,51 +45,12 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ColumnRenameConflict:
-    """A declared rename whose source and target are both present."""
-
-    old_name: str
-    new_name: str
-
-    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
-
-    def __post_init__(self) -> None:
-        if self.old_name == self.new_name:
-            raise ValueError(f"ColumnRenameConflict carries no difference: {self.old_name!r}")
-
-
-@dataclass(frozen=True, slots=True)
-class PropertyUndeclared:
-    """A managed catalog property for which the declaration states no intent."""
-
-    name: str
-    observed_value: str
-
-    aspect: ClassVar[TableAspect] = TableAspect.PROPERTIES
-
-
-@dataclass(frozen=True, slots=True)
-class PartitioningChanged:
-    """Partitioning drift, which has no supported in-place action."""
-
-    desired_partitioning: tuple[str, ...]
-    observed_partitioning: tuple[str, ...]
-
-    aspect: ClassVar[TableAspect] = TableAspect.PARTITIONING
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "desired_partitioning", tuple(self.desired_partitioning))
-        object.__setattr__(self, "observed_partitioning", tuple(self.observed_partitioning))
-        if self.desired_partitioning == self.observed_partitioning:
-            raise ValueError(
-                f"PartitioningChanged carries no difference: {self.desired_partitioning!r}"
-            )
-
-
-type Finding = ColumnRenameConflict | PropertyUndeclared | PartitioningChanged
+from delta_engine.domain.plan.unresolvable import (
+    ColumnRenameConflict,
+    PartitioningChanged,
+    PropertyUndeclared,
+    Unresolvable,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +93,7 @@ class TableDrift:
     Differences separating observed state from its declaration.
 
     ``actions`` are remedied differences, each carrying the executable
-    operation that closes its gap. ``findings`` are differences no action
+    operation that closes its gap. ``unresolvable`` are differences no action
     can close; they exist to be judged by validation. Both state every
     difference regardless of scope; deciding which the declaration is
     allowed to make is validation's scope gate, not the diff's concern.
@@ -141,7 +101,7 @@ class TableDrift:
 
     desired: DesiredTable
     actions: tuple[Action, ...] = ()
-    findings: tuple[Finding, ...] = ()
+    unresolvable: tuple[Unresolvable, ...] = ()
 
 
 type TableDiff = TableMissing | TableDrift
@@ -149,7 +109,7 @@ type TableDiff = TableMissing | TableDrift
 
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """
-    Compute the actions and findings separating observed from desired state.
+    Compute the actions and unresolvable differences separating observed from desired state.
 
     A rename pre-pass projects observed columns and layout names through
     ``renamed_from`` hints so residual drift is expressed under the declared
@@ -185,12 +145,12 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
     )
-    findings: tuple[Finding, ...] = (
+    unresolvable: tuple[Unresolvable, ...] = (
         *rename_projection.conflicts,
         *_diff_undeclared_properties(desired, observed),
         *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
     )
-    return TableDrift(desired=desired, actions=actions, findings=findings)
+    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +192,7 @@ def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenamePro
         rename_actions.append(RenameColumn(old_name=old_name, new_name=new_name))
 
     # A conflicted source yields no column facts — whether it is surplus or
-    # the rename's origin is unknowable, so the conflict finding carries the
+    # the rename's origin is unknowable, so the conflict is carried as an unresolvable
     # difference instead of a DropColumn.
     relabeled = tuple(column for column in relabeled if column.name not in conflicted_sources)
     return _RenameProjection(
@@ -381,9 +341,9 @@ def _diff_properties(
 def _diff_undeclared_properties(
     desired: DesiredTable, observed: ObservedTable
 ) -> list[PropertyUndeclared]:
-    """Return findings for managed catalog keys the declaration omits."""
+    """Return unresolvable differences for managed catalog keys the declaration omits."""
     # See _diff_properties: exact-declaration semantics, so an unmanaged
-    # PROPERTIES aspect produces no findings for the scope gate to reject.
+    # PROPERTIES aspect produces nothing for the scope gate to reject.
     if TableAspect.PROPERTIES not in desired.managed_aspects:
         return []
 

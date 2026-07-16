@@ -60,12 +60,12 @@ class Rule(Protocol):
 
     A rule judges whether a change is safe, given the declaration it belongs
     to. It receives the whole ``TableDrift`` and reads ``drift.actions`` or
-    ``drift.findings`` for the differences to judge, and ``drift.desired``
+    ``drift.unresolvable`` for the differences to judge, and ``drift.desired``
     for declaration context such as declared properties. Because the scope
     gate runs first and short-circuits, a rule is only ever evaluated on a
-    fully in-scope diff, so its actions and findings are exactly the ones the
-    declaration manages — it does no scope filtering of its own. Never called
-    for a ``TableMissing`` diff.
+    fully in-scope diff, so its actions and unresolvable differences are
+    exactly the ones the declaration manages — it does no scope filtering of
+    its own. Never called for a ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -238,13 +238,13 @@ class PartitioningChangeNotSupported:
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: partitioning cannot be changed in place."
-                    f" Current: {finding.observed_partitioning}."
-                    f" Requested: {finding.desired_partitioning}."
+                    f" Current: {unresolvable.observed_partitioning}."
+                    f" Requested: {unresolvable.desired_partitioning}."
                     " Recreate the table with the desired partitioning."
                 ),
             )
-            for finding in drift.findings
-            if isinstance(finding, PartitioningChanged)
+            for unresolvable in drift.unresolvable
+            if isinstance(unresolvable, PartitioningChanged)
         )
 
 
@@ -316,22 +316,22 @@ class PropertyMustBeDeclared:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every registered key set on the table but absent from the declaration."""
         return tuple(
-            ValidationFailure(rule_name=self.name, message=self._message(finding))
-            for finding in drift.findings
-            if isinstance(finding, PropertyUndeclared)
+            ValidationFailure(rule_name=self.name, message=self._message(unresolvable))
+            for unresolvable in drift.unresolvable
+            if isinstance(unresolvable, PropertyUndeclared)
         )
 
-    def _message(self, finding: PropertyUndeclared) -> str:
-        if not self._removal_permitted(finding.name, finding.observed_value):
+    def _message(self, unresolvable: PropertyUndeclared) -> str:
+        if not self._removal_permitted(unresolvable.name, unresolvable.observed_value):
             return (
-                f"Operation not allowed: {finding.name} is set on the table"
-                f" (value '{finding.observed_value}') but not declared; it cannot"
+                f"Operation not allowed: {unresolvable.name} is set on the table"
+                f" (value '{unresolvable.observed_value}') but not declared; it cannot"
                 " be unset — declare it to continue managing this table's"
                 " properties."
             )
         return (
-            f"Operation not allowed: {finding.name} is set on the table"
-            f" (value '{finding.observed_value}') but not declared. Declare it"
+            f"Operation not allowed: {unresolvable.name} is set on the table"
+            f" (value '{unresolvable.observed_value}') but not declared. Declare it"
             " to manage it, or declare it as None to remove it."
         )
 
@@ -386,14 +386,14 @@ class AmbiguousColumnRename:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot rename '{finding.old_name}' to"
-                    f" '{finding.new_name}' — both columns exist"
+                    f"Operation not allowed: cannot rename '{unresolvable.old_name}' to"
+                    f" '{unresolvable.new_name}' — both columns exist"
                     " on the table. If the old column should be dropped, remove the"
                     " renamed_from hint and drop it in its own sync."
                 ),
             )
-            for finding in drift.findings
-            if isinstance(finding, ColumnRenameConflict)
+            for unresolvable in drift.unresolvable
+            if isinstance(unresolvable, ColumnRenameConflict)
         )
 
 
@@ -478,8 +478,8 @@ class UnmanagedAspectDrift:
     into executable work, so ``rules=()`` still cannot admit actions from an
     aspect the declaration does not manage.
 
-    It reads the diff's raw actions and findings — its subject is exactly the
-    out-of-scope differences the gate exists to reject. dict.fromkeys
+    It reads the diff's raw actions and unresolvable differences — its subject
+    is exactly the out-of-scope differences the gate exists to reject. dict.fromkeys
     deduplicates the aspects while preserving first-seen order, so failure
     order follows diff order deterministically.
     """
@@ -491,7 +491,7 @@ class UnmanagedAspectDrift:
         managed_aspects = drift.desired.managed_aspects
         unmanaged_aspects = dict.fromkeys(
             difference.aspect
-            for difference in (*drift.actions, *drift.findings)
+            for difference in (*drift.actions, *drift.unresolvable)
             if difference.aspect not in managed_aspects
         )
         return tuple(
