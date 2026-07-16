@@ -65,6 +65,17 @@ def test_partitioning_and_clustering_casefolded_in_order():
     assert description.clustered_by == ("id",)
 
 
+def test_non_list_partition_columns_raises():
+    # A present-but-non-list layout field is drift, not "no partitioning".
+    with pytest.raises(MetadataParseError):
+        parse_table_description(_doc(partition_columns="region"), QN)
+
+
+def test_non_list_clustering_columns_raises():
+    with pytest.raises(MetadataParseError):
+        parse_table_description(_doc(clustering_columns="id"), QN)
+
+
 def test_properties_filtered_to_registry():
     description = parse_table_description(
         _doc(
@@ -90,6 +101,34 @@ def test_unmappable_non_partition_column_is_skipped():
         QN,
     )
     assert [c.name for c in description.columns] == ["ok"]
+
+
+def test_malformed_type_object_raises():
+    # A present-but-non-object type is drift; it must fail the read rather than be
+    # skipped like an unknown type, which would silently drop a real column.
+    with pytest.raises(MetadataParseError):
+        parse_table_description(
+            _doc(
+                columns=[
+                    {"name": "id", "type": {"name": "int"}, "nullable": False},
+                    {"name": "amount", "type": "decimal"},
+                ]
+            ),
+            QN,
+        )
+
+
+def test_type_object_without_name_raises():
+    with pytest.raises(MetadataParseError):
+        parse_table_description(
+            _doc(
+                columns=[
+                    {"name": "id", "type": {"name": "int"}, "nullable": False},
+                    {"name": "amount", "type": {"precision": 10, "scale": 2}},
+                ]
+            ),
+            QN,
+        )
 
 
 def test_malformed_json_and_missing_columns_raise():

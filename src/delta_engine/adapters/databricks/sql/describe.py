@@ -52,8 +52,8 @@ def parse_table_description(json_text: str, qualified_name: QualifiedName) -> Ta
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name),
         comment=document.get("comment") or "",
-        partitioned_by=_casefolded_list(document.get("partition_columns")),
-        clustered_by=_casefolded_list(document.get("clustering_columns")),
+        partitioned_by=_casefolded_list(document, "partition_columns", qualified_name),
+        clustered_by=_casefolded_list(document, "clustering_columns", qualified_name),
         properties=_managed_properties(document.get("table_properties"), qualified_name),
     )
 
@@ -68,18 +68,25 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             raise MetadataParseError(f"{qualified_name}: malformed column entry {entry!r}")
         name = entry["name"].casefold()
-        data_type = data_type_from_json(entry.get("type"))
+        type_obj = entry.get("type")
+        if not isinstance(type_obj, dict) or not isinstance(type_obj.get("name"), str):
+            raise MetadataParseError(
+                f"{qualified_name}: column {name!r} has a malformed type object {type_obj!r}"
+            )
+        data_type = data_type_from_json(type_obj)
         if data_type is None:
-            # A column the domain cannot type is skipped rather than failed: it
-            # cannot be declared in a desired table either, so its absence here
-            # produces no drift. If partitioning, clustering, or a key names it,
-            # ObservedTable rejects the resulting inconsistency and the read fails
-            # there — one owner for that invariant, applied to every such column.
+            # The type object is well-formed (checked above) but the domain does
+            # not model it: an unknown or future type name, or a nested type it
+            # cannot represent. Skip rather than fail — such a type cannot be
+            # declared in a desired table either, so its absence produces no drift.
+            # A malformed type *shape* is drift, not an unknown type, and fails the
+            # read above. If partitioning, clustering, or a key names a skipped
+            # column, ObservedTable rejects the inconsistency and the read fails there.
             logger.warning(
                 "Skipping column %r in %s: unrecognised type %r",
                 name,
                 qualified_name,
-                entry.get("type"),
+                type_obj,
             )
             continue
         columns.append(
@@ -107,9 +114,17 @@ def _managed_properties(
     )
 
 
-def _casefolded_list(value: object) -> tuple[str, ...]:
-    if not value:
+def _casefolded_list(document: dict, key: str, qualified_name: QualifiedName) -> tuple[str, ...]:
+    """
+    Read a layout column list (partition or clustering columns), casefolded.
+
+    Absent or null means no such layout. A present value of any other shape is
+    drift, not "no layout", so it fails the read rather than silently reading as
+    an empty layout.
+    """
+    value = document.get(key)
+    if value is None:
         return ()
     if not isinstance(value, list):
-        return ()
+        raise MetadataParseError(f"{qualified_name}: {key} is not a list, got {value!r}")
     return tuple(str(item).casefold() for item in value)
