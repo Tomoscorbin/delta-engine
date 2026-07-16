@@ -79,3 +79,15 @@ def test_missing_relation_from_warehouse_message_prefix() -> None:
 
     assert is_missing_relation(RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] Table … not found")) is True
     assert is_missing_relation(RuntimeError("connection reset")) is False
+
+
+def test_missing_schema_or_catalog_is_not_a_missing_relation() -> None:
+    # The engine creates tables, never schemas or catalogs, so a missing
+    # container must not read as a creatable absence.
+    from delta_engine.adapters.databricks.errors import is_missing_relation
+
+    assert is_missing_relation(_AnalysisError("SCHEMA_NOT_FOUND")) is False
+    assert is_missing_relation(_AnalysisError("CATALOG_NOT_FOUND")) is False
+    assert (
+        is_missing_relation(RuntimeError("[SCHEMA_NOT_FOUND] The schema cannot be found")) is False
+    )

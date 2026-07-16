@@ -29,6 +29,7 @@ from delta_engine.adapters.databricks.sql import (
     read_primary_key,
     read_referencing_foreign_keys,
     read_table_tags,
+    schema_exists,
 )
 from delta_engine.adapters.databricks.sql.describe import (
     TableDescription,
@@ -68,9 +69,19 @@ def _describe_table(
     try:
         rows = run_query(describe_json_query(qualified_name))
     except Exception as exception:
-        if is_missing_relation(exception):
-            return None
-        raise
+        if not is_missing_relation(exception):
+            raise
+        # The describe reports TABLE_OR_VIEW_NOT_FOUND even when the schema or
+        # the catalog is what is missing (verified live), so absence needs
+        # positive confirmation. The engine creates tables, never their
+        # containers: reading a missing container as "absent" would plan a
+        # CREATE TABLE that cannot succeed — and a dry run would report that
+        # impossible plan as success.
+        if not schema_exists(run_query, qualified_name):
+            raise RuntimeError(
+                f"schema {qualified_name.catalog}.{qualified_name.schema} does not exist"
+            ) from exception
+        return None
     return table_description_from_rows(rows, qualified_name)
 
 

@@ -22,9 +22,12 @@ from typing import Final
 
 _MESSAGE_UNAVAILABLE = "<exception message unavailable>"
 
-_MISSING_RELATION_CONDITIONS: Final[frozenset[str]] = frozenset(
-    {"TABLE_OR_VIEW_NOT_FOUND", "SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"}
-)
+# Only the table itself missing reads as absence. A missing schema or catalog
+# is an unreadable environment, not a creatable absence: the engine creates
+# tables but never their containers, so treating it as absence would plan a
+# CREATE TABLE that cannot succeed — and a dry run would report that
+# impossible plan as success.
+_MISSING_TABLE_CONDITION: Final = "TABLE_OR_VIEW_NOT_FOUND"
 _CONDITION_PREFIX: Final = re.compile(r"\s*\[([A-Z0-9_.]+)\]")
 
 
@@ -78,5 +81,5 @@ def _error_condition(exception: BaseException) -> str | None:
 
 
 def is_missing_relation(exception: BaseException) -> bool:
-    """Whether ``exception`` reports that the described table/schema/catalog does not exist."""
-    return _error_condition(exception) in _MISSING_RELATION_CONDITIONS
+    """Whether ``exception`` reports that the described table itself does not exist."""
+    return _error_condition(exception) == _MISSING_TABLE_CONDITION

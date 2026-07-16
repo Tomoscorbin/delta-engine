@@ -23,6 +23,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.domain.model import (
@@ -36,6 +37,16 @@ from delta_engine.domain.model import (
 type Rows = Sequence[Any]
 # Runs one SQL statement and returns its rows — the one fact a backend supplies.
 type RunQuery = Callable[[str], Rows]
+
+
+def schema_exists(run_query: RunQuery, qualified_name: QualifiedName) -> bool:
+    """
+    Whether the table's parent schema exists.
+
+    Probes ``<catalog>.information_schema.schemata``, so a missing catalog
+    raises here rather than answering ``False``.
+    """
+    return bool(run_query(schema_exists_query(qualified_name)))
 
 
 def read_primary_key(

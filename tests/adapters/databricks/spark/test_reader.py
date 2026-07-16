@@ -9,6 +9,7 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
@@ -90,10 +91,15 @@ def test_present_table_uses_six_queries():
     assert spark.queries[0] == describe_json_query(QN)
 
 
-def test_missing_table_is_absent():
-    spark = FakeSpark({describe_json_query(QN): FakeAnalysisError("TABLE_OR_VIEW_NOT_FOUND")})
+def test_missing_table_is_absent_after_confirming_the_schema_exists():
+    spark = FakeSpark(
+        {
+            describe_json_query(QN): FakeAnalysisError("TABLE_OR_VIEW_NOT_FOUND"),
+            schema_exists_query(QN): [("sch",)],
+        }
+    )
     assert isinstance(SparkReader(spark).fetch_state(QN), TableAbsent)
-    assert spark.queries == [describe_json_query(QN)]
+    assert spark.queries == [describe_json_query(QN), schema_exists_query(QN)]
 
 
 def test_other_error_is_read_failed():

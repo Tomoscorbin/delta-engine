@@ -8,6 +8,7 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
@@ -165,10 +166,48 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
     assert len(calls) == 6
 
 
-def test_missing_relation_on_describe_reads_as_absent():
-    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+def test_missing_table_in_an_existing_schema_reads_as_absent():
+    responses = {
+        describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
+        schema_exists_query(QN): [("sch",)],
+    }
 
     assert isinstance(read_catalog_state(_router(responses), QN), TableAbsent)
+
+
+def test_missing_table_in_a_missing_schema_reads_as_failed_not_absent():
+    # Absent means "create the table". The engine never creates schemas or
+    # catalogs, so a missing container must fail the read — reading it as
+    # absent would plan a CREATE TABLE that cannot succeed, and a dry run
+    # would report that impossible plan as success. The router returns no
+    # rows for the schema probe: the schema does not exist.
+    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, ReadFailed)
+    assert "does not exist" in state.failure.message
+
+
+def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
+    # A nonexistent catalog also reports TABLE_OR_VIEW_NOT_FOUND on describe;
+    # the schema probe then fails because <catalog>.information_schema cannot
+    # resolve, and that failure is the read's outcome.
+    responses = {
+        describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
+        schema_exists_query(QN): RuntimeError("[SCHEMA_NOT_FOUND] cat.information_schema"),
+    }
+
+    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
+    # Where the backend does name the missing container on the describe, that
+    # is not a creatable absence either.
+    for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
+        responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
+
+        assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
 
 
 def test_other_describe_error_reads_as_failed():

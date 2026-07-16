@@ -20,6 +20,8 @@ from delta_engine.adapters.databricks.sql import (
     read_referencing_foreign_keys,
     read_table_tags,
     referencing_foreign_keys_query,
+    schema_exists,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.domain.model import (
@@ -40,6 +42,17 @@ def _runner(query, rows):
         return rows
 
     return run
+
+
+# ---------- schema existence ----------
+
+
+def test_schema_exists_when_the_probe_returns_a_row() -> None:
+    assert schema_exists(_runner(schema_exists_query(QN), [("silver",)]), QN) is True
+
+
+def test_schema_does_not_exist_when_the_probe_returns_no_rows() -> None:
+    assert schema_exists(_runner(schema_exists_query(QN), []), QN) is False
 
 
 # ---------- primary key ----------

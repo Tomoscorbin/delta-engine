@@ -478,4 +478,4 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     diff = diff_table(after, observed)
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()

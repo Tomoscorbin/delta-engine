@@ -34,6 +34,22 @@ def describe_json_query(qualified_name: QualifiedName) -> str:
     return f"DESCRIBE TABLE EXTENDED {backtick_qualified_name(qualified_name)} AS JSON"
 
 
+def schema_exists_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema probe for the table's parent schema.
+
+    Returns one row when the schema exists and no rows when it does not.
+    Resolving ``<catalog>.information_schema`` requires the catalog itself to
+    exist, so a missing catalog fails this query rather than returning no rows.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT schema_name"
+        f" FROM {catalog}.information_schema.schemata"
+        f" WHERE schema_name = {quote_literal(qualified_name.schema)}"
+    )
+
+
 def primary_key_query(qualified_name: QualifiedName) -> str:
     """
     Render the information_schema query for a table's primary key.
