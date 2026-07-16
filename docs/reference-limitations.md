@@ -73,12 +73,12 @@ changes, or drops them, and they produce no drift.
 The full matrix is in [data types](reference-data-types.md). The limitations
 in brief:
 
-| Limitation               | Behaviour                                                                                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unsupported Spark types  | Non-partition columns are left unmanaged with a warning, so their drift is invisible; an unsupported partition type or wholly unmappable table fails its read |
-| `CHAR(n)` / `VARCHAR(n)` | Treated as `String`; the length bound is not modeled and never altered                                                                                        |
-| Struct fields            | Structs change as a whole: any field change is a blocked column type change                                                                                   |
-| `Decimal` precision      | Maximum 38, enforced at declaration                                                                                                                           |
+| Limitation               | Behaviour                                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Unsupported Spark types  | Any column whose type the engine cannot model fails that table's read; columns are never skipped, so drift is never invisible |
+| `CHAR(n)` / `VARCHAR(n)` | Treated as `String`; the length bound is not modeled and never altered                                                        |
+| Struct fields            | Structs change as a whole: any field change is a blocked column type change                                                   |
+| `Decimal` precision      | Maximum 38, enforced at declaration                                                                                           |
 
 ## Clustering limits
 

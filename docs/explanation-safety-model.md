@@ -51,11 +51,11 @@ catalog state it can represent, the engine reconciles drift in managed aspects
 and refuses to proceed when an unmanaged aspect has drifted. It never silently
 reconciles something a declaration did not claim responsibility for.
 
-There is one current fail-open limitation at the catalog boundary: an observed
-non-partition column whose type the reader cannot parse is skipped with a logged
-warning, so drift in that column is invisible to validation. A table with no
-mappable columns, or an unsupported partition-column type, fails its read
-instead. See [unsupported types](reference-data-types.md#unsupported-types).
+The read boundary upholds this by failing closed: a column whose type the
+engine cannot model fails that table's read (`READ_FAILED`) rather than being
+silently omitted from the observed state, so drift can never hide in a column
+the reader could not represent. See
+[unsupported types](reference-data-types.md#unsupported-types).
 
 There are three public scopes, selected by `DeltaTable`'s `scope` parameter:
 
