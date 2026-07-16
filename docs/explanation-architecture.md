@@ -93,7 +93,7 @@ flowchart LR
     ExecutorPort[PlanExecutor<br/>execute]
     Reader[SparkReader / WarehouseReader]
     Executor[SparkExecutor / WarehouseExecutor]
-    Catalog[Unity Catalog<br/>Spark catalog APIs or information_schema]
+    Catalog[Unity Catalog<br/>DESCRIBE … AS JSON + information_schema]
     Compiler[Databricks SQL compiler]
     Spark[Spark SQL, or a SQL warehouse connection]
 
@@ -128,21 +128,24 @@ the engine keeps processing the rest of the run and returns a complete report.
 backend, and an exception from it is a programming error that propagates.
 
 The Databricks adapters also own backend normalization, most of it shared
-between the two backends through the `sql` core: lowercasing catalog
-identifiers, reading Unity Catalog constraints and tags through the same
-information_schema queries and row mappers, and quoting SQL identifiers.
-DDL type-string parsing is shared too — `sql/parse.py` turns catalog type
-text into domain data types for both backends, since Unity Catalog reports
-column types as DDL strings on the Spark path (`listColumns`) and the
-warehouse path (`information_schema.columns`) alike. The per-column read
-policy is equally shared: an unmappable type skips the column with a
-warning, unless it is a partition column, which fails the read.
-Exception translation is where the backends
-genuinely diverge: the Spark backend unwraps `Py4JJavaError` to report the
-underlying JVM exception class, while the warehouse backend has no such
-wrapper to unwrap and calls the shared, generic summarizer directly. Both
-paths turn backend exceptions into `ReadFailure` or `ExecutionFailure`
-values.
+between the two backends through the `sql` core and the `read` assembly. Both
+backends read a table with one `DESCRIBE TABLE EXTENDED … AS JSON` call, and a
+shared parser turns that JSON document into a backend-neutral `TableDescription`:
+lowercasing catalog identifiers, mapping the structured column types, and reading
+the comment, partitioning, clustering, and registry-filtered properties.
+`information_schema` supplies the constraint and tag metadata as structured rows
+— Unity Catalog tags, the table's own primary and foreign keys, and inbound
+foreign keys (the JSON document's embedded `table_constraints` string is left
+unread) — and the shared `read.observed_table_from_description` assembly attaches
+them. The per-column read policy is shared and fails closed: a column whose type
+the domain cannot model fails the read rather than being dropped, because a
+silently omitted column would read as "in sync" against a declaration that still
+owns it. Statement execution and exception
+translation are where the backends genuinely diverge: the Spark backend runs
+`spark.sql(...)` and unwraps `Py4JJavaError` to report the underlying JVM
+exception class, while the warehouse backend runs the same statements over a
+`databricks-sql` cursor and calls the shared, generic summarizer directly. Both
+paths turn backend exceptions into `ReadFailure` or `ExecutionFailure` values.
 
 ### Type-model fidelity
 
@@ -169,13 +172,12 @@ a varchar column, and an out-of-band length change is invisible to drift
 detection.
 
 `Struct` shows the same rule inside a modeled type. Struct fields carry name
-and type only: the catalog reports column types as DDL text, which does not
-reliably round-trip nested field nullability or comments, so declaring either
-would produce a permanent, blocked `AlterColumnType` action against whatever
-the reader observes. Both sides normalize to name + type instead — declared
-fields are created nullable, nested comments are unmanaged, and modeling
-field nullability waits until the reader observes a real `StructType` rather
-than DDL text.
+and type only: the domain `StructField` models neither nested field nullability
+nor comments, so the reader normalizes both sides to name + type — declared
+fields are created nullable, nested comments are unmanaged. The AS JSON
+description does report a `nullable` flag per struct field, so modeling nested
+nullability is now gated on the domain type model, not on the observation
+source.
 
 The model is also a pinned vocabulary while the catalog's keeps growing:
 `TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column
@@ -356,20 +358,22 @@ for users. Their implementations still live in `delta_engine.api` and
 
 Inside `delta_engine.adapters.databricks`, the code is split by what it needs
 at import time. The `sql` subpackage is the shared SQL-text core — DDL
-compilation, identifier quoting, and `information_schema` queries — and is
+compilation, identifier quoting, the `DESCRIBE … AS JSON` and
+`information_schema` query builders, and the JSON description parser — and is
 PySpark-free, enforced by an import-linter contract. Two backends build on
 that core today: the `spark` subpackage syncs through an active Spark
 session (the reader and the executor), and the
 `warehouse` subpackage syncs through a Databricks SQL warehouse connection
 over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview
-does not depend on which one ran it, and both read mostly the same shared
-`information_schema` and `DESCRIBE DETAIL` queries — differing in the
-transport those queries run over: in-process Spark SQL versus the warehouse
-connection's cursor. The read-side split is narrow: the Spark backend takes
-table existence, column listing, and the table comment from Spark catalog
-calls instead of `information_schema`, which is why only the Spark backend
-can read catalogs without one, such as `hive_metastore`.
+does not depend on which one ran it, and both read a table through the same
+shared path — one `DESCRIBE … AS JSON` parsed into a `TableDescription`, then
+`information_schema` for tags, keys, and inbound foreign keys — differing only in the
+transport those statements run over (in-process Spark SQL versus the warehouse
+connection's cursor) and in how each classifies a backend exception. Because
+`DESCRIBE … AS JSON` is a Unity Catalog feature, both backends are
+Unity-Catalog-only for reads; a `hive_metastore` table is not readable through
+either.
 
 ## Diff-first planning
 

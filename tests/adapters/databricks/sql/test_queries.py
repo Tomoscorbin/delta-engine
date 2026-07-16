@@ -2,18 +2,72 @@
 
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
-    columns_query,
-    describe_detail_query,
+    describe_json_query,
     foreign_keys_query,
-    information_schema_probe_query,
     primary_key_query,
     referencing_foreign_keys_query,
-    table_row_query,
     table_tags_query,
 )
 from delta_engine.domain.model import QualifiedName
 
 QN = QualifiedName("cat", "sch", "tbl")
+
+
+def test_describe_json_query_is_extended_and_backticked():
+    assert describe_json_query(QN) == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"
+
+
+def test_primary_key_query_golden():
+    assert primary_key_query(QN) == (
+        "SELECT tc.constraint_name, kcu.column_name"
+        " FROM `cat`.information_schema.table_constraints AS tc"
+        " JOIN `cat`.information_schema.key_column_usage AS kcu"
+        " ON tc.constraint_catalog = kcu.constraint_catalog"
+        " AND tc.constraint_schema = kcu.constraint_schema"
+        " AND tc.constraint_name = kcu.constraint_name"
+        " WHERE tc.table_schema = 'sch'"
+        " AND tc.table_name = 'tbl'"
+        " AND tc.constraint_type = 'PRIMARY KEY'"
+        " ORDER BY kcu.ordinal_position"
+    )
+
+
+def test_foreign_keys_query_golden():
+    assert foreign_keys_query(QN) == (
+        "SELECT fk.constraint_name,"
+        " fk.column_name AS local_column,"
+        " parent_table.table_catalog AS referenced_catalog,"
+        " parent_table.table_schema AS referenced_schema,"
+        " parent_table.table_name AS referenced_table,"
+        " parent_key.column_name AS referenced_column"
+        " FROM `cat`.information_schema.referential_constraints AS rc"
+        " JOIN `cat`.information_schema.key_column_usage AS fk"
+        " ON rc.constraint_catalog = fk.constraint_catalog"
+        " AND rc.constraint_schema = fk.constraint_schema"
+        " AND rc.constraint_name = fk.constraint_name"
+        " JOIN `cat`.information_schema.key_column_usage AS parent_key"
+        " ON rc.unique_constraint_catalog = parent_key.constraint_catalog"
+        " AND rc.unique_constraint_schema = parent_key.constraint_schema"
+        " AND rc.unique_constraint_name = parent_key.constraint_name"
+        " AND fk.position_in_unique_constraint = parent_key.ordinal_position"
+        " JOIN `cat`.information_schema.table_constraints AS parent_table"
+        " ON rc.unique_constraint_catalog = parent_table.constraint_catalog"
+        " AND rc.unique_constraint_schema = parent_table.constraint_schema"
+        " AND rc.unique_constraint_name = parent_table.constraint_name"
+        " WHERE fk.table_schema = 'sch'"
+        " AND fk.table_name = 'tbl'"
+        " ORDER BY fk.constraint_name, fk.ordinal_position"
+    )
+
+
+def test_foreign_keys_query_pairs_columns_by_position_in_unique_constraint():
+    # A composite foreign key's local and referenced columns are aligned by the
+    # local column's position in the parent key, so a key that references its
+    # parent's columns in a different order than they are declared still pairs
+    # correctly instead of relying on both sides sharing an order.
+    assert "fk.position_in_unique_constraint = parent_key.ordinal_position" in foreign_keys_query(
+        QN
+    )
 
 
 def test_referencing_foreign_keys_query_golden():
@@ -46,35 +100,6 @@ def test_referencing_foreign_keys_query_matches_primary_key_parents_only():
     assert "pk_tables.constraint_type = 'PRIMARY KEY'" in referencing_foreign_keys_query(QN)
 
 
-def test_describe_detail_query_backticks_the_table_name():
-    assert describe_detail_query(QN) == "DESCRIBE DETAIL `cat`.`sch`.`tbl`"
-
-
-def test_primary_key_query_golden():
-    assert primary_key_query(QN) == (
-        "SELECT table_constraints_info.constraint_name,"
-        " key_columns.column_name"
-        " FROM `cat`.information_schema.key_column_usage"
-        " AS key_columns"
-        " JOIN `cat`.information_schema.table_constraints"
-        " AS table_constraints_info"
-        " USING (constraint_catalog, constraint_schema, constraint_name)"
-        " WHERE key_columns.table_schema = 'sch'"
-        " AND key_columns.table_name = 'tbl'"
-        " AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
-        " ORDER BY key_columns.ordinal_position"
-    )
-
-
-def test_primary_key_query_orders_columns_by_key_position():
-    # A composite primary key's columns must come back in key order;
-    # constraint_column_usage has no ordinal, so the query reads
-    # key_column_usage instead.
-    query = primary_key_query(QN)
-    assert "ORDER BY key_columns.ordinal_position" in query
-    assert "constraint_column_usage" not in query
-
-
 def test_table_tags_query_golden():
     assert table_tags_query(QN) == (
         "SELECT tag_name, tag_value"
@@ -93,74 +118,9 @@ def test_column_tags_query_golden():
     )
 
 
-def test_foreign_keys_query_golden():
-    assert foreign_keys_query(QN) == (
-        "SELECT rc.constraint_name,"
-        " kcu.column_name AS local_column,"
-        " kcu.ordinal_position,"
-        " kcu.position_in_unique_constraint,"
-        " pk.table_catalog AS ref_catalog,"
-        " pk.table_schema AS ref_schema,"
-        " pk.table_name AS ref_table,"
-        " pk.column_name AS ref_column"
-        " FROM `cat`.information_schema.referential_constraints AS rc"
-        " JOIN `cat`.information_schema.key_column_usage AS kcu"
-        " USING (constraint_catalog, constraint_schema, constraint_name)"
-        " JOIN `cat`.information_schema.key_column_usage AS pk"
-        " ON rc.unique_constraint_catalog = pk.constraint_catalog"
-        " AND rc.unique_constraint_schema = pk.constraint_schema"
-        " AND rc.unique_constraint_name = pk.constraint_name"
-        " AND kcu.position_in_unique_constraint = pk.ordinal_position"
-        " WHERE kcu.table_schema = 'sch'"
-        " AND kcu.table_name = 'tbl'"
-        " ORDER BY rc.constraint_name, kcu.ordinal_position"
-    )
-
-
-def test_foreign_keys_query_correlates_referenced_columns_by_parent_key_position():
-    # The FK query must align referenced columns via position_in_unique_constraint
-    # (constraint_column_usage has no ordinal, so it cannot align composite keys).
-    query = foreign_keys_query(QN)
-    assert "position_in_unique_constraint" in query
-    assert "constraint_column_usage" not in query
-
-
 def test_queries_escape_identifiers_and_literals():
     # Backticked identifier parts double embedded backticks; string literals
     # double embedded single quotes.
     qn = QualifiedName("ca`t", "sc'h", "tbl")
-    assert "`ca``t`" in primary_key_query(qn)
-    assert "'sc''h'" in primary_key_query(qn)
-
-
-def test_information_schema_probe_query_golden():
-
-    assert information_schema_probe_query("cat") == (
-        "SELECT 1 FROM `cat`.information_schema.schemata WHERE 1 = 0"
-    )
-
-
-def test_table_row_query_golden():
-    assert table_row_query(QN) == (
-        "SELECT comment"
-        " FROM `cat`.information_schema.tables"
-        " WHERE table_schema = 'sch'"
-        " AND table_name = 'tbl'"
-    )
-
-
-def test_columns_query_golden():
-    assert columns_query(QN) == (
-        "SELECT column_name, full_data_type, is_nullable, comment, partition_index"
-        " FROM `cat`.information_schema.columns"
-        " WHERE table_schema = 'sch'"
-        " AND table_name = 'tbl'"
-        " ORDER BY ordinal_position"
-    )
-
-
-def test_new_queries_quote_identifiers_and_escape_literals():
-    tricky = QualifiedName("c`at", "s'ch", "t'bl")
-    assert "`c``at`" in table_row_query(tricky)
-    assert "'s''ch'" in columns_query(tricky)
-    assert "'t''bl'" in columns_query(tricky)
+    assert "`ca``t`" in referencing_foreign_keys_query(qn)
+    assert "'sc''h'" in table_tags_query(qn)

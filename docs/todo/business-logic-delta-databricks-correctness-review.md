@@ -111,6 +111,24 @@ current runtimes and SQL warehouses. See the
 [DESCRIBE TABLE reference](https://docs.databricks.com/gcp/en/sql/language-manual/sql-ref-syntax-aux-describe-table).
 That larger reader refactor is not required to make the current behavior safe.
 
+### Resolved (2026-07-16)
+
+Fixed in [PR #241](https://github.com/Tomoscorbin/delta-engine/pull/241), which
+rebuilt both readers on `DESCRIBE … AS JSON` and then made the column reader
+fail closed on every unmappable observed column. Malformed column entries,
+malformed type shapes, and malformed layout lists fail the read; and any type
+the domain cannot model — an unknown or future type name (for example
+`geography`), an unrepresentable nested type, or a domain-constructor rejection
+— now also fails the parse rather than being skipped, surfacing as `ReadFailed`
+at the total read boundary. No observed column is silently omitted, so the
+earlier idea of surfacing "skipped columns" in the report is dropped as moot:
+there is no shrunken observed state left to report.
+
+The nested-name round-trip case (item 2 of the proposed solution) is subsumed:
+the structured AS JSON types avoid the textual type-string parsing that dropped
+those columns, and any struct the domain still cannot represent fails the read
+rather than being skipped.
+
 ## 3. Plan required Delta table-feature enablement
 
 ### Cause

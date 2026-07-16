@@ -10,12 +10,12 @@ the page with the detail.
 
 ## Platform
 
-| Requirement           | Supported                                                                                                                                                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader does not yet reliably fail closed on every non-Delta relation, so register Delta tables only ([architecture](explanation-architecture.md)) |
-| Python                | 3.12 or later                                                                                                                                                                                                                          |
-| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                           |
-| SQL warehouse backend | Unity Catalog only — every read runs through `information_schema`; a `hive_metastore` table is readable only through the Spark backend and fails as a read failure through this one ([installation](installation.md))                  |
+| Requirement           | Supported                                                                                                                                                                                                                                                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader does not yet reliably fail closed on every non-Delta relation, so register Delta tables only ([architecture](explanation-architecture.md))                                                                                                    |
+| Python                | 3.12 or later                                                                                                                                                                                                                                                                                                                             |
+| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                                              |
+| Reads (both backends) | Unity Catalog only — every read is one `DESCRIBE TABLE EXTENDED … AS JSON` plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both the Spark and SQL warehouse backends ([installation](installation.md)) |
 
 ## Identifier handling
 
@@ -110,3 +110,11 @@ Declaring a feature the workspace or table protocol does not support — key
 constraints, tags, change data feed — fails at execution with the original
 Databricks error. See
 [runtime and Delta feature compatibility](how-to-handle-sync-failures.md#runtime-and-delta-feature-compatibility).
+
+Reading a table relies on `DESCRIBE TABLE EXTENDED … AS JSON`, which needs
+Databricks Runtime 16.2 or later, or any SQL warehouse. Primary and foreign keys
+are then read from `information_schema`; because key constraints are available
+from Databricks Runtime 13.3 (GA 15.2) — below the AS JSON read floor — any
+runtime new enough to read a table can also observe its keys. As with every
+other runtime feature, delta-engine documents this floor rather than
+preflighting it — an unsupported runtime surfaces as a read failure.

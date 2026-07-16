@@ -287,11 +287,18 @@ the adapter, never in application code.
 
 ### 17. Metadata read batching
 
-Each present table costs ~8 metadata round trips (existence, columns, detail,
-comment, table tags, column tags, PK, FKs, inbound FKs); a 500-table estate
-pays minutes of wall clock. `todo.md` already gates this on latency evidence —
-keep that gate, but expect it to be the first complaint from a large adopter.
-The shape when evidence lands: per-schema/per-catalog batched
+**Update (2026-07-15).** The per-table read now costs 4 round trips, not ~8:
+both backends read one `DESCRIBE TABLE EXTENDED … AS JSON` (columns, comment,
+partitioning, clustering, properties, primary key, and outbound foreign keys in
+one document) plus three `information_schema` queries for tags and inbound
+foreign keys. The remaining idea below — per-schema/per-catalog batching across
+tables — is still deferred behind latency evidence.
+
+Each present table previously cost ~8 metadata round trips (existence, columns,
+detail, comment, table tags, column tags, PK, FKs, inbound FKs); a 500-table
+estate pays minutes of wall clock. `todo.md` already gates further batching on
+latency evidence — keep that gate, but expect it to be the first complaint from
+a large adopter. The shape when evidence lands: per-schema/per-catalog batched
 information_schema queries instead of per-table.
 
 ### 18. Plan artifacts (approve-then-apply)

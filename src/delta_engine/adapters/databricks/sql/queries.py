@@ -6,8 +6,11 @@ metadata query as text, with identifier quoting and literal escaping handled
 here so the reader never assembles SQL inline. Builders are pure — no
 SparkSession, no I/O — so query structure is pinned by golden tests.
 
-All information_schema queries are Unity Catalog only; the reader owns the
-policy for environments where information_schema does not exist.
+The primary read is ``DESCRIBE TABLE EXTENDED … AS JSON`` (``describe_json_query``);
+the information_schema queries here read the constraint and tag metadata as
+structured rows instead of parsing the describe document — Unity Catalog tags,
+this table's own primary and foreign keys, and inbound foreign keys — and are
+Unity Catalog only.
 """
 
 from delta_engine.adapters.databricks.sql.dialect import (
@@ -18,49 +21,84 @@ from delta_engine.adapters.databricks.sql.dialect import (
 from delta_engine.domain.model import QualifiedName
 
 
-def describe_detail_query(qualified_name: QualifiedName) -> str:
+def describe_json_query(qualified_name: QualifiedName) -> str:
     """
-    Render the DESCRIBE DETAIL statement for a table's properties.
+    Render ``DESCRIBE TABLE EXTENDED <table> AS JSON``.
 
-    The name is interpolated into SQL text here, so it must be backtick-quoted
-    to stay an identifier (and escape any embedded backtick). This differs
-    deliberately from the reader's ``spark.catalog.*`` calls, which take the
-    plain ``str()`` form because they parse the dot-separated parts themselves.
-    Don't unify the two.
-
-    DESCRIBE DETAIL is load-bearing: its ``properties`` column is
-    ``Metadata.configuration`` verbatim — Delta strips protocol keys
-    (``delta.minReaderVersion``, ``delta.feature.*``) from it before every
-    commit. Never switch to ``SHOW TBLPROPERTIES``, which synthesizes those
-    protocol rows into its output at read time.
+    The one primary read: it returns columns (structured types), the table
+    comment, partition and clustering columns, and table properties in a single
+    JSON document. ``AS JSON`` requires ``EXTENDED``. Requires DBR 16.2+; older
+    runtimes surface as ``ReadFailed``. Key constraints and tags are read from
+    information_schema instead of this document.
     """
-    return f"DESCRIBE DETAIL {backtick_qualified_name(qualified_name)}"
+    return f"DESCRIBE TABLE EXTENDED {backtick_qualified_name(qualified_name)} AS JSON"
 
 
 def primary_key_query(qualified_name: QualifiedName) -> str:
     """
-    Render the information_schema query for a table's primary key columns.
+    Render the information_schema query for a table's primary key.
 
-    Reads from key_column_usage, whose ordinal_position puts a composite
-    key's columns in key order — constraint_column_usage has no ordinal and
-    returns rows in arbitrary order, which would scramble the observed
-    ``PrimaryKeyConstraint.columns`` tuple.
+    Returns one row per key column — ``constraint_name`` and ``column_name`` —
+    ordered by the column's position in the key, or no rows when the table has
+    no primary key. A table has at most one primary key, so every row carries
+    the same constraint name.
     """
     catalog = backtick(qualified_name.catalog)
     return (
-        f"SELECT table_constraints_info.constraint_name,"
-        f" key_columns.column_name"
-        f" FROM {catalog}.information_schema.key_column_usage"
-        f" AS key_columns"
-        f" JOIN {catalog}.information_schema.table_constraints"
-        f" AS table_constraints_info"
-        f" USING (constraint_catalog, constraint_schema, constraint_name)"
-        f" WHERE key_columns.table_schema ="
-        f" {quote_literal(qualified_name.schema)}"
-        f" AND key_columns.table_name ="
-        f" {quote_literal(qualified_name.name)}"
-        f" AND table_constraints_info.constraint_type = 'PRIMARY KEY'"
-        f" ORDER BY key_columns.ordinal_position"
+        f"SELECT tc.constraint_name, kcu.column_name"
+        f" FROM {catalog}.information_schema.table_constraints AS tc"
+        f" JOIN {catalog}.information_schema.key_column_usage AS kcu"
+        f" ON tc.constraint_catalog = kcu.constraint_catalog"
+        f" AND tc.constraint_schema = kcu.constraint_schema"
+        f" AND tc.constraint_name = kcu.constraint_name"
+        f" WHERE tc.table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND tc.table_name = {quote_literal(qualified_name.name)}"
+        f" AND tc.constraint_type = 'PRIMARY KEY'"
+        f" ORDER BY kcu.ordinal_position"
+    )
+
+
+def foreign_keys_query(qualified_name: QualifiedName) -> str:
+    """
+    Render the information_schema query for the foreign keys this table owns.
+
+    Returns one row per foreign-key column: the constraint name, the local
+    column, the referenced table (three parts), and the referenced column. A
+    composite key yields one row per column pair, ordered by the local column's
+    position. Local and referenced columns are aligned through
+    ``position_in_unique_constraint`` — the local column's position in the
+    parent key — so a key that lists its parent's columns in a different order
+    still pairs correctly, rather than relying on both sides sharing an order.
+
+    information_schema is per-catalog, so a foreign key whose parent table lives
+    in another catalog is invisible here — the same per-catalog limit the
+    inbound query carries.
+    """
+    catalog = backtick(qualified_name.catalog)
+    return (
+        f"SELECT fk.constraint_name,"
+        f" fk.column_name AS local_column,"
+        f" parent_table.table_catalog AS referenced_catalog,"
+        f" parent_table.table_schema AS referenced_schema,"
+        f" parent_table.table_name AS referenced_table,"
+        f" parent_key.column_name AS referenced_column"
+        f" FROM {catalog}.information_schema.referential_constraints AS rc"
+        f" JOIN {catalog}.information_schema.key_column_usage AS fk"
+        f" ON rc.constraint_catalog = fk.constraint_catalog"
+        f" AND rc.constraint_schema = fk.constraint_schema"
+        f" AND rc.constraint_name = fk.constraint_name"
+        f" JOIN {catalog}.information_schema.key_column_usage AS parent_key"
+        f" ON rc.unique_constraint_catalog = parent_key.constraint_catalog"
+        f" AND rc.unique_constraint_schema = parent_key.constraint_schema"
+        f" AND rc.unique_constraint_name = parent_key.constraint_name"
+        f" AND fk.position_in_unique_constraint = parent_key.ordinal_position"
+        f" JOIN {catalog}.information_schema.table_constraints AS parent_table"
+        f" ON rc.unique_constraint_catalog = parent_table.constraint_catalog"
+        f" AND rc.unique_constraint_schema = parent_table.constraint_schema"
+        f" AND rc.unique_constraint_name = parent_table.constraint_name"
+        f" WHERE fk.table_schema = {quote_literal(qualified_name.schema)}"
+        f" AND fk.table_name = {quote_literal(qualified_name.name)}"
+        f" ORDER BY fk.constraint_name, fk.ordinal_position"
     )
 
 
@@ -90,53 +128,14 @@ def column_tags_query(qualified_name: QualifiedName) -> str:
     )
 
 
-def foreign_keys_query(qualified_name: QualifiedName) -> str:
-    """
-    Render the information_schema query for a table's foreign keys.
-
-    Reads the FK's local columns from key_column_usage (kcu). For a foreign
-    key, kcu also exposes position_in_unique_constraint: the 1-based position
-    of each local column within the *parent* key. The referenced columns are
-    resolved by reading the parent key's own kcu rows (aliased pk) and
-    aligning them to the FK by that position. constraint_column_usage has no
-    ordinal, so it cannot align composite keys — hence the self-join.
-
-    Ordered by (constraint_name, ordinal_position) so each constraint's rows
-    are contiguous and already in column order; the row mapper relies on this.
-    """
-    catalog = backtick(qualified_name.catalog)
-    return (
-        f"SELECT rc.constraint_name,"
-        f" kcu.column_name AS local_column,"
-        f" kcu.ordinal_position,"
-        f" kcu.position_in_unique_constraint,"
-        f" pk.table_catalog AS ref_catalog,"
-        f" pk.table_schema AS ref_schema,"
-        f" pk.table_name AS ref_table,"
-        f" pk.column_name AS ref_column"
-        f" FROM {catalog}.information_schema.referential_constraints AS rc"
-        f" JOIN {catalog}.information_schema.key_column_usage AS kcu"
-        f" USING (constraint_catalog, constraint_schema, constraint_name)"
-        f" JOIN {catalog}.information_schema.key_column_usage AS pk"
-        f" ON rc.unique_constraint_catalog = pk.constraint_catalog"
-        f" AND rc.unique_constraint_schema = pk.constraint_schema"
-        f" AND rc.unique_constraint_name = pk.constraint_name"
-        f" AND kcu.position_in_unique_constraint = pk.ordinal_position"
-        f" WHERE kcu.table_schema = {quote_literal(qualified_name.schema)}"
-        f" AND kcu.table_name = {quote_literal(qualified_name.name)}"
-        f" ORDER BY rc.constraint_name, kcu.ordinal_position"
-    )
-
-
 def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
     """
     Render the information_schema query for foreign keys referencing this table.
 
-    The inbound counterpart of :func:`foreign_keys_query`: it finds FKs owned
-    by *other* tables whose parent key lives on this table, joining
-    table_constraints twice — once to locate the parent key's table (the
-    WHERE filter) and once to name the referencing constraint's own table.
-    Column detail is not needed; validation only names what blocks a
+    Finds foreign keys owned by *other* tables whose parent key lives on this
+    table, joining table_constraints twice — once to locate the parent key's
+    table (the WHERE filter) and once to name the referencing constraint's own
+    table. Column detail is not needed; validation only names what blocks a
     primary-key change.
 
     The parent constraint is filtered to the primary key: a foreign key may
@@ -167,54 +166,4 @@ def referencing_foreign_keys_query(qualified_name: QualifiedName) -> str:
         f" AND pk_tables.constraint_type = 'PRIMARY KEY'"
         f" ORDER BY fk_tables.table_catalog, fk_tables.table_schema,"
         f" fk_tables.table_name, rc.constraint_name"
-    )
-
-
-def information_schema_probe_query(catalog: str) -> str:
-    """
-    Render a cheap query that succeeds exactly where information_schema exists.
-
-    Takes the catalog name (not a table's QualifiedName): availability is a
-    per-catalog fact, probed once and cached by the reader. ``WHERE 1 = 0``
-    keeps it free — the planner still resolves the view, which is the test.
-    """
-    return f"SELECT 1 FROM {backtick(catalog)}.information_schema.schemata WHERE 1 = 0"
-
-
-def table_row_query(qualified_name: QualifiedName) -> str:
-    """
-    Render the information_schema query for a table's ``tables`` row.
-
-    One row when the table exists — carrying its comment — and no rows when
-    it does not: the warehouse reader's existence probe and comment fetch in
-    a single query. Views also have a ``tables`` row; the warehouse reader
-    inherits the Spark reader's behaviour of discovering them later in the
-    read (DESCRIBE DETAIL fails), pending the roadmap's read-guard item.
-    """
-    catalog = backtick(qualified_name.catalog)
-    return (
-        f"SELECT comment"
-        f" FROM {catalog}.information_schema.tables"
-        f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
-        f" AND table_name = {quote_literal(qualified_name.name)}"
-    )
-
-
-def columns_query(qualified_name: QualifiedName) -> str:
-    """
-    Render the information_schema query for a table's columns.
-
-    ``full_data_type`` is the DDL string the shared type parser consumes;
-    ``partition_index`` (NULL for non-partition columns) recovers partition
-    order without relying on whether the catalog numbers it from zero or one. Ordered by
-    ``ordinal_position`` so the observed column tuple preserves the table's
-    column order.
-    """
-    catalog = backtick(qualified_name.catalog)
-    return (
-        f"SELECT column_name, full_data_type, is_nullable, comment, partition_index"
-        f" FROM {catalog}.information_schema.columns"
-        f" WHERE table_schema = {quote_literal(qualified_name.schema)}"
-        f" AND table_name = {quote_literal(qualified_name.name)}"
-        f" ORDER BY ordinal_position"
     )
