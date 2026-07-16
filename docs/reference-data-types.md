@@ -25,8 +25,8 @@ under [Unsupported types](#unsupported-types).
 | `Byte()`                                 | `TINYINT`              |                                                                      |
 | `Short()`                                | `SMALLINT`             |                                                                      |
 | `Binary()`                               | `BINARY`               |                                                                      |
-| `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | Creation enables the feature; existing tables need it enabled first |
-| `Variant()`                              | `VARIANT`              | Creation enables the feature; existing tables need it enabled first |
+| `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | Creation enables the feature; existing tables need it enabled first  |
+| `Variant()`                              | `VARIANT`              | Creation enables the feature; existing tables need it enabled first  |
 | `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable  |
 
 `Map` declarations should use a non-`Map` key type. The current declaration
@@ -41,18 +41,20 @@ a struct.
 
 ## Unsupported types
 
-A non-partition column whose Spark type is outside this table (`VOID`,
-`INTERVAL`, geospatial types, etc.) is skipped with a logged warning. The engine
-leaves it unmanaged — it neither creates, alters, nor drops it — and cannot
-detect drift in that column. This is a current fail-open limitation at the read
-boundary; do not rely on delta-engine as a complete drift gate for a table that
-contains an unsupported type. All mappable columns are still managed normally.
+A column whose catalog type is outside the table above (`VOID`, `INTERVAL`,
+geospatial types, a future Spark type, etc.) fails that table's read: the sync
+reports `READ_FAILED` for the table instead of planning against a partial view
+of it, and no column is ever silently skipped. The engine manages a table's
+full column set — an observed column absent from the declaration is planned as
+a `DROP COLUMN` — so an omitted column would make its drift invisible and
+could report a table as in sync when it is not. A failed read affects only
+that table; the other tables in the run still sync normally.
+
+Hitting this usually means the catalog's type vocabulary is ahead of this
+engine version: new Spark types (recent precedents: `TIMESTAMP_NTZ`,
+`VARIANT`) reach tables before tools that pin a type model.
 
 Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length bound is not modeled, produces no drift, and is never altered. The reasoning — facts that cannot round-trip declaration → catalog → observation are normalized out on both sides — is explained in [explanation-architecture.md](explanation-architecture.md).
-
-A table where every column is unsupported surfaces as a `READ_FAILED` for that table alone.
-
-A table whose partition column has an unsupported type also surfaces as `READ_FAILED`, rather than being skipped: silently dropping a partition column would leave the observed partitioning incomplete, and the engine would report a false partitioning change instead of an honest "could not determine state". Hitting this usually means the catalog's type vocabulary is ahead of this engine version — new Spark types (recent precedents: `TIMESTAMP_NTZ`, `VARIANT`) reach tables before tools that pin a type model — or the name resolves to a non-Delta relation (a federated or legacy Hive table) with a broader partitioning vocabulary.
 
 For an existing Delta table, Databricks does not enable `TIMESTAMP_NTZ` or
 `VARIANT` support merely because an `ADD COLUMN` statement names the type.
