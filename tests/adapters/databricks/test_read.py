@@ -147,6 +147,25 @@ def test_all_description_fields_pass_through():
     assert dict(observed.columns[0].tags) == {}
 
 
+def test_unregistered_observed_properties_are_invisible():
+    # The description carries every observed property key; the read keeps only
+    # the keys the engine manages. Protocol internals no declaration can own
+    # (delta.minReaderVersion, feature flags) must not read as drift.
+    doc = _describe_doc(
+        table_properties={
+            "delta.columnMapping.mode": "name",
+            "delta.minReaderVersion": "3",
+            "delta.feature.columnMapping": "supported",
+        }
+    )
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    assert dict(state.table.properties) == {"delta.columnMapping.mode": "name"}
+
+
 def test_read_catalog_state_returns_the_present_table():
     state = read_catalog_state(_router(_describe_responses()), QN)
 

@@ -105,17 +105,25 @@ def test_non_list_clustering_columns_raises():
         _parse(_doc(clustering_columns="id"))
 
 
-def test_properties_filtered_to_registry():
-    description = _parse(
-        _doc(
-            table_properties={
-                "delta.columnMapping.mode": "name",
-                "delta.feature.clustering": "supported",
-                "delta.minReaderVersion": "3",
-            }
-        )
-    )
-    assert dict(description.properties) == {"delta.columnMapping.mode": "name"}
+def test_table_properties_are_carried_verbatim():
+    # Which property keys the engine manages is the reader's decision; the
+    # parse carries every observed key, protocol internals included.
+    properties = {
+        "delta.columnMapping.mode": "name",
+        "delta.feature.clustering": "supported",
+        "delta.minReaderVersion": "3",
+    }
+    description = _parse(_doc(table_properties=properties))
+    assert dict(description.table_properties) == properties
+
+
+def test_absent_table_properties_carry_as_empty():
+    assert dict(_parse(_doc()).table_properties) == {}
+
+
+def test_non_object_table_properties_raises():
+    with pytest.raises(MetadataParseError):
+        _parse(_doc(table_properties="delta.appendOnly=true"))
 
 
 def test_unsupported_column_type_fails_the_read():
@@ -212,4 +220,5 @@ def test_real_order_fact_fixture():
     assert len(description.columns) == 7
     assert description.columns[0].name == "order_id"
     assert description.columns[0].nullable is False
-    assert dict(description.properties) == {"delta.columnMapping.mode": "name"}
+    assert description.table_properties["delta.columnMapping.mode"] == "name"
+    assert description.table_properties["delta.minReaderVersion"] == "3"  # unregistered, carried

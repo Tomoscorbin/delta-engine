@@ -111,9 +111,6 @@ _SIMPLE_TYPES: Final[dict[str, DataType]] = {
     "variant": Variant(),
 }
 
-_DEFAULT_DECIMAL_PRECISION: Final = 10
-_DEFAULT_DECIMAL_SCALE: Final = 0
-
 
 def data_type_from_json(type_obj: object) -> DataType | None:
     """
@@ -161,8 +158,14 @@ def _data_type_from_json(type_obj: object) -> DataType | None:
 
 
 def _decimal_from_json(type_obj: dict) -> DataType | None:
-    precision = type_obj.get("precision", _DEFAULT_DECIMAL_PRECISION)
-    scale = type_obj.get("scale", _DEFAULT_DECIMAL_SCALE)
+    # No default precision or scale: Unity Catalog records concrete values for
+    # every decimal column, so an absent field is a malformed document.
+    # Inventing DECIMAL(10,0) for a column that is really DECIMAL(12,4) would
+    # read as false type drift and be planned against; fail the read instead.
+    precision = type_obj.get("precision")
+    scale = type_obj.get("scale")
+    if precision is None or scale is None:
+        return None
     try:
         return Decimal(int(precision), int(scale))
     except (TypeError, ValueError):

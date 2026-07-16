@@ -132,7 +132,7 @@ between the two backends through the `sql` core and the `read` assembly. Both
 backends read a table with one `DESCRIBE TABLE EXTENDED … AS JSON` call, and a
 shared parser turns that JSON document into a backend-neutral `TableDescription`:
 lowercasing catalog identifiers, mapping the structured column types, and reading
-the comment, partitioning, clustering, and registry-filtered properties.
+the comment, partitioning, clustering, and table properties.
 `information_schema` supplies the constraint and tag metadata as structured rows
 — Unity Catalog tags, the table's own primary and foreign keys, and inbound
 foreign keys (the JSON document's embedded `table_constraints` string is left
@@ -143,7 +143,10 @@ or external Delta tables, judged from the relation kind and provider the
 description carries — so a view, streaming table, foreign table, or non-Delta
 format fails the read instead of being modelled as a table and planned
 against. (Existing external tables are read and altered like managed ones;
-creating one is not yet supported.) The
+creating one is not yet supported.) The read also decides which observed
+property keys become engine state: only the keys the property registry
+manages are kept, so the protocol internals every Delta table carries do not
+read as drift. The
 per-column read policy is shared and fails closed the same way: a column whose type
 the domain cannot model fails the read rather than being dropped, because a
 silently omitted column would read as "in sync" against a declaration that still
