@@ -5,6 +5,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.describe import (
     MetadataParseError,
+    UnsupportedRelationError,
     table_description_from_rows,
 )
 from delta_engine.domain.model import Integer, QualifiedName, String
@@ -22,6 +23,8 @@ def _doc(**overrides):
         "table_name": "demo_table",
         "catalog_name": "dev",
         "schema_name": "silver",
+        "type": "MANAGED",
+        "provider": "delta",
         "columns": [
             {"name": "id", "type": {"name": "int"}, "nullable": False, "comment": "pk"},
             {
@@ -34,6 +37,52 @@ def _doc(**overrides):
     }
     base.update(overrides)
     return json.dumps(base)
+
+
+# ---------- relation acceptance ----------
+
+
+def test_managed_delta_table_is_readable():
+    assert _parse(_doc()).qualified_name == QN
+
+
+def test_external_delta_table_is_readable():
+    description = _parse(_doc(type="EXTERNAL"))
+    assert [column.name for column in description.columns] == ["id", "name"]
+
+
+def test_relations_that_are_not_tables_are_not_readable():
+    # The engine manages ordinary tables. Every other relation kind fails the
+    # read — including kinds Databricks adds in the future — rather than being
+    # diffed and planned against as though it were one.
+    for kind in ("VIEW", "MATERIALIZED_VIEW", "STREAMING_TABLE", "FOREIGN", "FUTURE_KIND"):
+        with pytest.raises(UnsupportedRelationError):
+            _parse(_doc(type=kind))
+
+
+def test_non_delta_formats_are_not_readable():
+    for provider in ("iceberg", "parquet", "csv"):
+        with pytest.raises(UnsupportedRelationError):
+            _parse(_doc(provider=provider))
+
+
+def test_document_without_relation_kind_or_provider_fails_closed():
+    for missing in ("type", "provider"):
+        doc = json.loads(_doc())
+        doc.pop(missing)
+        with pytest.raises(UnsupportedRelationError):
+            _parse(json.dumps(doc))
+
+
+def test_rejection_message_names_the_found_relation_and_the_supported_kinds():
+    with pytest.raises(UnsupportedRelationError) as excinfo:
+        _parse(_doc(type="STREAMING_TABLE"))
+    message = str(excinfo.value)
+    assert "STREAMING_TABLE" in message
+    assert "MANAGED or EXTERNAL" in message
+
+
+# ---------- columns ----------
 
 
 def test_columns_types_nullability_comments_and_order():
@@ -162,8 +211,10 @@ def test_empty_describe_result_raises():
 def test_malformed_json_and_missing_columns_raise():
     with pytest.raises(MetadataParseError):
         _parse("{not json")
+    doc = json.loads(_doc())
+    doc.pop("columns")
     with pytest.raises(MetadataParseError):
-        _parse('{"comment": ""}')
+        _parse(json.dumps(doc))
 
 
 def test_non_object_document_raises():

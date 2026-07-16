@@ -28,6 +28,8 @@ def _describe_doc(**overrides):
         "table_name": "tbl",
         "catalog_name": "cat",
         "schema_name": "sch",
+        "type": "MANAGED",
+        "provider": "delta",
         "columns": [{"name": "id", "type": {"name": "int"}, "nullable": False}],
         "comment": "",
         "table_properties": {},
@@ -233,6 +235,20 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
     )
 
     assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_relation_that_is_not_a_delta_table_reads_as_failed_not_present():
+    # A registered name that resolves to a view or a non-Delta table is not
+    # observable engine state: the read fails with a distinct failure type
+    # rather than presenting it as a table to diff and plan against.
+    for override in ({"type": "VIEW"}, {"provider": "iceberg"}):
+        doc = _describe_doc(**override)
+        responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+        state = read_catalog_state(_router(responses), QN)
+
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedRelationError"
 
 
 def test_unmappable_column_type_reads_as_failed_not_present():

@@ -22,6 +22,8 @@ _DOC = json.dumps(
         "table_name": "tbl",
         "catalog_name": "cat",
         "schema_name": "sch",
+        "type": "MANAGED",
+        "provider": "delta",
         "columns": [{"name": "id", "type": {"name": "int"}, "nullable": False}],
         "comment": "",
         "table_properties": {},
