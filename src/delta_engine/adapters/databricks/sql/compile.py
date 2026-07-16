@@ -207,6 +207,11 @@ def _(action: AlterColumnType, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: DropPrimaryKey, backticked_table_name: str) -> str:
     """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
+    # IF EXISTS is the deliberate mirror of CreateTable's plain CREATE: a
+    # constraint already gone is the end state this action wants, so an
+    # out-of-band drop in the read-execute window converges instead of failing
+    # the sync — whereas a table that appeared in that window has contents the
+    # plan knows nothing about, so the create must surface it as a failure.
     return f"ALTER TABLE {backticked_table_name} DROP PRIMARY KEY IF EXISTS"
 
 
@@ -224,6 +229,7 @@ def _(action: SetPrimaryKey, backticked_table_name: str) -> str:
 @_compile_action.register
 def _(action: DropForeignKey, backticked_table_name: str) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
+    # IF EXISTS converges like DropPrimaryKey: already absent is the end state.
     constraint = backtick(action.constraint.constraint_name)
     return f"ALTER TABLE {backticked_table_name} DROP CONSTRAINT IF EXISTS {constraint}"
 
