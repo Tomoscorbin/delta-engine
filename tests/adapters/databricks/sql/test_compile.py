@@ -13,6 +13,7 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
+    TableKind,
     Variant,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
@@ -91,8 +92,8 @@ def _create_table(
     )
 
 
-def _compile_single(action: Action) -> str:
-    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)))
+def _compile_single(action: Action, kind: TableKind = TableKind.TABLE) -> str:
+    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)), kind)
     return statement
 
 
@@ -513,3 +514,51 @@ def test_compile_rename_column():
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )
+
+
+def test_tag_statements_compile_with_the_streaming_table_dialect():
+    cases = {
+        SetTableTag(name="owner", value="gov"): (
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
+        ),
+        UnsetTableTag(name="owner"): (
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` UNSET TAGS ('owner')"
+        ),
+        SetColumnTag(column_name="id", name="pii", value="low"): (
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET TAGS ('pii'='low')"
+        ),
+        UnsetColumnTag(column_name="id", name="pii"): (
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET TAGS ('pii')"
+        ),
+    }
+    for action, expected in cases.items():
+        assert _compile_single(action, kind=TableKind.STREAMING_TABLE) == expected
+
+
+def test_ordinary_tables_keep_the_alter_table_dialect():
+    statement = _compile_single(SetTableTag(name="owner", value="gov"))
+
+    assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
+
+
+def test_every_alter_statement_adopts_the_dialect_mechanically():
+    # The compiler is policy-free: validation keeps non-tag actions away from
+    # streaming tables, but a statement compiled for one still targets it.
+    statement = _compile_single(
+        AddColumn(DesiredColumn("extra", Integer())), kind=TableKind.STREAMING_TABLE
+    )
+
+    assert statement.startswith("ALTER STREAMING TABLE `cat`.`sch`.`tbl` ADD COLUMN")
+
+
+def test_non_alter_statements_ignore_the_dialect():
+    create = _compile_single(
+        _create_table(DesiredColumn("id", Integer())), kind=TableKind.STREAMING_TABLE
+    )
+    comment = _compile_single(
+        SetTableComment(desired_comment="c", observed_comment=""),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    assert create.startswith("CREATE TABLE `cat`.`sch`.`tbl`")
+    assert comment == "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'c'"
