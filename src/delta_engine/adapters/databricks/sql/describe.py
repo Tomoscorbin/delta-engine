@@ -2,10 +2,11 @@
 Turn a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` result into a table description.
 
 Columns carry type objects (mapped by ``types.data_type_from_json``); comment,
-partitioning, clustering, and properties are plain JSON. The relation kind and
-storage format are carried through as the ``relation_type`` and ``provider``
-facts — whether the engine reads that kind of relation is the reader's
-decision, not the parser's. Key constraints and tags are not read from this
+partitioning, clustering, and properties are plain JSON. The relation kind,
+storage format, and table properties are carried through verbatim as facts —
+whether the engine reads that kind of relation, and which property keys it
+manages, are the reader's decisions, not the parser's. Key constraints and
+tags are not read from this
 document — they come from information_schema as structured rows (see
 ``queries`` and ``rows``), so the one embedded formatted ``table_constraints``
 string this document also carries is left unread.
@@ -18,7 +19,6 @@ from types import MappingProxyType
 
 from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import ObservedColumn, QualifiedName
 
 
@@ -35,7 +35,7 @@ class TableDescription:
     comment: str
     partitioned_by: tuple[str, ...]
     clustered_by: tuple[str, ...]
-    properties: Mapping[str, str]
+    table_properties: Mapping[str, str]
     relation_type: str | None
     provider: str | None
 
@@ -68,7 +68,7 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
         comment=document.get("comment") or "",
         partitioned_by=_casefolded_list(document, "partition_columns", qualified_name),
         clustered_by=_casefolded_list(document, "clustering_columns", qualified_name),
-        properties=_managed_properties(document.get("table_properties"), qualified_name),
+        table_properties=_table_properties(document.get("table_properties"), qualified_name),
         relation_type=_optional_string(document, "type"),
         provider=_optional_string(document, "provider"),
     )
@@ -123,16 +123,13 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
     return tuple(columns)
 
 
-def _managed_properties(
-    table_properties: object, qualified_name: QualifiedName
-) -> Mapping[str, str]:
+def _table_properties(table_properties: object, qualified_name: QualifiedName) -> Mapping[str, str]:
+    """Carry the document's table properties verbatim; absent means none."""
     if table_properties is None:
         return MappingProxyType({})
     if not isinstance(table_properties, dict):
         raise MetadataParseError(f"{qualified_name}: table_properties is not an object")
-    return MappingProxyType(
-        {name: value for name, value in table_properties.items() if name in DELTA_PROPERTY_REGISTRY}
-    )
+    return MappingProxyType(dict(table_properties))
 
 
 def _casefolded_list(document: dict, key: str, qualified_name: QualifiedName) -> tuple[str, ...]:
