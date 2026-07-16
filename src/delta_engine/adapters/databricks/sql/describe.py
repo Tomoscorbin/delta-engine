@@ -66,7 +66,7 @@ def parse_table_description(json_text: str, qualified_name: QualifiedName) -> Ta
         raise MetadataParseError(f"{qualified_name}: malformed table_constraints") from error
     return TableDescription(
         qualified_name=qualified_name,
-        columns=_columns_from_json(document, qualified_name, set(partitioned_by)),
+        columns=_columns_from_json(document, qualified_name),
         comment=document.get("comment") or "",
         partitioned_by=partitioned_by,
         clustered_by=_casefolded_list(document.get("clustering_columns")),
@@ -76,9 +76,7 @@ def parse_table_description(json_text: str, qualified_name: QualifiedName) -> Ta
     )
 
 
-def _columns_from_json(
-    document: dict, qualified_name: QualifiedName, partition_names: set[str]
-) -> tuple[ObservedColumn, ...]:
+def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[ObservedColumn, ...]:
     columns_json = document.get("columns")
     if not isinstance(columns_json, list) or not columns_json:
         raise MetadataParseError(f"{qualified_name}: AS JSON has no columns array")
@@ -90,12 +88,11 @@ def _columns_from_json(
         name = entry["name"].casefold()
         data_type = data_type_from_json(entry.get("type"))
         if data_type is None:
-            if name in partition_names:
-                raise MetadataParseError(
-                    f"Partition column {name!r} in {qualified_name} has an unmappable"
-                    f" type {entry.get('type')!r}; observed partitioning cannot be"
-                    " determined, so the table cannot be read safely."
-                )
+            # A column the domain cannot type is skipped rather than failed: it
+            # cannot be declared in a desired table either, so its absence here
+            # produces no drift. If partitioning, clustering, or a key names it,
+            # ObservedTable rejects the resulting inconsistency and the read fails
+            # there — one owner for that invariant, applied to every such column.
             logger.warning(
                 "Skipping column %r in %s: unrecognised type %r",
                 name,

@@ -181,3 +181,24 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
     )
 
     assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_unmappable_partition_column_reads_as_failed_not_present():
+    # A partition column whose type the domain cannot model is dropped from the
+    # columns, which would leave partitioning naming a column that is not there.
+    # ObservedTable rejects that inconsistency, so the read reports failed.
+    doc = json.dumps(
+        {
+            "table_name": "tbl",
+            "catalog_name": "cat",
+            "schema_name": "sch",
+            "columns": [
+                {"name": "id", "type": {"name": "int"}, "nullable": False},
+                {"name": "region", "type": {"name": "geography"}, "nullable": True},
+            ],
+            "partition_columns": ["region"],
+        }
+    )
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)

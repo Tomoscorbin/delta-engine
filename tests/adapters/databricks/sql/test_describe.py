@@ -101,17 +101,6 @@ def test_unmappable_non_partition_column_is_skipped():
     assert [c.name for c in description.columns] == ["ok"]
 
 
-def test_unmappable_partition_column_raises():
-    with pytest.raises(MetadataParseError):
-        parse_table_description(
-            _doc(
-                partition_columns=["p"],
-                columns=[{"name": "p", "type": {"name": "geography"}, "nullable": True}],
-            ),
-            QN,
-        )
-
-
 def test_malformed_json_and_missing_columns_raise():
     with pytest.raises(MetadataParseError):
         parse_table_description("{not json", QN)
