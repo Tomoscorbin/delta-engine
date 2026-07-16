@@ -23,6 +23,11 @@ pytest.importorskip("databricks.sql")
 
 
 from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
+from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
+from delta_engine.application.ports import TablePresent
+from delta_engine.databricks import build_sql_engine
+from delta_engine.domain.model import QualifiedName, TableKind
+from delta_engine.schema import Column, DeltaTable, Integer
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     fetch_rows,
@@ -138,3 +143,35 @@ def test_alter_streaming_table_tags_round_through_information_schema(live_connec
     )
     assert _table_tags(live_connection, table_name) == {}
     assert _column_tags(live_connection, table_name) == {}
+
+
+def test_a_streaming_table_is_read_with_its_kind_and_tag_synced_end_to_end(
+    live_connection, live_tables
+):
+    """A streaming table reads as present with its kind, and a tags-scope sync reconciles tags."""
+    # Supersedes the old supported-relations pin that read streaming tables
+    # as failed: they are now engine state, discovered — never declared. The
+    # read and the round-trip share one provisioned table (see the module
+    # docstring on the pipeline quota).
+    table_name = _create_streaming_table(live_connection, live_tables)
+    target = qualified_table(table_name)
+    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('old'='remove-me')")
+
+    reader = WarehouseReader(live_connection)
+    state = reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
+    assert isinstance(state, TablePresent), state
+    assert state.table.kind is TableKind.STREAMING_TABLE
+
+    build_sql_engine(live_connection).sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer(), tags={"pii": "low"}),),
+            tags={"owner": "governance"},
+            scope="tags",
+        )
+    )
+
+    assert _table_tags(live_connection, table_name) == {"owner": "governance"}
+    assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}

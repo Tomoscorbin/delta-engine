@@ -1,10 +1,11 @@
 """
 Live pins for the read boundary's relation acceptance.
 
-The engine reads managed and external Delta tables as observed state. Each
-test creates a catalog relation outside that set and asserts the engine's own
-``WarehouseReader`` fails the read rather than admitting it as a table to
-diff and plan against.
+The engine reads managed and external Delta tables, and streaming tables, as
+observed state. Each test creates a catalog relation outside that set and
+asserts the engine's own ``WarehouseReader`` fails the read rather than
+admitting it as a table to diff and plan against. (Streaming tables are
+pinned positively in ``test_sql_warehouse_live_streaming_tables.py``.)
 """
 
 import pytest
@@ -47,37 +48,6 @@ def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
         assert state.failure.exception_type == "UnsupportedRelationError", state.failure
     finally:
         execute_sql(live_connection, f"DROP VIEW IF EXISTS {qualified_table(view_name)}")
-
-
-@pytest.mark.xdist_group("streaming_table")
-def test_a_streaming_table_is_not_read_as_a_table(live_connection, live_tables):
-    """A streaming table fails the read despite storing its data as Delta."""
-    # Its data lives in Delta files, so only the relation kind — not the
-    # storage format — can tell it apart from an ordinary table. It must be
-    # defined over a streaming query, here a stream off an ordinary Delta
-    # table. Skip cleanly if the workspace cannot create one.
-    source_name = live_tables("relation_stream_source")
-    table_name = live_tables("relation_stream")
-    execute_sql(
-        live_connection,
-        f"CREATE TABLE {qualified_table(source_name)} (id INT) USING DELTA",
-    )
-    try:
-        execute_sql(
-            live_connection,
-            f"CREATE STREAMING TABLE {qualified_table(table_name)} "
-            f"AS SELECT id FROM STREAM({qualified_table(source_name)})",
-        )
-    except Exception as exc:  # intentional broad except: environment capability probe
-        pytest.skip(f"workspace cannot create a streaming table here: {exc}")
-
-    # Plain DROP TABLE drops a streaming table here (verified live), so the
-    # fixture's teardown owns the cleanup; DROP STREAMING TABLE is not
-    # warehouse syntax.
-    state = _read(live_connection, table_name)
-
-    assert isinstance(state, ReadFailed), state
-    assert state.failure.exception_type == "UnsupportedRelationError", state.failure
 
 
 def test_a_non_delta_table_is_not_read_as_engine_state(live_connection, live_tables):
