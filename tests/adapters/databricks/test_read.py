@@ -179,6 +179,17 @@ def test_missing_relation_on_describe_reads_as_absent():
     assert isinstance(read_catalog_state(_router(responses), QN), TableAbsent)
 
 
+def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
+    # Absent means "create the table". The engine never creates schemas or
+    # catalogs, so a missing container must fail the read — reading it as
+    # absent would plan a CREATE TABLE that cannot succeed, and a dry run
+    # would report that impossible plan as success.
+    for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
+        responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
+
+        assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
 def test_other_describe_error_reads_as_failed():
     responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
 
