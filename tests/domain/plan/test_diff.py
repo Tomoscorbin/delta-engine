@@ -155,19 +155,18 @@ def test_type_drift_produces_column_data_type_changed():
     )
 
 
-def test_type_drift_suppresses_nullability_change_but_not_comment_change():
-    # Given a column where type, nullability, and comment all differ
+def test_type_nullability_and_comment_drift_on_one_column_each_produce_a_change():
+    # Given one column whose type, nullability, and comment all differ
     desired = _desired(columns=(DesiredColumn("id", Integer(), nullable=False, comment="new"),))
     observed = _observed(columns=(DesiredColumn("id", Long(), nullable=True, comment="old"),))
 
     # When diffing
     diff = diff_table(desired, observed)
 
-    # Then the type change is present and nullability is suppressed (the column
-    # must be recreated first); comment drift is independent and not suppressed
+    # Then each aspect drifts independently and produces its own change
     assert isinstance(diff, TableDrift)
     assert any(isinstance(change, AlterColumnType) for change in diff.actions)
-    assert not any(isinstance(change, SetColumnNullability) for change in diff.actions)
+    assert any(isinstance(change, SetColumnNullability) for change in diff.actions)
     assert any(isinstance(change, SetColumnComment) for change in diff.actions)
 
 
