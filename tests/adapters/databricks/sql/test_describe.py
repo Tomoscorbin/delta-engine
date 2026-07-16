@@ -22,6 +22,8 @@ def _doc(**overrides):
         "table_name": "demo_table",
         "catalog_name": "dev",
         "schema_name": "silver",
+        "type": "MANAGED",
+        "provider": "delta",
         "columns": [
             {"name": "id", "type": {"name": "int"}, "nullable": False, "comment": "pk"},
             {
@@ -34,6 +36,29 @@ def _doc(**overrides):
     }
     base.update(overrides)
     return json.dumps(base)
+
+
+# ---------- relation facts ----------
+
+
+def test_relation_type_and_provider_are_carried():
+    # Whether the engine reads a relation of this kind is the reader's
+    # decision; the parse carries the facts verbatim.
+    description = _parse(_doc(type="VIEW", provider="iceberg"))
+    assert description.relation_type == "VIEW"
+    assert description.provider == "iceberg"
+
+
+def test_missing_or_non_string_relation_fields_carry_as_none():
+    doc = json.loads(_doc())
+    doc.pop("type")
+    doc["provider"] = 7
+    description = _parse(json.dumps(doc))
+    assert description.relation_type is None
+    assert description.provider is None
+
+
+# ---------- columns ----------
 
 
 def test_columns_types_nullability_comments_and_order():
@@ -162,8 +187,10 @@ def test_empty_describe_result_raises():
 def test_malformed_json_and_missing_columns_raise():
     with pytest.raises(MetadataParseError):
         _parse("{not json")
+    doc = json.loads(_doc())
+    doc.pop("columns")
     with pytest.raises(MetadataParseError):
-        _parse('{"comment": ""}')
+        _parse(json.dumps(doc))
 
 
 def test_non_object_document_raises():

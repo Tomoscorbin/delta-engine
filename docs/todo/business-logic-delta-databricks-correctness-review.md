@@ -30,8 +30,8 @@ path currently produces an incorrect result.
 
 | #    | Severity | Finding                                                       | Failure mode                                                       |
 | ---- | -------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1    | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
-| 2    | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
+| 1 ✅ | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
+| 2 ✅ | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
 | 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
 | 4    | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
 | 5    | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
@@ -73,6 +73,24 @@ has observed. See the
 
 Add shared mapper tests plus live coverage for a view and, where the test
 workspace supports it, a non-Delta table.
+
+### Resolved (2026-07-16)
+
+Superseded in shape by the AS JSON reader (PR #241) and closed by the relation
+acceptance policy in `read.py`: the shared read admits only relations with
+`type` MANAGED or EXTERNAL and `provider` delta — the facts are carried on
+`TableDescription` from the AS JSON document's own fields (no extra query) and
+judged in `read_catalog_state` — and raises `UnsupportedRelationError` for
+everything else — views, materialized views, streaming tables, foreign
+tables, non-Delta formats, and any relation kind Databricks adds later — which
+surfaces as `ReadFailed` at the total read boundary. An acceptance set rather
+than a rejection list, so unknown kinds fail closed by construction. Existing
+EXTERNAL tables are read and reconciled; creating one is a tracked follow-up
+(todo.md). Unit coverage in `sql/test_describe.py` and `test_read.py`; live
+coverage for a view, a streaming table, and an Iceberg table in
+`tests/live/test_sql_warehouse_live_supported_relations.py`. The earlier
+standalone attempt (PR #238, guards over `table_row_query` + `DESCRIBE DETAIL`)
+was closed as stale when those read paths were deleted.
 
 ## 2. Fail closed when any observed column type cannot be mapped
 

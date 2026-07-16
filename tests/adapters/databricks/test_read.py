@@ -28,6 +28,8 @@ def _describe_doc(**overrides):
         "table_name": "tbl",
         "catalog_name": "cat",
         "schema_name": "sch",
+        "type": "MANAGED",
+        "provider": "delta",
         "columns": [{"name": "id", "type": {"name": "int"}, "nullable": False}],
         "comment": "",
         "table_properties": {},
@@ -233,6 +235,63 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
     )
 
     assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_an_external_delta_table_reads_as_present():
+    # Existing external Delta tables are read and reconciled like managed
+    # ones; only creating them is unsupported.
+    doc = _describe_doc(type="EXTERNAL")
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    assert isinstance(read_catalog_state(_router(responses), QN), TablePresent)
+
+
+def test_relation_kinds_the_engine_does_not_manage_read_as_failed():
+    # The engine reads ordinary tables. Every other relation kind fails the
+    # read — including kinds Databricks adds in the future — rather than
+    # being diffed and planned against as though it were one.
+    for kind in ("VIEW", "MATERIALIZED_VIEW", "STREAMING_TABLE", "FOREIGN", "FUTURE_KIND"):
+        doc = _describe_doc(type=kind)
+        responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+        state = read_catalog_state(_router(responses), QN)
+
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedRelationError"
+
+
+def test_non_delta_formats_read_as_failed():
+    for provider in ("iceberg", "parquet", "csv"):
+        doc = _describe_doc(provider=provider)
+        responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+        state = read_catalog_state(_router(responses), QN)
+
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedRelationError"
+
+
+def test_document_without_relation_kind_or_provider_reads_as_failed():
+    for missing in ("type", "provider"):
+        doc = json.loads(_describe_doc())
+        doc.pop(missing)
+        responses = _describe_responses(**{describe_json_query(QN): [(json.dumps(doc),)]})
+
+        state = read_catalog_state(_router(responses), QN)
+
+        assert isinstance(state, ReadFailed)
+        assert state.failure.exception_type == "UnsupportedRelationError"
+
+
+def test_rejection_names_the_found_relation_and_the_supported_kinds():
+    doc = _describe_doc(type="STREAMING_TABLE")
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, ReadFailed)
+    assert "STREAMING_TABLE" in state.failure.message
+    assert "MANAGED or EXTERNAL" in state.failure.message
 
 
 def test_unmappable_column_type_reads_as_failed_not_present():

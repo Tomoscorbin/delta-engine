@@ -9,12 +9,13 @@ physically run differs per backend, so it is injected as a callable:
 ``read_catalog_state`` is the one entry point both readers call, the
 read-side twin of the write side's ``execution.execute_statements``. Each
 backend supplies only how a query runs (returning its rows) and owns its own
-connection resource; the describe, parsing, assembly, and the total failure
-boundary all live here. This module stays PySpark-free.
+connection resource; the describe, the relation acceptance policy, assembly,
+and the total failure boundary all live here. This module stays PySpark-free.
 """
 
 from dataclasses import replace
 from types import MappingProxyType
+from typing import Final
 
 from delta_engine.adapters.databricks.errors import (
     exception_message,
@@ -40,6 +41,21 @@ from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent
 from delta_engine.domain.model import ObservedTable, QualifiedName
 
 
+class UnsupportedRelationError(Exception):
+    """The described relation is not a kind of table the engine manages."""
+
+
+# The engine reads and reconciles ordinary Delta tables, managed or external
+# (existing external tables can be altered; creating one is not yet supported —
+# CREATE TABLE emits no LOCATION). Anything else a catalog name can resolve to
+# — a view, a materialized view, a streaming table, a foreign table, a
+# non-Delta format — cannot be represented as engine state, so the read admits
+# exactly these kinds and fails closed on everything else, including kinds
+# Databricks adds in the future.
+_SUPPORTED_RELATION_TYPES: Final = {"MANAGED", "EXTERNAL"}
+_SUPPORTED_PROVIDERS: Final = {"delta"}
+
+
 def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
     """
     Read one table's catalog state: ``TablePresent`` | ``TableAbsent`` | ``ReadFailed``.
@@ -54,6 +70,7 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
         description = _describe_table(run_query, qualified_name)
         if description is None:
             return TableAbsent()
+        _require_supported_relation(description)
         return TablePresent(table=_observed_table(run_query, description))
     except Exception as exception:
         return ReadFailed(
@@ -83,6 +100,26 @@ def _describe_table(
             ) from exception
         return None
     return table_description_from_rows(rows, qualified_name)
+
+
+def _require_supported_relation(description: TableDescription) -> None:
+    """
+    Check the described relation is a kind of table the engine manages.
+
+    The engine reads managed and external Delta tables. Any other relation —
+    a view, a streaming table, a foreign table, a non-Delta format, or an
+    unknown future kind — raises rather than being modelled as a table.
+    """
+    if (
+        description.relation_type in _SUPPORTED_RELATION_TYPES
+        and description.provider in _SUPPORTED_PROVIDERS
+    ):
+        return
+    raise UnsupportedRelationError(
+        f"{description.qualified_name}: the engine manages MANAGED or EXTERNAL Delta tables; "
+        f"this relation has type={description.relation_type!r}, "
+        f"provider={description.provider!r}"
+    )
 
 
 def _observed_table(run_query: RunQuery, description: TableDescription) -> ObservedTable:

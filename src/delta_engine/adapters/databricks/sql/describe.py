@@ -2,10 +2,13 @@
 Turn a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` result into a table description.
 
 Columns carry type objects (mapped by ``types.data_type_from_json``); comment,
-partitioning, clustering, and properties are plain JSON. Key constraints and
-tags are not read from this document — they come from information_schema as
-structured rows (see ``queries`` and ``rows``), so the one embedded formatted
-``table_constraints`` string this document also carries is left unread.
+partitioning, clustering, and properties are plain JSON. The relation kind and
+storage format are carried through as the ``relation_type`` and ``provider``
+facts — whether the engine reads that kind of relation is the reader's
+decision, not the parser's. Key constraints and tags are not read from this
+document — they come from information_schema as structured rows (see
+``queries`` and ``rows``), so the one embedded formatted ``table_constraints``
+string this document also carries is left unread.
 """
 
 from collections.abc import Mapping
@@ -25,7 +28,7 @@ class MetadataParseError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class TableDescription:
-    """Backend-neutral columns and layout parsed from one AS JSON document."""
+    """Backend-neutral relation facts, columns, and layout from one AS JSON document."""
 
     qualified_name: QualifiedName
     columns: tuple[ObservedColumn, ...]
@@ -33,6 +36,8 @@ class TableDescription:
     partitioned_by: tuple[str, ...]
     clustered_by: tuple[str, ...]
     properties: Mapping[str, str]
+    relation_type: str | None
+    provider: str | None
 
 
 def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> TableDescription:
@@ -64,7 +69,15 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
         partitioned_by=_casefolded_list(document, "partition_columns", qualified_name),
         clustered_by=_casefolded_list(document, "clustering_columns", qualified_name),
         properties=_managed_properties(document.get("table_properties"), qualified_name),
+        relation_type=_optional_string(document, "type"),
+        provider=_optional_string(document, "provider"),
     )
+
+
+def _optional_string(document: dict, key: str) -> str | None:
+    """Read a string field, with any absent or non-string value as ``None``."""
+    value = document.get(key)
+    return value if isinstance(value, str) else None
 
 
 def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[ObservedColumn, ...]:
