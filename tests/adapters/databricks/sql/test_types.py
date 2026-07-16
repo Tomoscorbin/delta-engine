@@ -74,6 +74,16 @@ def test_decimal_reads_precision_and_scale():
     assert data_type_from_json({"name": "decimal", "precision": 10, "scale": 2}) == Decimal(10, 2)
 
 
+def test_decimal_without_precision_or_scale_is_unmodelable():
+    # Unity Catalog records concrete precision and scale for every decimal
+    # column. Rather than invent DECIMAL(10,0) — false type drift against
+    # whatever the column really is — an absent field is unmodelable and
+    # fails the read like any other unreadable type.
+    assert data_type_from_json({"name": "decimal"}) is None
+    assert data_type_from_json({"name": "decimal", "precision": 12}) is None
+    assert data_type_from_json({"name": "decimal", "scale": 4}) is None
+
+
 def test_array_map_struct_nested():
     assert data_type_from_json(
         {"name": "array", "element_type": {"name": "string"}, "element_nullable": True}
