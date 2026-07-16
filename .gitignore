@@ -47,3 +47,4 @@ htmlcov/
 docs/superpowers/
 docs/_build/
 docs/generated/
+.claude/
