@@ -111,27 +111,23 @@ current runtimes and SQL warehouses. See the
 [DESCRIBE TABLE reference](https://docs.databricks.com/gcp/en/sql/language-manual/sql-ref-syntax-aux-describe-table).
 That larger reader refactor is not required to make the current behavior safe.
 
-### Follow-up (2026-07-16)
+### Resolved (2026-07-16)
 
-The structured-reader improvement anticipated above shipped as
-[PR #241](https://github.com/Tomoscorbin/delta-engine/pull/241), which rebuilt
-both readers on `DESCRIBE … AS JSON` and narrowed this finding: malformed
-column entries, malformed type shapes, and malformed layout lists now fail the
-read, and a skipped column that partitioning, clustering, or a key names fails
-`ObservedTable` construction. The one remaining silent path is a column whose
-well-formed type name the domain does not model (for example `geography`): it
-is skipped with a log warning only, on the grounds that such a type cannot be
-declared in a desired table either, so no drift is fabricated.
+Fixed in [PR #241](https://github.com/Tomoscorbin/delta-engine/pull/241), which
+rebuilt both readers on `DESCRIBE … AS JSON` and then made the column reader
+fail closed on every unmappable observed column. Malformed column entries,
+malformed type shapes, and malformed layout lists fail the read; and any type
+the domain cannot model — an unknown or future type name (for example
+`geography`), an unrepresentable nested type, or a domain-constructor rejection
+— now also fails the parse rather than being skipped, surfacing as `ReadFailed`
+at the total read boundary. No observed column is silently omitted, so the
+earlier idea of surfacing "skipped columns" in the report is dropped as moot:
+there is no shrunken observed state left to report.
 
-- [ ] Surface reader-skipped columns in the sync report so a shrunken observed
-      schema is visible without log access: carry `skipped_columns` on
-      `TablePresent`, derive `has_read_warnings` on `TableRunReport` and
-      `SyncReport`, project both into `to_dict()` (bumping `schema_version`
-      to 3), and render a "Read warnings" section in `render_report`. Table
-      status stays `SUCCESS`; the flag gives CI a separate gate. A first
-      implementation was reverted on 2026-07-16 as standing surface not yet
-      justified; revisit with live evidence (a type-shape survey table holding
-      one column of every modeled type, asserting zero skips).
+The nested-name round-trip case (item 2 of the proposed solution) is subsumed:
+the structured AS JSON types avoid the textual type-string parsing that dropped
+those columns, and any struct the domain still cannot represent fails the read
+rather than being skipped.
 
 ## 3. Plan required Delta table-feature enablement
 

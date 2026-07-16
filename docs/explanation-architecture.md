@@ -130,15 +130,17 @@ backend, and an exception from it is a programming error that propagates.
 The Databricks adapters also own backend normalization, most of it shared
 between the two backends through the `sql` core and the `read` assembly. Both
 backends read a table with one `DESCRIBE TABLE EXTENDED … AS JSON` call, and a
-shared parser turns that JSON document into a backend-neutral `TableSnapshot`:
-lowercasing catalog identifiers, mapping the structured column types, and
-reading the comment, partitioning, clustering, registry-filtered properties,
-and the primary and foreign keys from the embedded `table_constraints` string.
-`information_schema` supplies only what the JSON omits — Unity Catalog tags and
-inbound foreign keys — through shared queries and row mappers, and the shared
-`read.observed_table_from_snapshot` assembly attaches them. The per-column read
-policy is shared: an unmappable type skips the column with a warning, unless it
-is a partition column, which fails the read. Statement execution and exception
+shared parser turns that JSON document into a backend-neutral `TableDescription`:
+lowercasing catalog identifiers, mapping the structured column types, and reading
+the comment, partitioning, clustering, and registry-filtered properties.
+`information_schema` supplies the constraint and tag metadata as structured rows
+— Unity Catalog tags, the table's own primary and foreign keys, and inbound
+foreign keys (the JSON document's embedded `table_constraints` string is left
+unread) — and the shared `read.observed_table_from_description` assembly attaches
+them. The per-column read policy is shared and fails closed: a column whose type
+the domain cannot model fails the read rather than being dropped, because a
+silently omitted column would read as "in sync" against a declaration that still
+owns it. Statement execution and exception
 translation are where the backends genuinely diverge: the Spark backend runs
 `spark.sql(...)` and unwraps `Py4JJavaError` to report the underlying JVM
 exception class, while the warehouse backend runs the same statements over a
@@ -357,7 +359,7 @@ for users. Their implementations still live in `delta_engine.api` and
 Inside `delta_engine.adapters.databricks`, the code is split by what it needs
 at import time. The `sql` subpackage is the shared SQL-text core — DDL
 compilation, identifier quoting, the `DESCRIBE … AS JSON` and
-`information_schema` query builders, and the JSON snapshot parser — and is
+`information_schema` query builders, and the JSON description parser — and is
 PySpark-free, enforced by an import-linter contract. Two backends build on
 that core today: the `spark` subpackage syncs through an active Spark
 session (the reader and the executor), and the
@@ -365,8 +367,8 @@ session (the reader and the executor), and the
 over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview
 does not depend on which one ran it, and both read a table through the same
-shared path — one `DESCRIBE … AS JSON` parsed into a `TableSnapshot`, then
-`information_schema` for tags and inbound foreign keys — differing only in the
+shared path — one `DESCRIBE … AS JSON` parsed into a `TableDescription`, then
+`information_schema` for tags, keys, and inbound foreign keys — differing only in the
 transport those statements run over (in-process Spark SQL versus the warehouse
 connection's cursor) and in how each classifies a backend exception. Because
 `DESCRIBE … AS JSON` is a Unity Catalog feature, both backends are

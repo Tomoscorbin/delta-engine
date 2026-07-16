@@ -10,11 +10,9 @@ shipped readers use. Unity Catalog tags, inbound foreign keys, and
 primary/foreign key constraints have no OSS Spark equivalent, so those come
 back empty; no local e2e test declares them.
 
-This module intentionally does not reuse ``sql.rows``'s per-aspect DESCRIBE
-DETAIL mappers (``clustering_columns_from_detail_row``,
-``managed_properties_from_detail_row``): those exist only for the obsolete
-per-aspect read path and are slated for deletion once nothing references
-them, so this reader inlines the small amount of logic it needs instead.
+This reader parses the ``DESCRIBE DETAIL`` row inline. The shipped readers get
+layout and properties from AS JSON, so the shared ``sql`` core carries no
+DESCRIBE DETAIL mappers for it to reuse.
 
 Used only by the local engine e2e tests, to keep a real
 read -> diff -> plan -> execute round trip credential-free. Production reads

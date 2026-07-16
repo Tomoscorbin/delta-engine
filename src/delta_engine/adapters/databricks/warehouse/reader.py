@@ -2,7 +2,7 @@
 Reader adapter for Databricks SQL warehouses.
 
 Unity Catalog only. Reads one table's state through the shared
-``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus three
+``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus five
 information_schema queries). The connector is never imported at runtime: the
 connection is duck-typed (``.cursor()`` yielding ``execute``/``fetchall``). One
 cursor is acquired lazily on the first query and runs every statement — the
