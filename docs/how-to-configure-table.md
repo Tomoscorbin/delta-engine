@@ -373,6 +373,12 @@ to match the live table or use the full scope. Properties are the exception:
 a restricted scope never compares them, so live table properties cannot fail
 the sync.
 
+Streaming tables are supported here and only here: the engine discovers the
+relation kind at read time and compiles tag changes with the
+`ALTER STREAMING TABLE` dialect, while any wider scope against one fails
+validation. See
+[tag a streaming table](how-to-deploy-metadata-only.md#tag-a-streaming-table).
+
 ### Requirements and limits
 
 Column tags require Unity Catalog on Databricks Runtime 13.3 LTS or later and

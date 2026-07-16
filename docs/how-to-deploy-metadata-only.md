@@ -62,6 +62,33 @@ metadata is applied.
 Both failures are scope invariants, listed in
 [safe-change rules](reference-safe-change-rules.md).
 
+## Tag a streaming table
+
+`scope="tags"` extends to streaming tables. A streaming table's definition —
+schema, comments, properties — is owned by its pipeline, and out-of-band
+changes to those can be reverted on refresh; Unity Catalog tags persist, so
+tags are the one aspect the engine can durably manage there. The engine
+discovers the relation kind when it reads the table (nothing is declared),
+compiles tag changes as `ALTER STREAMING TABLE`, and rejects any wider scope:
+a `"full"` or `"metadata"` declaration against a streaming table fails
+validation (`StreamingTableTagsOnly`) even when nothing has drifted.
+
+```python
+from delta_engine.schema import Column, DeltaTable, Integer
+
+clicks = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="clicks",
+    columns=[Column("id", Integer(), tags={"pii": "low"})],
+    tags={"owner": "governance"},
+    scope="tags",
+)
+```
+
+Materialized views remain unsupported: a name that resolves to one still
+fails its read. See [limitations](reference-limitations.md).
+
 ## Mixing scopes in one sync
 
 `scope` is per-table, not per-sync. A single `engine.sync(...)` call

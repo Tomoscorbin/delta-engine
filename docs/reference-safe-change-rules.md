@@ -65,13 +65,20 @@ rather than validated. CHECK constraints and generated columns are also
 outside the model: change dependent expressions first, or Databricks rejects
 the rename at execution.
 
-Two further checks are scope invariants rather than rules — they define what a
-declaration is allowed to govern and always run, regardless of the rule set:
+Three further checks are scope invariants rather than rules — they define what
+a declaration is allowed to govern and always run, regardless of the rule set:
 
-| Invariant               | What it blocks                                                                                          | How to resolve                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `UnmanagedAspectDrift`  | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync | Sync the table fully, or update the declaration to match the live schema |
-| `MissingTableUnmanaged` | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                   |
+| Invariant                | What it blocks                                                                                          | How to resolve                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `UnmanagedAspectDrift`   | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync | Sync the table fully, or update the declaration to match the live schema              |
+| `MissingTableUnmanaged`  | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
+| `StreamingTableTagsOnly` | The observed table is a streaming table and the declaration manages more than tags                      | Declare it with `scope="tags"`; the table's definition belongs to its owning pipeline |
+
+`StreamingTableTagsOnly` judges the declaration against the observed relation
+kind, not against drift, so it fires even when the streaming table is
+currently in sync. Comments and properties stay unmanageable on streaming
+tables deliberately: the pipeline definition owns them and a refresh can
+revert out-of-band changes, whereas Unity Catalog tags persist.
 
 ## Declaration-time checks
 

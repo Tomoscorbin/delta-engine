@@ -45,11 +45,13 @@ Execution is a two-stage boundary. `compile` turns a domain plan into the backen
 ```python
 from delta_engine.application.ports import PlanExecutor, ExecutionSummary, ExecutionSucceeded, ExecutionFailed
 from delta_engine.application.failures import ExecutionFailure
-from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model import QualifiedName, TableKind
 from delta_engine.domain.plan.actions import ActionPlan
 
 class MyExecutor:
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(
+        self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
+    ) -> tuple[str, ...]:
         return tuple(self._render(action) for action in plan.actions)
 ```
 
@@ -58,7 +60,10 @@ The engine calls `compile` only with the `ActionPlan` carried by a
 statements on the table's report. A rejected diff has no plan and never reaches
 this port. `compile` is **not** total: compiling an accepted plan is a pure,
 local operation that cannot fail against a backend, so it may raise on a
-genuine programming error rather than swallowing it.
+genuine programming error rather than swallowing it. `kind` is the observed
+relation kind of the target table — backends whose DDL dialect differs by
+kind (Databricks streaming tables take `ALTER STREAMING TABLE`) dispatch on
+it; a backend with one dialect may ignore it.
 
 `execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
 

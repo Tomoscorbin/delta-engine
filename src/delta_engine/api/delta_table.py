@@ -444,8 +444,11 @@ class DeltaTable:
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
                 constraints. ``"tags"`` restricts it to table and column tags
-                — for tables owned elsewhere (e.g. by a streaming pipeline)
-                whose Unity Catalog tags this engine should still govern. A
+                — for tables owned elsewhere whose Unity Catalog tags this
+                engine should still govern. Streaming tables are supported
+                under this scope and only this scope: their definition
+                belongs to the owning pipeline, so any wider scope against
+                one fails validation. A
                 restricted scope still declares the full table shape; aspects
                 outside the scope are never changed, and drift on them fails
                 validation. Properties are the exception: a declaration that

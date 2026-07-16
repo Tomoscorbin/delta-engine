@@ -112,10 +112,11 @@ flowchart LR
 - `TableAbsent()`
 - `ReadFailed(failure=ReadFailure(...))`
 
-`PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan)` lowers
-a plan to the backend statements that apply it — the engine calls it in the
-plan phase on every run, dry or real, and records the statements on the
-table's report. `execute(statements)` then runs that same tuple and returns an
+`PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan, kind)`
+lowers a plan to the backend statements that apply it — `kind` being the
+observed relation kind, so the SQL dialect follows what the reader saw — and
+the engine calls it in the plan phase on every run, dry or real, recording
+the statements on the table's report. `execute(statements)` then runs that same tuple and returns an
 `ExecutionSummary` with one result per attempted statement, so the previewed
 SQL is exactly what executes.
 
@@ -262,7 +263,7 @@ sequenceDiagram
     Differ-->>Engine: TableMissing / TableDrift
     Engine->>Planner: plan_diff(diff)
     Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
-    Engine->>Executor: compile(qualified_name, plan)
+    Engine->>Executor: compile(qualified_name, plan, kind)
     Executor-->>Engine: SQL statements
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
