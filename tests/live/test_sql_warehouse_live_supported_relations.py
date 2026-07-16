@@ -49,6 +49,7 @@ def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
         execute_sql(live_connection, f"DROP VIEW IF EXISTS {qualified_table(view_name)}")
 
 
+@pytest.mark.xdist_group("streaming_table")
 def test_a_streaming_table_is_not_read_as_a_table(live_connection, live_tables):
     """A streaming table fails the read despite storing its data as Delta."""
     # Its data lives in Delta files, so only the relation kind — not the
