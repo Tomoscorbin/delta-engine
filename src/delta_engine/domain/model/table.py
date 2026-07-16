@@ -264,7 +264,8 @@ class ObservedTable:
         clustered_by: Ordered tuple of liquid clustering column names.
         primary_key: Primary key constraint, or ``None`` when no primary key is defined.
         foreign_keys: Foreign key constraints owned by this table.
-        properties: Table properties as reported by the catalog (values only —
+        properties: Observed values of the engine-managed property keys only;
+            the other keys a table carries are not engine state (values only —
             a catalog has no absence assertions, unlike a desired table's).
         referencing_foreign_keys: Inbound foreign keys owned by other tables.
 
