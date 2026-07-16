@@ -5,11 +5,11 @@ tags:
 
 # How to preview changes with a dry run
 
-`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, and
-dependency resolution, then skips execution. Nothing in the catalog changes.
-The report shows the plan and every pre-execution failure discoverable from the
-catalog snapshot it read; it cannot predict a Databricks error that would occur
-only while executing SQL.
+`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, SQL
+compilation, and dependency resolution, then skips execution. Nothing in the
+catalog changes. The report shows the plan, its exact compiled SQL, and every
+pre-execution failure discoverable from the catalog snapshot it read; it cannot
+predict a Databricks error that would occur only while executing SQL.
 
 ## Run a dry run
 
