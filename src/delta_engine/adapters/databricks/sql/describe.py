@@ -8,12 +8,12 @@ structured rows (see ``queries`` and ``rows``), so the one embedded formatted
 ``table_constraints`` string this document also carries is left unread.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from types import MappingProxyType
-from typing import Any
 
+from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import ObservedColumn, QualifiedName
@@ -35,10 +35,7 @@ class TableDescription:
     properties: Mapping[str, str]
 
 
-def table_description_from_rows(
-    rows: Sequence[Any],
-    qualified_name: QualifiedName,
-) -> TableDescription:
+def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> TableDescription:
     """
     Map a ``DESCRIBE … AS JSON`` result to a ``TableDescription``.
 

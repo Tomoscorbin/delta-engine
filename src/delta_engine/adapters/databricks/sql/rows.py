@@ -14,7 +14,7 @@ boundary keeps that impedance mismatch out of the domain. Tag keys and values
 are case-sensitive and preserved verbatim.
 """
 
-from collections.abc import Iterable
+from collections.abc import Sequence
 from types import MappingProxyType
 from typing import Any
 
@@ -25,8 +25,11 @@ from delta_engine.domain.model import (
     QualifiedName,
 )
 
+# Duck-typed catalog rows, as a backend query returns them.
+type Rows = Sequence[Any]
 
-def primary_key_from_rows(rows: Iterable[Any]) -> PrimaryKeyConstraint | None:
+
+def primary_key_from_rows(rows: Rows) -> PrimaryKeyConstraint | None:
     """
     Build this table's primary key from information_schema rows, or ``None``.
 
@@ -43,7 +46,7 @@ def primary_key_from_rows(rows: Iterable[Any]) -> PrimaryKeyConstraint | None:
     )
 
 
-def foreign_keys_from_rows(rows: Iterable[Any]) -> tuple[ForeignKeyConstraint, ...]:
+def foreign_keys_from_rows(rows: Rows) -> tuple[ForeignKeyConstraint, ...]:
     """
     Build this table's foreign keys from information_schema rows.
 
@@ -69,7 +72,7 @@ def foreign_keys_from_rows(rows: Iterable[Any]) -> tuple[ForeignKeyConstraint, .
     )
 
 
-def referencing_foreign_keys_from_rows(rows: Iterable[Any]) -> tuple[ForeignKeyReference, ...]:
+def referencing_foreign_keys_from_rows(rows: Rows) -> tuple[ForeignKeyReference, ...]:
     """Build the inbound foreign key references from information_schema rows."""
     return tuple(
         ForeignKeyReference(
@@ -84,14 +87,12 @@ def referencing_foreign_keys_from_rows(rows: Iterable[Any]) -> tuple[ForeignKeyR
     )
 
 
-def table_tags_from_rows(rows: Iterable[Any]) -> MappingProxyType[str, str]:
+def table_tags_from_rows(rows: Rows) -> MappingProxyType[str, str]:
     """Map table-tag rows to a read-only mapping; tag case is preserved verbatim."""
     return MappingProxyType({row.tag_name: row.tag_value for row in rows})
 
 
-def column_tags_from_rows(
-    rows: Iterable[Any],
-) -> MappingProxyType[str, MappingProxyType[str, str]]:
+def column_tags_from_rows(rows: Rows) -> MappingProxyType[str, MappingProxyType[str, str]]:
     """
     Map column-tag rows to ``{column_name: {tag: value}}``.
 

@@ -23,6 +23,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
+    Rows,
     column_tags_from_rows,
     foreign_keys_from_rows,
     primary_key_from_rows,
@@ -32,6 +33,7 @@ from delta_engine.adapters.databricks.sql.rows import (
 from delta_engine.adapters.databricks.sql.types import render_data_type
 
 __all__ = [
+    "Rows",
     "backtick",
     "backtick_qualified_name",
     "column_tags_from_rows",
