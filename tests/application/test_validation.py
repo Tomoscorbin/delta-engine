@@ -36,17 +36,17 @@ from delta_engine.domain.plan import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    Finding,
     SetColumnComment,
     SetColumnTag,
     SetTableComment,
+    Unresolvable,
 )
 from delta_engine.domain.plan.diff import (
-    ColumnRenameConflict,
     TableDrift,
     TableMissing,
     diff_table,
 )
+from delta_engine.domain.plan.unresolvable import ColumnRenameConflict
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
@@ -88,15 +88,15 @@ def _observed_table(
 
 
 def _drift(
-    *differences: Action | Finding,
+    *differences: Action | Unresolvable,
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
     desired: DesiredTable | None = None,
 ) -> TableDrift:
     if desired is None:
         desired = _desired_table(managed_aspects=managed_aspects)
     actions = tuple(item for item in differences if isinstance(item, Action))
-    findings = tuple(item for item in differences if not isinstance(item, Action))
-    return TableDrift(desired=desired, actions=actions, findings=findings)
+    unresolvable = tuple(item for item in differences if not isinstance(item, Action))
+    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable)
 
 
 def _validate(
@@ -979,7 +979,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     )
     drift = TableDrift(
         desired=desired,
-        findings=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
+        unresolvable=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
     )
 
     result = validate_diff(drift)

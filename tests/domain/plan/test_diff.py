@@ -35,12 +35,14 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
-    ColumnRenameConflict,
-    PartitioningChanged,
-    PropertyUndeclared,
     TableDrift,
     TableMissing,
     diff_table,
+)
+from delta_engine.domain.plan.unresolvable import (
+    ColumnRenameConflict,
+    PartitioningChanged,
+    PropertyUndeclared,
 )
 from tests.builders import as_observed_columns
 
@@ -97,7 +99,7 @@ def test_equal_tables_diff_to_empty_drift():
     # Then no changes are produced — the natural zero
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_drift_carries_the_desired_table():
@@ -255,7 +257,7 @@ def test_identical_column_tags_produce_no_changes():
     # Then no tag changes are produced
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 # ---------- table comment change
@@ -307,7 +309,7 @@ def test_declared_property_matching_catalog_produces_no_change():
     # Then no change is produced — the property sync is idempotent
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_none_declaration_on_present_key_produces_unset():
@@ -332,7 +334,7 @@ def test_none_declaration_on_absent_key_produces_no_change():
 
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_undeclared_registered_key_produces_an_undeclared_property_finding():
@@ -342,9 +344,9 @@ def test_undeclared_registered_key_produces_an_undeclared_property_finding():
         _observed(properties={"delta.columnMapping.mode": "name"}),
     )
 
-    # Then the diff records the missing declaration intent as a finding
+    # Then the diff records the missing declaration intent as unresolvable
     assert isinstance(diff, TableDrift)
-    assert diff.findings == (
+    assert diff.unresolvable == (
         PropertyUndeclared(name="delta.columnMapping.mode", observed_value="name"),
     )
 
@@ -358,7 +360,7 @@ def test_every_observed_key_without_declaration_produces_a_finding():
     )
 
     assert isinstance(diff, TableDrift)
-    assert diff.findings == (
+    assert diff.unresolvable == (
         PropertyUndeclared(name="delta.enableChangeDataFeed", observed_value="true"),
     )
 
@@ -375,7 +377,7 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
     # Then no property change of any kind — no assertion was made
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_declared_properties_are_not_compared_when_properties_unmanaged():
@@ -390,7 +392,7 @@ def test_declared_properties_are_not_compared_when_properties_unmanaged():
     # Then the carried property makes no assertion and produces no change
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_property_set_rejects_equal_values():
@@ -437,7 +439,7 @@ def test_partitioning_drift_produces_change_with_both_sides():
     )
 
     assert isinstance(diff, TableDrift)
-    assert diff.findings == (
+    assert diff.unresolvable == (
         PartitioningChanged(desired_partitioning=("id",), observed_partitioning=()),
     )
 
@@ -466,7 +468,7 @@ def test_reordered_clustering_keys_are_not_a_change():
     )
     # Then no clustering change is produced — key order is immaterial
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 def test_clustering_removal_produces_cluster_by_none_action():
@@ -517,7 +519,7 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     # Then identity is column-set equality — no change
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 # ---------- foreign key changes
@@ -541,7 +543,7 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
     # Then identity is the content signature — no change, sync stays idempotent
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.findings == ()
+    assert diff.unresolvable == ()
 
 
 # ---------- no-difference changes are unrepresentable
@@ -760,7 +762,7 @@ def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
     applied = _observed(columns=(DesiredColumn("customer_name", String()),))
     drift = diff_table(desired, applied)
     assert drift.actions == ()
-    assert drift.findings == ()
+    assert drift.unresolvable == ()
 
 
 def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
@@ -789,8 +791,8 @@ def test_diff_emits_explicit_conflict_when_source_and_target_both_observed():
 
     drift = diff_table(desired, observed)
 
-    # The conflict is a finding, and the source column is neither dropped nor renamed
-    assert drift.findings == (
+    # The conflict is unresolvable, and the source column is neither dropped nor renamed
+    assert drift.unresolvable == (
         ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),
     )
     assert drift.actions == ()

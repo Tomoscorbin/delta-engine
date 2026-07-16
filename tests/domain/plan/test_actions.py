@@ -36,7 +36,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.diff import ColumnRenameConflict
+from delta_engine.domain.plan.unresolvable import ColumnRenameConflict
 
 _TARGET = QualifiedName("cat", "sch", "table")
 
@@ -297,11 +297,11 @@ def test_drop_foreign_key_phases_before_drop_primary_key():
     assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
 
 
-def test_column_rename_conflict_is_a_finding_not_an_action():
-    finding = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
+def test_column_rename_conflict_is_unresolvable_not_an_action():
+    unresolvable = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
 
-    assert not isinstance(finding, Action)
-    assert finding.aspect is TableAspect.COLUMN_STRUCTURE
+    assert not isinstance(unresolvable, Action)
+    assert unresolvable.aspect is TableAspect.COLUMN_STRUCTURE
 
 
 def test_column_rename_conflict_rejects_no_difference():
