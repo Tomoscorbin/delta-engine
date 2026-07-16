@@ -90,22 +90,24 @@ def test_properties_filtered_to_registry():
     assert dict(description.properties) == {"delta.columnMapping.mode": "name"}
 
 
-def test_unmappable_non_partition_column_is_skipped():
-    description = parse_table_description(
-        _doc(
-            columns=[
-                {"name": "ok", "type": {"name": "int"}, "nullable": True},
-                {"name": "weird", "type": {"name": "geography"}, "nullable": True},
-            ]
-        ),
-        QN,
-    )
-    assert [c.name for c in description.columns] == ["ok"]
+def test_unsupported_column_type_fails_the_read():
+    # An unknown or future type name is a column the domain cannot model. The
+    # engine owns the full column set, so dropping it would read as "in sync";
+    # fail the read instead.
+    with pytest.raises(MetadataParseError):
+        parse_table_description(
+            _doc(
+                columns=[
+                    {"name": "ok", "type": {"name": "int"}, "nullable": True},
+                    {"name": "weird", "type": {"name": "geography"}, "nullable": True},
+                ]
+            ),
+            QN,
+        )
 
 
 def test_malformed_type_object_raises():
-    # A present-but-non-object type is drift; it must fail the read rather than be
-    # skipped like an unknown type, which would silently drop a real column.
+    # A non-object type is a malformed shape, caught before type classification.
     with pytest.raises(MetadataParseError):
         parse_table_description(
             _doc(
@@ -131,6 +133,29 @@ def test_type_object_without_name_raises():
         )
 
 
+def test_unsupported_nested_type_fails_the_read():
+    # A nested type the domain cannot represent (here an array with no element
+    # type) is unreadable just like an unknown top-level type: fail, don't drop.
+    with pytest.raises(MetadataParseError):
+        parse_table_description(
+            _doc(
+                columns=[
+                    {"name": "id", "type": {"name": "int"}, "nullable": False},
+                    {"name": "tags", "type": {"name": "array"}, "nullable": True},
+                ]
+            ),
+            QN,
+        )
+
+
+def test_non_boolean_nullable_fails_the_read():
+    with pytest.raises(MetadataParseError):
+        parse_table_description(
+            _doc(columns=[{"name": "id", "type": {"name": "int"}, "nullable": "false"}]),
+            QN,
+        )
+
+
 def test_malformed_json_and_missing_columns_raise():
     with pytest.raises(MetadataParseError):
         parse_table_description("{not json", QN)
@@ -146,23 +171,6 @@ def test_non_object_document_raises():
 def test_malformed_column_entry_raises():
     with pytest.raises(MetadataParseError):
         parse_table_description(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]), QN)
-
-
-def test_skipping_unmappable_column_logs_a_warning(caplog):
-    import logging
-
-    with caplog.at_level(logging.WARNING):
-        description = parse_table_description(
-            _doc(
-                columns=[
-                    {"name": "ok", "type": {"name": "int"}, "nullable": True},
-                    {"name": "weird", "type": {"name": "geography"}, "nullable": True},
-                ]
-            ),
-            QN,
-        )
-    assert [c.name for c in description.columns] == ["ok"]
-    assert any("weird" in record.message for record in caplog.records)
 
 
 _FIXTURES = Path(__file__).parent / "fixtures"

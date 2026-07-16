@@ -120,9 +120,11 @@ def data_type_from_json(type_obj: object) -> DataType | None:
     Map an AS JSON type object to a domain ``DataType``, or ``None``.
 
     ``None`` covers a type the domain does not model (interval, void, geo,
-    future types) and malformed input; both get the caller's skip-and-warn
-    policy. Domain constructor rejections (decimal over the Delta limit,
-    struct fields colliding after casefold) also yield ``None``.
+    future types), malformed input, and domain constructor rejections (decimal
+    over the Delta limit, struct fields colliding after casefold). The column
+    reader treats ``None`` as an unreadable column and fails the read; the
+    recursive element/key/value/field lookups here propagate it as an
+    unmodelable nested type.
     """
     try:
         return _data_type_from_json(type_obj)

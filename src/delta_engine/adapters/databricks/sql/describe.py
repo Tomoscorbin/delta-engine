@@ -11,14 +11,11 @@ structured rows (see ``queries`` and ``rows``), so the one embedded formatted
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
-import logging
 from types import MappingProxyType
 
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import ObservedColumn, QualifiedName
-
-logger = logging.getLogger(__name__)
 
 
 class MetadataParseError(Exception):
@@ -75,30 +72,29 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
             )
         data_type = data_type_from_json(type_obj)
         if data_type is None:
-            # The type object is well-formed (checked above) but the domain does
-            # not model it: an unknown or future type name, or a nested type it
-            # cannot represent. Skip rather than fail — such a type cannot be
-            # declared in a desired table either, so its absence produces no drift.
-            # A malformed type *shape* is drift, not an unknown type, and fails the
-            # read above. If partitioning, clustering, or a key names a skipped
-            # column, ObservedTable rejects the inconsistency and the read fails there.
-            logger.warning(
-                "Skipping column %r in %s: unrecognised type %r",
-                name,
-                qualified_name,
-                type_obj,
+            # A well-formed type object the domain does not model: an unknown or
+            # future type name (interval, geography, ...), a nested type it cannot
+            # represent, or a value the domain constructor rejects. Fail the read
+            # rather than drop the column. This engine owns the full column set —
+            # an observed column absent from the declaration is planned for DROP
+            # COLUMN — so silently dropping one would read as "in sync" when it is
+            # not. Surfaces as ReadFailed at the total read boundary.
+            raise MetadataParseError(
+                f"{qualified_name}: column {name!r} has an unsupported type {type_obj!r}"
             )
-            continue
+        nullable = entry.get("nullable", True)
+        if not isinstance(nullable, bool):
+            raise MetadataParseError(
+                f"{qualified_name}: column {name!r} has a non-boolean nullable {nullable!r}"
+            )
         columns.append(
             ObservedColumn(
                 name=name,
                 data_type=data_type,
-                nullable=bool(entry.get("nullable", True)),
+                nullable=nullable,
                 comment=entry.get("comment") or "",
             )
         )
-    if not columns:
-        raise MetadataParseError(f"{qualified_name}: no mappable columns")
     return tuple(columns)
 
 

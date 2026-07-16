@@ -204,10 +204,10 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
     assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
 
 
-def test_unmappable_partition_column_reads_as_failed_not_present():
-    # A partition column whose type the domain cannot model is dropped from the
-    # columns, which would leave partitioning naming a column that is not there.
-    # ObservedTable rejects that inconsistency, so the read reports failed.
+def test_unmappable_column_type_reads_as_failed_not_present():
+    # A column whose type the domain cannot model fails the parse, which the total
+    # read boundary turns into ReadFailed rather than a partial present state that
+    # silently omits the column.
     doc = json.dumps(
         {
             "table_name": "tbl",
@@ -217,7 +217,6 @@ def test_unmappable_partition_column_reads_as_failed_not_present():
                 {"name": "id", "type": {"name": "int"}, "nullable": False},
                 {"name": "region", "type": {"name": "geography"}, "nullable": True},
             ],
-            "partition_columns": ["region"],
         }
     )
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
