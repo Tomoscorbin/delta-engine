@@ -36,7 +36,10 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_from_rows,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe import table_description_from_rows
+from delta_engine.adapters.databricks.sql.describe import (
+    TableDescription,
+    table_description_from_rows,
+)
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName
@@ -56,30 +59,33 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
     first query.
     """
     try:
-        return _read(run_query, qualified_name)
+        description = _describe_table(run_query, qualified_name)
+        if description is None:
+            return TableAbsent()
+        return TablePresent(table=_observed_table(run_query, description))
     except Exception as exception:
         return ReadFailed(
             failure=ReadFailure(exception_type_name(exception), exception_message(exception))
         )
 
 
-def _read(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
+def _describe_table(
+    run_query: RunQuery,
+    qualified_name: QualifiedName,
+) -> TableDescription | None:
+    """Describe the table: the parsed description, or ``None`` when it does not exist."""
     try:
-        describe_rows = run_query(describe_json_query(qualified_name))
+        rows = run_query(describe_json_query(qualified_name))
     except Exception as exception:
         if is_missing_relation(exception):
-            return TableAbsent()
+            return None
         raise
-    return TablePresent(table=_observed_table(run_query, describe_rows, qualified_name))
+    return table_description_from_rows(rows, qualified_name)
 
 
-def _observed_table(
-    run_query: RunQuery,
-    describe_rows: Rows,
-    qualified_name: QualifiedName,
-) -> ObservedTable:
-    """Parse the describe result and attach the information_schema metadata to it."""
-    description = table_description_from_rows(describe_rows, qualified_name)
+def _observed_table(run_query: RunQuery, description: TableDescription) -> ObservedTable:
+    """Attach the information_schema metadata (tags, keys, inbound FKs) to the description."""
+    qualified_name = description.qualified_name
     column_tags = column_tags_from_rows(run_query(column_tags_query(qualified_name)))
     tagged_columns = tuple(
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
