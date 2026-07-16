@@ -18,6 +18,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    TableKind,
 )
 
 QN = QualifiedName("cat", "sch", "tbl")
@@ -266,10 +267,11 @@ def test_an_external_delta_table_reads_as_present():
 
 
 def test_relation_kinds_the_engine_does_not_manage_read_as_failed():
-    # The engine reads ordinary tables. Every other relation kind fails the
-    # read — including kinds Databricks adds in the future — rather than
-    # being diffed and planned against as though it were one.
-    for kind in ("VIEW", "MATERIALIZED_VIEW", "STREAMING_TABLE", "FOREIGN", "FUTURE_KIND"):
+    # The engine reads ordinary tables and streaming tables. Every other
+    # relation kind fails the read — materialized views deliberately
+    # included, and kinds Databricks adds in the future — rather than being
+    # diffed and planned against as though it were a table.
+    for kind in ("VIEW", "MATERIALIZED_VIEW", "FOREIGN", "FUTURE_KIND"):
         doc = _describe_doc(type=kind)
         responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
@@ -303,14 +305,15 @@ def test_document_without_relation_kind_or_provider_reads_as_failed():
 
 
 def test_rejection_names_the_found_relation_and_the_supported_kinds():
-    doc = _describe_doc(type="STREAMING_TABLE")
+    doc = _describe_doc(type="MATERIALIZED_VIEW")
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
     state = read_catalog_state(_router(responses), QN)
 
     assert isinstance(state, ReadFailed)
-    assert "STREAMING_TABLE" in state.failure.message
+    assert "MATERIALIZED_VIEW" in state.failure.message
     assert "MANAGED or EXTERNAL" in state.failure.message
+    assert "streaming tables" in state.failure.message
 
 
 def test_unmappable_column_type_reads_as_failed_not_present():
@@ -326,3 +329,33 @@ def test_unmappable_column_type_reads_as_failed_not_present():
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
     assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+
+
+def test_a_streaming_table_reads_as_present_with_its_kind():
+    # DESCRIBE ... AS JSON reports type=STREAMING_TABLE, provider=delta for a
+    # streaming table (pinned live in
+    # tests/live/test_sql_warehouse_live_streaming_tables.py).
+    doc = _describe_doc(type="STREAMING_TABLE")
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.kind is TableKind.STREAMING_TABLE
+
+
+def test_an_ordinary_table_reads_with_the_table_kind():
+    state = read_catalog_state(_router(_describe_responses()), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.kind is TableKind.TABLE
+
+
+def test_a_non_delta_streaming_table_reads_as_failed():
+    doc = _describe_doc(type="STREAMING_TABLE", provider="iceberg")
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, ReadFailed)
+    assert state.failure.exception_type == "UnsupportedRelationError"
