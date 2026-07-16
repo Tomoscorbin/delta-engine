@@ -20,6 +20,7 @@ from delta_engine.adapters.databricks.sql.queries import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.sql.rows import (
@@ -46,6 +47,7 @@ __all__ = [
     "referencing_foreign_keys_from_rows",
     "referencing_foreign_keys_query",
     "render_data_type",
+    "schema_exists_query",
     "table_tags_from_rows",
     "table_tags_query",
 ]

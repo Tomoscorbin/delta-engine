@@ -33,6 +33,7 @@ from delta_engine.adapters.databricks.sql import (
     primary_key_query,
     referencing_foreign_keys_from_rows,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_from_rows,
     table_tags_query,
 )
@@ -67,14 +68,32 @@ def _read(run_query: Callable[[str], Sequence[Any]], qualified_name: QualifiedNa
     try:
         rows = run_query(describe_json_query(qualified_name))
     except Exception as exception:
-        if is_missing_relation(exception):
-            return TableAbsent()
-        raise
+        if not is_missing_relation(exception):
+            raise
+        # The describe reports TABLE_OR_VIEW_NOT_FOUND even when the schema or
+        # the catalog is what is missing (verified live), so absence needs
+        # positive confirmation. The engine creates tables, never their
+        # containers: reading a missing container as "absent" would plan a
+        # CREATE TABLE that cannot succeed — and a dry run would report that
+        # impossible plan as success.
+        if not _schema_exists(run_query, qualified_name):
+            raise RuntimeError(
+                f"schema {qualified_name.catalog}.{qualified_name.schema} does not exist"
+            ) from exception
+        return TableAbsent()
     if not rows:
         raise RuntimeError(f"DESCRIBE AS JSON returned no row for {qualified_name}")
     description = parse_table_description(rows[0][0], qualified_name)
     observed = observed_table_from_description(description, run_info_schema_query=run_query)
     return TablePresent(table=observed)
+
+
+def _schema_exists(
+    run_query: Callable[[str], Sequence[Any]],
+    qualified_name: QualifiedName,
+) -> bool:
+    """Whether the table's parent schema exists; raises when the catalog cannot be read."""
+    return bool(run_query(schema_exists_query(qualified_name)))
 
 
 def observed_table_from_description(

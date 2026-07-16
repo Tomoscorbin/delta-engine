@@ -6,6 +6,7 @@ from delta_engine.adapters.databricks.sql import (
     foreign_keys_query,
     primary_key_query,
     referencing_foreign_keys_query,
+    schema_exists_query,
     table_tags_query,
 )
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
@@ -98,11 +99,14 @@ def test_present_table_uses_six_queries():
     assert connection.cursor_fake.queries[0] == describe_json_query(QN)
 
 
-def test_missing_table_is_absent_and_stops_after_describe():
-    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+def test_missing_table_is_absent_after_confirming_the_schema_exists():
+    responses = {
+        describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
+        schema_exists_query(QN): [("sch",)],
+    }
     connection = RoutedConnection(responses)
     assert isinstance(WarehouseReader(connection).fetch_state(QN), TableAbsent)
-    assert connection.cursor_fake.queries == [describe_json_query(QN)]
+    assert connection.cursor_fake.queries == [describe_json_query(QN), schema_exists_query(QN)]
 
 
 def test_other_backend_error_is_read_failed():
