@@ -5,7 +5,6 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.describe import (
     MetadataParseError,
-    UnsupportedRelationError,
     table_description_from_rows,
 )
 from delta_engine.domain.model import Integer, QualifiedName, String
@@ -39,47 +38,24 @@ def _doc(**overrides):
     return json.dumps(base)
 
 
-# ---------- relation acceptance ----------
+# ---------- relation facts ----------
 
 
-def test_managed_delta_table_is_readable():
-    assert _parse(_doc()).qualified_name == QN
+def test_relation_type_and_provider_are_carried():
+    # Whether the engine reads a relation of this kind is the reader's
+    # decision; the parse carries the facts verbatim.
+    description = _parse(_doc(type="VIEW", provider="iceberg"))
+    assert description.relation_type == "VIEW"
+    assert description.provider == "iceberg"
 
 
-def test_external_delta_table_is_readable():
-    description = _parse(_doc(type="EXTERNAL"))
-    assert [column.name for column in description.columns] == ["id", "name"]
-
-
-def test_relations_that_are_not_tables_are_not_readable():
-    # The engine manages ordinary tables. Every other relation kind fails the
-    # read — including kinds Databricks adds in the future — rather than being
-    # diffed and planned against as though it were one.
-    for kind in ("VIEW", "MATERIALIZED_VIEW", "STREAMING_TABLE", "FOREIGN", "FUTURE_KIND"):
-        with pytest.raises(UnsupportedRelationError):
-            _parse(_doc(type=kind))
-
-
-def test_non_delta_formats_are_not_readable():
-    for provider in ("iceberg", "parquet", "csv"):
-        with pytest.raises(UnsupportedRelationError):
-            _parse(_doc(provider=provider))
-
-
-def test_document_without_relation_kind_or_provider_fails_closed():
-    for missing in ("type", "provider"):
-        doc = json.loads(_doc())
-        doc.pop(missing)
-        with pytest.raises(UnsupportedRelationError):
-            _parse(json.dumps(doc))
-
-
-def test_rejection_message_names_the_found_relation_and_the_supported_kinds():
-    with pytest.raises(UnsupportedRelationError) as excinfo:
-        _parse(_doc(type="STREAMING_TABLE"))
-    message = str(excinfo.value)
-    assert "STREAMING_TABLE" in message
-    assert "MANAGED or EXTERNAL" in message
+def test_missing_or_non_string_relation_fields_carry_as_none():
+    doc = json.loads(_doc())
+    doc.pop("type")
+    doc["provider"] = 7
+    description = _parse(json.dumps(doc))
+    assert description.relation_type is None
+    assert description.provider is None
 
 
 # ---------- columns ----------

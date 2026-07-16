@@ -1,11 +1,11 @@
 """
 Turn a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` result into a table description.
 
-The parse admits only the relations the engine manages — ordinary Delta
-tables, managed or external, read from the document's ``type`` and
-``provider`` fields. Columns carry type objects (mapped by
-``types.data_type_from_json``); comment, partitioning, clustering, and
-properties are plain JSON. Key constraints and tags are not read from this
+Columns carry type objects (mapped by ``types.data_type_from_json``); comment,
+partitioning, clustering, and properties are plain JSON. The relation kind and
+storage format are carried through as the ``relation_type`` and ``provider``
+facts — whether the engine reads that kind of relation is the reader's
+decision, not the parser's. Key constraints and tags are not read from this
 document — they come from information_schema as structured rows (see
 ``queries`` and ``rows``), so the one embedded formatted ``table_constraints``
 string this document also carries is left unread.
@@ -15,7 +15,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from types import MappingProxyType
-from typing import Final
 
 from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
@@ -27,22 +26,9 @@ class MetadataParseError(Exception):
     """A DESCRIBE … AS JSON result is missing required structure."""
 
 
-class UnsupportedRelationError(Exception):
-    """The described relation is not a kind of table the engine manages."""
-
-
-# The engine manages ordinary Delta tables, managed or external. Anything else
-# a catalog name can resolve to — a view, a materialized view, a streaming
-# table, a foreign table, a non-Delta format — cannot be represented as engine
-# state, so the parse admits exactly these kinds and fails closed on
-# everything else, including kinds Databricks adds in the future.
-_SUPPORTED_TABLE_TYPES: Final = frozenset({"MANAGED", "EXTERNAL"})
-_SUPPORTED_PROVIDER: Final = "delta"
-
-
 @dataclass(frozen=True, slots=True)
 class TableDescription:
-    """Backend-neutral columns and layout parsed from one AS JSON document."""
+    """Backend-neutral relation facts, columns, and layout from one AS JSON document."""
 
     qualified_name: QualifiedName
     columns: tuple[ObservedColumn, ...]
@@ -50,6 +36,8 @@ class TableDescription:
     partitioned_by: tuple[str, ...]
     clustered_by: tuple[str, ...]
     properties: Mapping[str, str]
+    relation_type: str | None
+    provider: str | None
 
 
 def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> TableDescription:
@@ -57,9 +45,7 @@ def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> Ta
     Map a ``DESCRIBE … AS JSON`` result to a ``TableDescription``.
 
     The statement returns exactly one row with one column holding the JSON
-    document; an empty result fails the read. Only a managed or external
-    Delta table describes successfully — any other relation raises
-    ``UnsupportedRelationError``.
+    document; an empty result fails the read.
     """
     if not rows:
         raise MetadataParseError(f"{qualified_name}: DESCRIBE AS JSON returned no rows")
@@ -75,7 +61,6 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
         ) from error
     if not isinstance(document, dict):
         raise MetadataParseError(f"{qualified_name}: expected a JSON object")
-    _require_supported_relation(document, qualified_name)
 
     return TableDescription(
         qualified_name=qualified_name,
@@ -84,26 +69,15 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
         partitioned_by=_casefolded_list(document, "partition_columns", qualified_name),
         clustered_by=_casefolded_list(document, "clustering_columns", qualified_name),
         properties=_managed_properties(document.get("table_properties"), qualified_name),
+        relation_type=_optional_string(document, "type"),
+        provider=_optional_string(document, "provider"),
     )
 
 
-def _require_supported_relation(document: dict, qualified_name: QualifiedName) -> None:
-    """
-    Check the described relation is a kind of table the engine manages.
-
-    The engine manages ordinary Delta tables: relation ``type`` MANAGED or
-    EXTERNAL with ``provider`` delta. Any other relation — a view, a
-    streaming table, a foreign table, a non-Delta format, or an unknown
-    future kind — raises rather than being modelled as a table.
-    """
-    relation_type = document.get("type")
-    provider = document.get("provider")
-    if relation_type in _SUPPORTED_TABLE_TYPES and provider == _SUPPORTED_PROVIDER:
-        return
-    raise UnsupportedRelationError(
-        f"{qualified_name}: the engine manages MANAGED or EXTERNAL Delta tables; "
-        f"this relation has type={relation_type!r}, provider={provider!r}"
-    )
+def _optional_string(document: dict, key: str) -> str | None:
+    """Read a string field, with any absent or non-string value as ``None``."""
+    value = document.get(key)
+    return value if isinstance(value, str) else None
 
 
 def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[ObservedColumn, ...]:

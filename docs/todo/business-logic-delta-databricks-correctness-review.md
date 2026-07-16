@@ -77,15 +77,17 @@ workspace supports it, a non-Delta table.
 ### Resolved (2026-07-16)
 
 Superseded in shape by the AS JSON reader (PR #241) and closed by the relation
-acceptance check in `sql/describe.py`: the parse admits only relations with
-`type` MANAGED or EXTERNAL and `provider` delta, read from the AS JSON
-document's own fields (no extra query), and raises `UnsupportedRelationError`
-for everything else — views, materialized views, streaming tables, foreign
+acceptance policy in `read.py`: the shared read admits only relations with
+`type` MANAGED or EXTERNAL and `provider` delta — the facts are carried on
+`TableDescription` from the AS JSON document's own fields (no extra query) and
+judged in `read_catalog_state` — and raises `UnsupportedRelationError` for
+everything else — views, materialized views, streaming tables, foreign
 tables, non-Delta formats, and any relation kind Databricks adds later — which
 surfaces as `ReadFailed` at the total read boundary. An acceptance set rather
-than a rejection list, so unknown kinds fail closed by construction. Unit
-coverage in `sql/test_describe.py` and `test_read.py`; live coverage for a
-view, a streaming table, and an Iceberg table in
+than a rejection list, so unknown kinds fail closed by construction. Existing
+EXTERNAL tables are read and reconciled; creating one is a tracked follow-up
+(todo.md). Unit coverage in `sql/test_describe.py` and `test_read.py`; live
+coverage for a view, a streaming table, and an Iceberg table in
 `tests/live/test_sql_warehouse_live_supported_relations.py`. The earlier
 standalone attempt (PR #238, guards over `table_row_query` + `DESCRIBE DETAIL`)
 was closed as stale when those read paths were deleted.

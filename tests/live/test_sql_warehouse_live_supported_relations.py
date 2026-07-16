@@ -70,15 +70,13 @@ def test_a_streaming_table_is_not_read_as_a_table(live_connection, live_tables):
     except Exception as exc:  # intentional broad except: environment capability probe
         pytest.skip(f"workspace cannot create a streaming table here: {exc}")
 
-    try:
-        state = _read(live_connection, table_name)
+    # Plain DROP TABLE drops a streaming table here (verified live), so the
+    # fixture's teardown owns the cleanup; DROP STREAMING TABLE is not
+    # warehouse syntax.
+    state = _read(live_connection, table_name)
 
-        assert isinstance(state, ReadFailed), state
-        assert state.failure.exception_type == "UnsupportedRelationError", state.failure
-    finally:
-        execute_sql(
-            live_connection, f"DROP STREAMING TABLE IF EXISTS {qualified_table(table_name)}"
-        )
+    assert isinstance(state, ReadFailed), state
+    assert state.failure.exception_type == "UnsupportedRelationError", state.failure
 
 
 def test_a_non_delta_table_is_not_read_as_engine_state(live_connection, live_tables):

@@ -57,15 +57,16 @@ dropping columns](how-to-configure-table.md#column-mapping-and-dropping-columns)
 These features are not modeled at all: the engine never reads, creates,
 changes, or drops them, and they produce no drift.
 
-| Not modeled                                                       | Meaning                                                                                                                                                                             |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CHECK constraints                                                 | Cannot be declared; a constraint that references a renamed column must be changed before the rename                                                                                 |
-| Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key |
-| `UNIQUE` constraints                                              | Cannot be declared or used as a registered foreign-key target, even on Databricks versions that support them                                                                        |
-| Identity and generated columns                                    | Generation expressions are invisible; one that references a renamed column must be changed before the rename                                                                        |
-| Views and materialized views                                      | Unsupported; only managed and external Delta tables are readable, so a registered name that resolves to any other relation fails its read rather than being planned against         |
-| Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                 |
-| Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                 |
+| Not modeled                                                       | Meaning                                                                                                                                                                                     |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CHECK constraints                                                 | Cannot be declared; a constraint that references a renamed column must be changed before the rename                                                                                         |
+| Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key         |
+| `UNIQUE` constraints                                              | Cannot be declared or used as a registered foreign-key target, even on Databricks versions that support them                                                                                |
+| Identity and generated columns                                    | Generation expressions are invisible; one that references a renamed column must be changed before the rename                                                                                |
+| Views and materialized views                                      | Unsupported; only managed and external Delta tables are readable, so a registered name that resolves to any other relation fails its read rather than being planned against                 |
+| External table creation                                           | Existing external Delta tables are read and reconciled like managed ones, but the engine creates managed tables only: a location cannot be declared, and an absent table is created managed |
+| Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                         |
+| Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                         |
 
 ## Type support
 

@@ -138,10 +138,12 @@ the comment, partitioning, clustering, and registry-filtered properties.
 foreign keys (the JSON document's embedded `table_constraints` string is left
 unread) — which the shared read attaches during assembly. The whole read is one
 entry point, `read.read_catalog_state`, and each backend supplies only how a
-query runs. The parse admits only the relations the engine manages — managed
-or external Delta tables, read from the document's `type` and `provider`
-fields — so a view, streaming table, foreign table, or non-Delta format fails
-the read instead of being modelled as a table and planned against. The
+query runs. The read admits only the relations the engine manages — managed
+or external Delta tables, judged from the relation kind and provider the
+description carries — so a view, streaming table, foreign table, or non-Delta
+format fails the read instead of being modelled as a table and planned
+against. (Existing external tables are read and altered like managed ones;
+creating one is not yet supported.) The
 per-column read policy is shared and fails closed the same way: a column whose type
 the domain cannot model fails the read rather than being dropped, because a
 silently omitted column would read as "in sync" against a declaration that still
