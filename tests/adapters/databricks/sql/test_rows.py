@@ -8,6 +8,7 @@ results are accessed — and each read returns a domain value.
 
 from types import SimpleNamespace
 
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.adapters.databricks.sql import (
@@ -30,6 +31,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
 )
+from tests.adapters.databricks.sql.strategies import SQL_IDENTIFIERS
 
 QN = QualifiedName("dev", "silver", "orders")
 
@@ -223,3 +225,70 @@ def test_column_tags_read_lowercases_column_names_but_preserves_tag_case():
     tags = read_column_tags(_runner(column_tags_query(QN), rows), QN)
     assert dict(tags["email"]) == {"PII": "Email", "mask": "hash"}
     assert dict(tags["id"]) == {"key": "primary"}
+
+
+@st.composite
+def _foreign_key_row_permutations(draw: st.DrawFn):
+    size = draw(st.integers(min_value=1, max_value=5))
+    local_columns = draw(st.lists(SQL_IDENTIFIERS, min_size=size, max_size=size, unique=True))
+    referenced_columns = draw(st.lists(SQL_IDENTIFIERS, min_size=size, max_size=size, unique=True))
+    constraint_name = draw(SQL_IDENTIFIERS)
+    rows = [
+        SimpleNamespace(
+            constraint_name=constraint_name.upper(),
+            local_column=local.upper(),
+            referenced_catalog="DEV",
+            referenced_schema="SILVER",
+            referenced_table="PARENT",
+            referenced_column=referenced.upper(),
+        )
+        for local, referenced in zip(local_columns, referenced_columns, strict=True)
+    ]
+    expected = ForeignKeyConstraint(
+        local_columns=tuple(local_columns),
+        referenced_table=QualifiedName("dev", "silver", "parent"),
+        referenced_columns=tuple(referenced_columns),
+        constraint_name=constraint_name,
+    )
+    return draw(st.permutations(rows)), expected
+
+
+@given(_foreign_key_row_permutations())
+def test_foreign_key_row_order_does_not_break_local_to_referenced_pairing(case) -> None:
+    rows, expected = case
+
+    assert read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN) == (expected,)
+
+
+_TAG_NAMES = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_",
+    min_size=1,
+    max_size=12,
+)
+
+
+@st.composite
+def _column_tag_row_permutations(draw: st.DrawFn):
+    expected = draw(
+        st.dictionaries(
+            SQL_IDENTIFIERS,
+            st.dictionaries(_TAG_NAMES, st.text(max_size=30), min_size=1, max_size=4),
+            min_size=1,
+            max_size=4,
+        )
+    )
+    rows = [
+        SimpleNamespace(column_name=column.upper(), tag_name=name, tag_value=value)
+        for column, tags in expected.items()
+        for name, value in tags.items()
+    ]
+    return draw(st.permutations(rows)), expected
+
+
+@given(_column_tag_row_permutations())
+def test_column_tag_grouping_is_row_order_independent_and_preserves_tag_case(case) -> None:
+    rows, expected = case
+
+    actual = read_column_tags(_runner(column_tags_query(QN), rows), QN)
+
+    assert {column: dict(tags) for column, tags in actual.items()} == expected

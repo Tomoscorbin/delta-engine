@@ -16,6 +16,7 @@ def test_backtick_escapes_backtick_qualified_names_and_wraps() -> None:
 def test_quote_literal_escapes_single_quotes_and_wraps() -> None:
     assert quote_literal("plain") == "'plain'"
     assert quote_literal("O'Reilly") == "'O''Reilly'"
+    assert quote_literal(r"line\nbreak") == r"'line\\nbreak'"
 
 
 def test_backtick_qualified_name_quotes_each_part() -> None:
@@ -56,11 +57,9 @@ def test_quote_literal_always_wraps_with_single_quote_delimiters(s: str) -> None
 
 
 @given(st.text())
-def test_quote_literal_round_trips_arbitrary_strings(s: str) -> None:
-    # Given: any string
-    # When: literal-quoting then stripping delimiters and unescaping
-    quoted = quote_literal(s)
-    interior = quoted[1:-1]
-    recovered = interior.replace("''", "'")
-    # Then: the original string is recovered exactly
-    assert recovered == s
+def test_quote_literal_escapes_databricks_control_sequences_and_quotes(s: str) -> None:
+    # Regular Databricks string literals preprocess backslash sequences. Double
+    # backslashes first so values such as the two characters ``\n`` stay literal;
+    # SQL-standard quote doubling then keeps apostrophes inside the delimiters.
+    expected_interior = s.replace("\\", "\\\\").replace("'", "''")
+    assert quote_literal(s) == f"'{expected_interior}'"

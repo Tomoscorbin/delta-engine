@@ -9,8 +9,9 @@ def backtick(raw: str) -> str:
 
 
 def quote_literal(literal: str) -> str:
-    """Single-quote a string literal, escaping single quotes."""
-    return "'" + literal.replace("'", "''") + "'"
+    """Single-quote a string literal, escaping backslashes and single quotes."""
+    escaped = literal.replace("\\", "\\\\").replace("'", "''")
+    return "'" + escaped + "'"
 
 
 def backtick_qualified_name(qualified_name: QualifiedName) -> str:

@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from hypothesis import given, strategies as st
+
 from delta_engine.adapters.databricks.execution import execute_statements
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
 
@@ -113,3 +115,40 @@ def test_execute_returns_empty_summary_for_no_statements():
     summary = execute_statements(RecordingRunner(), ())
     assert summary.results == ()
     assert summary.failed is False
+
+
+@st.composite
+def _execution_scenarios(draw: st.DrawFn):
+    statements = draw(st.lists(st.text(max_size=30), max_size=8))
+    if not statements:
+        return statements, None
+    failure_index = draw(
+        st.one_of(st.none(), st.integers(min_value=0, max_value=len(statements) - 1))
+    )
+    return statements, failure_index
+
+
+@given(_execution_scenarios())
+def test_execution_summary_is_exactly_the_prefix_through_the_first_failure(case) -> None:
+    statements, failure_index = case
+    attempted: list[str] = []
+
+    def run(statement: str) -> None:
+        attempted.append(statement)
+        if failure_index is not None and len(attempted) - 1 == failure_index:
+            raise RuntimeError("generated failure")
+
+    summary = execute_statements(run, statements)
+    attempted_count = len(statements) if failure_index is None else failure_index + 1
+
+    assert attempted == statements[:attempted_count]
+    assert len(summary.results) == attempted_count
+    for index, result in enumerate(summary.results):
+        if failure_index is not None and index == failure_index:
+            assert isinstance(result, ExecutionFailed)
+            assert result.failure.statement_index == index
+            assert result.failure.statement == statements[index]
+        else:
+            assert isinstance(result, ExecutionSucceeded)
+            assert result.statement_index == index
+            assert result.statement == statements[index]

@@ -1,8 +1,14 @@
 import inspect
 
+from hypothesis import given, strategies as st
 import pytest
 
-from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
+from delta_engine.adapters.databricks.sql.compile import (
+    _compile_action,
+    _properties_clause,
+    compile_plan,
+)
+from delta_engine.adapters.databricks.sql.dialect import quote_literal
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -513,3 +519,22 @@ def test_compile_rename_column():
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )
+
+
+@given(
+    st.dictionaries(
+        st.text(max_size=12),
+        st.one_of(st.none(), st.text(max_size=30)),
+        max_size=8,
+    )
+)
+def test_properties_clause_is_sorted_filters_absence_and_ignores_mapping_order(
+    properties: dict[str, str | None],
+) -> None:
+    valued = [(name, value) for name, value in sorted(properties.items()) if value is not None]
+    pairs = ", ".join(f"{quote_literal(name)}={quote_literal(value)}" for name, value in valued)
+    expected = f"TBLPROPERTIES ({pairs})" if pairs else ""
+    reversed_properties = dict(reversed(tuple(properties.items())))
+
+    assert _properties_clause(properties) == expected
+    assert _properties_clause(reversed_properties) == expected

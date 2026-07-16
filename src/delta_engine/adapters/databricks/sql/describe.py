@@ -49,7 +49,13 @@ def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> Ta
     """
     if not rows:
         raise MetadataParseError(f"{qualified_name}: DESCRIBE AS JSON returned no rows")
-    return _parse_document(rows[0][0], qualified_name)
+    try:
+        json_text = rows[0][0]
+    except (IndexError, KeyError, TypeError) as error:
+        raise MetadataParseError(
+            f"{qualified_name}: DESCRIBE AS JSON returned a malformed row"
+        ) from error
+    return _parse_document(json_text, qualified_name)
 
 
 def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescription:
@@ -65,7 +71,7 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
     return TableDescription(
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name),
-        comment=document.get("comment") or "",
+        comment=_string_or_empty(document, "comment", qualified_name, "table comment"),
         partitioned_by=_casefolded_list(document, "partition_columns", qualified_name),
         clustered_by=_casefolded_list(document, "clustering_columns", qualified_name),
         table_properties=_table_properties(document.get("table_properties"), qualified_name),
@@ -78,6 +84,21 @@ def _optional_string(document: dict, key: str) -> str | None:
     """Read a string field, with any absent or non-string value as ``None``."""
     value = document.get(key)
     return value if isinstance(value, str) else None
+
+
+def _string_or_empty(
+    document: dict,
+    key: str,
+    qualified_name: QualifiedName,
+    label: str,
+) -> str:
+    """Read an optional string, rejecting present values of another JSON type."""
+    value = document.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise MetadataParseError(f"{qualified_name}: {label} is not a string, got {value!r}")
+    return value
 
 
 def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[ObservedColumn, ...]:
@@ -117,7 +138,12 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
                 name=name,
                 data_type=data_type,
                 nullable=nullable,
-                comment=entry.get("comment") or "",
+                comment=_string_or_empty(
+                    entry,
+                    "comment",
+                    qualified_name,
+                    f"column {name!r} comment",
+                ),
             )
         )
     return tuple(columns)
@@ -129,6 +155,13 @@ def _table_properties(table_properties: object, qualified_name: QualifiedName) -
         return MappingProxyType({})
     if not isinstance(table_properties, dict):
         raise MetadataParseError(f"{qualified_name}: table_properties is not an object")
+    if any(
+        not isinstance(name, str) or not isinstance(value, str)
+        for name, value in table_properties.items()
+    ):
+        raise MetadataParseError(
+            f"{qualified_name}: table_properties keys and values must be strings"
+        )
     return MappingProxyType(dict(table_properties))
 
 
@@ -145,4 +178,6 @@ def _casefolded_list(document: dict, key: str, qualified_name: QualifiedName) ->
         return ()
     if not isinstance(value, list):
         raise MetadataParseError(f"{qualified_name}: {key} is not a list, got {value!r}")
-    return tuple(str(item).casefold() for item in value)
+    if any(not isinstance(item, str) for item in value):
+        raise MetadataParseError(f"{qualified_name}: {key} entries must be strings, got {value!r}")
+    return tuple(item.casefold() for item in value)

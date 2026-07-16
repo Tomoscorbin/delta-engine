@@ -1,13 +1,15 @@
 import json
 from pathlib import Path
 
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.adapters.databricks.sql.describe import (
     MetadataParseError,
     table_description_from_rows,
 )
-from delta_engine.domain.model import Integer, QualifiedName, String
+from delta_engine.domain.model import Integer, ObservedColumn, QualifiedName, String
+from tests.adapters.databricks.sql.strategies import SQL_IDENTIFIERS, TYPE_DOCUMENTS
 
 QN = QualifiedName("dev", "silver", "demo_table")
 
@@ -36,6 +38,64 @@ def _doc(**overrides):
     }
     base.update(overrides)
     return json.dumps(base)
+
+
+@st.composite
+def _valid_describe_documents(draw: st.DrawFn):
+    names = draw(st.lists(SQL_IDENTIFIERS, min_size=1, max_size=5, unique=True))
+    columns = []
+    expected_columns = []
+    raw_names = []
+    for name in names:
+        raw_name = draw(st.sampled_from((name, name.upper())))
+        data_type, type_document = draw(TYPE_DOCUMENTS)
+        nullable = draw(st.booleans())
+        comment = draw(st.text(max_size=30))
+        raw_names.append(raw_name)
+        columns.append(
+            {
+                "name": raw_name,
+                "type": type_document,
+                "nullable": nullable,
+                "comment": comment,
+            }
+        )
+        expected_columns.append(
+            ObservedColumn(
+                name=raw_name.casefold(),
+                data_type=data_type,
+                nullable=nullable,
+                comment=comment,
+            )
+        )
+
+    partitioned_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
+    clustered_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
+    properties = draw(
+        st.dictionaries(
+            st.text(min_size=1, max_size=12),
+            st.text(max_size=30),
+            max_size=5,
+        )
+    )
+    comment = draw(st.text(max_size=30))
+    document = {
+        "type": "MANAGED",
+        "provider": "delta",
+        "columns": columns,
+        "comment": comment,
+        "partition_columns": partitioned_by,
+        "clustering_columns": clustered_by,
+        "table_properties": properties,
+    }
+    return (
+        document,
+        tuple(expected_columns),
+        comment,
+        tuple(name.casefold() for name in partitioned_by),
+        tuple(name.casefold() for name in clustered_by),
+        properties,
+    )
 
 
 # ---------- relation facts ----------
@@ -222,3 +282,64 @@ def test_real_order_fact_fixture():
     assert description.columns[0].nullable is False
     assert description.table_properties["delta.columnMapping.mode"] == "name"
     assert description.table_properties["delta.minReaderVersion"] == "3"  # unregistered, carried
+
+
+@given(_valid_describe_documents())
+def test_valid_describe_documents_preserve_values_and_normalize_identifiers(case) -> None:
+    document, columns, comment, partitioned_by, clustered_by, properties = case
+
+    description = _parse(json.dumps(document))
+
+    assert description.columns == columns
+    assert description.comment == comment
+    assert description.partitioned_by == partitioned_by
+    assert description.clustered_by == clustered_by
+    assert dict(description.table_properties) == properties
+
+
+@given(_valid_describe_documents())
+def test_describe_parsing_ignores_json_formatting_key_order_and_unknown_fields(case) -> None:
+    document = case[0]
+    baseline = _parse(json.dumps(document, separators=(",", ":")))
+    with_future_metadata = {**document, "future_metadata": {"ignored": [1, 2, 3]}}
+
+    reparsed = _parse(json.dumps(with_future_metadata, indent=2, sort_keys=True))
+
+    assert reparsed == baseline
+
+
+_NON_STRING_JSON_VALUES = st.one_of(
+    st.booleans(),
+    st.integers(),
+    st.floats(allow_nan=False, allow_infinity=False),
+    st.lists(st.integers(), max_size=3),
+    st.dictionaries(st.text(max_size=5), st.integers(), max_size=3),
+)
+
+
+@given(
+    field=st.sampled_from(("table_comment", "column_comment", "layout_item", "property_value")),
+    malformed=_NON_STRING_JSON_VALUES,
+)
+def test_non_string_describe_leaf_values_raise_metadata_parse_error(
+    field: str,
+    malformed: object,
+) -> None:
+    document = json.loads(_doc())
+    if field == "table_comment":
+        document["comment"] = malformed
+    elif field == "column_comment":
+        document["columns"][0]["comment"] = malformed
+    elif field == "layout_item":
+        document["partition_columns"] = [malformed]
+    else:
+        document["table_properties"] = {"delta.appendOnly": malformed}
+
+    with pytest.raises(MetadataParseError):
+        _parse(json.dumps(document))
+
+
+@pytest.mark.parametrize("row", [(), []])
+def test_malformed_describe_result_row_raises_metadata_parse_error(row) -> None:
+    with pytest.raises(MetadataParseError):
+        table_description_from_rows([row], QN)
