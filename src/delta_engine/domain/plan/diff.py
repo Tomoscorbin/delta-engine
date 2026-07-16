@@ -22,6 +22,7 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedTable,
     TableAspect,
+    TableKind,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -97,11 +98,14 @@ class TableDrift:
     can close; they exist to be judged by validation. Both state every
     difference regardless of scope; deciding which the declaration is
     allowed to make is validation's scope gate, not the diff's concern.
+    ``kind`` is the observed table's relation kind, carried as a fact for the
+    same gate to judge.
     """
 
     desired: DesiredTable
     actions: tuple[Action, ...] = ()
     unresolvable: tuple[Unresolvable, ...] = ()
+    kind: TableKind = TableKind.TABLE
 
 
 type TableDiff = TableMissing | TableDrift
@@ -150,7 +154,9 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_undeclared_properties(desired, observed),
         *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
     )
-    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable)
+    return TableDrift(
+        desired=desired, actions=actions, unresolvable=unresolvable, kind=observed.kind
+    )
 
 
 @dataclass(frozen=True, slots=True)

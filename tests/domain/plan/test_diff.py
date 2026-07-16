@@ -12,6 +12,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     String,
     TableAspect,
+    TableKind,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
@@ -962,3 +963,39 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropForeignKey(constraint=unrelated_key),
     )
+
+
+def test_drift_carries_the_observed_relation_kind():
+    # The diff states the fact; judging it is validation's scope gate.
+    qualified_name = QualifiedName("cat", "sch", "clicks")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("id", Integer()),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("id", Integer()),),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    diff = diff_table(desired, observed)
+
+    assert isinstance(diff, TableDrift)
+    assert diff.kind is TableKind.STREAMING_TABLE
+
+
+def test_drift_against_an_ordinary_table_carries_the_table_kind():
+    qualified_name = QualifiedName("cat", "sch", "orders")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("id", Integer()),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("id", Integer()),),
+    )
+
+    diff = diff_table(desired, observed)
+
+    assert isinstance(diff, TableDrift)
+    assert diff.kind is TableKind.TABLE
