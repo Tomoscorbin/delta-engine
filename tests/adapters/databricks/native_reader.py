@@ -5,10 +5,9 @@ OSS Spark's ``DESCRIBE TABLE ... AS JSON`` rejects Delta tables, so the local
 ``local_e2e`` suite cannot exercise ``SparkReader`` directly. This reader
 reaches the same observed state a different way: columns come from the
 native ``StructType``, layout and properties come from ``DESCRIBE DETAIL``,
-and the result feeds the same ``observed_table_from_description`` assembly the
-shipped readers use. Unity Catalog tags, inbound foreign keys, and
-primary/foreign key constraints have no OSS Spark equivalent, so those come
-back empty; no local e2e test declares them.
+and the domain ``ObservedTable`` is constructed directly. Unity Catalog tags,
+inbound foreign keys, and primary/foreign key constraints have no OSS Spark
+equivalent, so they stay empty; no local e2e test declares them.
 
 This reader parses the ``DESCRIBE DETAIL`` row inline. The shipped readers get
 layout and properties from AS JSON, so the shared ``sql`` core carries no
@@ -27,8 +26,6 @@ from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
-from delta_engine.adapters.databricks.read import observed_table_from_description
-from delta_engine.adapters.databricks.sql.describe import TableDescription
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
@@ -45,6 +42,7 @@ from delta_engine.domain.model import (
     Long,
     Map,
     ObservedColumn,
+    ObservedTable,
     QualifiedName,
     Short,
     String,
@@ -154,15 +152,12 @@ class NativeSparkReader:
         fq = str(qualified_name)
         struct = self.spark.table(fq).schema
         detail = self.spark.sql(f"DESCRIBE DETAIL {fq}").first()
-        description = TableDescription(
+        observed = ObservedTable(
             qualified_name=qualified_name,
             columns=_observed_columns(struct),
             comment=self.spark.catalog.getTable(fq).description or "",
             partitioned_by=tuple(c.casefold() for c in (detail["partitionColumns"] or [])),
             clustered_by=tuple(c.casefold() for c in (detail["clusteringColumns"] or [])),
             properties=_managed_properties(detail["properties"]),
-        )
-        observed = observed_table_from_description(
-            description, run_info_schema_query=lambda query: []
         )
         return TablePresent(table=observed)

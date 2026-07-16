@@ -1,5 +1,5 @@
 """
-Parse a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` document into a table description.
+Turn a ``DESCRIBE TABLE EXTENDED <table> AS JSON`` result into a table description.
 
 Columns carry type objects (mapped by ``types.data_type_from_json``); comment,
 partitioning, clustering, and properties are plain JSON. Key constraints and
@@ -13,13 +13,14 @@ from dataclasses import dataclass
 import json
 from types import MappingProxyType
 
+from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
 from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
 from delta_engine.domain.model import ObservedColumn, QualifiedName
 
 
 class MetadataParseError(Exception):
-    """A DESCRIBE … AS JSON document is missing required structure."""
+    """A DESCRIBE … AS JSON result is missing required structure."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +35,19 @@ class TableDescription:
     properties: Mapping[str, str]
 
 
-def parse_table_description(json_text: str, qualified_name: QualifiedName) -> TableDescription:
-    """Parse one AS JSON document into a ``TableDescription``."""
+def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> TableDescription:
+    """
+    Map a ``DESCRIBE … AS JSON`` result to a ``TableDescription``.
+
+    The statement returns exactly one row with one column holding the JSON
+    document; an empty result fails the read.
+    """
+    if not rows:
+        raise MetadataParseError(f"{qualified_name}: DESCRIBE AS JSON returned no rows")
+    return _parse_document(rows[0][0], qualified_name)
+
+
+def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescription:
     try:
         document = json.loads(json_text)
     except (ValueError, TypeError) as error:
