@@ -164,18 +164,26 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     if observed is None:
         return TableMissing(desired=desired)
 
+    # Column identity is the column name, so aspects normally diff by name.
+    # A declared rename breaks that — the column observed as X is the one now
+    # declared Y — so renames are resolved first, and each aspect is then diffed
+    # in the frame that matches how a rename treats it.
     rename_projection = _apply_renames(desired, observed)
     actions: tuple[Action, ...] = (
         *rename_projection.renames,
+        # Preserved by a rename: diff under the new names.
         *_diff_column_structure(desired.columns, rename_projection.columns),
         *_diff_column_comments(desired.columns, rename_projection.columns),
         *_diff_column_tags(desired.columns, rename_projection.columns),
+        *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
+        # Dropped by a rename: diff under raw names so a renamed key column
+        # surfaces as an explicit drop-and-set, not silent carry-forward.
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed),
+        # Not column-keyed: renames don't apply.
         *_diff_table_comment(desired, observed),
         *_diff_properties(desired, observed),
         *_diff_table_tags(desired, observed),
-        *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
-        *_diff_primary_key(desired, observed),
-        *_diff_foreign_keys(desired, observed),
     )
     findings: tuple[Finding, ...] = (
         *rename_projection.conflicts,
@@ -243,40 +251,47 @@ def _relabel_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[
 
 def _diff_column_structure(
     desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
-) -> list[Action]:
-    """Return actions for additions, removals, type drift, and nullability drift."""
+) -> list[AddColumn | DropColumn | AlterColumnType | SetColumnNullability]:
+    """Return actions for added and dropped columns, plus drift on matched pairs."""
     desired_by_name = {column.name: column for column in desired_columns}
     observed_by_name = {column.name: column for column in observed_columns}
-    actions: list[Action] = []
+    actions: list[AddColumn | DropColumn | AlterColumnType | SetColumnNullability] = []
 
     for name, desired_only_column in desired_by_name.items():
         if name not in observed_by_name:
             actions.append(AddColumn(column=desired_only_column))
-
     for name, observed_only_column in observed_by_name.items():
         if name not in desired_by_name:
             actions.append(DropColumn(column=observed_only_column))
 
     for name, desired_column in desired_by_name.items():
         observed_column = observed_by_name.get(name)
-        if observed_column is None:
-            continue
-        if desired_column.data_type != observed_column.data_type:
-            actions.append(
-                AlterColumnType(
-                    column_name=name,
-                    desired_type=desired_column.data_type,
-                    observed_type=observed_column.data_type,
-                )
+        if observed_column is not None:
+            actions.extend(_diff_column_pair(desired_column, observed_column))
+    return actions
+
+
+def _diff_column_pair(
+    desired: DesiredColumn, observed: ObservedColumn
+) -> list[AlterColumnType | SetColumnNullability]:
+    """Return the type and nullability actions for a name-matched column pair."""
+    actions: list[AlterColumnType | SetColumnNullability] = []
+    if desired.data_type != observed.data_type:
+        actions.append(
+            AlterColumnType(
+                column_name=desired.name,
+                desired_type=desired.data_type,
+                observed_type=observed.data_type,
             )
-        elif desired_column.nullable != observed_column.nullable:
-            actions.append(
-                SetColumnNullability(
-                    column_name=name,
-                    desired_nullable=desired_column.nullable,
-                    observed_nullable=observed_column.nullable,
-                )
+        )
+    if desired.nullable != observed.nullable:
+        actions.append(
+            SetColumnNullability(
+                column_name=desired.name,
+                desired_nullable=desired.nullable,
+                observed_nullable=observed.nullable,
             )
+        )
     return actions
 
 
@@ -307,8 +322,9 @@ def _diff_column_tags(
     observed_by_name = {column.name: column for column in observed_columns}
     actions: list[SetColumnTag | UnsetColumnTag] = []
     for column in desired_columns:
+        observed_column = observed_by_name.get(column.name)
         observed_tags: Mapping[str, str] = (
-            observed_by_name[column.name].tags if column.name in observed_by_name else {}
+            observed_column.tags if observed_column is not None else {}
         )
         for tag_name, tag_value in column.tags.items():
             if observed_tags.get(tag_name) != tag_value:
@@ -349,10 +365,9 @@ def _diff_properties(
     actions: list[SetProperty | UnsetProperty] = []
     for name, declared_value in desired.properties.items():
         observed_value = observed.properties.get(name)
-        if declared_value is None:
-            if observed_value is not None:
-                actions.append(UnsetProperty(name=name, observed_value=observed_value))
-        elif observed_value != declared_value:
+        if declared_value is None and observed_value is not None:
+            actions.append(UnsetProperty(name=name, observed_value=observed_value))
+        elif declared_value is not None and observed_value != declared_value:
             actions.append(
                 SetProperty(
                     name=name,
@@ -421,36 +436,36 @@ def _diff_clustering(
     ]
 
 
-def _diff_primary_key(desired: DesiredTable, observed: ObservedTable) -> list[Action]:
-    """Return direct primary-key actions; a changed key becomes a drop and a set."""
+def _diff_primary_key(
+    desired: DesiredTable, observed: ObservedTable
+) -> list[DropPrimaryKey | SetPrimaryKey]:
+    """
+    Return primary-key actions; a changed key becomes a drop and a set.
+
+    A primary key is identified by its column set, with absence its own
+    identity, so an unchanged identity yields nothing. Any change drops the
+    observed key (carrying the foreign keys that reference it, which the drop
+    must account for) and sets the declared one.
+    """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
-    if desired_key is not None and observed_key is None:
-        return [SetPrimaryKey(primary_key=desired_key)]
+    desired_columns = frozenset(desired_key.columns) if desired_key is not None else None
+    observed_columns = frozenset(observed_key.columns) if observed_key is not None else None
+    if desired_columns == observed_columns:
+        return []
 
-    if desired_key is None and observed_key is not None:
-        return [
+    actions: list[DropPrimaryKey | SetPrimaryKey] = []
+    if observed_key is not None:
+        actions.append(
             DropPrimaryKey(
                 primary_key=observed_key,
                 referencing_foreign_keys=observed.referencing_foreign_keys,
             )
-        ]
-
-    if (
-        desired_key is not None
-        and observed_key is not None
-        and set(desired_key.columns) != set(observed_key.columns)
-    ):
-        return [
-            DropPrimaryKey(
-                primary_key=observed_key,
-                referencing_foreign_keys=observed.referencing_foreign_keys,
-            ),
-            SetPrimaryKey(primary_key=desired_key),
-        ]
-
-    return []
+        )
+    if desired_key is not None:
+        actions.append(SetPrimaryKey(primary_key=desired_key))
+    return actions
 
 
 def _diff_foreign_keys(
