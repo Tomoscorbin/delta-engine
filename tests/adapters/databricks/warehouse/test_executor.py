@@ -3,7 +3,7 @@
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.application.ports import ExecutionFailed, ExecutionSucceeded
-from delta_engine.domain.model import DesiredColumn, ObservedColumn, QualifiedName
+from delta_engine.domain.model import DesiredColumn, ObservedColumn, QualifiedName, TableKind
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import ActionPlan, AddColumn, DropColumn, SetTableComment
 
@@ -54,7 +54,7 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
         )
     )
 
-    summary = executor.execute(executor.compile(QN, plan))
+    summary = executor.execute(executor.compile(QN, plan, TableKind.TABLE))
 
     assert connection.cursor_fake.executed == [
         "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT",
@@ -112,9 +112,9 @@ def test_compile_returns_the_statements_execute_would_run():
     executor = WarehouseExecutor(FakeConnection())
     plan = ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),))
 
-    statements = executor.compile(QN, plan)
+    statements = executor.compile(QN, plan, TableKind.TABLE)
 
-    assert statements == compile_plan(QN, plan)
+    assert statements == compile_plan(QN, plan, TableKind.TABLE)
     assert len(statements) == 1
 
 

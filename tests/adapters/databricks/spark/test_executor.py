@@ -3,7 +3,13 @@ import pyspark.sql.types as T
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionSucceeded
-from delta_engine.domain.model import DesiredColumn, DesiredTable, ObservedColumn, QualifiedName
+from delta_engine.domain.model import (
+    DesiredColumn,
+    DesiredTable,
+    ObservedColumn,
+    QualifiedName,
+    TableKind,
+)
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
     ActionPlan,
@@ -27,7 +33,7 @@ def _dummy_qualified_name() -> QualifiedName:
 def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
     """Compile then execute, the same two-stage flow the engine drives."""
     executor = SparkExecutor(spark)
-    return executor.execute(executor.compile(qualified_name, plan))
+    return executor.execute(executor.compile(qualified_name, plan, TableKind.TABLE))
 
 
 class _FakeSpark:
@@ -272,14 +278,17 @@ def test_compile_returns_the_statements_execute_would_run():
     executor = SparkExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
 
     # When compiling without executing
-    statements = executor.compile(qualified_name, plan)
+    statements = executor.compile(qualified_name, plan, TableKind.TABLE)
 
     # Then the statements match the SQL compiler's output, in plan order
-    assert statements == compile_plan(qualified_name, plan)
+    assert statements == compile_plan(qualified_name, plan, TableKind.TABLE)
     assert len(statements) == 1
     assert "COMMENT" in statements[0].upper()
 
 
 def test_compile_of_empty_plan_returns_no_statements():
     executor = SparkExecutor(spark=None)  # type: ignore[arg-type]
-    assert executor.compile(QualifiedName("cat", "schema", "tbl"), ActionPlan()) == ()
+    statements = executor.compile(
+        QualifiedName("cat", "schema", "tbl"), ActionPlan(), TableKind.TABLE
+    )
+    assert statements == ()

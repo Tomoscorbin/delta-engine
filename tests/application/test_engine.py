@@ -24,7 +24,7 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
-from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName
+from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
@@ -213,7 +213,7 @@ def _existing_matching_table(fqn: str) -> TablePresent:
     )
 
 
-def _existing_tag_drifted_table(fqn: str) -> TablePresent:
+def _existing_tag_drifted_table(fqn: str, kind: TableKind = TableKind.TABLE) -> TablePresent:
     """Build an observed table with tag drift against _tag_scoped_spec."""
     catalog, schema, table_name = _split_fqn(fqn)
 
@@ -222,6 +222,7 @@ def _existing_tag_drifted_table(fqn: str) -> TablePresent:
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), tags={"stale": "true"}),),
             tags={"legacy": "yes"},
+            kind=kind,
         )
     )
 
@@ -279,8 +280,12 @@ class _RecordingExecutor:
         self.calls: list[tuple[str, ...]] = []
         self._per_call_results = None if per_call_results is None else list(per_call_results)
 
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
+    def compile(
+        self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
+    ) -> tuple[str, ...]:
+        return tuple(
+            f"STATEMENT {index} AS {kind.name} FOR {qualified_name}" for index in range(len(plan))
+        )
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
         self.calls.append(statements)
@@ -538,7 +543,9 @@ def test_read_phase_attempts_all_tables_before_any_execution():
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        def compile(
+            self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
+        ) -> tuple[str, ...]:
             # Silent by design: the plan phase compiles every table, but this
             # test asserts read/execute event ordering, not compilation. The
             # name is embedded so execute can name the table in its event.
@@ -1363,3 +1370,44 @@ def test_metadata_scoped_column_removal_fails_without_drop_precondition():
     assert len(table_report.failures) == 1
     assert not any("ColumnMappingRequiredForDrop" in f.rule_name for f in table_report.failures)
     assert any("column structure" in f.message.lower() for f in table_report.failures)
+
+
+def test_planned_sql_targets_the_observed_relation_kind():
+    # Given a tags-scope declaration over a live streaming table with tag drift
+    fqn = "c.s.streaming_events"
+    reader = _RecordingReader(
+        {fqn: _existing_tag_drifted_table(fqn, kind=TableKind.STREAMING_TABLE)}
+    )
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing as a dry run
+    report = engine.sync(_tag_scoped_spec(fqn), dry_run=True)
+
+    # Then the compiled statements carry the observed kind through the port
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.SUCCESS
+    assert table_report.planned_sql_statements != ()
+    assert all(
+        f"AS STREAMING_TABLE FOR {fqn}" in statement
+        for statement in table_report.planned_sql_statements
+    )
+
+
+def test_created_tables_compile_as_ordinary_tables():
+    # Given an absent table — an absent table has no observed kind, and the
+    # engine only creates ordinary tables
+    fqn = "c.s.new_table"
+    reader = _RecordingReader({fqn: TableAbsent()})
+    executor = _RecordingExecutor(per_call_results=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing as a dry run
+    report = engine.sync(_spec(fqn), dry_run=True)
+
+    # Then the create path compiles with the ordinary kind
+    [table_report] = list(report)
+    assert table_report.planned_sql_statements != ()
+    assert all(
+        f"AS TABLE FOR {fqn}" in statement for statement in table_report.planned_sql_statements
+    )

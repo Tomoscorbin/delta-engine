@@ -66,7 +66,7 @@ class _SqlTarget:
 def compile_plan(
     qualified_name: QualifiedName,
     plan: ActionPlan,
-    kind: TableKind = TableKind.TABLE,
+    kind: TableKind,
 ) -> tuple[str, ...]:
     """
     Compile an :class:`ActionPlan` for ``qualified_name`` into SQL statements, in plan order.
