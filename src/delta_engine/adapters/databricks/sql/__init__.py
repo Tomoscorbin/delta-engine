@@ -24,30 +24,32 @@ from delta_engine.adapters.databricks.sql.queries import (
 )
 from delta_engine.adapters.databricks.sql.rows import (
     Rows,
-    column_tags_from_rows,
-    foreign_keys_from_rows,
-    primary_key_from_rows,
-    referencing_foreign_keys_from_rows,
-    table_tags_from_rows,
+    RunQuery,
+    read_column_tags,
+    read_foreign_keys,
+    read_primary_key,
+    read_referencing_foreign_keys,
+    read_table_tags,
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
 
 __all__ = [
     "Rows",
+    "RunQuery",
     "backtick",
     "backtick_qualified_name",
-    "column_tags_from_rows",
     "column_tags_query",
     "compile_plan",
     "describe_json_query",
-    "foreign_keys_from_rows",
     "foreign_keys_query",
-    "primary_key_from_rows",
     "primary_key_query",
     "quote_literal",
-    "referencing_foreign_keys_from_rows",
+    "read_column_tags",
+    "read_foreign_keys",
+    "read_primary_key",
+    "read_referencing_foreign_keys",
+    "read_table_tags",
     "referencing_foreign_keys_query",
     "render_data_type",
-    "table_tags_from_rows",
     "table_tags_query",
 ]

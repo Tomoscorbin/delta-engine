@@ -13,7 +13,6 @@ connection resource; the describe, parsing, assembly, and the total failure
 boundary all live here. This module stays PySpark-free.
 """
 
-from collections.abc import Callable
 from dataclasses import replace
 from types import MappingProxyType
 
@@ -23,18 +22,13 @@ from delta_engine.adapters.databricks.errors import (
     is_missing_relation,
 )
 from delta_engine.adapters.databricks.sql import (
-    Rows,
-    column_tags_from_rows,
-    column_tags_query,
+    RunQuery,
     describe_json_query,
-    foreign_keys_from_rows,
-    foreign_keys_query,
-    primary_key_from_rows,
-    primary_key_query,
-    referencing_foreign_keys_from_rows,
-    referencing_foreign_keys_query,
-    table_tags_from_rows,
-    table_tags_query,
+    read_column_tags,
+    read_foreign_keys,
+    read_primary_key,
+    read_referencing_foreign_keys,
+    read_table_tags,
 )
 from delta_engine.adapters.databricks.sql.describe import (
     TableDescription,
@@ -43,9 +37,6 @@ from delta_engine.adapters.databricks.sql.describe import (
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName
-
-# Runs one SQL statement and returns its rows — the one fact a backend supplies.
-type RunQuery = Callable[[str], Rows]
 
 
 def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
@@ -86,26 +77,20 @@ def _describe_table(
 def _observed_table(run_query: RunQuery, description: TableDescription) -> ObservedTable:
     """Attach the information_schema metadata (tags, keys, inbound FKs) to the description."""
     qualified_name = description.qualified_name
-    column_tags = column_tags_from_rows(run_query(column_tags_query(qualified_name)))
+    column_tags = read_column_tags(run_query, qualified_name)
     tagged_columns = tuple(
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
         for column in description.columns
-    )
-    table_tags = table_tags_from_rows(run_query(table_tags_query(qualified_name)))
-    primary_key = primary_key_from_rows(run_query(primary_key_query(qualified_name)))
-    foreign_keys = foreign_keys_from_rows(run_query(foreign_keys_query(qualified_name)))
-    referencing_foreign_keys = referencing_foreign_keys_from_rows(
-        run_query(referencing_foreign_keys_query(qualified_name))
     )
     return ObservedTable(
         qualified_name=qualified_name,
         columns=tagged_columns,
         comment=description.comment,
         properties=description.properties,
-        tags=table_tags,
+        tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,
-        primary_key=primary_key,
-        foreign_keys=foreign_keys,
-        referencing_foreign_keys=referencing_foreign_keys,
+        primary_key=read_primary_key(run_query, qualified_name),
+        foreign_keys=read_foreign_keys(run_query, qualified_name),
+        referencing_foreign_keys=read_referencing_foreign_keys(run_query, qualified_name),
     )
