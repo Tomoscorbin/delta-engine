@@ -37,7 +37,10 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_from_rows,
     table_tags_query,
 )
-from delta_engine.adapters.databricks.sql.describe import TableDescription, parse_table_description
+from delta_engine.adapters.databricks.sql.describe import (
+    TableDescription,
+    table_description_from_rows,
+)
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import ObservedTable, QualifiedName
@@ -71,9 +74,7 @@ def _read(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
         if is_missing_relation(exception):
             return TableAbsent()
         raise
-    if not rows:
-        raise RuntimeError(f"DESCRIBE AS JSON returned no row for {qualified_name}")
-    description = parse_table_description(rows[0][0], qualified_name)
+    description = table_description_from_rows(rows, qualified_name)
     return TablePresent(table=_observed_table(run_query, description))
 
 
