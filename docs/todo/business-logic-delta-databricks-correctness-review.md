@@ -34,7 +34,7 @@ path currently produces an incorrect result.
 | 2 ✅ | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
 | 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
 | 4    | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
-| 5    | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
+| 5 ✅ | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
 | 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
 | 7    | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
 | 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
@@ -242,6 +242,15 @@ The supported form is `ALTER COLUMN ... COMMENT '...'`; see the
 
 Always compile the comment action with a string literal, including
 `COMMENT ''`. Restore the empty-comment transition to the live lifecycle test.
+
+### Resolved (2026-07-14)
+
+Shipped in commit 05952ce, reapplying the fix reverted out of PR #213: the
+compiler always emits a string literal, so an empty desired comment compiles
+to `COMMENT ''` rather than `UNSET COMMENT`, which SQL warehouses reject
+(verified live 2026-07-12). `''` round-trips as the empty comment the reader
+observes, keeping resyncs idempotent on both backends. The live lifecycle
+test's empty-comment transition on `account_code` was restored with the fix.
 
 ## 6. Align identifier normalization with Unity Catalog
 

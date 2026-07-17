@@ -54,14 +54,13 @@ for table_report in report:
 
 For a machine-readable view of the whole run — each table's status, planned changes, SQL, and failures as plain JSON — call `report.to_dict()`; the `failures` list in each table record carries the `phase`, `type`, and `message` of every failure. See [the run report schema](reference-run-report.md).
 
-On Unity Catalog, constraint and tag metadata is read from `information_schema`.
-The reader probes once per catalog whether `information_schema` exists: where it
-does not (plain Spark), constraints and tags simply read as absent; where it
-does, a failing metadata query (for example a permissions gap on
-`information_schema`) fails that table's read with a `Read error` rather than
-silently reporting the table as having no constraints or tags. If you see a
-read failure naming an `information_schema` view, check the running principal's
-grants on that catalog's `information_schema`.
+Both backends are Unity Catalog only: after the initial describe, tag and key
+metadata is always read from `information_schema`, unconditionally. A failing
+metadata query (for example a permissions gap on `information_schema`) fails
+that table's read rather than silently reporting the table as having no
+constraints or tags. If you see a read failure naming an `information_schema`
+view, check the running principal's grants on that catalog's
+`information_schema`.
 
 ## Check which tables failed
 

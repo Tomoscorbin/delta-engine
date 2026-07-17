@@ -240,10 +240,10 @@ qualified names are rejected, and the desired tables are sorted by qualified
 name so reports and sync behavior do not depend on the order arguments were
 passed.
 
-After preparation, the engine runs five internal phases over private `_TableRun`
+After preparation, the engine runs six internal phases over private `_TableRun`
 objects. A `_TableRun` is a mutable scratch pad for one table. It accumulates
-read state, diff, plan, failures, and execution results before it is frozen into
-an immutable `TableRunReport`.
+read state, diff, plan, compiled SQL, failures, and execution results before it
+is frozen into an immutable `TableRunReport`.
 
 ```mermaid
 sequenceDiagram
@@ -272,7 +272,7 @@ sequenceDiagram
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
-The full run, with preparation first and reporting last bracketing the five
+The full run, with preparation first and reporting last bracketing the six
 phases:
 
 1. **Prepare** (before the chain): lower user-facing table declarations to
@@ -282,13 +282,14 @@ phases:
 4. **Plan**: call the total `plan_diff` boundary, which always applies the
    default validation policy. A rejected result contributes validation
    failures and has no plan; an accepted result carries the privately
-   constructed `ActionPlan`, which the engine compiles through the executor
-   port for dry-run preview and execution.
-5. **Resolve**: order tables by foreign-key dependency and block dependents of
+   constructed `ActionPlan` into the next phase.
+5. **Compile**: lower every accepted plan through the executor port and record
+   the exact statements used for both dry-run preview and real execution.
+6. **Resolve**: order tables by foreign-key dependency and block dependents of
    failed tables.
-6. **Execute**: run the compiled statements of every table that has a
+7. **Execute**: run the compiled statements of every table that has a
    non-empty plan and no failures.
-7. **Report** (after the chain): return `SyncReport`, or raise
+8. **Report** (after the chain): return `SyncReport`, or raise
    `SyncFailedError` with the report on real runs that failed.
 
 Execution is gated by accumulated failures. A table that failed read,

@@ -17,16 +17,17 @@ one table's failure does not take down the rest of the run.
 Every sync runs the same chain of phases over every table in the call:
 
 ```text
-read → diff → plan → resolve → execute → report
+read → diff → plan → compile → resolve → execute → report
 ```
 
-| Phase        | Question it answers                          | Outcome                                                           |
-| ------------ | -------------------------------------------- | ----------------------------------------------------------------- |
-| **Read**     | What does the table look like right now?     | Present (with its observed state), absent, or a read failure      |
-| **Diff**     | How does observed state differ from desired? | Direct actions and non-action differences — or no drift           |
-| **Plan**     | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
-| **Resolve**  | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                    |
-| **Execute**  | Apply the plan                               | An execution summary per table (skipped entirely on a dry run)    |
+| Phase       | Question it answers                          | Outcome                                                            |
+| ----------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| **Read**    | What does the table look like right now?     | Present (with its observed state), absent, or a read failure       |
+| **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — or no drift            |
+| **Plan**    | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
+| **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
+| **Resolve** | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                     |
+| **Execute** | Apply the compiled statements                | An execution summary per table (skipped entirely on a dry run)     |
 
 The result is a `SyncReport` with one entry per table. On a real run, if any
 table failed, the engine raises `SyncFailedError` with that report attached; a
@@ -87,12 +88,12 @@ declaration side.
 
 ## Dry runs stop before execution
 
-`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning, and
-resolve, then skips execution. You get every action and SQL statement planned
-from the catalog snapshot it read, plus any read, validation, or foreign-key
-failure found before execution. It cannot predict execution-time Databricks
-errors. The run makes zero catalog mutations and raises no exception. See [how
-to preview changes](how-to-preview-changes.md).
+`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning,
+compilation, and resolve, then skips execution. You get every action and SQL
+statement planned from the catalog snapshot it read, plus any read, validation,
+or foreign-key failure found before execution. It cannot predict execution-time
+Databricks errors. The run makes zero catalog mutations and raises no exception.
+See [how to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down
 
