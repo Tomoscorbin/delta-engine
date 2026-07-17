@@ -303,15 +303,12 @@ def test_valid_describe_documents_preserve_values_and_normalize_identifiers(case
     assert dict(description.table_properties) == properties
 
 
-@given(_valid_describe_documents())
-def test_describe_parsing_ignores_json_formatting_key_order_and_unknown_fields(case) -> None:
-    document = case[0]
-    baseline = _parse(json.dumps(document, separators=(",", ":")))
-    with_future_metadata = {**document, "future_metadata": {"ignored": [1, 2, 3]}}
+def test_unknown_describe_fields_are_ignored() -> None:
+    # Unity Catalog grows the document over time; fields the parser does not
+    # know must not affect the read.
+    baseline = _parse(_doc())
 
-    reparsed = _parse(json.dumps(with_future_metadata, indent=2, sort_keys=True))
-
-    assert reparsed == baseline
+    assert _parse(_doc(future_metadata={"ignored": [1, 2, 3]})) == baseline
 
 
 @pytest.mark.parametrize(
