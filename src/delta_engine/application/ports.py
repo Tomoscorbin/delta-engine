@@ -167,6 +167,10 @@ class PlanExecutor(Protocol):
         """
         Return the statements that apply ``plan``, in execution order.
 
+        The plan carries the relation kind its actions lower against
+        (``plan.kind``) — backends whose statements differ by kind read it
+        from the plan.
+
         The ordering is the plan's own deterministic order, which is the order
         ``execute`` runs the statements. An empty plan compiles to no statements.
 

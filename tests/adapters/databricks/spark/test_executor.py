@@ -3,7 +3,12 @@ import pyspark.sql.types as T
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.application.ports import ExecutionSucceeded
-from delta_engine.domain.model import DesiredColumn, DesiredTable, ObservedColumn, QualifiedName
+from delta_engine.domain.model import (
+    DesiredColumn,
+    DesiredTable,
+    ObservedColumn,
+    QualifiedName,
+)
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
     ActionPlan,

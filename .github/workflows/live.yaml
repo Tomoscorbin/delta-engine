@@ -89,4 +89,7 @@ jobs:
         # isolated (uuid-named tables, per-test cleanup), so they parallelise
         # safely; excess concurrency degrades to warehouse queueing, not
         # failure. Tune to the warehouse's concurrency headroom.
-        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA -n 8
+        # --dist loadgroup: tests marked xdist_group("streaming_table") run
+        # serially on one worker — the workspace tier allows one active DBSQL
+        # pipeline at a time — while unmarked tests distribute as in load mode.
+        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA -n 8 --dist loadgroup

@@ -59,15 +59,24 @@ the reader could not represent. See
 
 There are three public scopes, selected by `DeltaTable`'s `scope` parameter:
 
-| Scope                  | Manages                                                                                 | Use for                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                 |
-| `"metadata"`           | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in |
-| `"tags"`               | Table and column tags only                                                              | Tag governance for tables owned elsewhere, e.g. by a streaming pipeline                 |
+| Scope                  | Manages                                                                                 | Use for                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                                           |
+| `"metadata"`           | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in                           |
+| `"tags"`               | Table and column tags only                                                              | Tag governance for tables owned elsewhere — including streaming tables, where tags are the only manageable aspect |
 
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
 metadata scope in practice, and [tags](how-to-configure-table.md#manage-tags-only)
 for tag-only declarations.
+
+Streaming tables make the scope boundary literal. Their definition is owned by
+a pipeline, so the engine reads one for tag governance only: the relation kind
+is discovered at read time, and a declaration that manages anything beyond
+tags fails validation (`StreamingTableTagsOnly`) before any SQL runs — even
+with zero drift. See
+[safe-change rules](reference-safe-change-rules.md) for the invariant and
+[tag a streaming table](how-to-deploy-metadata-only.md#tag-a-streaming-table)
+for the workflow.
 
 ## Cross-table dependency blocking
 

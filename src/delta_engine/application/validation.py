@@ -22,6 +22,7 @@ from delta_engine.domain.model import (
     Long,
     Short,
     TableAspect,
+    TableKind,
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
@@ -60,12 +61,14 @@ class Rule(Protocol):
 
     A rule judges whether a change is safe, given the declaration it belongs
     to. It receives the whole ``TableDrift`` and reads ``drift.actions`` or
-    ``drift.unresolvable`` for the differences to judge, and ``drift.desired``
-    for declaration context such as declared properties. Because the scope
-    gate runs first and short-circuits, a rule is only ever evaluated on a
-    fully in-scope diff, so its actions and unresolvable differences are
-    exactly the ones the declaration manages — it does no scope filtering of
-    its own. Never called for a ``TableMissing`` diff.
+    ``drift.unresolvable`` for the differences to judge; ``drift.desired``
+    and ``drift.observed`` are the endpoints, available as context (declared
+    properties, observed relation kind) — the differences themselves are what
+    a rule judges. Because the scope gate runs first and short-circuits, a
+    rule is only ever evaluated on a fully in-scope diff, so its actions and
+    unresolvable differences are exactly the ones the declaration manages —
+    it does no scope filtering of its own. Never called for a
+    ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -538,13 +541,54 @@ class MissingTableUnmanaged:
         )
 
 
+_STREAMING_TABLE_MANAGEABLE_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
+)
+
+
+class StreamingTableTagsOnly:
+    """
+    Fail any declaration that manages more than tags on a streaming table.
+
+    The relation-kind arm of the scope gate, peer to ``UnmanagedAspectDrift``
+    and ``MissingTableUnmanaged``: it runs unconditionally and cannot be
+    suppressed via ``rules``. A streaming table's definition is owned by its
+    pipeline; Unity Catalog tags are the one aspect durably manageable from
+    outside it. The gate judges the declaration's claimed aspects against the
+    observed kind — not the drift — so it fires even when the table is
+    currently in sync, and a dry run surfaces the misdeclaration immediately.
+    """
+
+    name: ClassVar[str] = "StreamingTableTagsOnly"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
+        if drift.observed.kind is not TableKind.STREAMING_TABLE:
+            return ()
+        if drift.desired.managed_aspects <= _STREAMING_TABLE_MANAGEABLE_ASPECTS:
+            return ()
+        return (
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    "Operation not allowed: this relation is a streaming table,"
+                    " whose definition is owned by its pipeline. Only Unity"
+                    " Catalog tags can be managed on it: declare the table with"
+                    ' scope="tags", or change its definition in the owning'
+                    " pipeline."
+                ),
+            ),
+        )
+
+
 def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
     """
     Evaluate a table diff and return the verdict.
 
     Scope is a gate, checked before any safety rule. An out-of-scope
-    difference — a drifted aspect the declaration does not manage, or a
-    missing table it may not create — fails here and short-circuits, so the
+    difference — a drifted aspect the declaration does not manage, a missing
+    table it may not create, or a streaming table it claims more than tags
+    on — fails here and short-circuits, so the
     safety rules never run on a diff the engine has already rejected on
     scope grounds. This is what makes an unmanaged difference produce
     exactly the scope failure rather than also tripping rules for work the
@@ -577,6 +621,9 @@ def _scope_failures(diff: TableDiff) -> tuple[ValidationFailure, ...]:
         case TableMissing() as missing:
             return MissingTableUnmanaged().evaluate(missing)
         case TableDrift() as drift:
-            return UnmanagedAspectDrift().evaluate(drift)
+            return (
+                *StreamingTableTagsOnly().evaluate(drift),
+                *UnmanagedAspectDrift().evaluate(drift),
+            )
         case _ as unreachable:
             assert_never(unreachable)

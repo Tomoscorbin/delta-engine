@@ -31,6 +31,7 @@ from delta_engine.domain.model.table import (
     DesiredTable,
     ObservedTable,
     TableAspect,
+    TableKind,
 )
 
 __all__ = [
@@ -60,6 +61,7 @@ __all__ = [
     "Struct",
     "StructField",
     "TableAspect",
+    "TableKind",
     "Timestamp",
     "TimestampNtz",
     "Variant",
