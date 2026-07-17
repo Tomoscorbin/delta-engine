@@ -311,9 +311,11 @@ def test_rejection_names_the_found_relation_and_the_supported_kinds():
     state = read_catalog_state(_router(responses), QN)
 
     assert isinstance(state, ReadFailed)
+    # The admitted set is derived from the admit mapping, so the message
+    # names every supported relation type and provider without going stale.
     assert "MATERIALIZED_VIEW" in state.failure.message
-    assert "MANAGED or EXTERNAL" in state.failure.message
-    assert "streaming tables" in state.failure.message
+    assert "EXTERNAL, MANAGED, STREAMING_TABLE" in state.failure.message
+    assert "delta" in state.failure.message
 
 
 def test_unmappable_column_type_reads_as_failed_not_present():

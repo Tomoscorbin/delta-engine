@@ -83,7 +83,7 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
         if description is None:
             return TableAbsent()
         kind = _supported_relation_kind(description)
-        return TablePresent(table=_observed_table(run_query, description, kind))
+        return TablePresent(table=_read_observed_table(run_query, description, kind))
     except Exception as exception:
         return ReadFailed(
             failure=ReadFailure(exception_type_name(exception), exception_message(exception))
@@ -118,25 +118,28 @@ def _supported_relation_kind(description: TableDescription) -> TableKind:
     """
     Map the described relation onto the kind the engine manages it as.
 
-    Managed and external Delta tables are ordinary tables; Delta streaming
-    tables carry their own kind. Any other relation — a view, a materialized
-    view, a foreign table, a non-Delta format, or an unknown future kind —
-    raises rather than being modelled as a table.
+    Relations in the admit mapping with a supported provider map onto their
+    kind. Any other relation — a view, a materialized view, a foreign table,
+    a non-Delta format, or an unknown future kind — raises rather than being
+    modelled as a table. The error names the admitted set from the mapping
+    itself, so it cannot go stale against it.
     """
     kind = _TABLE_KINDS_BY_RELATION_TYPE.get(description.relation_type or "")
     if kind is not None and description.provider in _SUPPORTED_PROVIDERS:
         return kind
+    supported_types = ", ".join(sorted(_TABLE_KINDS_BY_RELATION_TYPE))
+    supported_providers = ", ".join(sorted(_SUPPORTED_PROVIDERS))
     raise UnsupportedRelationError(
-        f"{description.qualified_name}: the engine manages MANAGED or EXTERNAL Delta"
-        f" tables, and Delta streaming tables for tag governance; this relation has"
-        f" type={description.relation_type!r}, provider={description.provider!r}"
+        f"{description.qualified_name}: the engine reads relations of type"
+        f" {supported_types} with provider {supported_providers}; this relation"
+        f" has type={description.relation_type!r}, provider={description.provider!r}"
     )
 
 
-def _observed_table(
+def _read_observed_table(
     run_query: RunQuery, description: TableDescription, kind: TableKind
 ) -> ObservedTable:
-    """Attach the information_schema metadata (tags, keys, inbound FKs) to the description."""
+    """Read the information_schema metadata (tags, keys, inbound FKs) and assemble the table."""
     qualified_name = description.qualified_name
     column_tags = read_column_tags(run_query, qualified_name)
     tagged_columns = tuple(
