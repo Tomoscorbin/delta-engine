@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("databricks.sql")
 
 
+from delta_engine import SyncFailedError, TableRunStatus, ValidationFailure
 from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.ports import TablePresent
@@ -145,14 +146,15 @@ def test_alter_streaming_table_tags_round_through_information_schema(live_connec
     assert _column_tags(live_connection, table_name) == {}
 
 
-def test_a_streaming_table_is_read_with_its_kind_and_tag_synced_end_to_end(
+def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
     live_connection, live_tables
 ):
-    """A streaming table reads as present with its kind, and a tags-scope sync reconciles tags."""
+    """A streaming table syncs tags to convergence; any wider scope is refused."""
     # Supersedes the old supported-relations pin that read streaming tables
     # as failed: they are now engine state, discovered — never declared. The
-    # read and the round-trip share one provisioned table (see the module
-    # docstring on the pipeline quota).
+    # read, the round-trip, the convergence resync, and the wider-scope
+    # refusal share one provisioned table (see the module docstring on the
+    # pipeline quota).
     table_name = _create_streaming_table(live_connection, live_tables)
     target = qualified_table(table_name)
     execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('old'='remove-me')")
@@ -162,16 +164,43 @@ def test_a_streaming_table_is_read_with_its_kind_and_tag_synced_end_to_end(
     assert isinstance(state, TablePresent), state
     assert state.table.kind is TableKind.STREAMING_TABLE
 
-    build_sql_engine(live_connection).sync(
-        DeltaTable(
-            live_catalog(),
-            live_schema(),
-            table_name,
-            columns=(Column("id", Integer(), tags={"pii": "low"}),),
-            tags={"owner": "governance"},
-            scope="tags",
-        )
+    engine = build_sql_engine(live_connection)
+    declaration = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer(), tags={"pii": "low"}),),
+        tags={"owner": "governance"},
+        scope="tags",
     )
+    engine.sync(declaration)
 
+    assert _table_tags(live_connection, table_name) == {"owner": "governance"}
+    assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
+    # The reader must round-trip the tags the executor just wrote through the
+    # ALTER STREAMING TABLE dialect: a resync finds nothing left to do.
+    assert engine.sync(declaration).has_changes is False
+
+    # Anything wider than tags is refused before planning — even when the
+    # declaration mirrors the observed state exactly, so the refusal is about
+    # the table's kind, not about drift.
+    full_scope = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer(), tags={"pii": "low"}),),
+        tags={"owner": "governance"},
+    )
+    with pytest.raises(SyncFailedError) as error:
+        engine.sync(full_scope)
+
+    [table_report] = error.value.report.table_reports
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
+    assert "StreamingTableTagsOnly" in {
+        failure.rule_name
+        for failure in table_report.failures
+        if isinstance(failure, ValidationFailure)
+    }
+    assert table_report.planned_sql_statements == ()
     assert _table_tags(live_connection, table_name) == {"owner": "governance"}
     assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
