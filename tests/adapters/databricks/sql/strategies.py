@@ -204,9 +204,12 @@ def _struct_documents(
 def _nested_type_documents(
     children: st.SearchStrategy[TypeDocument],
 ) -> st.SearchStrategy[TypeDocument]:
+    # A MAP key may be any type except MAP itself, so keys exclude map documents
+    # (the value stays unrestricted).
+    map_keys = children.filter(lambda item: item[1]["name"] != "map")
     return st.one_of(
         children.map(_array_document),
-        st.tuples(children, children).map(_map_document),
+        st.tuples(map_keys, children).map(_map_document),
         _struct_documents(children),
     )
 

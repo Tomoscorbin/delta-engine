@@ -12,6 +12,8 @@ from delta_engine.domain.model import (
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import (
     Array,
+    Binary,
+    Boolean,
     Column,
     Date,
     DeltaTable,
@@ -190,6 +192,35 @@ def test_delta_table_rejects_complex_typed_clustering_column():
             columns=[Column("id", Integer()), Column("attrs", Map(String(), String()))],
             clustered_by=["attrs"],
         )
+
+
+@pytest.mark.parametrize("data_type", [Boolean(), Binary()])
+def test_delta_table_rejects_boolean_or_binary_clustering_column(data_type):
+    # Liquid clustering's supported-type list excludes Boolean and Binary, even
+    # though both are valid partition columns.
+    with pytest.raises(ValueError, match="clustering key"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("id", Integer()), Column("flag", data_type)],
+            clustered_by=["flag"],
+        )
+
+
+@pytest.mark.parametrize("data_type", [Boolean(), Binary()])
+def test_delta_table_accepts_boolean_or_binary_partition_column(data_type):
+    # Partitioning and clustering have distinct type rules: Boolean and Binary
+    # are rejected as clustering keys but accepted as partition columns.
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer()), Column("flag", data_type)],
+        partitioned_by=["flag"],
+    )
+
+    assert table.partitioned_by == ("flag",)
 
 
 @pytest.mark.parametrize(

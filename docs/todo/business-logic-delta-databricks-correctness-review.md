@@ -36,7 +36,7 @@ path currently produces an incorrect result.
 | 4 ✅ | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
 | 5 ✅ | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
 | 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
-| 7    | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
+| 7 ✅ | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
 | 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
 
 ## 1. Reject views and non-Delta tables at the read boundary
@@ -336,6 +336,26 @@ Platform references:
 3. Add `Map.__post_init__` validation that rejects a `Map` key type.
 
 These are deterministic declaration errors and need no runtime probing.
+
+### Resolved (2026-07-17)
+
+The shared `_TYPES_UNUSABLE_AS_LAYOUT_KEYS` tuple was split into
+`_TYPES_UNUSABLE_AS_PARTITION_KEYS` (Array/Map/Struct/Variant, unchanged) and
+`_TYPES_UNUSABLE_AS_CLUSTERING_KEYS`, which adds Boolean and Binary. The
+clustering exclusion was verified against the liquid-clustering supported-type
+list, whose enumerated types omit Boolean and Binary even though both are valid
+partition columns. `Map` gained a `__post_init__` that rejects a `Map` key
+type, matching the platform rule that a MAP key may be any type except MAP; a
+MAP value may still be a MAP.
+
+Coverage: API-layer tests assert clustering rejects Boolean and Binary while
+partitioning still accepts them (the two rules are now distinct), and
+domain-layer tests assert the Map key rejection and that a Map value type is
+still allowed. The shared AS JSON type-document strategy was narrowed to stop
+generating map-keyed maps, which the domain now forbids. Both changes are
+declaration-time errors with no runtime probing, so no live coverage is
+required; the live partition-rejection assumption test was reworded to name the
+now-separate partition and clustering type lists.
 
 ## 8. Remove the false-success race from table creation
 

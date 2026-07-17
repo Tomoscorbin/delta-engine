@@ -5,6 +5,7 @@ from delta_engine.domain.model.data_type import (
     Array,
     Decimal,
     Integer,
+    Map,
     String,
     Struct,
     StructField,
@@ -66,3 +67,15 @@ def test_struct_accepts_fields_as_a_list_and_compares_equal_to_tuple_form() -> N
 
     assert from_list == from_tuple
     assert from_list.fields == (StructField("a", Integer()),)
+
+
+def test_map_rejects_a_map_key_type() -> None:
+    # Databricks allows any MAP key type except MAP itself.
+    with pytest.raises(ValueError, match="key"):
+        Map(Map(String(), Integer()), String())
+
+
+def test_map_allows_a_map_value_type() -> None:
+    # Only the key is restricted; a MAP value may itself be a MAP.
+    nested = Map(String(), Map(String(), Integer()))
+    assert nested.value == Map(String(), Integer())
