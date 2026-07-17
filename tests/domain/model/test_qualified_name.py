@@ -11,16 +11,23 @@ def test_string_representation_is_canonical_fully_qualified_name() -> None:
     assert str(qn) == "core.public.orders"
 
 
-def test_raises_when_any_part_is_not_lowercase() -> None:
-    # Given / When / Then: each part raises when it contains uppercase
-    with pytest.raises(ValueError, match="lowercase"):
-        QualifiedName("MyCatalog", "schema", "table")
+def test_mixed_case_parts_normalize_to_lowercase() -> None:
+    # Given mixed-case parts (identifiers are case-insensitive on Databricks,
+    # and Unity Catalog stores object names lowercase)
+    qn = QualifiedName("MyCatalog", "MySchema", "MyTable")
 
-    with pytest.raises(ValueError, match="lowercase"):
-        QualifiedName("catalog", "MySchema", "table")
+    # Then every part is stored in the canonical lowercase form
+    assert qn.parts == ("mycatalog", "myschema", "mytable")
+    assert qn == QualifiedName("mycatalog", "myschema", "mytable")
 
-    with pytest.raises(ValueError, match="lowercase"):
-        QualifiedName("catalog", "schema", "MyTable")
+
+def test_lowercase_unicode_parts_are_preserved_verbatim() -> None:
+    # Given a part that is already lowercase but casefold-divergent
+    # (casefold would rewrite 'straße' to 'strasse' — a different identifier)
+    qn = QualifiedName("catalog", "schema", "straße")
+
+    # Then normalization does not change an already-lowercase name
+    assert qn.name == "straße"
 
 
 @pytest.mark.parametrize(
@@ -61,8 +68,10 @@ def test_parse_rejects_names_without_exactly_three_parts(raw: str) -> None:
         QualifiedName.parse(raw)
 
 
-def test_parse_delegates_part_validation_to_the_constructor() -> None:
+def test_parse_normalizes_parts_like_the_constructor() -> None:
     # Given a three-part string with an uppercase part
-    # When / Then parse raises the same lowercase error the constructor enforces
-    with pytest.raises(ValueError, match="lowercase"):
-        QualifiedName.parse("Core.public.orders")
+    # When parsing it
+    parsed = QualifiedName.parse("Core.public.orders")
+
+    # Then the part is normalized to the same canonical form the constructor produces
+    assert parsed == QualifiedName("core", "public", "orders")

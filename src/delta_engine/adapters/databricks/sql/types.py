@@ -118,7 +118,7 @@ def data_type_from_json(type_obj: object) -> DataType | None:
 
     ``None`` covers a type the domain does not model (interval, void, geo,
     future types), malformed input, and domain constructor rejections (decimal
-    over the Delta limit, struct fields colliding after casefold). The column
+    over the Delta limit, struct fields colliding after lowercasing). The column
     reader treats ``None`` as an unreadable column and fails the read; the
     recursive element/key/value/field lookups here propagate it as an
     unmodelable nested type.
@@ -135,7 +135,7 @@ def _data_type_from_json(type_obj: object) -> DataType | None:
     name = type_obj.get("name")
     if not isinstance(name, str):
         return None
-    name = name.casefold()
+    name = name.lower()
 
     if name in _SIMPLE_TYPES:
         return _SIMPLE_TYPES[name]
@@ -187,7 +187,7 @@ def _struct_from_json(type_obj: dict) -> DataType | None:
         field_type = data_type_from_json(field.get("type"))
         if not isinstance(field_name, str) or field_type is None:
             return None
-        fields.append(StructField(name=field_name.casefold(), data_type=field_type))
+        fields.append(StructField(name=field_name, data_type=field_type))
     try:
         return Struct(tuple(fields))
     except ValueError:

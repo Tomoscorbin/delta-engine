@@ -26,7 +26,7 @@ class PrimaryKeyConstraint:
     constraint_name: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(self, "columns", tuple(column.lower() for column in self.columns))
 
         if not self.columns:
             raise ValueError("columns must not be empty")
@@ -39,6 +39,7 @@ class PrimaryKeyConstraint:
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", self.constraint_name.lower())
 
     @classmethod
     def generate(cls, *, table_name: str, columns: tuple[str, ...]) -> Self:
@@ -106,11 +107,18 @@ class ForeignKeyConstraint:
                 f" {len(self.referenced_columns)} referenced"
             )
 
-        # Canonicalize: pairs are stored sorted by local column. Column order
-        # is not part of a foreign key's meaning (mirroring the primary key's
-        # set identity), so one canonical order makes identity, generated
-        # names, and rendered DDL independent of declaration order.
-        pairs = sorted(zip(self.local_columns, self.referenced_columns, strict=True))
+        # Canonicalize: names are lowercased, then pairs are stored sorted by
+        # local column. Column order is not part of a foreign key's meaning
+        # (mirroring the primary key's set identity), so one canonical order
+        # makes identity, generated names, and rendered DDL independent of
+        # declaration order and case.
+        pairs = sorted(
+            zip(
+                (column.lower() for column in self.local_columns),
+                (column.lower() for column in self.referenced_columns),
+                strict=True,
+            )
+        )
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
 
@@ -128,6 +136,7 @@ class ForeignKeyConstraint:
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", self.constraint_name.lower())
 
     @property
     def signature(self) -> tuple[tuple[str, ...], QualifiedName, tuple[str, ...]]:
@@ -164,3 +173,4 @@ class ForeignKeyReference:
     def __post_init__(self) -> None:
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", self.constraint_name.lower())

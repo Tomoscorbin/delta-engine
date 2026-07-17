@@ -19,15 +19,22 @@ the page with the detail.
 
 ## Identifier handling
 
-Declared identifiers must currently satisfy `name == name.casefold()`; they are
-rejected rather than normalized, while reader adapters casefold observed names.
-That is stricter than ordinary lowercase for some Unicode text. The engine also
-does not fully prevalidate Unity Catalog's length and character rules for
-catalog, schema, and table names, so quoting an accepted declaration does not
-guarantee that Databricks will accept it. Prefer simple lowercase object names
-until the identifier policy is aligned; column names that require special
-characters still need column mapping as described in [column mapping and
-dropping columns](how-to-configure-table.md#column-mapping-and-dropping-columns).
+Identifiers are case-insensitive, matching the platform: Databricks resolves
+all identifiers case-insensitively (backticked or not), and Unity Catalog
+stores catalog, schema, and table names in lowercase. The engine therefore
+accepts declarations in any case and normalizes every identifier — object
+name parts, column names, nested struct field names, and constraint names —
+to lowercase. A name that is already lowercase is preserved verbatim,
+including Unicode names such as `straße`. Case never distinguishes two
+identifiers, a case-only difference is never drift, and engine-created
+columns display in lowercase in the catalog.
+
+Declared catalog, schema, and table names are validated against Unity
+Catalog's object-name rules at declaration time: at most 255 characters, and
+no periods, spaces, forward slashes, control characters, or DEL. Column names
+are exempt from those rules; column names that require special characters
+need column mapping as described in [column mapping and dropping
+columns](how-to-configure-table.md#column-mapping-and-dropping-columns).
 
 ## What a sync manages
 

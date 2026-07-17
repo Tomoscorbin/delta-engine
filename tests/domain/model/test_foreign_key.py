@@ -192,3 +192,15 @@ def test_generate_names_identically_for_permuted_pairs():
     # Then the generated name is order-independent and canonical
     assert one.constraint_name == "orders_a_b_fk"
     assert two.constraint_name == "orders_a_b_fk"
+
+
+def test_mixed_case_columns_and_name_normalize_to_lowercase():
+    fk = ForeignKeyConstraint(
+        local_columns=("CustomerId",),
+        referenced_table=QualifiedName("cat", "sales", "customers"),
+        referenced_columns=("Id",),
+        constraint_name="Orders_CustomerId_FK",
+    )
+    assert fk.local_columns == ("customerid",)
+    assert fk.referenced_columns == ("id",)
+    assert fk.constraint_name == "orders_customerid_fk"

@@ -9,10 +9,14 @@ class QualifiedName:
     """
     Case-insensitive, fully qualified identifier (catalog.schema.name).
 
+    Parts are stored in canonical lowercase: identifiers are case-insensitive
+    on the platform and Unity Catalog stores object names lowercase, so two
+    names differing only in case are the same identifier and construct equal.
+
     Attributes:
-        catalog: Catalog name.
-        schema: Schema name.
-        name: Table or view name.
+        catalog: Catalog name, lowercased.
+        schema: Schema name, lowercased.
+        name: Table or view name, lowercased.
 
     """
 
@@ -28,8 +32,7 @@ class QualifiedName:
         ):
             if not value.strip():
                 raise ValueError(f"QualifiedName {field_name} must not be blank: {value!r}")
-            if value != value.casefold():
-                raise ValueError(f"QualifiedName {field_name} must be lowercase: {value!r}")
+            object.__setattr__(self, field_name, value.lower())
 
     def __str__(self) -> str:
         """Return the canonical fully qualified string ``catalog.schema.name``."""

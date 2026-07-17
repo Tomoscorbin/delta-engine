@@ -64,6 +64,15 @@ _ASPECTS_BY_SCOPE: Final[Mapping[str, frozenset[TableAspect]]] = {
 # Delta permits these characters in column names only under column mapping.
 _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
 
+# Unity Catalog rules for securable object names (catalogs, schemas, tables,
+# uniformly): at most 255 characters; no period, space, forward slash, ASCII
+# control character (00-1F hex), or DEL (7F hex). Column names are exempt —
+# their special characters are governed by column mapping instead.
+_OBJECT_NAME_MAX_LENGTH: Final[int] = 255
+_OBJECT_NAME_FORBIDDEN_CHARACTERS: Final[frozenset[str]] = frozenset(
+    {".", " ", "/", chr(0x7F), *(chr(code) for code in range(0x20))}
+)
+
 # Column names change data feed reserves for its own output columns.
 _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
@@ -102,6 +111,23 @@ class _SelfReference:
 
 
 Self: Final = _SelfReference()
+
+
+def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
+    """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
+    for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
+        if len(part) > _OBJECT_NAME_MAX_LENGTH:
+            raise ValueError(
+                f"Table {label} is {len(part)} characters long; Unity Catalog"
+                f" limits object names to {_OBJECT_NAME_MAX_LENGTH} characters"
+            )
+        forbidden = sorted(set(part) & _OBJECT_NAME_FORBIDDEN_CHARACTERS)
+        if forbidden:
+            raise ValueError(
+                f"Table {label} {part!r} contains characters Unity Catalog"
+                f" forbids in object names: {forbidden}. Periods, spaces,"
+                " forward slashes, control characters, and DEL are not allowed."
+            )
 
 
 def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
@@ -521,6 +547,7 @@ class DeltaTable:
         )
 
         qualified_name = QualifiedName(catalog, schema, name)
+        _validate_object_name_parts(qualified_name)
         lowered_foreign_keys = tuple(
             declaration._to_constraint(qualified_name, columns, primary_key_columns)
             for declaration in (foreign_keys or ())

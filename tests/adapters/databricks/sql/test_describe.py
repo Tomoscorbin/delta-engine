@@ -82,7 +82,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         columns.append(column_document)
         expected_columns.append(
             ObservedColumn(
-                name=raw_name.casefold(),
+                name=raw_name.lower(),
                 data_type=data_type,
                 nullable=nullable,
                 comment=comment,
@@ -117,8 +117,10 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         document=document,
         columns=tuple(expected_columns),
         comment=comment,
-        partitioned_by=tuple(name.casefold() for name in partitioned_by),
-        clustered_by=tuple(name.casefold() for name in clustered_by),
+        # Layout lists are carried verbatim by the description; the domain
+        # table canonicalizes them on construction.
+        partitioned_by=tuple(partitioned_by),
+        clustered_by=tuple(clustered_by),
         properties=properties,
     )
 
@@ -163,7 +165,18 @@ def test_empty_table_comment_is_empty_string():
     assert _parse(json.dumps(doc)).comment == ""
 
 
-def test_partitioning_and_clustering_casefolded_in_order():
+def test_lowercase_unicode_column_name_is_preserved_verbatim():
+    # 'straße' is already lowercase; casefold would rewrite it to 'strasse',
+    # a different identifier from the one the catalog stores
+    description = _parse(
+        _doc(columns=[{"name": "straße", "type": {"name": "int"}, "nullable": True}])
+    )
+    assert description.columns[0].name == "straße"
+
+
+def test_partitioning_and_clustering_carried_verbatim_in_order():
+    # The description carries the catalog's spelling; identifier normalization
+    # happens once, in the domain constructors, not in the adapter carrier.
     description = _parse(
         _doc(
             partition_columns=["Region", "Store"],
@@ -175,8 +188,8 @@ def test_partitioning_and_clustering_casefolded_in_order():
             ],
         )
     )
-    assert description.partitioned_by == ("region", "store")
-    assert description.clustered_by == ("id",)
+    assert description.partitioned_by == ("Region", "Store")
+    assert description.clustered_by == ("ID",)
 
 
 def test_non_list_partition_columns_raises():

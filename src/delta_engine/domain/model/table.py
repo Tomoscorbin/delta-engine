@@ -16,11 +16,7 @@ from delta_engine.domain.model.qualified_name import QualifiedName
 
 
 def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
-    """Rules shared by partition and clustering key lists: lowercase, existing, unique."""
-    for name in names:
-        if name != name.casefold():
-            raise ValueError(f"{kind} column name must be lowercase: {name!r}")
-
+    """Rules shared by partition and clustering key lists: existing and unique."""
     missing = [name for name in names if name not in column_names]
     if missing:
         raise ValueError(f"{kind} column not found: {', '.join(missing)}")
@@ -28,7 +24,7 @@ def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: s
     seen: set[str] = set()
     for name in names:
         if name in seen:
-            raise ValueError(f"Duplicate {kind.casefold()} column: {name}")
+            raise ValueError(f"Duplicate {kind.lower()} column: {name}")
         seen.add(name)
 
 
@@ -44,7 +40,7 @@ def _validate_table_structure(
     Validate the structural invariants shared by desired and observed tables.
 
     Columns must be non-empty and unique; partition and clustering columns
-    must be lowercase, must each exist in ``columns``, and must be unique.
+    must each exist in ``columns`` and must be unique.
     Primary key and foreign key local columns must each exist in ``columns``.
     Tag keys must not be blank.
     """
@@ -183,8 +179,8 @@ class DesiredTable:
         """
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
+        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
@@ -312,8 +308,8 @@ class ObservedTable:
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
+        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(

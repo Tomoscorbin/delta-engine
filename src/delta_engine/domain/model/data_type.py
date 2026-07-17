@@ -118,8 +118,7 @@ class StructField:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
-        if self.name != self.name.casefold():
-            raise ValueError(f"Struct field name must be lowercase: {self.name!r}")
+        object.__setattr__(self, "name", self.name.lower())
 
 
 @dataclass(frozen=True, slots=True)

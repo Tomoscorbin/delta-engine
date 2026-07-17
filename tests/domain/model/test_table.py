@@ -62,15 +62,15 @@ def test_fails_when_partition_references_undefined_column(table_type, column_typ
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_fails_when_partition_column_name_is_not_lowercase(table_type, column_type):
+def test_mixed_case_partition_reference_normalizes_to_lowercase(table_type, column_type):
     # Given: a column 'visit_date' and a partition spec naming it in upper case
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
 
     # When: constructing the table with a mixed-case partition reference
-    # Then: validation fails — partition column names must be lowercase, consistent
-    # with DesiredColumn and QualifiedName which reject non-lowercase identifiers at construction
-    with pytest.raises(ValueError, match="lowercase"):
-        table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
+    table = table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
+
+    # Then: the reference normalizes and resolves to the declared column
+    assert table.partitioned_by == ("visit_date",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -577,10 +577,10 @@ def test_table_rejects_clustering_column_not_in_columns(table_type, column_type)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_table_rejects_non_lowercase_clustering_column(table_type, column_type):
+def test_mixed_case_clustering_reference_normalizes_to_lowercase(table_type, column_type):
     columns = (column_type("id", Integer()), column_type("region", String()))
-    with pytest.raises(ValueError, match="lowercase"):
-        table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
+    table = table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
+    assert table.clustered_by == ("region",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
