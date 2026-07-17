@@ -22,7 +22,6 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedTable,
     TableAspect,
-    TableKind,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -91,21 +90,23 @@ class TableMissing:
 @dataclass(frozen=True, slots=True)
 class TableDrift:
     """
-    Differences separating observed state from its declaration.
+    Differences separating an observed table from its declaration.
 
     ``actions`` are remedied differences, each carrying the executable
     operation that closes its gap. ``unresolvable`` are differences no action
     can close; they exist to be judged by validation. Both state every
     difference regardless of scope; deciding which the declaration is
     allowed to make is validation's scope gate, not the diff's concern.
-    ``kind`` is the observed table's relation kind, carried as a fact for the
-    same gate to judge.
+    ``desired`` and ``observed`` are the two endpoints the differences
+    separate, carried as judging context: the declaration's side (managed
+    aspects, declared properties) and the catalog's side (observed facts such
+    as the relation kind).
     """
 
     desired: DesiredTable
+    observed: ObservedTable
     actions: tuple[Action, ...] = ()
     unresolvable: tuple[Unresolvable, ...] = ()
-    kind: TableKind = TableKind.TABLE
 
 
 type TableDiff = TableMissing | TableDrift
@@ -155,7 +156,7 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
     )
     return TableDrift(
-        desired=desired, actions=actions, unresolvable=unresolvable, kind=observed.kind
+        desired=desired, observed=observed, actions=actions, unresolvable=unresolvable
     )
 
 

@@ -22,7 +22,6 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     String,
-    TableKind,
 )
 from delta_engine.domain.plan import ActionPlan
 
@@ -50,9 +49,7 @@ class FakeReader:
 class FakeExecutor:
     """Executor that compiles one pseudo-statement per action and always succeeds."""
 
-    def compile(
-        self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
-    ) -> tuple[str, ...]:
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         return tuple(f"-- {qualified_name}: {type(action).__name__}" for action in plan)
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:

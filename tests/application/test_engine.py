@@ -280,11 +280,10 @@ class _RecordingExecutor:
         self.calls: list[tuple[str, ...]] = []
         self._per_call_results = None if per_call_results is None else list(per_call_results)
 
-    def compile(
-        self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
-    ) -> tuple[str, ...]:
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         return tuple(
-            f"STATEMENT {index} AS {kind.name} FOR {qualified_name}" for index in range(len(plan))
+            f"STATEMENT {index} AS {plan.kind.name} FOR {qualified_name}"
+            for index in range(len(plan))
         )
 
     def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
@@ -543,9 +542,7 @@ def test_read_phase_attempts_all_tables_before_any_execution():
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def compile(
-            self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
-        ) -> tuple[str, ...]:
+        def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
             # Silent by design: the plan phase compiles every table, but this
             # test asserts read/execute event ordering, not compilation. The
             # name is embedded so execute can name the table in its event.

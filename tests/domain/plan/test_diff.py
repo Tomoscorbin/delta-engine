@@ -965,8 +965,9 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
     )
 
 
-def test_drift_carries_the_observed_relation_kind():
-    # The diff states the fact; judging it is validation's scope gate.
+def test_drift_carries_the_observed_table_it_was_computed_against():
+    # The drift's endpoints are judging context: validation's scope gate reads
+    # observed facts (the relation kind) off the observed side.
     qualified_name = QualifiedName("cat", "sch", "clicks")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -981,7 +982,8 @@ def test_drift_carries_the_observed_relation_kind():
     diff = diff_table(desired, observed)
 
     assert isinstance(diff, TableDrift)
-    assert diff.kind is TableKind.STREAMING_TABLE
+    assert diff.observed is observed
+    assert diff.observed.kind is TableKind.STREAMING_TABLE
 
 
 def test_drift_against_an_ordinary_table_carries_the_table_kind():
@@ -998,4 +1000,4 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
     diff = diff_table(desired, observed)
 
     assert isinstance(diff, TableDrift)
-    assert diff.kind is TableKind.TABLE
+    assert diff.observed.kind is TableKind.TABLE

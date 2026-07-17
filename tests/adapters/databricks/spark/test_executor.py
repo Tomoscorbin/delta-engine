@@ -8,7 +8,6 @@ from delta_engine.domain.model import (
     DesiredTable,
     ObservedColumn,
     QualifiedName,
-    TableKind,
 )
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
@@ -33,7 +32,7 @@ def _dummy_qualified_name() -> QualifiedName:
 def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
     """Compile then execute, the same two-stage flow the engine drives."""
     executor = SparkExecutor(spark)
-    return executor.execute(executor.compile(qualified_name, plan, TableKind.TABLE))
+    return executor.execute(executor.compile(qualified_name, plan))
 
 
 class _FakeSpark:
@@ -278,17 +277,14 @@ def test_compile_returns_the_statements_execute_would_run():
     executor = SparkExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
 
     # When compiling without executing
-    statements = executor.compile(qualified_name, plan, TableKind.TABLE)
+    statements = executor.compile(qualified_name, plan)
 
     # Then the statements match the SQL compiler's output, in plan order
-    assert statements == compile_plan(qualified_name, plan, TableKind.TABLE)
+    assert statements == compile_plan(qualified_name, plan)
     assert len(statements) == 1
     assert "COMMENT" in statements[0].upper()
 
 
 def test_compile_of_empty_plan_returns_no_statements():
     executor = SparkExecutor(spark=None)  # type: ignore[arg-type]
-    statements = executor.compile(
-        QualifiedName("cat", "schema", "tbl"), ActionPlan(), TableKind.TABLE
-    )
-    assert statements == ()
+    assert executor.compile(QualifiedName("cat", "schema", "tbl"), ActionPlan()) == ()

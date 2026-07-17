@@ -40,9 +40,13 @@ Backend facts (verified against Databricks documentation; to be pinned live):
    one fail validation.
 4. **API**: no public API change. The engine discovers the relation kind at
    read time; kind is an observed fact, never a declared one.
-5. **Plumbing**: the observed kind reaches the SQL compiler by widening the
-   `PlanExecutor.compile` port, keeping target identity (name + kind)
-   together in the call.
+5. **Plumbing**: the observed kind reaches the SQL compiler on the objects
+   that already flow — the diff carries the observed table it was computed
+   against, and the plan carries the kind its actions lower against — so no
+   port or engine signature changes. (Revised during review, 2026-07-16:
+   the original decision widened `PlanExecutor.compile` to
+   `compile(qualified_name, plan, kind)`; the parameter read as bolted on,
+   and the engine had to re-derive a fact the diff already knew.)
 6. **Verification**: backend facts are pinned in the opt-in `tests/live`
    suite (`databricks_e2e`), alongside unit coverage.
 
@@ -76,11 +80,15 @@ Backend facts (verified against Databricks documentation; to be pinned live):
 
 ### Diff (`domain/plan/diff.py`)
 
-- `TableDrift` gains the observed `kind` (default `TABLE`, mirroring
-  `ObservedTable`); `diff_table` copies it from the observed table. The diff
-  states the fact and does no judging — the same contract as `unresolvable`,
-  which exists to be judged by validation.
-- `TableMissing` is unchanged: an absent table has no observed kind, and the
+- `TableDrift` carries the `observed` table it was computed against,
+  alongside the `desired` declaration it already carried: the two endpoints
+  the differences separate, available as judging context. Validation reads
+  observed facts (the relation kind) off `drift.observed`; the diff states
+  facts and does no judging. (Revised during review, 2026-07-16: the first
+  shape copied a bespoke `kind: TableKind = TABLE` field onto the drift —
+  a forwarded scalar whose default could silently disagree with the table
+  it came from.)
+- `TableMissing` is unchanged: an absent table has no observed side, and the
   engine only creates ordinary tables.
 
 ### Validation (`application/validation.py`)
@@ -101,16 +109,22 @@ Backend facts (verified against Databricks documentation; to be pinned live):
   manage existence), and structural drift under tags scope still fails
   `UnmanagedAspectDrift`.
 
-### Execution port and engine threading
+### Planning and the execution port
 
-- `PlanExecutor.compile(qualified_name, plan)` widens to
-  `compile(qualified_name, plan, kind)`. Both executors (Spark, warehouse)
-  share the underlying compile function; the real change is one function,
-  the protocol, and the engine call site. The CLI `plan` command flows
-  through the same port and needs no separate treatment.
-- Per-table run state remembers the observed kind from the read
-  (`TablePresent.table.kind`). The create path compiles with `TABLE`: the
-  engine only creates ordinary tables.
+- `ActionPlan` gains `kind: TableKind = TableKind.TABLE` — the relation kind
+  its actions lower against, part of what the plan means: the same actions
+  compile to different statements per kind, and `compile` can no longer be
+  handed a kind that disagrees with the plan it was built from (previously
+  the two travelled as separate call-site arguments). `plan_diff` copies
+  `drift.observed.kind` onto the plan; the `TableMissing` arm keeps the
+  default, as the engine only creates ordinary tables. The default itself
+  is a residual hazard accepted deliberately: `plan_diff` is the one
+  boundary constructing plans from diffs, and empty scratch plans need a
+  valid default.
+- `PlanExecutor.compile(qualified_name, plan)` is unchanged: backends whose
+  dialect differs by kind read `plan.kind`. The engine, both executors, and
+  the CLI `plan` command need no signature changes. (Revised during review,
+  2026-07-16 — see decision 5.)
 
 ### SQL compilation (`adapters/databricks/sql/compile.py`)
 
@@ -199,6 +213,10 @@ pipeline spin-up; the Live run gets slower), with a teardown drop.
 - Views and foreign tables.
 - A per-kind capability matrix; the tags-only rule is hardcoded policy
   until a second real use case exists.
+- Promoting the full statement target (name + kind) onto the plan and
+  narrowing the port to `compile(plan)` — parked deliberately (2026-07-16
+  review). If taken, take it whole; do not bolt further target facts onto
+  the plan piecemeal.
 
 ## Rejected alternatives
 

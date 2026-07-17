@@ -18,6 +18,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     String,
     TableAspect,
+    TableKind,
 )
 from delta_engine.domain.plan import (
     AddColumn,
@@ -344,3 +345,28 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
         DropForeignKey(constraint=unrelated_key),
         RenameColumn("customer_nm", "customer_name"),
     )
+
+
+def test_plan_carries_the_observed_relation_kind():
+    # Given tag drift against a streaming table, under a tags-only declaration
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer(), tags={"pii": "low"}),),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+    )
+    observed = _observed(kind=TableKind.STREAMING_TABLE)
+
+    # When planning the diff
+    result = plan_diff(diff_table(desired, observed))
+
+    # Then the plan knows what its actions lower against
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.kind is TableKind.STREAMING_TABLE
+
+
+def test_creation_plan_carries_the_ordinary_table_kind():
+    # Given a missing table — absence has no observed kind, and the engine
+    # only creates ordinary tables
+    result = plan_diff(diff_table(_desired(), None))
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.kind is TableKind.TABLE

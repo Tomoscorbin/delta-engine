@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
-from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName, TableKind
+from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
 # ---------- DesiredTableSource ----------
@@ -163,15 +163,13 @@ class PlanExecutor(Protocol):
     one table does not abort the others.
     """
 
-    def compile(
-        self, qualified_name: QualifiedName, plan: ActionPlan, kind: TableKind
-    ) -> tuple[str, ...]:
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         """
         Return the statements that apply ``plan``, in execution order.
 
-        ``kind`` is the observed relation kind of the target table — the
-        statements a plan lowers to can differ by kind. The engine passes the
-        kind it read for a present table and ``TableKind.TABLE`` for a create.
+        The plan carries the relation kind its actions lower against
+        (``plan.kind``) — backends whose statements differ by kind read it
+        from the plan.
 
         The ordering is the plan's own deterministic order, which is the order
         ``execute`` runs the statements. An empty plan compiles to no statements.

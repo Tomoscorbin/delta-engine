@@ -61,12 +61,14 @@ class Rule(Protocol):
 
     A rule judges whether a change is safe, given the declaration it belongs
     to. It receives the whole ``TableDrift`` and reads ``drift.actions`` or
-    ``drift.unresolvable`` for the differences to judge, and ``drift.desired``
-    for declaration context such as declared properties. Because the scope
-    gate runs first and short-circuits, a rule is only ever evaluated on a
-    fully in-scope diff, so its actions and unresolvable differences are
-    exactly the ones the declaration manages — it does no scope filtering of
-    its own. Never called for a ``TableMissing`` diff.
+    ``drift.unresolvable`` for the differences to judge; ``drift.desired``
+    and ``drift.observed`` are the endpoints, available as context (declared
+    properties, observed relation kind) — the differences themselves are what
+    a rule judges. Because the scope gate runs first and short-circuits, a
+    rule is only ever evaluated on a fully in-scope diff, so its actions and
+    unresolvable differences are exactly the ones the declaration manages —
+    it does no scope filtering of its own. Never called for a
+    ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -561,7 +563,7 @@ class StreamingTableTagsOnly:
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
-        if drift.kind is not TableKind.STREAMING_TABLE:
+        if drift.observed.kind is not TableKind.STREAMING_TABLE:
             return ()
         if drift.desired.managed_aspects <= _STREAMING_TABLE_MANAGEABLE_ASPECTS:
             return ()

@@ -93,7 +93,7 @@ def _create_table(
 
 
 def _compile_single(action: Action, kind: TableKind = TableKind.TABLE) -> str:
-    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,)), kind)
+    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,), kind=kind))
     return statement
 
 
@@ -114,7 +114,7 @@ def _concrete_action_types() -> list[type[Action]]:
 
 
 def test_compile_empty_plan_returns_empty_tuple():
-    assert compile_plan(_TARGET, ActionPlan(actions=()), TableKind.TABLE) == ()
+    assert compile_plan(_TARGET, ActionPlan(actions=())) == ()
 
 
 def test_compile_plan_compiles_each_action_in_action_plan_order():
@@ -128,7 +128,7 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
     )
 
     # When compiling the plan
-    statements = compile_plan(_TARGET, plan, TableKind.TABLE)
+    statements = compile_plan(_TARGET, plan)
 
     # Then each action in the normalized ActionPlan is compiled to its SQL statement
     assert statements == tuple(_compile_single(action) for action in plan)
@@ -140,7 +140,7 @@ def test_compile_backticks_table_and_column_identifiers():
     plan = ActionPlan(actions=(AddColumn(DesiredColumn("weird column", Integer())),))
 
     # When compiling
-    (statement,) = compile_plan(target, plan, TableKind.TABLE)
+    (statement,) = compile_plan(target, plan)
 
     # Then table and column identifiers are backticked
     assert statement == ("ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT")
@@ -486,8 +486,8 @@ def test_set_property_sql_ignores_observed_value():
     )
 
     # When compiling both
-    (first_statement,) = compile_plan(_TARGET, ActionPlan(actions=(first_write,)), TableKind.TABLE)
-    (update_statement,) = compile_plan(_TARGET, ActionPlan(actions=(update,)), TableKind.TABLE)
+    (first_statement,) = compile_plan(_TARGET, ActionPlan(actions=(first_write,)))
+    (update_statement,) = compile_plan(_TARGET, ActionPlan(actions=(update,)))
 
     # Then observed_value has no effect on rendered SQL
     assert first_statement == update_statement
@@ -510,7 +510,7 @@ def test_every_action_type_has_a_registered_compiler():
 
 def test_compile_rename_column():
     plan = ActionPlan((RenameColumn(old_name="customer_nm", new_name="customer_name"),))
-    statements = compile_plan(QualifiedName("dev", "silver", "customers"), plan, TableKind.TABLE)
+    statements = compile_plan(QualifiedName("dev", "silver", "customers"), plan)
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )

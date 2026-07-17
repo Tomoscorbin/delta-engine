@@ -56,7 +56,7 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName, TableKind
+from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
@@ -113,15 +113,6 @@ class _TableRun:
     def has_failures(self) -> bool:
         """True when any completed phase has failed for this table."""
         return bool(self.failures)
-
-    @property
-    def observed_kind(self) -> TableKind:
-        """The relation kind compiled DDL targets: as observed when present, TABLE when creating."""
-        match self.read:
-            case TablePresent(table=table):
-                return table.kind
-            case _:
-                return TableKind.TABLE
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
@@ -283,9 +274,7 @@ class Engine:
                     )
                 case PlanningSucceeded(plan=plan):
                     run.plan = plan
-                    run.planned_sql_statements = self.executor.compile(
-                        run.qualified_name, run.plan, run.observed_kind
-                    )
+                    run.planned_sql_statements = self.executor.compile(run.qualified_name, run.plan)
                     logger.info("Planned %d action(s) for %s", len(run.plan), run.qualified_name)
                 case _ as unreachable:
                     assert_never(unreachable)

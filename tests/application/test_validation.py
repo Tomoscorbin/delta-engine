@@ -77,6 +77,7 @@ def _observed_table(
     properties: dict[str, str] | None = None,
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
+    kind: TableKind = TableKind.TABLE,
 ) -> ObservedTable:
     source = (DesiredColumn("id", Integer()),) if columns is None else columns
     return ObservedTable(
@@ -85,6 +86,7 @@ def _observed_table(
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
+        kind=kind,
     )
 
 
@@ -98,7 +100,12 @@ def _drift(
         desired = _desired_table(managed_aspects=managed_aspects)
     actions = tuple(item for item in differences if isinstance(item, Action))
     unresolvable = tuple(item for item in differences if not isinstance(item, Action))
-    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable, kind=kind)
+    return TableDrift(
+        desired=desired,
+        observed=_observed_table(kind=kind),
+        actions=actions,
+        unresolvable=unresolvable,
+    )
 
 
 def _validate(
@@ -981,6 +988,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     )
     drift = TableDrift(
         desired=desired,
+        observed=_observed_table(),
         unresolvable=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
     )
 
@@ -997,7 +1005,9 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
         properties={"delta.columnMapping.mode": "name"},
     )
     drift = TableDrift(
-        desired=desired, actions=(DropColumn(column=ObservedColumn("old", String())),)
+        desired=desired,
+        observed=_observed_table(),
+        actions=(DropColumn(column=ObservedColumn("old", String())),),
     )
 
     result = validate_diff(drift)
