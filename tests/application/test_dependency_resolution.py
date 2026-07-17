@@ -19,7 +19,7 @@ from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.schema import Column, DeltaTable, ForeignKey, Self, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, Self, String
 
 
 def _qualified_name(fqn: str) -> QualifiedName:
@@ -882,6 +882,112 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
         reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
         references="cat.sch.customers",
         local_columns=("ref_email",),
+    )
+
+
+def _long_id_table(fqn: str) -> DesiredTable:
+    """Build a table whose primary key column ``id`` is a Long rather than a String."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("id", Long(), nullable=False),),
+        primary_key=["id"],
+    ).to_desired_table()
+
+
+def test_resolve_fails_fk_whose_types_mismatch_the_registered_parent():
+    # Given orders' FK was declared against a customers object whose id is a
+    # String, but the customers declaration registered for this sync types id
+    # as a Long
+    orders = _table_with_fk("cat.sch.orders", "cat.sch.customers")
+    customers = _long_id_table("cat.sch.customers")
+
+    # When resolving dependencies
+    result = resolve((orders, customers))
+
+    # Then orders fails because ref_id's type does not match the registered
+    # customers' primary key type, and customers itself is unaffected
+    _assert_has_failure(
+        result,
+        "cat.sch.orders",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH,
+        references="cat.sch.customers",
+        local_columns=("ref_id",),
+    )
+    assert _failures_for(result, "cat.sch.customers") == ()
+
+
+def test_resolve_blocks_dependents_of_a_type_mismatched_table():
+    # Given orders' FK types mismatch the registered customers,
+    # and shipments depends on orders
+    orders = _table_with_fk("cat.sch.orders", "cat.sch.customers")
+    shipments = _table_with_fk("cat.sch.shipments", "cat.sch.orders")
+    customers = _long_id_table("cat.sch.customers")
+
+    # When resolving dependencies
+    result = resolve((shipments, orders, customers))
+
+    # Then orders fails directly and shipments is blocked by orders
+    _assert_has_failure(
+        result,
+        "cat.sch.orders",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH,
+        references="cat.sch.customers",
+    )
+    _assert_has_failure(
+        result,
+        "cat.sch.shipments",
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.orders",
+    )
+
+
+def test_resolve_reports_type_mismatch_over_cycle_for_the_same_fk():
+    # Given a <-> b form a cycle, and a's FK into b was declared against a
+    # String-id b while the registered b types id as a Long. The type check
+    # runs before cycle classification, so the structural problem is reported
+    # per-FK even though a is also in a cycle.
+    a = _table_with_fk("cat.sch.a", "cat.sch.b")
+    b = DeltaTable(
+        "cat",
+        "sch",
+        "b",
+        columns=(
+            Column("id", Long(), nullable=False),
+            Column("ref_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[
+            ForeignKey(
+                columns={"ref_id": "id"},
+                references=_referenced_table("cat.sch.a"),
+            )
+        ],
+    ).to_desired_table()
+
+    # When resolving dependencies
+    result = resolve((a, b))
+
+    # Then a's single failure is the type mismatch, not a cycle failure,
+    # while b's FK back into the cycle still fails as a cycle
+    _assert_has_failure(
+        result,
+        "cat.sch.a",
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH,
+        references="cat.sch.b",
+        local_columns=("ref_id",),
+    )
+    assert _failure_reasons_for(result, "cat.sch.a") == [
+        ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH
+    ]
+    _assert_has_failure(
+        result,
+        "cat.sch.b",
+        reason=ForeignKeyFailureReason.CYCLE,
+        references="cat.sch.a",
     )
 
 

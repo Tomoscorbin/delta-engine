@@ -31,6 +31,7 @@ class ForeignKeyFailureReason(StrEnum):
     UNRESOLVABLE_REFERENCE = "UNRESOLVABLE_REFERENCE"
     BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
     REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
+    REFERENCED_COLUMN_TYPE_MISMATCH = "REFERENCED_COLUMN_TYPE_MISMATCH"
 
     @property
     def detail(self) -> str:
@@ -44,6 +45,10 @@ class ForeignKeyFailureReason(StrEnum):
                 return "it references a table that failed to sync"
             case ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY:
                 return "its referenced columns are not the primary key of the referenced table"
+            case ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH:
+                return (
+                    "its column types do not match the registered referenced table's column types"
+                )
             case _ as unreachable:
                 assert_never(unreachable)
 

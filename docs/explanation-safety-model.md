@@ -85,17 +85,18 @@ protects it from the rest of the run: a table only executes when every table
 its foreign keys reference can be trusted to reach its desired state this
 sync.
 
-A table blocked by this layer reports `FOREIGN_KEY_FAILED`, with one of four
+A table blocked by this layer reports `FOREIGN_KEY_FAILED`, with one of five
 reasons in its failure message:
 
-| Failure reason                 | Fires when                                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| `UNRESOLVABLE_REFERENCE`       | A foreign key references a table that is not part of the sync                       |
-| `CYCLE`                        | The table is part of a foreign-key dependency cycle                                 |
-| `REFERENCED_COLUMNS_NOT_A_KEY` | The referenced columns are not the referenced table's primary key                   |
-| `BLOCKED_BY_FAILED_DEPENDENCY` | A referenced table failed this run — at any of the layers above, or while executing |
+| Failure reason                    | Fires when                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `UNRESOLVABLE_REFERENCE`          | A foreign key references a table that is not part of the sync                                                |
+| `CYCLE`                           | The table is part of a foreign-key dependency cycle                                                          |
+| `REFERENCED_COLUMNS_NOT_A_KEY`    | The referenced columns are not the referenced table's primary key                                            |
+| `REFERENCED_COLUMN_TYPE_MISMATCH` | A foreign-key column's type does not match the referenced column's type on the table registered for the sync |
+| `BLOCKED_BY_FAILED_DEPENDENCY`    | A referenced table failed this run — at any of the layers above, or while executing                          |
 
-The first three are structural problems with the declarations themselves —
+The first four are structural problems with the declarations themselves —
 validation in spirit, run separately only because they need to see every table
 in the sync at once. The last is failure propagation: the declaration is fine,
 but the state its foreign keys depend on won't exist, so the table is blocked

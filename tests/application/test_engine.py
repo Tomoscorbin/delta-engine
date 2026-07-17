@@ -37,7 +37,7 @@ from delta_engine.domain.plan.actions import (
     UnsetColumnTag,
     UnsetTableTag,
 )
-from delta_engine.schema import Column, DeltaTable, ForeignKey, String
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
 from tests.builders import as_observed_columns
 
 # ---------------------------------------------------------------------------
@@ -864,6 +864,49 @@ def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     _assert_has_fk_failure(
         orders,
         reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY,
+        references="cat.sch.customers",
+    )
+
+    assert orders.execution is None
+    assert customers.execution is not None
+    assert executor.executed_names == ["cat.sch.customers"]
+
+
+def test_sync_fails_fk_whose_types_mismatch_the_registered_parent():
+    # Given orders' FK was declared against a customers object whose id is a
+    # String, but the customers declaration registered for this sync types id
+    # as a Long
+    reader = _RecordingReader()
+    executor = _RecordingExecutor([(_ok_exec(0),)])
+    engine = Engine(reader=reader, executor=executor)
+
+    registered_customers = DeltaTable(
+        "cat",
+        "sch",
+        "customers",
+        columns=(Column("id", Long(), nullable=False),),
+        primary_key=["id"],
+    )
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+            registered_customers,
+        )
+
+    # Then orders is FK-failed, but customers can still be created
+    report = exc_info.value.report
+    orders = _assert_status(
+        report,
+        "cat.sch.orders",
+        TableRunStatus.FOREIGN_KEY_FAILED,
+    )
+    customers = _assert_status(report, "cat.sch.customers", TableRunStatus.SUCCESS)
+
+    _assert_has_fk_failure(
+        orders,
+        reason=ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH,
         references="cat.sch.customers",
     )
 

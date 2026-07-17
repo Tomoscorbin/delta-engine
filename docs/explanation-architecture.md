@@ -572,6 +572,8 @@ connected components to produce a dependency-first order. It reports:
   of the sync.
 - `REFERENCED_COLUMNS_NOT_A_KEY` when the referenced columns are not exactly the
   referenced table's primary key.
+- `REFERENCED_COLUMN_TYPE_MISMATCH` when a foreign-key column's type does not
+  match the referenced column's type on the table registered for the sync.
 - `CYCLE` for true multi-table FK cycles.
 - `BLOCKED_BY_FAILED_DEPENDENCY` when a table depends on another table that
   is already known to have failed before execution begins, such as a table with

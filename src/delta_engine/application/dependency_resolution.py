@@ -30,11 +30,17 @@ strongly-connected-components algorithm, fixpoint propagation of blocked
 dependents) are hidden behind that interface.
 """
 
-from collections.abc import Set as AbstractSet
+from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
-from delta_engine.domain.model import DesiredTable, ForeignKeyConstraint, QualifiedName, TableAspect
+from delta_engine.domain.model import (
+    DataType,
+    DesiredTable,
+    ForeignKeyConstraint,
+    QualifiedName,
+    TableAspect,
+)
 
 # TODO: Replace the recursive SCC traversal with an iterative implementation.
 # Its call depth follows dependency depth, so a chain near Python's recursion
@@ -158,6 +164,21 @@ def _foreign_key_failure(
         local_columns=foreign_key.local_columns,
         references=foreign_key.referenced_table,
         reason=reason,
+    )
+
+
+def _foreign_key_types_match(
+    foreign_key: ForeignKeyConstraint,
+    *,
+    local_types: Mapping[str, DataType],
+    referenced_types: Mapping[str, DataType],
+) -> bool:
+    """Return True if every local column's type equals its referenced column's type."""
+    return all(
+        local_types[local_column] == referenced_types[referenced_column]
+        for local_column, referenced_column in zip(
+            foreign_key.local_columns, foreign_key.referenced_columns, strict=True
+        )
     )
 
 
@@ -326,8 +347,11 @@ def _classify_failures(
     Two passes:
 
     1. Direct failures — a foreign key to an unregistered table
-       (UNRESOLVABLE_REFERENCE) or a foreign key into the owning table's own
-       dependency cycle (CYCLE).
+       (UNRESOLVABLE_REFERENCE), a foreign key whose target is not the
+       registered table's primary key (REFERENCED_COLUMNS_NOT_A_KEY), a
+       foreign key whose column types disagree with the registered table's
+       (REFERENCED_COLUMN_TYPE_MISMATCH), or a foreign key into the owning
+       table's own dependency cycle (CYCLE).
     2. Propagation — a table that references a table which will not be built
        cannot be built either (its foreign key would target a missing table).
        This repeats to a fixpoint so the block flows along chains of dependents.
@@ -360,6 +384,18 @@ def _classify_failures(
     # aligned to local_columns, not PK order.
     primary_key_by_name = {table.qualified_name: set(table.primary_key_columns) for table in tables}
 
+    # Column types of every registered table, keyed by qualified name. A
+    # foreign key's types were validated at declaration time against the
+    # particular parent *object* it was declared with, but the table the sync
+    # will actually build is the declaration *registered* under that qualified
+    # name — and Databricks requires each foreign-key column type to equal the
+    # referenced column's type. The two declarations can differ, so the types
+    # are re-checked here against the registered parent.
+    column_types_by_name = {
+        table.qualified_name: {column.name: column.data_type for column in table.columns}
+        for table in tables
+    }
+
     # Pass 1 — direct failures.
     for table in tables:
         table_name = table.qualified_name
@@ -367,10 +403,19 @@ def _classify_failures(
             referenced_table = foreign_key.referenced_table
             if referenced_table not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
-            # Checked before the cycle test so that a structural FK-target problem is
-            # reported per-FK even when the table also participates in a cycle.
+            # Structural FK-target checks run before the cycle test so that a
+            # structural problem is reported per-FK even when the table also
+            # participates in a cycle. The type check relies on the target
+            # being the registered parent's primary key: only then is every
+            # referenced column known to exist on the registered parent.
             elif set(foreign_key.referenced_columns) != primary_key_by_name[referenced_table]:
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
+            elif not _foreign_key_types_match(
+                foreign_key,
+                local_types=column_types_by_name[table_name],
+                referenced_types=column_types_by_name[referenced_table],
+            ):
+                record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH)
             elif referenced_table in cycle_partners_by_table.get(table_name, frozenset()):
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 
