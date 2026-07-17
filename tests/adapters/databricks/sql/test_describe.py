@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import NamedTuple
 
 from hypothesis import given, strategies as st
 import pytest
@@ -45,8 +46,19 @@ def _doc(**overrides):
     return json.dumps(base)
 
 
+class DescribeCase(NamedTuple):
+    """A generated valid document paired with the observed state it must parse to."""
+
+    document: dict
+    columns: tuple[ObservedColumn, ...]
+    comment: str
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    properties: dict[str, str]
+
+
 @st.composite
-def _valid_describe_documents(draw: st.DrawFn):
+def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
     names = draw(st.lists(CANONICAL_IDENTIFIERS, min_size=1, max_size=5, unique=True))
     columns = []
     expected_columns = []
@@ -101,13 +113,13 @@ def _valid_describe_documents(draw: st.DrawFn):
         document["comment"] = None
     elif comment_kind == "value":
         document["comment"] = comment
-    return (
-        document,
-        tuple(expected_columns),
-        comment,
-        tuple(name.casefold() for name in partitioned_by),
-        tuple(name.casefold() for name in clustered_by),
-        properties,
+    return DescribeCase(
+        document=document,
+        columns=tuple(expected_columns),
+        comment=comment,
+        partitioned_by=tuple(name.casefold() for name in partitioned_by),
+        clustered_by=tuple(name.casefold() for name in clustered_by),
+        properties=properties,
     )
 
 
@@ -298,16 +310,16 @@ def test_real_order_fact_fixture():
 
 
 @given(_valid_describe_documents())
-def test_valid_describe_documents_preserve_values_and_normalize_identifiers(case) -> None:
-    document, columns, comment, partitioned_by, clustered_by, properties = case
+def test_valid_describe_documents_preserve_values_and_normalize_identifiers(
+    case: DescribeCase,
+) -> None:
+    description = _parse(json.dumps(case.document))
 
-    description = _parse(json.dumps(document))
-
-    assert description.columns == columns
-    assert description.comment == comment
-    assert description.partitioned_by == partitioned_by
-    assert description.clustered_by == clustered_by
-    assert dict(description.table_properties) == properties
+    assert description.columns == case.columns
+    assert description.comment == case.comment
+    assert description.partitioned_by == case.partitioned_by
+    assert description.clustered_by == case.clustered_by
+    assert dict(description.table_properties) == case.properties
 
 
 def test_unknown_describe_fields_are_ignored() -> None:

@@ -1,13 +1,14 @@
-from hypothesis import given, settings, strategies as st
-import pytest
+from hypothesis import example, given, settings, strategies as st
 
 from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
 from tests.adapters.databricks.sql.strategies import COLUMN_NAMES, SQL_LITERAL_VALUES
 
-pytestmark = pytest.mark.local_e2e
-
 
 @settings(max_examples=25, deadline=None)
+# Known regressions run on every seed; the generator explores beyond them.
+@example(
+    [r"C:\landing\new", r"the two characters \n stay literal", "an actual\nnewline", "O'Reilly"]
+)
 @given(st.lists(SQL_LITERAL_VALUES, min_size=1, max_size=8))
 def test_quoted_literals_round_trip_through_the_spark_sql_parser(spark, values: list[str]) -> None:
     rows_sql = ", ".join(
@@ -24,6 +25,7 @@ def test_quoted_literals_round_trip_through_the_spark_sql_parser(spark, values: 
 
 
 @settings(max_examples=25, deadline=None)
+@example(["embedded`tick", "display name", "café"])
 @given(st.lists(COLUMN_NAMES, min_size=1, max_size=8))
 def test_backticked_column_names_round_trip_through_the_spark_sql_parser(
     spark,
