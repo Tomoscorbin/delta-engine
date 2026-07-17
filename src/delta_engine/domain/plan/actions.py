@@ -15,6 +15,7 @@ from delta_engine.domain.model import (
     ObservedColumn,
     PrimaryKeyConstraint,
     TableAspect,
+    TableKind,
 )
 
 
@@ -402,9 +403,14 @@ class ActionPlan:
     A plan keeps its actions sorted by execution phase and then by subject
     name, regardless of the order they are supplied in: ordering is an
     invariant of the plan, not a step a caller has to remember.
+
+    ``kind`` is the relation kind of the table the actions lower against —
+    part of what the plan means, since the same actions compile to different
+    statements per kind. Defaults to the ordinary table kind.
     """
 
     actions: tuple[Action, ...] = ()
+    kind: TableKind = TableKind.TABLE
 
     def __post_init__(self) -> None:
         """Sort the actions into execution order, preserving input order on ties."""

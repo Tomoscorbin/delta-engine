@@ -90,16 +90,21 @@ class TableMissing:
 @dataclass(frozen=True, slots=True)
 class TableDrift:
     """
-    Differences separating observed state from its declaration.
+    Differences separating an observed table from its declaration.
 
     ``actions`` are remedied differences, each carrying the executable
     operation that closes its gap. ``unresolvable`` are differences no action
     can close; they exist to be judged by validation. Both state every
     difference regardless of scope; deciding which the declaration is
     allowed to make is validation's scope gate, not the diff's concern.
+    ``desired`` and ``observed`` are the two endpoints the differences
+    separate, carried as judging context: the declaration's side (managed
+    aspects, declared properties) and the catalog's side (observed facts such
+    as the relation kind).
     """
 
     desired: DesiredTable
+    observed: ObservedTable
     actions: tuple[Action, ...] = ()
     unresolvable: tuple[Unresolvable, ...] = ()
 
@@ -150,7 +155,9 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
         *_diff_undeclared_properties(desired, observed),
         *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
     )
-    return TableDrift(desired=desired, actions=actions, unresolvable=unresolvable)
+    return TableDrift(
+        desired=desired, observed=observed, actions=actions, unresolvable=unresolvable
+    )
 
 
 @dataclass(frozen=True, slots=True)

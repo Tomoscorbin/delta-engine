@@ -12,6 +12,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     String,
     TableAspect,
+    TableKind,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from tests.builders import as_observed_columns
@@ -728,3 +729,24 @@ def test_desired_table_rejects_a_foreign_key_local_column_on_a_rename_source() -
                 ),
             ),
         )
+
+
+def test_observed_table_kind_defaults_to_an_ordinary_table():
+    # Kind is an observed fact with a safe default: construction sites that
+    # predate relation kinds still describe an ordinary table.
+    table = ObservedTable(
+        qualified_name=QualifiedName("cat", "sch", "tbl"),
+        columns=(ObservedColumn("id", Integer()),),
+    )
+
+    assert table.kind is TableKind.TABLE
+
+
+def test_observed_table_carries_a_streaming_table_kind():
+    table = ObservedTable(
+        qualified_name=QualifiedName("cat", "sch", "tbl"),
+        columns=(ObservedColumn("id", Integer()),),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    assert table.kind is TableKind.STREAMING_TABLE

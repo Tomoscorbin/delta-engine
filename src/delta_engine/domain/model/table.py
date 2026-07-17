@@ -101,6 +101,20 @@ class TableAspect(Enum):
 ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
+class TableKind(Enum):
+    """
+    The catalog relation kind an observed table resolved to.
+
+    Discovered at read time, never declared. ``TABLE`` is an ordinary managed
+    or external Delta table; ``STREAMING_TABLE`` is a pipeline-owned streaming
+    table, which takes a distinct ALTER dialect and admits tag changes only
+    (enforced by validation's scope gate, not here).
+    """
+
+    TABLE = auto()
+    STREAMING_TABLE = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class DesiredTable:
     """
@@ -268,6 +282,8 @@ class ObservedTable:
             the other keys a table carries are not engine state (values only —
             a catalog has no absence assertions, unlike a desired table's).
         referencing_foreign_keys: Inbound foreign keys owned by other tables.
+        kind: The relation kind this table resolved to; ``TableKind.TABLE``
+            unless the reader observed otherwise.
 
     ``referencing_foreign_keys`` is the one field that is not about this
     table's own schema: it lists inbound foreign keys owned by other tables,
@@ -286,6 +302,7 @@ class ObservedTable:
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+    kind: TableKind = TableKind.TABLE
 
     @property
     def primary_key_columns(self) -> tuple[str, ...]:

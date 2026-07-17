@@ -58,7 +58,11 @@ The engine calls `compile` only with the `ActionPlan` carried by a
 statements on the table's report. A rejected diff has no plan and never reaches
 this port. `compile` is **not** total: compiling an accepted plan is a pure,
 local operation that cannot fail against a backend, so it may raise on a
-genuine programming error rather than swallowing it.
+genuine programming error rather than swallowing it. The plan carries the
+relation kind its actions lower against (`plan.kind`) — backends whose DDL
+dialect differs by kind (Databricks streaming tables take
+`ALTER STREAMING TABLE`) read it off the plan; a backend with one dialect
+may ignore it.
 
 `execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
 

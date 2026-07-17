@@ -113,10 +113,11 @@ flowchart LR
 - `ReadFailed(failure=ReadFailure(...))`
 
 `PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan)` lowers
-a plan to the backend statements that apply it — the engine calls it for every
-accepted plan in the compile phase, dry or real, and records the statements on
-the table's report. `execute(statements)` then runs that same tuple and returns
-an `ExecutionSummary` with one result per attempted statement, so the previewed
+a plan to the backend statements that apply it — the plan carries the observed
+relation kind its actions lower against, so the SQL dialect follows what the
+reader saw — and the engine calls it in the plan phase on every run, dry or
+real, recording the statements on the table's report. `execute(statements)` then runs that same tuple and returns an
+`ExecutionSummary` with one result per attempted statement, so the previewed
 SQL is exactly what executes.
 
 `fetch_state` and `execute` are **total**. Adapter implementations catch
