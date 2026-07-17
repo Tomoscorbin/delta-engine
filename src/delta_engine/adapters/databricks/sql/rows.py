@@ -8,10 +8,12 @@ duck-typed catalog rows — pyspark ``Row`` or databricks-sql ``Row`` —
 accessed only by attribute lookups, so this module stays PySpark-free like
 the rest of the package.
 
-Identifier fields (constraint, column, table names) are lowercased here: the
-domain model stores identifiers in canonical lowercase, and normalising at the
-adapter boundary keeps pre-domain lookup keys (e.g. tag grouping) consistent
-with it. Tag keys and values are case-sensitive and preserved verbatim.
+Identifier normalization happens in the domain constructors, which store
+every identifier in canonical lowercase — mapped rows carry catalog values
+verbatim and let construction canonicalize. The one exception is
+``read_column_tags``, which builds a plain lookup dict keyed by column name
+before any domain object exists, so it lowercases its keys itself. Tag keys
+and values are case-sensitive and preserved verbatim.
 """
 
 from collections.abc import Callable, Sequence
@@ -63,8 +65,8 @@ def read_primary_key(
     if not ordered:
         return None
     return PrimaryKeyConstraint(
-        columns=tuple(row.column_name.lower() for row in ordered),
-        constraint_name=ordered[0].constraint_name.lower(),
+        columns=tuple(row.column_name for row in ordered),
+        constraint_name=ordered[0].constraint_name,
     )
 
 
@@ -81,16 +83,16 @@ def read_foreign_keys(
     """
     grouped: dict[str, list[Any]] = {}
     for row in run_query(foreign_keys_query(qualified_name)):
-        grouped.setdefault(row.constraint_name.lower(), []).append(row)
+        grouped.setdefault(row.constraint_name, []).append(row)
     return tuple(
         ForeignKeyConstraint(
-            local_columns=tuple(row.local_column.lower() for row in group),
+            local_columns=tuple(row.local_column for row in group),
             referenced_table=QualifiedName(
-                group[0].referenced_catalog.lower(),
-                group[0].referenced_schema.lower(),
-                group[0].referenced_table.lower(),
+                group[0].referenced_catalog,
+                group[0].referenced_schema,
+                group[0].referenced_table,
             ),
-            referenced_columns=tuple(row.referenced_column.lower() for row in group),
+            referenced_columns=tuple(row.referenced_column for row in group),
             constraint_name=constraint_name,
         )
         for constraint_name, group in grouped.items()
@@ -104,11 +106,11 @@ def read_referencing_foreign_keys(
     """Read the inbound foreign keys owned by other tables that reference this one."""
     return tuple(
         ForeignKeyReference(
-            constraint_name=row.constraint_name.lower(),
+            constraint_name=row.constraint_name,
             referencing_table=QualifiedName(
-                row.referencing_catalog.lower(),
-                row.referencing_schema.lower(),
-                row.referencing_table.lower(),
+                row.referencing_catalog,
+                row.referencing_schema,
+                row.referencing_table,
             ),
         )
         for row in run_query(referencing_foreign_keys_query(qualified_name))
@@ -132,7 +134,9 @@ def read_column_tags(
     """
     Read all column tags of this table as ``{column_name: {tag: value}}``.
 
-    Column names are lowercased to match the domain's lowercase columns; tag
+    The one adapter-side identifier lowering: this dict is probed with
+    domain-canonical column names, but it is a plain dict built before any
+    domain object exists, so nothing else can canonicalize its keys. Tag
     keys and values are case-sensitive and returned verbatim.
     """
     grouped: dict[str, dict[str, str]] = {}

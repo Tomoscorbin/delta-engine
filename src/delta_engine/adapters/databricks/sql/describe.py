@@ -66,8 +66,8 @@ def _parse_document(json_text: str, qualified_name: QualifiedName) -> TableDescr
         qualified_name=qualified_name,
         columns=_columns_from_json(document, qualified_name),
         comment=_string_or_empty(document, "comment", qualified_name, "table comment"),
-        partitioned_by=_lowercased_list(document, "partition_columns", qualified_name),
-        clustered_by=_lowercased_list(document, "clustering_columns", qualified_name),
+        partitioned_by=_string_list(document, "partition_columns", qualified_name),
+        clustered_by=_string_list(document, "clustering_columns", qualified_name),
         table_properties=_table_properties(document.get("table_properties"), qualified_name),
         relation_type=_optional_string(document, "type"),
         provider=_optional_string(document, "provider"),
@@ -104,7 +104,7 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
     for entry in columns_json:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             raise MetadataParseError(f"{qualified_name}: malformed column entry {entry!r}")
-        name = entry["name"].lower()
+        name = entry["name"]
         type_obj = entry.get("type")
         if not isinstance(type_obj, dict) or not isinstance(type_obj.get("name"), str):
             raise MetadataParseError(
@@ -154,13 +154,14 @@ def _table_properties(table_properties: object, qualified_name: QualifiedName) -
     return MappingProxyType(dict(table_properties))
 
 
-def _lowercased_list(document: dict, key: str, qualified_name: QualifiedName) -> tuple[str, ...]:
+def _string_list(document: dict, key: str, qualified_name: QualifiedName) -> tuple[str, ...]:
     """
-    Read a layout column list (partition or clustering columns), lowercased.
+    Read a layout column list (partition or clustering columns), verbatim.
 
     Absent or null means no such layout. A present value of any other shape is
     drift, not "no layout", so it fails the read rather than silently reading as
-    an empty layout.
+    an empty layout. Values carry the catalog's spelling; the domain table
+    canonicalizes them on construction.
     """
     value = document.get(key)
     if value is None:
@@ -169,4 +170,4 @@ def _lowercased_list(document: dict, key: str, qualified_name: QualifiedName) ->
         raise MetadataParseError(f"{qualified_name}: {key} is not a list, got {value!r}")
     if any(not isinstance(item, str) for item in value):
         raise MetadataParseError(f"{qualified_name}: {key} entries must be strings, got {value!r}")
-    return tuple(item.lower() for item in value)
+    return tuple(value)

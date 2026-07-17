@@ -187,7 +187,7 @@ def _struct_from_json(type_obj: dict) -> DataType | None:
         field_type = data_type_from_json(field.get("type"))
         if not isinstance(field_name, str) or field_type is None:
             return None
-        fields.append(StructField(name=field_name.lower(), data_type=field_type))
+        fields.append(StructField(name=field_name, data_type=field_type))
     try:
         return Struct(tuple(fields))
     except ValueError:
