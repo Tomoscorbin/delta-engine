@@ -5,7 +5,6 @@ import pytest
 
 from delta_engine.adapters.databricks.sql.compile import (
     _compile_action,
-    _properties_clause,
     compile_plan,
 )
 from delta_engine.domain.model import (
@@ -522,13 +521,21 @@ def test_compile_rename_column():
 
 
 @given(MANAGED_PROPERTY_MAPS)
-def test_properties_clause_is_sorted_filters_absence_and_ignores_mapping_order(
+def test_create_table_properties_are_mapping_order_independent_and_omit_absent_keys(
     properties: dict[str, str | None],
 ) -> None:
-    valued = [(name, value) for name, value in sorted(properties.items()) if value is not None]
-    pairs = ", ".join(f"'{name}'='{value}'" for name, value in valued)
-    expected = f"TBLPROPERTIES ({pairs})" if pairs else ""
+    # Given the same declared properties in two mapping insertion orders
     reversed_properties = dict(reversed(tuple(properties.items())))
+    column = DesiredColumn("id", Integer())
 
-    assert _properties_clause(properties) == expected
-    assert _properties_clause(reversed_properties) == expected
+    # When compiling a CREATE TABLE for each
+    statement = _compile_single(_create_table(column, properties=properties))
+    reversed_statement = _compile_single(_create_table(column, properties=reversed_properties))
+
+    # Then the statements are identical, and None-declared keys never render
+    assert statement == reversed_statement
+    absent = [name for name, value in properties.items() if value is None]
+    for name in absent:
+        assert name not in statement
+    if len(absent) == len(properties):
+        assert "TBLPROPERTIES" not in statement
