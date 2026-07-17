@@ -77,8 +77,15 @@ def _valid_describe_documents(draw: st.DrawFn):
             )
         )
 
-    partitioned_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
-    clustered_by = draw(st.lists(st.sampled_from(raw_names), unique=True))
+    # A Delta table is partitioned or liquid-clustered, never both.
+    layout_kind = draw(st.sampled_from(("none", "partitioned", "clustered")))
+    layout_columns = (
+        draw(st.lists(st.sampled_from(raw_names), unique=True, min_size=1))
+        if layout_kind != "none"
+        else []
+    )
+    partitioned_by = layout_columns if layout_kind == "partitioned" else []
+    clustered_by = layout_columns if layout_kind == "clustered" else []
     properties = draw(OBSERVED_TABLE_PROPERTIES)
     comment_kind = draw(st.sampled_from(("missing", "null", "value")))
     comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""

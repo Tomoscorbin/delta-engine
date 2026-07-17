@@ -1,4 +1,4 @@
-"""Hypothesis strategies shared by the pure Databricks SQL adapter tests."""
+"""Hypothesis strategies shared by the Databricks SQL and Spark adapter tests."""
 
 from hypothesis import strategies as st
 
@@ -32,7 +32,7 @@ CANONICAL_IDENTIFIERS = st.from_regex(r"[a-z_][a-z0-9_]{0,11}", fullmatch=True)
 
 _TEXT_CHARACTERS = st.one_of(
     st.characters(whitelist_categories=("Ll", "Lu", "Nd", "Zs")),
-    st.sampled_from(("'", "\\", "\n", "\t", "-", "_", ".", ",", "—")),
+    st.sampled_from(("'", '"', "\\", "\n", "\r", "\t", "-", "_", ".", ",", "—", "🚀")),
 )
 
 SQL_LITERAL_VALUES = st.one_of(
@@ -145,6 +145,8 @@ _SIMPLE_TYPE_DOCUMENTS: tuple[TypeDocument, ...] = (
     (Double(), {"name": "double"}),
     (Boolean(), {"name": "boolean"}),
     (String(), {"name": "string"}),
+    (String(), {"name": "string", "collation": "UTF8_BINARY"}),
+    (String(), {"name": "varchar", "length": 20}),
     (Binary(), {"name": "binary"}),
     (Date(), {"name": "date"}),
     (Timestamp(), {"name": "timestamp"}),
@@ -166,7 +168,7 @@ def _decimal_documents(draw: st.DrawFn) -> TypeDocument:
 
 def _array_document(item: TypeDocument) -> TypeDocument:
     data_type, document = item
-    return Array(data_type), {"name": "array", "element_type": document}
+    return Array(data_type), {"name": "array", "element_type": document, "element_nullable": True}
 
 
 def _map_document(items: tuple[TypeDocument, TypeDocument]) -> TypeDocument:
@@ -175,15 +177,25 @@ def _map_document(items: tuple[TypeDocument, TypeDocument]) -> TypeDocument:
         "name": "map",
         "key_type": key_document,
         "value_type": value_document,
+        "value_nullable": True,
     }
 
 
-def _struct_document(fields: dict[str, TypeDocument]) -> TypeDocument:
+@st.composite
+def _struct_documents(
+    draw: st.DrawFn,
+    children: st.SearchStrategy[TypeDocument],
+) -> TypeDocument:
+    fields = draw(st.dictionaries(CANONICAL_IDENTIFIERS, children, min_size=1, max_size=3))
     data_type = Struct(
         tuple(StructField(name, field_type) for name, (field_type, _) in fields.items())
     )
     document_fields: list[dict[str, object]] = [
-        {"name": name, "type": field_document, "nullable": True}
+        {
+            "name": draw(st.sampled_from((name, name.upper()))),
+            "type": field_document,
+            "nullable": True,
+        }
         for name, (_, field_document) in fields.items()
     ]
     return data_type, {"name": "struct", "fields": document_fields}
@@ -195,9 +207,7 @@ def _nested_type_documents(
     return st.one_of(
         children.map(_array_document),
         st.tuples(children, children).map(_map_document),
-        st.dictionaries(CANONICAL_IDENTIFIERS, children, min_size=1, max_size=3).map(
-            _struct_document
-        ),
+        _struct_documents(children),
     )
 
 
