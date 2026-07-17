@@ -14,6 +14,11 @@ name: Live Databricks Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      pytest_filter:
+        description: "Optional pytest -k expression to run a subset of the suite"
+        required: false
+        default: ""
   schedule:
     # Weekly drift check (Mondays 07:00 UTC): catches Databricks-side
     # behaviour changes the hermetic suite cannot see. Non-blocking — it
@@ -92,4 +97,8 @@ jobs:
         # --dist loadgroup: tests marked xdist_group("streaming_table") run
         # serially on one worker — the workspace tier allows one active DBSQL
         # pipeline at a time — while unmarked tests distribute as in load mode.
-        run: uv run pytest tests/live -m databricks_e2e --no-cov -rA -n 8 --dist loadgroup
+        env:
+          PYTEST_FILTER: ${{ inputs.pytest_filter }}
+        run: >
+          uv run pytest tests/live -m databricks_e2e --no-cov -rA -n 8
+          --dist loadgroup ${PYTEST_FILTER:+-k "${PYTEST_FILTER}"}

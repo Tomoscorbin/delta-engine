@@ -11,6 +11,7 @@ from delta_engine import (
     SyncFailedError,
     TableRunStatus,
     ValidationFailure,
+    render_report,
 )
 from delta_engine.databricks import build_sql_engine
 from delta_engine.schema import (
@@ -487,6 +488,69 @@ def test_child_with_foreign_key_is_blocked_when_its_parent_is_rejected(
     assert failure.reason == "BLOCKED_BY_FAILED_DEPENDENCY"
     assert table_exists(live_connection, child_name) is False
     assert read_live_table(live_connection, parent_name) == parent_before
+
+
+def test_fk_type_mismatch_against_registered_parent_is_blocked_before_execution(
+    live_connection, live_tables
+):
+    """Blocks a FK whose column types mismatch the registered parent before any child SQL runs."""
+    parent_name = live_tables("mismatch_parent")
+    child_name = live_tables("mismatch_child")
+
+    # The foreign key is internally consistent: it is declared against a
+    # parent object whose id is an Integer, matching the child's parent_id.
+    # But the parent declaration *registered for this sync* under the same
+    # qualified name types id as a Long — and Unity Catalog requires each
+    # foreign-key column's type to equal the referenced column's type. The
+    # engine must block the child before executing anything against it,
+    # rather than let the warehouse reject the constraint mid-execution and
+    # leave a half-built child behind.
+    declared_parent = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        parent_name,
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=("id",),
+    )
+    registered_parent = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        parent_name,
+        columns=(Column("id", Long(), nullable=False),),
+        primary_key=("id",),
+    )
+    child = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        child_name,
+        columns=(
+            Column("id", Integer(), nullable=False),
+            Column("parent_id", Integer()),
+        ),
+        primary_key=("id",),
+        foreign_keys=(ForeignKey(columns={"parent_id": "id"}, references=declared_parent),),
+    )
+
+    with pytest.raises(SyncFailedError) as error:
+        build_sql_engine(live_connection).sync(child, registered_parent)
+
+    report = error.value.report
+    [child_report] = [
+        table_report
+        for table_report in report.table_reports
+        if table_report.qualified_name.name == child_name
+    ]
+    # On failure the rendered report is the diagnosis: it shows what the
+    # engine actually did against the warehouse instead of blocking.
+    assert child_report.status is TableRunStatus.FOREIGN_KEY_FAILED, render_report(report)
+    [failure] = child_report.failures
+    assert isinstance(failure, ForeignKeyFailure)
+    assert failure.reason == "REFERENCED_COLUMN_TYPE_MISMATCH"
+    # The child never reached the warehouse: no SQL ran, no table was created.
+    assert child_report.execution is None
+    assert table_exists(live_connection, child_name) is False
+    # The registered parent is healthy and still synced.
+    assert read_live_table(live_connection, parent_name)["primary_key"] == ("id",)
 
 
 def test_unreadable_catalog_surfaces_as_typed_read_failure(live_connection):
