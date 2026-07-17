@@ -266,6 +266,8 @@ Expected: the whole live suite passes, including the four new pins. On failure, 
 
 **Second adjustment (2026-07-16, after the second Live run):** the serialized run confirmed the describe values and all four `ALTER STREAMING TABLE` tag statements, but the premise pin **failed in the informative direction** — plain `ALTER TABLE ... SET TAGS` was _tolerated_ on a streaming table (table level). Agreed resolution (Tom, this session): keep emitting the documented `ALTER STREAMING TABLE` dialect (all four statements live-verified); the rejection pin is removed because the engine relies on nothing being rejected. The spec's Problem, live-pin list, and Risks sections carry the dated correction.
 
+**Fourth adjustment (2026-07-17, post-verification):** the raw describe pin (`test_describe_as_json_reports_the_streaming_table_kind_and_provider`) was retired after proving `type="STREAMING_TABLE"` / `provider="delta"` green on every Live run, Tom's included. The end-to-end test now carries that fact — the reader's admit gate fails its read if the describe document changes — and gained a convergence resync (`has_changes is False`) plus a wider-scope refusal (`StreamingTableTagsOnly`, no planned statements, tags untouched) on the same provisioned table. A full Live run now provisions two streaming tables, not three.
+
 ---
 
 ### Task 3: Domain — `TableKind` on `ObservedTable`

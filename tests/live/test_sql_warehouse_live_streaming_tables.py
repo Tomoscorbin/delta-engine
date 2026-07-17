@@ -3,18 +3,26 @@ Live pins for the streaming-table facts the tags scope is built on.
 
 A streaming table's definition — schema, comments, properties — is owned by
 its pipeline; Unity Catalog tags are the one aspect durably manageable from
-outside it, via the documented ALTER STREAMING TABLE dialect. Each pin
+outside it, via the documented ALTER STREAMING TABLE dialect. Each test
 states platform facts the engine's reader gate, validation gate, or SQL
 dialect dispatch assumes.
+
+Two pins are deliberately absent. A raw ``DESCRIBE ... AS JSON`` pin proved
+``type="STREAMING_TABLE"``, ``provider="delta"`` on every Live run and was
+retired (2026-07-17): the end-to-end test carries the fact now — if the
+platform changed either value, the reader's admit gate would fail that read.
+And a rejection pin for plain ``ALTER TABLE ... SET TAGS`` never shipped:
+the platform was observed tolerating it on a streaming table (2026-07-16);
+the engine emits the documented ALTER STREAMING TABLE dialect and relies on
+nothing being rejected.
 
 Provisioning is quota-bound: the workspace tier allows one active DBSQL
 pipeline at a time, so every test that creates a streaming table carries the
 ``streaming_table`` xdist group (serialized onto one worker by the Live
-workflow's ``--dist loadgroup``) and pins share a provisioned table where the
-facts allow.
+workflow's ``--dist loadgroup``) and tests share a provisioned table where
+the facts allow.
 """
 
-import json
 import time
 
 import pytest
@@ -94,30 +102,6 @@ def _column_tags(live_connection, table_name: str) -> dict[tuple[str, str], str]
         f"AND table_name = {quote_literal(table_name)}",
     )
     return {(row["column_name"], row["tag_name"]): row["tag_value"] for row in rows}
-
-
-def test_describe_as_json_reports_the_streaming_table_kind_and_provider(
-    live_connection, live_tables
-):
-    """DESCRIBE AS JSON reports type=STREAMING_TABLE, provider=delta for a streaming table."""
-    # The admit gate in adapters/databricks/read.py is written against
-    # exactly these two values. If this pin fails, the gate and the unit
-    # fixtures are wrong, not this test: the assertion output carries the
-    # whole document — update them to the observed values.
-    #
-    # A rejection pin for plain ALTER TABLE ... SET TAGS deliberately does
-    # not exist: the platform was observed tolerating it on a streaming
-    # table (2026-07-16). The engine emits the documented ALTER STREAMING
-    # TABLE dialect and relies on nothing being rejected.
-    table_name = _create_streaming_table(live_connection, live_tables)
-
-    [row] = fetch_rows(
-        live_connection,
-        f"DESCRIBE TABLE EXTENDED {qualified_table(table_name)} AS JSON",
-    )
-    document = json.loads(row["json_metadata"])
-    assert document.get("type") == "STREAMING_TABLE", document
-    assert document.get("provider") == "delta", document
 
 
 def test_alter_streaming_table_tags_round_through_information_schema(live_connection, live_tables):
