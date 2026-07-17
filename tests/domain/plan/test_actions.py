@@ -1,3 +1,5 @@
+import inspect
+
 from hypothesis import given, strategies as st
 import pytest
 
@@ -12,6 +14,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     TableAspect,
 )
+import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
     Action,
     ActionPhase,
@@ -75,6 +78,22 @@ def _create_table_action() -> CreateTable:
 
 def _drop_primary_key() -> DropPrimaryKey:
     return DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=())
+
+
+def _concrete_action_types() -> list[type[Action]]:
+    """
+    Return every concrete Action subclass exposed by the actions module.
+
+    This uses the module namespace rather than Action.__subclasses__() because
+    dataclass(slots=True) can leave stale pre-slots class objects there.
+    """
+    return [
+        obj
+        for _, obj in inspect.getmembers(actions_module, inspect.isclass)
+        if issubclass(obj, Action)
+        and obj is not Action
+        and not getattr(obj, "__abstractmethods__", False)
+    ]
 
 
 def test_actionplan_truthiness_and_length():
@@ -307,3 +326,19 @@ def test_column_rename_conflict_is_unresolvable_not_an_action():
 def test_column_rename_conflict_rejects_no_difference():
     with pytest.raises(ValueError, match="no difference"):
         ColumnRenameConflict(old_name="same", new_name="same")
+
+
+def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
+    # The streaming-table scope gate admits only the tag aspects, so the
+    # actions carrying them are the complete set of statements the engine can
+    # aim at a streaming table. Growing this set is a policy decision, not a
+    # side effect: an action added with a tag aspect flows to streaming
+    # tables automatically.
+    tag_aspects = {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
+    tag_actions = {
+        action_type.__name__
+        for action_type in _concrete_action_types()
+        if action_type.aspect in tag_aspects
+    }
+
+    assert tag_actions == {"SetTableTag", "UnsetTableTag", "SetColumnTag", "UnsetColumnTag"}
