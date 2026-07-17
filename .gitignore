@@ -48,3 +48,5 @@ docs/superpowers/
 docs/_build/
 docs/generated/
 .claude/
+.agents/
+AGENTS.md
