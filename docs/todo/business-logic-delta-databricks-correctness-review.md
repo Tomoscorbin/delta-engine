@@ -35,7 +35,7 @@ path currently produces an incorrect result.
 | 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
 | 4 ✅ | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
 | 5 ✅ | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
-| 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
+| 6 ✅ | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
 | 7 ✅ | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
 | 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
 
@@ -304,6 +304,43 @@ DEL. See the
 
 Add Unicode regression tests that prove normalization never changes a valid
 lowercase identifier into a different spelling.
+
+### Resolved (2026-07-17)
+
+Resolved with one agreed policy change beyond the proposed solution: the
+engine no longer _rejects_ mixed-case declarations at all. The principle —
+reject what Databricks rejects, normalize what Databricks normalizes, no
+house rules beyond that. Identifiers are case-insensitive on the platform
+(backticked or not; backticks only widen the character set), Unity Catalog
+stores object names lowercase, and column display case is preserved but
+meaningless, so case is never identity and the engine canonicalizes rather
+than polices it.
+
+Identifier-carrying domain constructors now normalize with `str.lower()` in
+`__post_init__` instead of raising — `QualifiedName` parts, desired and
+observed column names, `renamed_from`, struct field names, constraint columns
+and names, and the partition/clustering lists. This is the normalization seam
+because the public `Column`/`StructField` are the domain classes re-exported;
+non-canonical names are now unrepresentable by construction. Reader adapters
+switched `casefold()` to `lower()`, fixing the defect where an
+already-lowercase name like `straße` was rejected on declaration and rewritten
+to `strasse` on observation. Declared catalog/schema/table parts are validated
+against the Unity Catalog object-name rules (at most 255 characters; no
+period, space, forward slash, control characters, or DEL — verified against
+the UC requirements page, uniform across the three parts) in the API layer,
+keeping the domain backend-free; column names stay governed by the
+column-mapping rules only. A case-only `renamed_from` collapses into the
+existing "cannot be renamed_from itself" rejection.
+
+Coverage: rejection tests flipped to normalization assertions; `straße`
+round-trip pins at the domain and the describe reader; a property-based test
+that normalization is identity on already-canonical names; a UC-rule
+rejection matrix (six rule classes across all three parts) plus a
+column-exemption test. Two live pins added for the next workflow run: Unity
+Catalog lowercases object names the way Python `lower()` does (and not the
+casefold), and the platform preserves column display case.
+`docs/reference-limitations.md` § Identifier handling rewritten from
+"known gap" to the new policy.
 
 ## 7. Separate partition and clustering type rules, and validate map keys
 

@@ -44,6 +44,52 @@ def test_delta_table_exposes_declared_name_parts():
     assert table.name == "orders"
 
 
+def test_mixed_case_declaration_normalizes_to_lowercase():
+    # Identifiers are case-insensitive on Databricks and Unity Catalog stores
+    # object names lowercase, so the declaration canonicalizes rather than rejects
+    table = DeltaTable(
+        catalog="Main",
+        schema="Sales",
+        name="Orders",
+        columns=[Column("Id", Integer())],
+    )
+
+    assert (table.catalog, table.schema, table.name) == ("main", "sales", "orders")
+    assert [column.name for column in table.columns] == ["id"]
+
+
+@pytest.mark.parametrize(
+    "bad_part",
+    ["or.ders", "or ders", "or/ders", "or\x07ders", "or\x7fders", "x" * 256],
+    ids=["period", "space", "slash", "control-char", "del", "over-255-chars"],
+)
+@pytest.mark.parametrize("position", ["catalog", "schema", "name"])
+def test_rejects_name_parts_unity_catalog_forbids(position, bad_part):
+    # Unity Catalog object names: at most 255 characters; no period, space,
+    # forward slash, ASCII control characters, or DEL
+    parts = {"catalog": "main", "schema": "sales", "name": "orders", position: bad_part}
+    with pytest.raises(ValueError, match="Unity Catalog"):
+        DeltaTable(
+            catalog=parts["catalog"],
+            schema=parts["schema"],
+            name=parts["name"],
+            columns=[Column("id", Integer())],
+        )
+
+
+def test_column_names_are_exempt_from_object_name_rules():
+    # Column-name characters are governed by column mapping, not the Unity
+    # Catalog object-name rules: a forward slash needs no special handling
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("id", Integer()), Column("net/gross", String())],
+    )
+
+    assert [column.name for column in table.columns] == ["id", "net/gross"]
+
+
 def test_delta_table_exposes_declared_columns():
     # Given a table declared with ordered columns
     table = DeltaTable(

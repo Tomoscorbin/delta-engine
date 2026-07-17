@@ -163,7 +163,16 @@ def test_empty_table_comment_is_empty_string():
     assert _parse(json.dumps(doc)).comment == ""
 
 
-def test_partitioning_and_clustering_casefolded_in_order():
+def test_lowercase_unicode_column_name_is_preserved_verbatim():
+    # 'straße' is already lowercase; casefold would rewrite it to 'strasse',
+    # a different identifier from the one the catalog stores
+    description = _parse(
+        _doc(columns=[{"name": "straße", "type": {"name": "int"}, "nullable": True}])
+    )
+    assert description.columns[0].name == "straße"
+
+
+def test_partitioning_and_clustering_lowercased_in_order():
     description = _parse(
         _doc(
             partition_columns=["Region", "Store"],

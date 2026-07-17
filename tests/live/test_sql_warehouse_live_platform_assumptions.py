@@ -14,8 +14,10 @@ from databricks.sql.exc import ServerOperationError
 
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
+    fetch_rows,
     qualified_table,
     read_live_table,
+    table_exists,
 )
 
 
@@ -230,3 +232,37 @@ def test_platform_rejects_a_complex_type_as_a_partition_column(live_connection, 
             f"CREATE TABLE {qualified_table(array_name)} "
             "(id INT, labels ARRAY<INT>) USING DELTA PARTITIONED BY (labels)",
         )
+
+
+def test_unity_catalog_lowercases_object_names_like_python_lower(live_connection, live_tables):
+    """Unity Catalog stores object names as the Python str.lower of the declared name."""
+    # The engine canonicalizes declared identifiers with str.lower(). The pin
+    # covers both halves of that choice: an uppercase non-ASCII name is stored
+    # as its Python lowercase, and the stored form is NOT the casefold ('ß'
+    # lowers to itself but casefolds to 'ss' — a different identifier). If
+    # either assertion fails, the engine's canonical form has diverged from
+    # what the platform stores.
+    declared = live_tables("GRÖßE")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(declared)} (id INT) USING DELTA",
+    )
+
+    assert table_exists(live_connection, declared.lower())
+    assert not table_exists(live_connection, declared.casefold())
+
+
+def test_platform_preserves_column_display_case(live_connection, live_tables):
+    """Databricks preserves the declared casing of column names."""
+    # Column case is display metadata: references resolve case-insensitively,
+    # but DESCRIBE echoes the creator's casing back. This is what makes the
+    # reader's lowercasing of observed column names real normalization work
+    # rather than a no-op, and why engine-created columns display lowercase.
+    table_name = live_tables("column_case")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`MyCol` INT) USING DELTA",
+    )
+
+    rows = fetch_rows(live_connection, f"DESCRIBE TABLE {qualified_table(table_name)}")
+    assert rows[0]["col_name"] == "MyCol"

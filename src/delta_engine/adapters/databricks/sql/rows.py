@@ -8,10 +8,10 @@ duck-typed catalog rows — pyspark ``Row`` or databricks-sql ``Row`` —
 accessed only by attribute lookups, so this module stays PySpark-free like
 the rest of the package.
 
-Identifier fields (constraint, column, table names) are casefolded here: the
-domain model requires lowercase identifiers, and normalising at the adapter
-boundary keeps that impedance mismatch out of the domain. Tag keys and values
-are case-sensitive and preserved verbatim.
+Identifier fields (constraint, column, table names) are lowercased here: the
+domain model stores identifiers in canonical lowercase, and normalising at the
+adapter boundary keeps pre-domain lookup keys (e.g. tag grouping) consistent
+with it. Tag keys and values are case-sensitive and preserved verbatim.
 """
 
 from collections.abc import Callable, Sequence
@@ -63,8 +63,8 @@ def read_primary_key(
     if not ordered:
         return None
     return PrimaryKeyConstraint(
-        columns=tuple(row.column_name.casefold() for row in ordered),
-        constraint_name=ordered[0].constraint_name.casefold(),
+        columns=tuple(row.column_name.lower() for row in ordered),
+        constraint_name=ordered[0].constraint_name.lower(),
     )
 
 
@@ -81,16 +81,16 @@ def read_foreign_keys(
     """
     grouped: dict[str, list[Any]] = {}
     for row in run_query(foreign_keys_query(qualified_name)):
-        grouped.setdefault(row.constraint_name.casefold(), []).append(row)
+        grouped.setdefault(row.constraint_name.lower(), []).append(row)
     return tuple(
         ForeignKeyConstraint(
-            local_columns=tuple(row.local_column.casefold() for row in group),
+            local_columns=tuple(row.local_column.lower() for row in group),
             referenced_table=QualifiedName(
-                group[0].referenced_catalog.casefold(),
-                group[0].referenced_schema.casefold(),
-                group[0].referenced_table.casefold(),
+                group[0].referenced_catalog.lower(),
+                group[0].referenced_schema.lower(),
+                group[0].referenced_table.lower(),
             ),
-            referenced_columns=tuple(row.referenced_column.casefold() for row in group),
+            referenced_columns=tuple(row.referenced_column.lower() for row in group),
             constraint_name=constraint_name,
         )
         for constraint_name, group in grouped.items()
@@ -104,11 +104,11 @@ def read_referencing_foreign_keys(
     """Read the inbound foreign keys owned by other tables that reference this one."""
     return tuple(
         ForeignKeyReference(
-            constraint_name=row.constraint_name.casefold(),
+            constraint_name=row.constraint_name.lower(),
             referencing_table=QualifiedName(
-                row.referencing_catalog.casefold(),
-                row.referencing_schema.casefold(),
-                row.referencing_table.casefold(),
+                row.referencing_catalog.lower(),
+                row.referencing_schema.lower(),
+                row.referencing_table.lower(),
             ),
         )
         for row in run_query(referencing_foreign_keys_query(qualified_name))
@@ -132,10 +132,10 @@ def read_column_tags(
     """
     Read all column tags of this table as ``{column_name: {tag: value}}``.
 
-    Column names are casefolded to match the domain's lowercase columns; tag
+    Column names are lowercased to match the domain's lowercase columns; tag
     keys and values are case-sensitive and returned verbatim.
     """
     grouped: dict[str, dict[str, str]] = {}
     for row in run_query(column_tags_query(qualified_name)):
-        grouped.setdefault(row.column_name.casefold(), {})[row.tag_name] = row.tag_value
+        grouped.setdefault(row.column_name.lower(), {})[row.tag_name] = row.tag_value
     return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})
