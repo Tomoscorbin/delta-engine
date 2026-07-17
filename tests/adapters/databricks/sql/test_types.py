@@ -1,3 +1,6 @@
+from hypothesis import given
+import pytest
+
 from delta_engine.adapters.databricks.sql.types import data_type_from_json, render_data_type
 from delta_engine.domain.model.data_type import (
     Array,
@@ -19,6 +22,7 @@ from delta_engine.domain.model.data_type import (
     TimestampNtz,
     Variant,
 )
+from tests.adapters.databricks.sql.strategies import TYPE_DOCUMENTS
 
 
 def test_sql_type_for_primitive_types() -> None:
@@ -138,3 +142,28 @@ def test_pathologically_deep_nesting_returns_none():
     for _ in range(6000):
         payload = {"name": "array", "element_type": payload}
     assert data_type_from_json(payload) is None
+
+
+@given(TYPE_DOCUMENTS)
+def test_canonical_json_type_documents_map_to_the_generated_domain_type(case) -> None:
+    expected, document = case
+
+    assert data_type_from_json(document) == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed"),
+    (
+        ("precision", True),
+        ("precision", 10.5),
+        ("precision", "10"),
+        ("scale", False),
+        ("scale", 2.5),
+        ("scale", "2"),
+    ),
+)
+def test_decimal_rejects_non_integer_json_fields(field: str, malformed: object) -> None:
+    document: dict[str, object] = {"name": "decimal", "precision": 10, "scale": 2}
+    document[field] = malformed
+
+    assert data_type_from_json(document) is None

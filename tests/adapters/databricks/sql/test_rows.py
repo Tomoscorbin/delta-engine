@@ -8,6 +8,7 @@ results are accessed — and each read returns a domain value.
 
 from types import SimpleNamespace
 
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.adapters.databricks.sql import (
@@ -29,6 +30,11 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
     QualifiedName,
+)
+from tests.adapters.databricks.sql.strategies import (
+    CANONICAL_IDENTIFIERS,
+    TAG_KEYS,
+    TAG_VALUES,
 )
 
 QN = QualifiedName("dev", "silver", "orders")
@@ -223,3 +229,30 @@ def test_column_tags_read_lowercases_column_names_but_preserves_tag_case():
     tags = read_column_tags(_runner(column_tags_query(QN), rows), QN)
     assert dict(tags["email"]) == {"PII": "Email", "mask": "hash"}
     assert dict(tags["id"]) == {"key": "primary"}
+
+
+@st.composite
+def _column_tag_row_permutations(draw: st.DrawFn):
+    expected = draw(
+        st.dictionaries(
+            CANONICAL_IDENTIFIERS,
+            st.dictionaries(TAG_KEYS, TAG_VALUES, min_size=1, max_size=4),
+            min_size=1,
+            max_size=4,
+        )
+    )
+    rows = [
+        SimpleNamespace(column_name=column.upper(), tag_name=name, tag_value=value)
+        for column, tags in expected.items()
+        for name, value in tags.items()
+    ]
+    return draw(st.permutations(rows)), expected
+
+
+@given(_column_tag_row_permutations())
+def test_column_tag_grouping_is_row_order_independent_and_preserves_tag_case(case) -> None:
+    rows, expected = case
+
+    actual = read_column_tags(_runner(column_tags_query(QN), rows), QN)
+
+    assert {column: dict(tags) for column, tags in actual.items()} == expected

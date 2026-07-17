@@ -164,11 +164,14 @@ def _decimal_from_json(type_obj: dict) -> DataType | None:
     # read as false type drift and be planned against; fail the read instead.
     precision = type_obj.get("precision")
     scale = type_obj.get("scale")
-    if precision is None or scale is None:
+    # json.loads returns JSON integer tokens as int. Do not coerce strings,
+    # floats, or booleans: accepting 10.9 as 10 or true as 1 would turn a
+    # malformed catalog document into false observed type state.
+    if type(precision) is not int or type(scale) is not int:
         return None
     try:
-        return Decimal(int(precision), int(scale))
-    except (TypeError, ValueError):
+        return Decimal(precision, scale)
+    except ValueError:
         return None
 
 

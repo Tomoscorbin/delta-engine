@@ -1,8 +1,12 @@
 import inspect
 
+from hypothesis import given
 import pytest
 
-from delta_engine.adapters.databricks.sql.compile import _compile_action, compile_plan
+from delta_engine.adapters.databricks.sql.compile import (
+    _compile_action,
+    compile_plan,
+)
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -41,6 +45,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
+from tests.adapters.databricks.sql.strategies import MANAGED_PROPERTY_MAPS
 
 _TARGET = QualifiedName("cat", "sch", "tbl")
 _REFERENCED_TABLE = QualifiedName("cat", "sch", "customers")
@@ -514,6 +519,27 @@ def test_compile_rename_column():
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )
+
+
+@given(MANAGED_PROPERTY_MAPS)
+def test_create_table_properties_are_mapping_order_independent_and_omit_absent_keys(
+    properties: dict[str, str | None],
+) -> None:
+    # Given the same declared properties in two mapping insertion orders
+    reversed_properties = dict(reversed(tuple(properties.items())))
+    column = DesiredColumn("id", Integer())
+
+    # When compiling a CREATE TABLE for each
+    statement = _compile_single(_create_table(column, properties=properties))
+    reversed_statement = _compile_single(_create_table(column, properties=reversed_properties))
+
+    # Then the statements are identical, and None-declared keys never render
+    assert statement == reversed_statement
+    absent = [name for name, value in properties.items() if value is None]
+    for name in absent:
+        assert name not in statement
+    if len(absent) == len(properties):
+        assert "TBLPROPERTIES" not in statement
 
 
 def test_tag_statements_compile_with_the_streaming_table_dialect():

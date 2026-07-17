@@ -1,13 +1,21 @@
 import json
 from pathlib import Path
+from typing import NamedTuple
 
+from hypothesis import given, strategies as st
 import pytest
 
 from delta_engine.adapters.databricks.sql.describe import (
     MetadataParseError,
     table_description_from_rows,
 )
-from delta_engine.domain.model import Integer, QualifiedName, String
+from delta_engine.domain.model import Integer, ObservedColumn, QualifiedName, String
+from tests.adapters.databricks.sql.strategies import (
+    CANONICAL_IDENTIFIERS,
+    OBSERVED_TABLE_PROPERTIES,
+    SQL_LITERAL_VALUES,
+    TYPE_DOCUMENTS,
+)
 
 QN = QualifiedName("dev", "silver", "demo_table")
 
@@ -36,6 +44,83 @@ def _doc(**overrides):
     }
     base.update(overrides)
     return json.dumps(base)
+
+
+class DescribeCase(NamedTuple):
+    """A generated valid document paired with the observed state it must parse to."""
+
+    document: dict
+    columns: tuple[ObservedColumn, ...]
+    comment: str
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    properties: dict[str, str]
+
+
+@st.composite
+def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
+    names = draw(st.lists(CANONICAL_IDENTIFIERS, min_size=1, max_size=5, unique=True))
+    columns = []
+    expected_columns = []
+    raw_names = []
+    for name in names:
+        raw_name = draw(st.sampled_from((name, name.upper())))
+        data_type, type_document = draw(TYPE_DOCUMENTS)
+        nullable = draw(st.booleans())
+        comment_kind = draw(st.sampled_from(("missing", "null", "value")))
+        comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""
+        raw_names.append(raw_name)
+        column_document = {
+            "name": raw_name,
+            "type": type_document,
+            "nullable": nullable,
+        }
+        if comment_kind == "null":
+            column_document["comment"] = None
+        elif comment_kind == "value":
+            column_document["comment"] = comment
+        columns.append(column_document)
+        expected_columns.append(
+            ObservedColumn(
+                name=raw_name.casefold(),
+                data_type=data_type,
+                nullable=nullable,
+                comment=comment,
+            )
+        )
+
+    # A Delta table is partitioned or liquid-clustered, never both.
+    layout_kind = draw(st.sampled_from(("none", "partitioned", "clustered")))
+    layout_columns = (
+        draw(st.lists(st.sampled_from(raw_names), unique=True, min_size=1))
+        if layout_kind != "none"
+        else []
+    )
+    partitioned_by = layout_columns if layout_kind == "partitioned" else []
+    clustered_by = layout_columns if layout_kind == "clustered" else []
+    properties = draw(OBSERVED_TABLE_PROPERTIES)
+    comment_kind = draw(st.sampled_from(("missing", "null", "value")))
+    comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""
+    document = {
+        "type": "MANAGED",
+        "provider": "delta",
+        "columns": columns,
+        "partition_columns": partitioned_by,
+        "clustering_columns": clustered_by,
+        "table_properties": properties,
+    }
+    if comment_kind == "null":
+        document["comment"] = None
+    elif comment_kind == "value":
+        document["comment"] = comment
+    return DescribeCase(
+        document=document,
+        columns=tuple(expected_columns),
+        comment=comment,
+        partitioned_by=tuple(name.casefold() for name in partitioned_by),
+        clustered_by=tuple(name.casefold() for name in clustered_by),
+        properties=properties,
+    )
 
 
 # ---------- relation facts ----------
@@ -222,3 +307,51 @@ def test_real_order_fact_fixture():
     assert description.columns[0].nullable is False
     assert description.table_properties["delta.columnMapping.mode"] == "name"
     assert description.table_properties["delta.minReaderVersion"] == "3"  # unregistered, carried
+
+
+@given(_valid_describe_documents())
+def test_valid_describe_documents_preserve_values_and_normalize_identifiers(
+    case: DescribeCase,
+) -> None:
+    description = _parse(json.dumps(case.document))
+
+    assert description.columns == case.columns
+    assert description.comment == case.comment
+    assert description.partitioned_by == case.partitioned_by
+    assert description.clustered_by == case.clustered_by
+    assert dict(description.table_properties) == case.properties
+
+
+def test_unknown_describe_fields_are_ignored() -> None:
+    # Unity Catalog grows the document over time; fields the parser does not
+    # know must not affect the read.
+    baseline = _parse(_doc())
+
+    assert _parse(_doc(future_metadata={"ignored": [1, 2, 3]})) == baseline
+
+
+@pytest.mark.parametrize(
+    ("field", "malformed"),
+    (
+        ("table_comment", False),
+        ("column_comment", 0),
+        ("layout_item", {"name": "region"}),
+        ("property_value", True),
+    ),
+)
+def test_non_string_describe_leaf_values_raise_metadata_parse_error(
+    field: str,
+    malformed: object,
+) -> None:
+    document = json.loads(_doc())
+    if field == "table_comment":
+        document["comment"] = malformed
+    elif field == "column_comment":
+        document["columns"][0]["comment"] = malformed
+    elif field == "layout_item":
+        document["partition_columns"] = [malformed]
+    else:
+        document["table_properties"] = {"delta.appendOnly": malformed}
+
+    with pytest.raises(MetadataParseError):
+        _parse(json.dumps(document))
