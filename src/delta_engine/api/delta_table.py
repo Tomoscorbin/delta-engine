@@ -20,6 +20,8 @@ from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Propert
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Array,
+    Binary,
+    Boolean,
     DataType,
     DesiredColumn as Column,
     DesiredTable,
@@ -67,10 +69,18 @@ _CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
     {"_change_type", "_commit_version", "_commit_timestamp"}
 )
 
-# Complex types Delta accepts neither as partition columns
-# (INVALID_PARTITION_COLUMN_DATA_TYPE) nor as liquid-clustering keys.
-# Two distinct backend rules that happen to name the same types today.
-_TYPES_UNUSABLE_AS_LAYOUT_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
+# Partitioning and clustering are distinct backend rules with distinct type
+# lists. Delta refuses complex types as partition columns
+# (INVALID_PARTITION_COLUMN_DATA_TYPE).
+_TYPES_UNUSABLE_AS_PARTITION_KEYS: Final[tuple[type[DataType], ...]] = (Array, Map, Struct, Variant)
+
+# Liquid clustering's supported-type list is narrower: on top of the complex
+# types, it also excludes Boolean and Binary, which partitioning accepts.
+_TYPES_UNUSABLE_AS_CLUSTERING_KEYS: Final[tuple[type[DataType], ...]] = (
+    *_TYPES_UNUSABLE_AS_PARTITION_KEYS,
+    Boolean,
+    Binary,
+)
 
 # Tag limits enforced per securable object (a table and each of its columns
 # are separate securables). Databricks caps both tag keys and values at 256
@@ -171,14 +181,14 @@ def _validate_layout(
     columns_by_name = {column.name: column for column in columns}
     for name in partitioned_by:
         column = columns_by_name.get(name)
-        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_PARTITION_KEYS):
             raise ValueError(
                 f"Partition column {name!r} has type"
                 f" {type(column.data_type).__name__}, which Delta cannot partition by"
             )
     for name in clustered_by:
         column = columns_by_name.get(name)
-        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_LAYOUT_KEYS):
+        if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_CLUSTERING_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
                 f" {type(column.data_type).__name__}, which cannot be a clustering key"

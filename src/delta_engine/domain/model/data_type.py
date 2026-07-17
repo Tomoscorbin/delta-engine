@@ -154,3 +154,8 @@ class Map(DataType):
 
     key: DataType
     value: DataType
+
+    def __post_init__(self) -> None:
+        # Databricks accepts any MAP key type except MAP itself.
+        if isinstance(self.key, Map):
+            raise ValueError("Map key type must not be a Map")
