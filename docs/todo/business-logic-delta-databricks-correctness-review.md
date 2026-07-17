@@ -33,7 +33,7 @@ path currently produces an incorrect result.
 | 1 ✅ | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
 | 2 ✅ | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
 | 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
-| 4    | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
+| 4 ✅ | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
 | 5 ✅ | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
 | 6    | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
 | 7    | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
@@ -220,6 +220,21 @@ each foreign-key column type must match the referenced column type. See the
 
 Cover the mismatch through resolver tests, engine tests, and the public
 declaration surface.
+
+### Resolved (2026-07-17)
+
+Fixed in [PR #256](https://github.com/Tomoscorbin/delta-engine/pull/256).
+Dependency resolution now compares each local column's type with the
+referenced column's type on the registered parent declaration and fails the
+table with the new `REFERENCED_COLUMN_TYPE_MISMATCH` reason. The check runs
+after `REFERENCED_COLUMNS_NOT_A_KEY` — which guarantees every referenced
+column exists on the registered parent — and before cycle classification,
+mirroring the existing structural-check precedence; dependents of a
+mismatched table are blocked through the existing propagation pass.
+Resolver, engine, and failure-detail coverage all construct the mismatch
+through the public declaration surface (an FK declared against one parent
+object while a differently-typed declaration is registered under the same
+qualified name).
 
 ## 5. Compile an empty column comment as `COMMENT ''`
 
