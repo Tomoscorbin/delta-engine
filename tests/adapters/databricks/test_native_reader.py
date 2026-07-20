@@ -44,7 +44,7 @@ def test_reads_comment_properties_and_has_no_constraints_or_tags(spark, temp_sch
         QualifiedName(TEST_CATALOG, temp_schema, table_name)
     )
 
-    # Then the comment and only the registered property are observed
+    # Then the comment and only the managed property are observed
     assert isinstance(state, TablePresent)
     assert state.table.comment == "demo table"
     assert dict(state.table.properties) == {"delta.enableChangeDataFeed": "true"}

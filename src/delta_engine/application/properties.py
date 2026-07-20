@@ -6,12 +6,12 @@ Reference: https://docs.delta.io/latest/table-properties.html
 Properties share their namespace with the platform: Databricks writes keys
 like ``delta.minReaderVersion`` and ``delta.enableRowTracking`` into table
 metadata autonomously. The engine manages properties by exact declaration
-over the registered keys below; everything else is invisible — the reader
-adapter filters unregistered keys out of the observed state before the
+over the managed keys below; everything else is invisible — the reader
+adapter filters unmanaged keys out of the observed state before the
 domain ever sees them.
 
-``Property`` is the single source of the managed key names: the catalogue
-below references its members, and the api layer re-exports it as the
+``Property`` is the single source of the managed key names: the policy
+definitions below reference its members, and the api layer re-exports it as the
 user-facing declaration vocabulary. There is no second list to keep in sync.
 
 Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
@@ -19,10 +19,10 @@ Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
 entirely to the platform.
 
 Admission policy — adding a key is a breaking change: tables carrying it
-undeclared start failing validation on upgrade. Before registering a key,
+undeclared start failing validation on upgrade. Before managing a new key,
 create a fresh table on a current Databricks Runtime and inspect DESCRIBE
-DETAIL's properties: if the platform auto-writes the key, do not register
-it. Additions are called out in release notes.
+DETAIL's properties: if the platform auto-writes the key, do not add it to
+the policy. Additions are called out in release notes.
 """
 
 from collections.abc import Callable, Mapping
@@ -31,6 +31,38 @@ from enum import StrEnum
 import re
 from types import MappingProxyType
 from typing import Final
+
+# A single `interval <n> <unit>` term only — deliberately stricter than the
+# catalog, which also accepts compound intervals ("interval 1 hour 30
+# minutes"). One canonical spelling keeps declared and observed values
+# comparable; see the properties section in docs/how-to-configure-table.md.
+_INTERVAL_FORMAT = re.compile(
+    r"interval [0-9]+ "
+    r"(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?"
+)
+
+_INTEGER_AT_LEAST_MINUS_ONE = re.compile(r"-1|0|[1-9][0-9]*")
+
+
+def _is_lowercase_boolean(value: str) -> bool:
+    # The catalog stores 'true'/'false'; any other casing would re-diff
+    # as drift on every sync.
+    return value in {"true", "false"}
+
+
+def _is_interval(value: str) -> bool:
+    return _INTERVAL_FORMAT.fullmatch(value) is not None
+
+
+def _is_integer_at_least_minus_one(value: str) -> bool:
+    # Canonical digits only: bare int() also accepts "1_000", "+5", or " 5 ",
+    # forms the catalog would not normalize and that can fail Java-side
+    # parsing at execution instead of at declaration.
+    return _INTEGER_AT_LEAST_MINUS_ONE.fullmatch(value) is not None
+
+
+def _is_column_mapping_mode(value: str) -> bool:
+    return value in {"none", "name"}
 
 
 class Property(StrEnum):
@@ -42,39 +74,6 @@ class Property(StrEnum):
     LOG_RETENTION_DURATION = "delta.logRetentionDuration"
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
     TYPE_WIDENING = "delta.enableTypeWidening"
-
-
-# A single `interval <n> <unit>` term only — deliberately stricter than the
-# catalog, which also accepts compound intervals ("interval 1 hour 30
-# minutes"). One canonical spelling keeps declared and observed values
-# comparable; see the properties section in docs/how-to-configure-table.md.
-_INTERVAL_FORMAT = re.compile(
-    r"interval\s+\d+\s+(nanosecond|microsecond|millisecond|second|minute|hour|day|week)s?",
-    re.IGNORECASE,
-)
-
-
-def _is_lowercase_boolean(value: str) -> bool:
-    # The catalog stores 'true'/'false'; any other casing would re-diff
-    # as drift on every sync.
-    return value in {"true", "false"}
-
-
-def _is_interval(value: str) -> bool:
-    return _INTERVAL_FORMAT.fullmatch(value.strip()) is not None
-
-
-def _is_integer_at_least_minus_one(value: str) -> bool:
-    # Canonical digits only: bare int() also accepts "1_000", "+5", or " 5 ",
-    # forms the catalog would not normalize and that can fail Java-side
-    # parsing at execution instead of at declaration.
-    if re.fullmatch(r"-?\d+", value) is None:
-        return False
-    return int(value) >= -1
-
-
-def _is_column_mapping_mode(value: str) -> bool:
-    return value in {"none", "name"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,12 +116,93 @@ class PropertyDefinition:
         restriction set permits everything; ``desired`` ``None`` means
         removal (the key declared absent).
         """
+        if observed == desired:
+            return True
+
         if observed is None or not self.permitted_transitions:
             return True
+
         return (observed, desired) in self.permitted_transitions
 
 
-type PropertyRegistry = Mapping[str, PropertyDefinition]
+@dataclass(frozen=True, slots=True)
+class PropertyPolicy:
+    """Validate declarations and transitions for the managed properties."""
+
+    definitions: tuple[PropertyDefinition, ...]
+    _definitions_by_name: Mapping[str, PropertyDefinition] = field(
+        init=False, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        definitions_by_name = {definition.key.value: definition for definition in self.definitions}
+
+        if len(definitions_by_name) != len(self.definitions):
+            raise ValueError("Property policy contains duplicate property definitions")
+
+        managed_keys = frozenset(definitions_by_name)
+        public_keys = frozenset(member.value for member in Property)
+
+        # Property is the public vocabulary. Every public member must have
+        # exactly one policy definition, and no hidden definitions may exist
+        if managed_keys != public_keys:
+            missing = sorted(public_keys - managed_keys)
+            unexpected = sorted(managed_keys - public_keys)
+            raise ValueError(
+                "Property policy does not match the public Property vocabulary:"
+                f" missing={missing}, unexpected={unexpected}"
+            )
+
+        object.__setattr__(self, "_definitions_by_name", MappingProxyType(definitions_by_name))
+
+    def validate_declaration(self, properties: Mapping[str, str | None]) -> None:
+        """
+        Raise ``ValueError`` when a declaration contains an unmanaged key or bad value.
+
+        A ``None`` value asserts absence and is validated by ``PropertyDefinition``.
+        """
+        unmanaged = sorted(name for name in properties if name not in self._definitions_by_name)
+
+        if unmanaged:
+            raise ValueError(f"Properties not managed by this engine: {', '.join(unmanaged)}")
+
+        for name, value in properties.items():
+            definition = self._definitions_by_name[name]
+            rejection = definition.reject_declared_value(value)
+            if rejection is not None:
+                raise ValueError(rejection)
+
+    def project_observed(self, properties: Mapping[str, str]) -> Mapping[str, str]:
+        """Return only managed keys from the catalog's observed properties."""
+        managed = {
+            name: value for name, value in properties.items() if name in self._definitions_by_name
+        }
+        return MappingProxyType(managed)
+
+    def permits_transition(
+        self,
+        name: str,
+        observed: str | None,
+        desired: str | None,
+    ) -> bool:
+        """Return whether a managed property may move to its desired value."""
+        definition = self._definitions_by_name.get(name)
+        if definition is None:  # TODO: raise on unknown properties
+            return True
+        return definition.permits_transition(observed, desired)
+
+    def permits_removal(
+        self,
+        name: str,
+        observed: str,
+    ) -> bool:
+        """Return whether a managed property may be removed."""
+        return self.permits_transition(
+            name=name,
+            observed=observed,
+            desired=None,
+        )
+
 
 _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     PropertyDefinition(
@@ -147,7 +227,7 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     ),
     PropertyDefinition(
         key=Property.COLUMN_MAPPING_MODE,
-        value_description="'none' or 'name'",
+        value_description=("'none' or 'name'; 'id' is unsupported."),
         is_valid_value=_is_column_mapping_mode,
         # Only none -> name is permitted. Databricks can remove column
         # mapping (SET mode='none' / DROP FEATURE), but removal rewrites
@@ -167,6 +247,4 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
     ),
 )
 
-DELTA_PROPERTY_REGISTRY: Final[PropertyRegistry] = MappingProxyType(
-    {definition.key: definition for definition in _DEFINITIONS}
-)
+DELTA_PROPERTY_POLICY: Final = PropertyPolicy(_DEFINITIONS)

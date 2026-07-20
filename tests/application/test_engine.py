@@ -1375,7 +1375,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
-def test_sync_fails_loud_on_undeclared_registered_property():
+def test_sync_fails_loud_on_undeclared_managed_property():
     # Given a live table carrying columnMapping.mode that the spec omits
     fqn = "cat.sch.orders"
     catalog, schema, name = fqn.split(".")

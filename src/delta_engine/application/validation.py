@@ -7,9 +7,9 @@ from typing import ClassVar, Final, Protocol, assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import (
-    DELTA_PROPERTY_REGISTRY,
+    DELTA_PROPERTY_POLICY,
     Property,
-    PropertyRegistry,
+    PropertyPolicy,
 )
 from delta_engine.domain.model import (
     Byte,
@@ -258,11 +258,11 @@ class PropertyTransitionNotSupported:
 
     A removal is a transition to absence: an ``UnsetProperty`` is judged as
     ``(observed_value, None)`` against the same permitted set as value
-    changes, so a key whose registry entry permits no ``(value, None)``
+    changes, so a key whose policy definition permits no ``(value, None)``
     pair cannot be declared absent.
     """
 
-    property_registry: PropertyRegistry
+    property_policy: PropertyPolicy
 
     name: ClassVar[str] = "PropertyTransitionNotSupported"
 
@@ -302,22 +302,23 @@ class PropertyTransitionNotSupported:
         return tuple(failures)
 
     def _is_blocked(self, name: str, observed_value: str, desired_value: str | None) -> bool:
-        definition = self.property_registry.get(name)
-        if definition is None:
-            return False
-        return not definition.permits_transition(observed_value, desired_value)
+        return not self.property_policy.permits_transition(
+            name=name,
+            observed=observed_value,
+            desired=desired_value,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class PropertyMustBeDeclared:
-    """Disallow leaving a registered catalog property undeclared."""
+    """Disallow leaving a managed catalog property undeclared."""
 
-    property_registry: PropertyRegistry
+    property_policy: PropertyPolicy
 
     name: ClassVar[str] = "PropertyMustBeDeclared"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every registered key set on the table but absent from the declaration."""
+        """Flag every managed key set on the table but absent from the declaration."""
         return tuple(
             ValidationFailure(rule_name=self.name, message=self._message(unresolvable))
             for unresolvable in drift.unresolvable
@@ -325,7 +326,7 @@ class PropertyMustBeDeclared:
         )
 
     def _message(self, unresolvable: PropertyUndeclared) -> str:
-        if not self._removal_permitted(unresolvable.name, unresolvable.observed_value):
+        if not self.property_policy.permits_removal(unresolvable.name, unresolvable.observed_value):
             return (
                 f"Operation not allowed: {unresolvable.name} is set on the table"
                 f" (value '{unresolvable.observed_value}') but not declared; it cannot"
@@ -337,10 +338,6 @@ class PropertyMustBeDeclared:
             f" (value '{unresolvable.observed_value}') but not declared. Declare it"
             " to manage it, or declare it as None to remove it."
         )
-
-    def _removal_permitted(self, name: str, observed_value: str) -> bool:
-        definition = self.property_registry.get(name)
-        return definition is None or definition.permits_transition(observed_value, None)
 
 
 class ColumnMappingRequiredForDrop:
@@ -462,8 +459,8 @@ DEFAULT_RULES: Final[tuple[Rule, ...]] = (
     NonWideningColumnTypeChange(),
     TypeWideningRequiredForTypeChange(),
     PartitioningChangeNotSupported(),
-    PropertyTransitionNotSupported(DELTA_PROPERTY_REGISTRY),
-    PropertyMustBeDeclared(DELTA_PROPERTY_REGISTRY),
+    PropertyTransitionNotSupported(DELTA_PROPERTY_POLICY),
+    PropertyMustBeDeclared(DELTA_PROPERTY_POLICY),
     ColumnMappingRequiredForDrop(),
     AmbiguousColumnRename(),
     PrimaryKeyReferencedByForeignKeys(),

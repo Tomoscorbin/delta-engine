@@ -137,7 +137,7 @@ reader, executor, and backend-specific error translation.
 
 ## Adding a genuinely different backend
 
-The two ports are import-clean: the `domain` and `application` layers never import `pyspark` or `delta`, and your adapter adds no backend imports to them. But import purity is not the whole story. The application layer still encodes Delta-specific policy in ordinary Python — the Delta table-property registry in `application/properties.py`, and validation rules such as `ColumnMappingRequiredForDrop` that exist only because of how Delta handles column drops.
+The two ports are import-clean: the `domain` and `application` layers never import `pyspark` or `delta`, and your adapter adds no backend imports to them. But import purity is not the whole story. The application layer still encodes Delta-specific policy in ordinary Python — `DELTA_PROPERTY_POLICY` in `application/properties.py`, and validation rules such as `ColumnMappingRequiredForDrop` that exist only because of how Delta handles column drops.
 
 The consequence for a new backend:
 

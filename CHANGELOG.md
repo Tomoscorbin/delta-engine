@@ -278,10 +278,10 @@ DeltaTable(scope="metadata"). The metadata_only parameter is removed.
 - **adapter**: probe information_schema availability; fail reads loudly on UC
 - exact property declarations — None assertions, no default injection, metadata-only fast-fail
 - property guards — transition, must-declare, unset-forbidden rules and drop precondition
-- exact-declaration properties diff with registry parameter and PROPERTIES gate
+- exact-declaration properties diff with policy parameter and PROPERTIES gate
 - UnsetProperty action; SetProperty observed_value; None-filtered CREATE properties
 - DesiredTable properties accept None absence assertions
-- property registry — domain mechanism, application catalogue
+- property policy — domain mechanism, application definitions
 - add metadata_only mode to DeltaTable
 - add UnmanagedDimensionDrift rule and wire desired into validate_diff
 - add managed_aspects scope field to DesiredTable
@@ -466,7 +466,7 @@ DeltaTable(scope="metadata"). The metadata_only parameter is removed.
 - group FK rows with itertools.groupby in reader
 - extract blocking_failures helper in dependency resolution
 - Refactor parse method in QualifiedName class
-- dissolve api/properties.py — import Property and the registry directly
+- dissolve api/properties.py — import Property and the policy directly
 - extract MissingTableUnmanaged into a named invariant class
 - rename PropertyUndeclared; uniform (desired, observed) diff-helper signatures
 - scope check becomes UnmanagedAspectDrift with the Rule interface

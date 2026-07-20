@@ -148,7 +148,7 @@ def test_all_description_fields_pass_through():
     assert dict(observed.columns[0].tags) == {}
 
 
-def test_unregistered_observed_properties_are_invisible():
+def test_unmanaged_observed_properties_are_invisible():
     # The description carries every observed property key; the read keeps only
     # the keys the engine manages. Protocol internals no declaration can own
     # (delta.minReaderVersion, feature flags) must not read as drift.

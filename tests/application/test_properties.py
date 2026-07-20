@@ -1,21 +1,10 @@
 import pytest
 
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
 
 
-def test_property_enum_values_match_the_registry_keys():
-    # Given the property vocabulary a user declares against — the enum is the
-    # single source, and the catalogue the engine validates against is built
-    # from it, so the registry covers exactly the enum's keys
-    assert {member.value for member in Property} == set(DELTA_PROPERTY_REGISTRY)
-
-    # And Property is a str enum, so its members can be used directly as dict keys
-    assert Property.COLUMN_MAPPING_MODE == "delta.columnMapping.mode"
-
-
-def test_registry_covers_exactly_the_managed_keys():
-    # Given deletion vectors is deliberately absent — Databricks manages it
-    assert set(DELTA_PROPERTY_REGISTRY) == {
+def test_property_is_the_expected_public_vocabulary() -> None:
+    assert set(Property) == {
         "delta.enableChangeDataFeed",
         "delta.deletedFileRetentionDuration",
         "delta.logRetentionDuration",
@@ -25,38 +14,9 @@ def test_registry_covers_exactly_the_managed_keys():
     }
 
 
-def test_column_mapping_mode_permits_only_the_upgrade_transition():
-    definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
-
-    # The protocol upgrade is one-way
-    assert definition.permits_transition("none", "name")
-    assert not definition.permits_transition("name", "none")
-
-
-def test_column_mapping_mode_permits_no_removal():
-    # Given the protocol upgrade is permanent — removal is a transition to
-    # absence, and no absence transition is permitted
-    definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
-
-    assert not definition.permits_transition("name", None)
-    assert not definition.permits_transition("none", None)
-
-
-def test_first_write_is_always_permitted():
-    # Given a key absent from the catalog, any declared value may be written,
-    # even for the most restricted key
-    definition = DELTA_PROPERTY_REGISTRY["delta.columnMapping.mode"]
-
-    assert definition.permits_transition(None, "name")
-
-
-def test_every_other_key_permits_any_transition_and_removal():
-    # Given the pure-configuration keys
-    for key, definition in DELTA_PROPERTY_REGISTRY.items():
-        if key == "delta.columnMapping.mode":
-            continue
-        assert definition.permits_transition("anything", "else"), key
-        assert definition.permits_transition("anything", None), key
+def test_policy_rejects_an_unmanaged_declared_property() -> None:
+    with pytest.raises(ValueError, match=r"Properties not managed.*delta\.enableRowTracking"):
+        DELTA_PROPERTY_POLICY.validate_declaration({"delta.enableRowTracking": "true"})
 
 
 @pytest.mark.parametrize(
@@ -67,7 +27,6 @@ def test_every_other_key_permits_any_transition_and_removal():
         (Property.COLUMN_MAPPING_MODE, "name"),
         (Property.COLUMN_MAPPING_MODE, "none"),
         (Property.LOG_RETENTION_DURATION, "interval 30 days"),
-        (Property.LOG_RETENTION_DURATION, "INTERVAL 1 WEEK"),
         (Property.DELETED_FILE_RETENTION_DURATION, "interval 7 days"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-1"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "32"),
@@ -75,37 +34,91 @@ def test_every_other_key_permits_any_transition_and_removal():
         (Property.TYPE_WIDENING, "false"),
     ],
 )
-def test_registry_accepts_valid_property_values(key: str, value: str) -> None:
-    assert DELTA_PROPERTY_REGISTRY[key].reject_declared_value(value) is None
+def test_policy_accepts_valid_property_values(key: str, value: str) -> None:
+    DELTA_PROPERTY_POLICY.validate_declaration({key: value})
 
 
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        (Property.CHANGE_DATA_FEED, "True"),  # catalog stores lowercase; drift churn otherwise
+        (Property.CHANGE_DATA_FEED, "True"),
         (Property.CHANGE_DATA_FEED, "yes"),
         (Property.COLUMN_MAPPING_MODE, "id"),
         (Property.LOG_RETENTION_DURATION, "30 days"),
+        (Property.LOG_RETENTION_DURATION, "INTERVAL 1 WEEK"),
         (Property.LOG_RETENTION_DURATION, "interval thirty days"),
+        (Property.LOG_RETENTION_DURATION, "interval 1 hour 30 minutes"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "-2"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "many"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "1_000"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, "+5"),
         (Property.DATA_SKIPPING_NUM_INDEXED_COLS, " 5 "),
-        (Property.TYPE_WIDENING, "True"),  # catalog stores lowercase; drift churn otherwise
+        (Property.TYPE_WIDENING, "True"),
         (Property.TYPE_WIDENING, "enabled"),
     ],
 )
-def test_registry_rejects_invalid_property_values(key: str, value: str) -> None:
-    rejection = DELTA_PROPERTY_REGISTRY[key].reject_declared_value(value)
+def test_policy_rejects_invalid_property_values(key: str, value: str) -> None:
+    with pytest.raises(ValueError) as error:
+        DELTA_PROPERTY_POLICY.validate_declaration({key: value})
 
-    # The message names the key and the expected format
-    assert rejection is not None
-    assert str(key) in rejection
-    assert "Expected" in rejection
+    assert key in str(error.value)
+    assert "Expected" in str(error.value)
 
 
-def test_declared_none_is_never_rejected():
-    # Given None asserts a key's absence, not a value
-    for definition in DELTA_PROPERTY_REGISTRY.values():
-        assert definition.reject_declared_value(None) is None
+@pytest.mark.parametrize("key", Property)
+def test_policy_accepts_none_as_an_absence_assertion(key: str) -> None:
+    DELTA_PROPERTY_POLICY.validate_declaration({key: None})
+
+
+def test_policy_projects_only_managed_observed_properties() -> None:
+    observed = DELTA_PROPERTY_POLICY.project_observed(
+        {
+            "delta.columnMapping.mode": "name",
+            "delta.minReaderVersion": "3",
+            "delta.feature.columnMapping": "supported",
+        }
+    )
+    assert dict(observed) == {
+        "delta.columnMapping.mode": "name",
+    }
+
+
+def test_policy_permits_only_the_column_mapping_upgrade() -> None:
+    assert DELTA_PROPERTY_POLICY.permits_transition(
+        "delta.columnMapping.mode",
+        observed="none",
+        desired="name",
+    )
+    assert not DELTA_PROPERTY_POLICY.permits_transition(
+        "delta.columnMapping.mode",
+        observed="name",
+        desired="none",
+    )
+
+
+@pytest.mark.parametrize("observed", ["none", "name"])
+def test_policy_does_not_permit_column_mapping_removal(observed: str) -> None:
+    assert not DELTA_PROPERTY_POLICY.permits_removal(Property.COLUMN_MAPPING_MODE, observed)
+
+
+def test_policy_permits_first_write_of_a_restricted_property() -> None:
+    assert DELTA_PROPERTY_POLICY.permits_transition(
+        Property.COLUMN_MAPPING_MODE,
+        observed=None,
+        desired="name",
+    )
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        Property.CHANGE_DATA_FEED,
+        Property.DELETED_FILE_RETENTION_DURATION,
+        Property.LOG_RETENTION_DURATION,
+        Property.DATA_SKIPPING_NUM_INDEXED_COLS,
+        Property.TYPE_WIDENING,
+    ],
+)
+def test_policy_permits_transitions_and_removal_for_unrestricted_properties(key: str) -> None:
+    assert DELTA_PROPERTY_POLICY.permits_transition(key, observed="anything", desired="else")
+    assert DELTA_PROPERTY_POLICY.permits_removal(key, observed="anything")

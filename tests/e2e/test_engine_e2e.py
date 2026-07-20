@@ -467,7 +467,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
         )
     )
 
-    # Then the unregistered key is invisible — no failure, no action
+    # Then the unmanaged key is invisible — no failure, no action
     assert report.has_failures is False
     assert len(report.table_reports[0].plan) == 0
 

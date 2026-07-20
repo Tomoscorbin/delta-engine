@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, Literal, NamedTuple
 
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY, Property
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     Array,
@@ -545,22 +545,7 @@ class DeltaTable:
         managed_aspects = _ASPECTS_BY_SCOPE[scope]
 
         user_properties = dict(properties or {})
-
-        # Fast-fail on property keys this engine does not manage (e.g. typos).
-        # None-valued assertions are validated too: asserting absence of an
-        # unmanaged key is as meaningless as declaring it.
-        unmanaged = [key for key in user_properties if key not in DELTA_PROPERTY_REGISTRY]
-        if unmanaged:
-            raise ValueError(
-                f"Properties not managed by this engine: {', '.join(sorted(unmanaged))}"
-            )
-
-        # Fast-fail on malformed values; the definition owns the judgment
-        # (including the exemption for None, which asserts absence).
-        for key, declared_value in user_properties.items():
-            rejection = DELTA_PROPERTY_REGISTRY[key].reject_declared_value(declared_value)
-            if rejection is not None:
-                raise ValueError(rejection)
+        DELTA_PROPERTY_POLICY.validate_declaration(user_properties)
 
         columns = tuple(columns)
         partitioned_by = tuple(partitioned_by)

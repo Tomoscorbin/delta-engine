@@ -338,8 +338,8 @@ def test_none_declaration_on_absent_key_produces_no_change():
     assert diff.unresolvable == ()
 
 
-def test_undeclared_registered_key_produces_an_undeclared_property_finding():
-    # Given a registered key on the table that the declaration omits
+def test_undeclared_managed_key_produces_an_undeclared_property_finding():
+    # Given a managed key on the table that the declaration omits
     diff = diff_table(
         _desired(properties={}),
         _observed(properties={"delta.columnMapping.mode": "name"}),
@@ -368,7 +368,7 @@ def test_every_observed_key_without_declaration_produces_a_finding():
 
 def test_properties_diff_is_skipped_when_properties_unmanaged():
     # Given a declaration that does not manage properties (metadata-only style)
-    # over a catalog carrying an undeclared registered key
+    # over a catalog carrying an undeclared managed key
     managed = ALL_ASPECTS - frozenset({TableAspect.PROPERTIES})
     diff = diff_table(
         _desired(properties={}, managed_aspects=managed),

@@ -15,7 +15,7 @@
 - `domain` and `application` stay backend-free; `adapters` may import `application` and `domain` (matches existing `sql/rows.py`). New parser/assembly modules must stay **PySpark-free** (no `pyspark`/`delta` imports) so the warehouse backend can import them. `lint-imports` must stay green.
 - Absolute imports only. Type hints on every signature. No bare `except`; broad `except Exception` only at the two `fetch_state` boundaries and at the one narrow condition-checked re-raise (missing-relation classification). Do not swallow errors.
 - Identifiers (column, field, constraint, referenced-table names) are **casefolded** at the adapter boundary; tag keys/values are preserved verbatim.
-- Managed properties are filtered to `DELTA_PROPERTY_REGISTRY` (from `delta_engine.application.properties`).
+- Observed properties are projected through `DELTA_PROPERTY_POLICY` (from `delta_engine.application.properties`).
 - Runtime floor (document only, never preflight): `table_constraints` requires DBR 17.3+ or a SQL warehouse; base AS JSON requires DBR 16.2+. Both readers are Unity-Catalog-only.
 - Conventional commits. No `Co-authored-by`. Commit after each task. Never commit to `main` (work stays on `claude/databricks-reader-efficiency-75bf90`).
 - Validate per task with the narrowest useful `uv run pytest …`, then before finishing: `uv run pytest`, `uv run ruff check src tests`, `uv run ruff format src tests`, `uv run mypy src`, `uv run lint-imports`.
@@ -559,7 +559,7 @@ git commit -m "feat(reader): parse the table_constraints string into structured 
 
 ### Task 3: `TableSnapshot` + `parse_table_snapshot`
 
-Turns a whole AS JSON document into a backend-neutral `TableSnapshot`. Owns the column skip/raise policy, the registry property filter, comment/partition/clustering extraction, and delegation to Tasks 1–2.
+Turns a whole AS JSON document into a backend-neutral `TableSnapshot`. Owns the column skip/raise policy, property-policy projection, comment/partition/clustering extraction, and delegation to Tasks 1–2.
 
 **Files:**
 
@@ -568,7 +568,7 @@ Turns a whole AS JSON document into a backend-neutral `TableSnapshot`. Owns the 
 
 **Interfaces:**
 
-- Consumes: `data_type_from_json` (Task 1); `parse_table_constraints`, `ParsedConstraints` (Task 2); `DELTA_PROPERTY_REGISTRY` (`delta_engine.application.properties`); domain `ObservedColumn`, `PrimaryKeyConstraint`, `ForeignKeyConstraint`, `QualifiedName`.
+- Consumes: `data_type_from_json` (Task 1); `parse_table_constraints`, `ParsedConstraints` (Task 2); `DELTA_PROPERTY_POLICY` (`delta_engine.application.properties`); domain `ObservedColumn`, `PrimaryKeyConstraint`, `ForeignKeyConstraint`, `QualifiedName`.
 - Produces: frozen `TableSnapshot(qualified_name, columns: tuple[ObservedColumn, ...], comment: str, partitioned_by: tuple[str, ...], clustered_by: tuple[str, ...], properties: Mapping[str, str], primary_key: PrimaryKeyConstraint | None, foreign_keys: tuple[ForeignKeyConstraint, ...])`; `parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> TableSnapshot`; exception `MetadataParseError`.
 
 - [ ] **Step 1: Write the failing test**
@@ -631,7 +631,7 @@ def test_partitioning_and_clustering_casefolded_in_order():
     assert snap.clustered_by == ("id",)
 
 
-def test_properties_filtered_to_registry():
+def test_observed_properties_are_projected_through_policy():
     snap = parse_table_snapshot(
         _doc(table_properties={
             "delta.columnMapping.mode": "name",
@@ -698,7 +698,7 @@ from types import MappingProxyType
 from delta_engine.adapters.databricks.sql.constraints import (
     ParsedConstraints, parse_table_constraints,
 )
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.domain.model import (
     ForeignKeyConstraint, ObservedColumn, PrimaryKeyConstraint, QualifiedName,
 )
@@ -741,7 +741,9 @@ def parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> Table
         comment=document.get("comment") or "",
         partitioned_by=partitioned_by,
         clustered_by=_casefolded_list(document.get("clustering_columns")),
-        properties=_managed_properties(document.get("table_properties"), qualified_name),
+        properties=_project_observed_properties(
+            document.get("table_properties"), qualified_name
+        ),
         primary_key=constraints[0],
         foreign_keys=constraints[1],
     )
@@ -785,16 +787,14 @@ def _columns_from_json(
     return tuple(columns)
 
 
-def _managed_properties(
+def _project_observed_properties(
     table_properties: object, qualified_name: QualifiedName
 ) -> Mapping[str, str]:
     if table_properties is None:
         return MappingProxyType({})
     if not isinstance(table_properties, dict):
         raise MetadataParseError(f"{qualified_name}: table_properties is not an object")
-    return MappingProxyType(
-        {name: value for name, value in table_properties.items() if name in DELTA_PROPERTY_REGISTRY}
-    )
+    return DELTA_PROPERTY_POLICY.project_observed(table_properties)
 
 
 def _lower_constraints(
@@ -1539,7 +1539,7 @@ from delta_engine.adapters.databricks.errors import exception_message, exception
 from delta_engine.adapters.databricks.read import observed_table_from_snapshot
 from delta_engine.adapters.databricks.sql.describe_json import TableSnapshot
 from delta_engine.application.failures import ReadFailure
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
 from delta_engine.domain.model import (
     Array, Binary, Boolean, DataType, Date, Decimal, Double, Float, Integer, Long, Map,
@@ -1603,10 +1603,7 @@ class NativeSparkReader:
             for field in struct.fields
             if _data_type(field.dataType) is not None
         )
-        properties = MappingProxyType({
-            name: value for name, value in (detail["properties"] or {}).items()
-            if name in DELTA_PROPERTY_REGISTRY
-        })
+        properties = DELTA_PROPERTY_POLICY.project_observed(detail["properties"] or {})
         snapshot = TableSnapshot(
             qualified_name=qualified_name,
             columns=columns,
@@ -1690,7 +1687,7 @@ Expected: matches only in the files to be deleted/edited in this task (definitio
 - [ ] **Step 2: Delete the symbols**
 
 - `sql/queries.py`: delete `columns_query`, `primary_key_query`, `foreign_keys_query`, `table_row_query`, `describe_detail_query`, `information_schema_probe_query`. Keep `describe_json_query`, `table_tags_query`, `column_tags_query`, `referencing_foreign_keys_query`.
-- `sql/rows.py`: delete `column_from_catalog`, `primary_key_from_rows`, `foreign_keys_from_rows`, `managed_properties_from_detail_row`, `clustering_columns_from_detail_row`, and the now-unused `_properties_from_detail_row`. Keep `table_tags_from_rows`, `column_tags_from_rows`, `referencing_foreign_keys_from_rows`; drop the now-unused `parse_data_type`/`DELTA_PROPERTY_REGISTRY`/`json` imports.
+- `sql/rows.py`: delete `column_from_catalog`, `primary_key_from_rows`, `foreign_keys_from_rows`, `managed_properties_from_detail_row`, `clustering_columns_from_detail_row`, and the now-unused `_properties_from_detail_row`. Keep `table_tags_from_rows`, `column_tags_from_rows`, `referencing_foreign_keys_from_rows`; drop the now-unused property-filter, `parse_data_type`, and `json` imports.
 - Delete `sql/parse.py` and `tests/adapters/databricks/sql/test_parse.py`.
 - `sql/__init__.py`: remove the deleted names from imports and `__all__`.
 
@@ -1738,7 +1735,7 @@ git commit -m "refactor(reader): remove the obsolete per-aspect read path and DD
 - [ ] **Step 2: Update the roadmap/todo**
 
 - `docs/todo/roadmap.md` #17: note the per-table read reduced from ~8 round-trips to 4 via AS JSON (per-catalog batching still deferred).
-- `docs/todo/todo.md`: mark the struct special-character round-trip issue fixed on the parse side (structured JSON field names); record the R1 live-verification gate (property-source equivalence across the 6 registry keys, especially the two retention defaults).
+- `docs/todo/todo.md`: mark the struct special-character round-trip issue fixed on the parse side (structured JSON field names); record the R1 live-verification gate (property-source equivalence across the 6 policy-managed keys, especially the two retention defaults).
 
 - [ ] **Step 3: Build docs and commit**
 

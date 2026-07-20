@@ -20,15 +20,13 @@ go through ``SparkReader`` (AS JSON) instead.
 
 from __future__ import annotations
 
-from types import MappingProxyType
-
 from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 
 from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.domain.model import (
     Array,
     Binary,
@@ -114,13 +112,6 @@ def _observed_columns(struct: T.StructType) -> tuple[ObservedColumn, ...]:
     return tuple(columns)
 
 
-def _managed_properties(raw: dict[str, str] | None) -> MappingProxyType[str, str]:
-    """Filter a DESCRIBE DETAIL properties map down to the registry the engine manages."""
-    return MappingProxyType(
-        {name: value for name, value in (raw or {}).items() if name in DELTA_PROPERTY_REGISTRY}
-    )
-
-
 class NativeSparkReader:
     """
     Reads observed table state from a local OSS SparkSession, for tests only.
@@ -158,6 +149,6 @@ class NativeSparkReader:
             comment=self.spark.catalog.getTable(fq).description or "",
             partitioned_by=tuple(c.casefold() for c in (detail["partitionColumns"] or [])),
             clustered_by=tuple(c.casefold() for c in (detail["clusteringColumns"] or [])),
-            properties=_managed_properties(detail["properties"]),
+            properties=DELTA_PROPERTY_POLICY.project_observed(detail["properties"] or {}),
         )
         return TablePresent(table=observed)

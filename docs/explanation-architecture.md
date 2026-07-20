@@ -145,7 +145,7 @@ description carries — so a view, streaming table, foreign table, or non-Delta
 format fails the read instead of being modelled as a table and planned
 against. (Existing external tables are read and altered like managed ones;
 creating one is not yet supported.) The read also decides which observed
-property keys become engine state: only the keys the property registry
+property keys become engine state: only the keys the property policy
 manages are kept, so the protocol internals every Delta table carries do not
 read as drift. The
 per-column read policy is shared and fails closed the same way: a column whose type
@@ -212,14 +212,14 @@ The _soft_ form — that the domain and application layers know nothing about an
 particular backend — does not fully hold today. Delta and Databricks semantics
 are encoded as ordinary Python in the application layer:
 
-- `application/properties.py` is a registry of Delta table properties
+- `application/properties.py` defines the Delta table-property policy
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
   durations, …), with Delta-specific value formats and transition rules.
 - Several rules in `application/validation.py` encode Delta behaviour directly.
   `ColumnMappingRequiredForDrop` exists only because Delta permits
   `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;
   `PropertyTransitionNotSupported` and `PropertyMustBeDeclared` operate on that
-  Delta property registry.
+  Delta property policy.
 
 import-linter cannot catch this, because it is backend _knowledge_ expressed in
 ordinary types, not a forbidden import.

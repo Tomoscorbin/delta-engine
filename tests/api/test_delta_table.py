@@ -876,7 +876,7 @@ def test_none_property_declarations_are_carried_through():
     assert table.to_desired_table().properties == {Property.CHANGE_DATA_FEED.value: None}
 
 
-def test_rejects_unregistered_key_declared_as_none():
+def test_rejects_unmanaged_key_declared_as_none():
     # Given an absence assertion for a key the engine does not manage
     with pytest.raises(ValueError, match="not managed"):
         DeltaTable(
