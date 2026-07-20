@@ -53,7 +53,7 @@ properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties)
 ```
 
 Property diff production can remain in `diff.py`; that is comparison logic,
-not property-registry ownership.
+not property-policy ownership.
 
 ### Validation composition
 

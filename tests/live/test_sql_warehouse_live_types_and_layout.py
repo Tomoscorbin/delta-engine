@@ -146,7 +146,7 @@ def test_sync_creates_every_managed_table_property(live_connection, live_tables)
 
 def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tables):
     """A freshly created table carries none of the managed property keys."""
-    # Registry admission policy: a key belongs in the managed registry only
+    # Property-policy admission: a key belongs in the managed set only
     # if Databricks does not auto-write it, otherwise every undeclared table
     # would fail validation on resync.
     table_name = live_tables("fresh_properties")
@@ -163,9 +163,9 @@ def test_fresh_table_carries_no_managed_property_keys(live_connection, live_tabl
     assert not set(properties) & {str(key) for key in Property}
 
 
-def test_unregistered_properties_are_invisible_to_a_full_sync(live_connection, live_tables):
-    """Properties outside the managed registry are neither drift nor unset on a full sync."""
-    # The reader filters unregistered keys out of observed state, so keys
+def test_unmanaged_properties_are_invisible_to_a_full_sync(live_connection, live_tables):
+    """Unmanaged properties are neither drift nor unset on a full sync."""
+    # The reader filters unmanaged keys out of observed state, so keys
     # owned by other tooling or the platform are neither drift nor unset.
     table_name = live_tables("custom_properties")
     declaration = DeltaTable(

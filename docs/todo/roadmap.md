@@ -53,7 +53,7 @@ operation.
 
 **Shape.** Already scoped in `todo.md`:
 
-- Register `delta.enableTypeWidening` in the property registry. Permit
+- Add `delta.enableTypeWidening` to the property policy. Permit
   `false -> true` only — disabling requires `ALTER TABLE ... DROP FEATURE`
   with history truncation, so `true -> false` is blocked by the same
   `permitted_transitions` mechanism as column mapping.
@@ -245,7 +245,7 @@ separate `check` entry point vs. a sync option scoped to declared schemas).
 
 ### 12. `ignored_properties` escape hatch
 
-From `todo.md` (deferred from the property-ownership design). The registry
+From `todo.md` (deferred from the property-ownership design). The property-policy
 admission policy is right, but coexistence with other tooling that writes
 managed keys is a real wall, and the only current recourse is un-declaring
 the table.
@@ -254,7 +254,7 @@ the table.
 
 Follow-on to identity (item 6), same family. `DEFAULT` is reconcilable in
 place (`ALTER COLUMN SET DEFAULT`, requires the `allowColumnDefaults` writer
-feature — property registry entry). Generation expressions are create-time
+feature — property-policy definition). Generation expressions are create-time
 only — same blocked-drift pattern as identity. Do after identity proves the
 column-metadata plumbing.
 
@@ -318,7 +318,7 @@ Tracked in `todo.md`, deliberately unchanged by this roadmap:
   normalisation flip; wait for demand.
 - Struct-field nullability — gated on a richer observation source than DDL
   string parsing.
-- Backend-agnostic application layer (rules and property registry injected
+- Backend-agnostic application layer (rules and property policy injected
   from the composition root) — architectural refactor, own PR, not blocking
   any item above.
 - Live-workspace verification items (CDF reserved columns, nested

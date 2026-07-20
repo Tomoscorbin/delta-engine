@@ -6,12 +6,12 @@ Reference: https://docs.delta.io/latest/table-properties.html
 Properties share their namespace with the platform: Databricks writes keys
 like ``delta.minReaderVersion`` and ``delta.enableRowTracking`` into table
 metadata autonomously. The engine manages properties by exact declaration
-over the registered keys below; everything else is invisible — the reader
-adapter filters unregistered keys out of the observed state before the
+over the managed keys below; everything else is invisible — the reader
+adapter filters unmanaged keys out of the observed state before the
 domain ever sees them.
 
-``Property`` is the single source of the managed key names: the catalogue
-below references its members, and the api layer re-exports it as the
+``Property`` is the single source of the managed key names: the policy
+definitions below reference its members, and the api layer re-exports it as the
 user-facing declaration vocabulary. There is no second list to keep in sync.
 
 Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
@@ -19,10 +19,10 @@ Deliberately absent: ``delta.enableDeletionVectors``. Databricks manages it
 entirely to the platform.
 
 Admission policy — adding a key is a breaking change: tables carrying it
-undeclared start failing validation on upgrade. Before registering a key,
+undeclared start failing validation on upgrade. Before managing a new key,
 create a fresh table on a current Databricks Runtime and inspect DESCRIBE
-DETAIL's properties: if the platform auto-writes the key, do not register
-it. Additions are called out in release notes.
+DETAIL's properties: if the platform auto-writes the key, do not add it to
+the policy. Additions are called out in release notes.
 """
 
 from collections.abc import Callable, Mapping

@@ -180,8 +180,8 @@ change.
 
 Relevant code:
 
-- `src/delta_engine/adapters/databricks/read.py` (`_managed_properties` and
-  observed-table construction)
+- `src/delta_engine/adapters/databricks/read.py`
+  (`DELTA_PROPERTY_POLICY.project_observed` and observed-table construction)
 - `src/delta_engine/domain/model/table.py` (`ObservedTable`)
 - `src/delta_engine/application/validation.py` (type-widening matrix)
 - `src/delta_engine/domain/plan/actions.py` and

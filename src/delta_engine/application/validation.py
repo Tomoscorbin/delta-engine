@@ -258,7 +258,7 @@ class PropertyTransitionNotSupported:
 
     A removal is a transition to absence: an ``UnsetProperty`` is judged as
     ``(observed_value, None)`` against the same permitted set as value
-    changes, so a key whose registry entry permits no ``(value, None)``
+    changes, so a key whose policy definition permits no ``(value, None)``
     pair cannot be declared absent.
     """
 
@@ -311,14 +311,14 @@ class PropertyTransitionNotSupported:
 
 @dataclass(frozen=True, slots=True)
 class PropertyMustBeDeclared:
-    """Disallow leaving a registered catalog property undeclared."""
+    """Disallow leaving a managed catalog property undeclared."""
 
     property_policy: PropertyPolicy
 
     name: ClassVar[str] = "PropertyMustBeDeclared"
 
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
-        """Flag every registered key set on the table but absent from the declaration."""
+        """Flag every managed key set on the table but absent from the declaration."""
         return tuple(
             ValidationFailure(rule_name=self.name, message=self._message(unresolvable))
             for unresolvable in drift.unresolvable

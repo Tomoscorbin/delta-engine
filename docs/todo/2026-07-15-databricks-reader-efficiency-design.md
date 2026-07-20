@@ -31,7 +31,7 @@ carrying almost all table-local state as structured data.
 | Which backends use AS JSON | **Both**                                            | Truest "one abstraction"; deletes the per-aspect info_schema column/PK/FK queries and the DDL type parser.                                                                                                                                                                                                                                   |
 | OSS-Spark local e2e        | **Lightweight native test reader**                  | OSS Spark rejects `AS JSON` for Delta v2 tables (`NOT_SUPPORTED_COMMAND_FOR_V2_TABLE`, verified locally). Production Spark runs on Databricks where it works; the ~20 engine e2e tests keep running by injecting a test-only reader that reads OSS Delta via native `spark.table().schema` + `DESCRIBE DETAIL`, reusing the shared assembly. |
 | Clustering source          | **AS JSON** (`clustering_columns`)                  | Real Databricks output carries top-level `clustering_columns` (the research missed it).                                                                                                                                                                                                                                                      |
-| Property source            | **AS JSON** (`table_properties`, registry-filtered) | Lets us drop `DESCRIBE DETAIL` from the read path (4 round-trips, not 5). Gated on a live check — see Risk R1.                                                                                                                                                                                                                               |
+| Property source            | **AS JSON** (`table_properties`, policy-projected) | Lets us drop `DESCRIBE DETAIL` from the read path (4 round-trips, not 5). Gated on a live check — see Risk R1.                                                                                                                                                                                                                               |
 | Supplementary round-trips  | **3 clean separate queries**                        | Repo policy: don't optimise to a UNION without latency evidence (`todo.md:11`).                                                                                                                                                                                                                                                              |
 | Existence detection        | **Derive from the AS JSON not-found error**         | No separate existence probe; fewest ops.                                                                                                                                                                                                                                                                                                     |
 
@@ -42,7 +42,7 @@ read path.
 
 1. `DESCRIBE TABLE EXTENDED <table> AS JSON` → columns (structured types, nullability,
    comments), table comment, `partition_columns`, `clustering_columns`, `table_properties`
-   (filtered to the managed registry), and `table_constraints` (PK + outbound FKs, as an
+   (projected through the property policy), and `table_constraints` (PK + outbound FKs, as an
    embedded string).
 2. `information_schema.table_tags`
 3. `information_schema.column_tags`
@@ -70,15 +70,15 @@ observed_table_from_snapshot(snapshot, run_info_schema_query) ──► Observed
 
 - **`sql/describe_json.py`** — `parse_table_snapshot(json_text: str, qualified_name: QualifiedName) -> TableSnapshot`.
   Parses the JSON once. Owns the structured-type → domain `DataType` mapper, the column
-  skip/raise policy (previously in `column_from_catalog`), the `table_properties` registry
-  filter, comment handling, partition/clustering extraction, and delegation to the constraint
+  skip/raise policy (previously in `column_from_catalog`), the `table_properties` policy
+  projection, comment handling, partition/clustering extraction, and delegation to the constraint
   parser. Raises a typed `MetadataParseError` on malformed structure — never silently drops.
 - **`sql/constraints.py`** — `parse_table_constraints(value: str | None) -> ParsedConstraints`.
   The one embedded-string field, isolated behind a narrow interface and documented as less
   structurally stable than the rest of the JSON.
 - **`TableSnapshot`** (frozen dataclass, in `sql/`) — the neutral table-local form:
   `qualified_name, columns (tuple[ObservedColumn], tags empty), comment, partitioned_by,
-clustered_by, properties (already registry-filtered), primary_key, foreign_keys`.
+  `clustered_by, properties (already policy-projected), primary_key, foreign_keys`.
   Reuses `ObservedColumn` — **no new `ObservedColumnBase`**.
 
 ### Reshaped
@@ -129,9 +129,9 @@ Verified against three real Databricks tables (Appendix A).
 - **Partitioning**: top-level `partition_columns` (ordered array; casefold; `()` when absent).
 - **Clustering**: top-level `clustering_columns` (array; casefold; `()` when absent). Ignore the
   stringified `table_properties.clusteringColumns` duplicate.
-- **Properties**: top-level `table_properties` (string→string map) filtered to
-  `DELTA_PROPERTY_REGISTRY`. The synthesized protocol/feature keys (`delta.feature.*`,
-  `minReaderVersion`, `enableDeletionVectors`, …) are not registry keys and drop out. See R1.
+- **Properties**: top-level `table_properties` (string→string map) projected through
+  `DELTA_PROPERTY_POLICY`. The synthesized protocol/feature keys (`delta.feature.*`,
+  `minReaderVersion`, `enableDeletionVectors`, …) are not managed keys and drop out. See R1.
 - **Constraints**: `table_constraints` string → `parse_table_constraints`.
 - **Malformed input** (missing `columns`, a type object with no `name`, a constraint string that
   won't parse) raises `MetadataParseError`, which the reader boundary turns into `ReadFailed`.
@@ -182,12 +182,12 @@ runtime that omits it) → no constraints.
 - **R1 — property synthesis (live-gated).** An observed **managed** property that a declaration
   does not declare is a **hard validation failure** (`PropertyUndeclared` finding →
   the `PropertyMustBeDeclared` validation rule), not churn. AS JSON's `table_properties` carries a
-  synthesized blob; the danger is a registry key with a platform **default**
+  synthesized blob; the danger is a managed key with a platform **default**
   (`logRetentionDuration`, `deletedFileRetentionDuration`, `dataSkippingNumIndexedCols`) being
   emitted when not truly set. Evidence across three real tables is strongly negative: the only
-  registry key ever present was `columnMapping.mode`, and only where genuinely set; two tables
+  managed key ever present was `columnMapping.mode`, and only where genuinely set; two tables
   use the default 32-column data-skipping yet omit `dataSkippingNumIndexedCols`.
-  **Gate**: a live check that creates a table setting none of the 6 registry keys and confirms
+  **Gate**: a live check that creates a table setting none of the 6 policy-managed keys and confirms
   `table_properties` carries none of them (especially the two retention keys, not exercised by
   the samples). **Fallback if it ever bites**: read properties from `DESCRIBE DETAIL` for that
   key (loud, clear failure message; trivial fix). Keep the change to the property source a
@@ -207,7 +207,7 @@ Read correctness moves from local e2e into unit tests over the pure parsers + as
 - **`test_describe_json.py`** — every type shape (primitive incl. `bigint`/`double`,
   decimal, array, map, nested struct, struct field-name casefolding + special chars),
   nullable/not-null, column comment omitted vs present, table `comment` `""` vs present,
-  partitioning, `clustering_columns`, `table_properties` registry filter (incl. the synthesized
+  partitioning, `clustering_columns`, `table_properties` policy projection (incl. the synthesized
   blob dropping out), unmappable non-partition column skipped, unmappable partition column
   raises, malformed JSON → `MetadataParseError`.
 - **`test_constraints.py`** — no constraints (`None`/empty), single-column PK, composite PK,
@@ -253,7 +253,7 @@ Once the new path is green:
 3. Both readers share `parse_table_snapshot`, `parse_table_constraints`, and
    `observed_table_from_snapshot`; the backend shells differ only in execution + error
    classification.
-4. Complex types are read from the structured JSON; managed properties are registry-filtered;
+4. Complex types are read from the structured JSON; observed properties are policy-projected;
    composite key/column order preserved.
 5. `DESCRIBE DETAIL` and the DDL type parser are gone from the read path.
 6. Existing public reader behaviour (`TablePresent`/`TableAbsent`/`ReadFailed`) is preserved.
