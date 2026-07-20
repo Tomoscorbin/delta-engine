@@ -516,8 +516,10 @@ table with the original error. See
 
 ## Foreign keys
 
-Pass `foreign_keys` with one `ForeignKey` per constraint. `columns` maps each
-local column to the referenced-table primary-key column it references.
+Pass `foreign_keys` with one `ForeignKey` per constraint. For a
+single-column parent key, `columns` can be the local column name. For a
+same-name composite key, it can be a sequence of local names. Use an explicit
+`{local: referenced}` mapping when local and parent names differ.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
@@ -544,15 +546,16 @@ orders = DeltaTable(
     ],
     primary_key=["order_id"],
     foreign_keys=[
-        ForeignKey(columns={"customer_id": "id"}, references=customers),
+        ForeignKey(columns="customer_id", references=customers),
     ],
 )
 ```
 
 Referencing the target `DeltaTable` object — rather than a dotted table name —
-lets the engine validate the mapping against that declaration's primary key and
-capture the target's qualified name. The constraint name is generated at
-lowering as `{table}_{local_columns}_fk`, joining the local columns in sorted
+lets the engine resolve the declaration against that table's primary key,
+validate the resulting column pairs, and capture the target's qualified name.
+The constraint name is generated at lowering as
+`{table}_{local_columns}_fk`, joining the local columns in sorted
 order (`orders_customer_id_fk` above). The name cannot be chosen, and drift
 matching never depends on it — a foreign key created outside the engine under a
 different name still matches by content.
@@ -591,15 +594,16 @@ employees = DeltaTable(
     ],
     primary_key=["id"],
     foreign_keys=[
-        ForeignKey(columns={"manager_id": "id"}, references=Self),
+        ForeignKey(columns="manager_id", references=Self),
     ],
 )
 ```
 
 ### Composite foreign keys
 
-For a composite primary key, map each local column to the primary-key column
-it references.
+For a composite primary key whose local columns have the same names, pass the
+local names in any order and the engine pairs them by name. When names differ,
+map each local column to the primary-key column it references.
 
 ```python
 customer_accounts = DeltaTable(
@@ -632,9 +636,12 @@ order_lines = DeltaTable(
 )
 ```
 
-The mapping states which primary-key column each local column references;
-its order never matters, and a mapping that does not cover the referenced
-table's primary key exactly fails when the `DeltaTable` is constructed.
+String, sequence, and mapping identifiers are normalized once when the
+`ForeignKey` declaration is constructed. Sequence and mapping order never
+matters. A composite sequence is accepted only when its normalized names match
+the parent key exactly; otherwise an explicit mapping is required. A mapping
+that does not cover the referenced table's primary key exactly fails when the
+owning `DeltaTable` is constructed.
 
 ### Dependency ordering
 
