@@ -40,7 +40,7 @@ from delta_engine.adapters.databricks.sql.describe import (
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
-from delta_engine.application.properties import DELTA_PROPERTY_REGISTRY
+from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind
 
 
@@ -150,7 +150,7 @@ def _read_observed_table(
         qualified_name=qualified_name,
         columns=tagged_columns,
         comment=description.comment,
-        properties=_managed_properties(description.table_properties),
+        properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties),
         tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,
@@ -158,16 +158,4 @@ def _read_observed_table(
         foreign_keys=read_foreign_keys(run_query, qualified_name),
         referencing_foreign_keys=read_referencing_foreign_keys(run_query, qualified_name),
         kind=kind,
-    )
-
-
-def _managed_properties(table_properties: Mapping[str, str]) -> Mapping[str, str]:
-    """Keep the observed property keys the engine manages."""
-    # The registry names every property key the engine declares and reconciles.
-    # A Delta table carries many more — protocol internals like
-    # delta.minReaderVersion, feature flags, writer bookkeeping — that no
-    # declaration can own, so observing them is not drift: they stay out of
-    # engine state rather than being diffed against the declaration.
-    return MappingProxyType(
-        {name: value for name, value in table_properties.items() if name in DELTA_PROPERTY_REGISTRY}
     )

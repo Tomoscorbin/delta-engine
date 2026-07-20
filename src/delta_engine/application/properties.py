@@ -75,10 +75,6 @@ class Property(StrEnum):
     DATA_SKIPPING_NUM_INDEXED_COLS = "delta.dataSkippingNumIndexedCols"
     TYPE_WIDENING = "delta.enableTypeWidening"
 
-    @classmethod
-    def keys(cls) -> frozenset[str]:
-        return frozenset(p.value for p in cls)
-
 
 @dataclass(frozen=True, slots=True)
 class PropertyDefinition:
@@ -131,6 +127,8 @@ class PropertyDefinition:
 
 @dataclass(frozen=True, slots=True)
 class PropertyPolicy:
+    """Validate declarations and transitions for the managed properties."""
+
     definitions: tuple[PropertyDefinition, ...]
     _definitions_by_name: Mapping[str, PropertyDefinition] = field(
         init=False, repr=False, compare=False
@@ -142,8 +140,8 @@ class PropertyPolicy:
         if len(definitions_by_name) != len(self.definitions):
             raise ValueError("Property policy contains duplicate property definitions")
 
-        managed_keys = definitions_by_name.keys()
-        public_keys = Property.keys()
+        managed_keys = frozenset(definitions_by_name)
+        public_keys = frozenset(member.value for member in Property)
 
         # Property is the public vocabulary. Every public member must have
         # exactly one policy definition, and no hidden definitions may exist
@@ -159,9 +157,9 @@ class PropertyPolicy:
 
     def validate_declaration(self, properties: Mapping[str, str | None]) -> None:
         """
-        Raise valueError when a declaration contains an unmanaged key or bad value.
+        Raise ``ValueError`` when a declaration contains an unmanaged key or bad value.
 
-        A None value asserts absence and is validated by PropertyDefinition
+        A ``None`` value asserts absence and is validated by ``PropertyDefinition``.
         """
         unmanaged = sorted(name for name in properties if name not in self._definitions_by_name)
 
@@ -175,6 +173,7 @@ class PropertyPolicy:
                 raise ValueError(rejection)
 
     def project_observed(self, properties: Mapping[str, str]) -> Mapping[str, str]:
+        """Return only managed keys from the catalog's observed properties."""
         managed = {
             name: value for name, value in properties.items() if name in self._definitions_by_name
         }
@@ -186,6 +185,7 @@ class PropertyPolicy:
         observed: str | None,
         desired: str | None,
     ) -> bool:
+        """Return whether a managed property may move to its desired value."""
         definition = self._definitions_by_name.get(name)
         if definition is None:  # TODO: raise on unknown properties
             return True
@@ -196,6 +196,7 @@ class PropertyPolicy:
         name: str,
         observed: str,
     ) -> bool:
+        """Return whether a managed property may be removed."""
         return self.permits_transition(
             name=name,
             observed=observed,

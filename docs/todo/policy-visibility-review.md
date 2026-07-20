@@ -27,9 +27,9 @@ than one named owner.
 
 ## Consolidation opportunities
 
-### Property ownership
+### Property ownership — consolidated
 
-Property decisions currently appear in four places:
+Property decisions are applied at four lifecycle points:
 
 - Declaration admission and value validation in `api/delta_table.py`.
 - Observation filtering in `adapters/databricks/read.py`.
@@ -37,17 +37,16 @@ Property decisions currently appear in four places:
 - Transition and undeclared-property enforcement in
   `application/validation.py`.
 
-`application/properties.py` is already the intended policy owner, but callers
-interpret its registry directly. The next consolidation should make it a deep
-property-policy boundary with operations such as:
+Those locations now delegate ownership judgments to the deep
+`DELTA_PROPERTY_POLICY` boundary in `application/properties.py` through:
 
 - `validate_declaration(properties)`
 - `project_observed(properties)`
 - `permits_transition(name, observed, desired)`
-- `removal_is_permitted(name, observed)`
+- `permits_removal(name, observed)`
 
-The read assembly should still remain in `read.py`, but the ownership decision
-would then be explicit, for example:
+The read assembly remains in `read.py`, while the ownership decision is
+explicit:
 
 ```python
 properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties)
@@ -55,10 +54,6 @@ properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties)
 
 Property diff production can remain in `diff.py`; that is comparison logic,
 not property-registry ownership.
-
-The move of `_managed_properties` from a test helper into the shared read
-boundary was therefore correct. This would be the next, smaller step toward a
-single visible owner.
 
 ### Validation composition
 
