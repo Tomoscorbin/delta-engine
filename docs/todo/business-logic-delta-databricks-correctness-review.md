@@ -1,15 +1,21 @@
 # Business logic, Delta, and Databricks correctness review
 
-**Status:** Review complete; findings and proposed solutions await agreement
+**Status:** Fresh sweep complete; original item 3 and fresh findings 9–15
+await agreement and implementation
 
-**Reviewed:** 2026-07-14
+**Original review:** 2026-07-14
 
-**Implementation PR:** Not opened
+**Fresh sweep:** 2026-07-20
 
-This is the second phase of the codebase review. The general correctness work is
-tracked separately in [PR #227](https://github.com/Tomoscorbin/delta-engine/pull/227),
-and the documentation review will follow after this phase is agreed and
-implemented.
+**Fresh-sweep implementation PR:** Not opened
+
+This began as the second phase of the codebase review. Seven of the original
+eight findings have since been implemented, as recorded in their resolution
+notes below. On 2026-07-20 the current `main` branch was swept again from the
+public API through domain validation, dependency resolution, diffing,
+observation, SQL compilation, and execution reporting. The fresh findings were
+checked against the live Databricks and Delta documentation linked in each
+section.
 
 ## Scope
 
@@ -28,16 +34,23 @@ path currently produces an incorrect result.
 
 ## Summary
 
-| #    | Severity | Finding                                                       | Failure mode                                                       |
-| ---- | -------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1 ✅ | High     | Non-Delta objects are not rejected                            | Invalid or partial plans against views, Iceberg, or other formats  |
-| 2 ✅ | High     | Unparseable columns are silently omitted                      | Existing drift can be reported as synchronized                     |
-| 3    | High     | Required Delta table features are not planned                 | Valid-looking plans fail during execution                          |
-| 4 ✅ | High     | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution                |
-| 5 ✅ | Medium   | Clearing a column comment generates invalid SQL               | Warehouse execution fails on `UNSET COMMENT`                       |
-| 6 ✅ | Medium   | Identifier normalization disagrees with Unity Catalog         | Valid names can change identity; invalid object names pass locally |
-| 7 ✅ | Medium   | Layout and map-type validation is too permissive              | Unsupported declarations reach execution                           |
-| 8 ✅ | Medium   | `CREATE TABLE IF NOT EXISTS` can report false success         | A concurrent incompatible create is treated as success             |
+| # | Severity | Finding | Failure mode |
+| --- | --- | --- | --- |
+| 1 ✅ | High | Non-Delta objects are not rejected | Invalid or partial plans against views, Iceberg, or other formats |
+| 2 ✅ | High | Unparseable columns are silently omitted | Existing drift can be reported as synchronized |
+| 3 | High | Required Delta table features are not planned | Valid-looking plans fail during execution |
+| 4 ✅ | High | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution |
+| 5 ✅ | Medium | Clearing a column comment generates invalid SQL | Warehouse execution fails on `UNSET COMMENT` |
+| 6 ✅ | Medium | Identifier normalization disagrees with Unity Catalog | Valid names can change identity; invalid object names pass locally |
+| 7 ✅ | Medium | Layout and map-type validation is too permissive | Unsupported declarations reach execution |
+| 8 ✅ | Medium | `CREATE TABLE IF NOT EXISTS` can report false success | A concurrent incompatible create is treated as success |
+| 9 | High | Non-default `STRING` collations are erased on observation | Collation drift can be reported as synchronized |
+| 10 | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
+| 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
+| 12 | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
+| 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
+| 14 | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
+| 15 | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
 
 ## 1. Reject views and non-Delta tables at the read boundary
 
@@ -151,42 +164,58 @@ rather than being skipped.
 
 ### Cause
 
-The desired type and widening rules can admit operations that need a Delta
-table feature without inspecting or changing `DESCRIBE DETAIL.tableFeatures`.
-This affects at least:
+The desired type and widening rules admit operations that need a Delta table
+feature, but the observed model does not carry authoritative feature state and
+the plan has no feature-enablement action. The AS JSON reader currently removes
+`delta.feature.*` entries while building managed table properties, and
+`ObservedTable` has no separate feature field. This affects at least:
 
-- adding `TIMESTAMP_NTZ` to an existing table;
+- adding `TIMESTAMP_NTZ` anywhere in the type tree of an existing table;
 - widening `DATE` to `TIMESTAMP_NTZ`; and
-- adding `VARIANT` to an existing table.
+- adding `VARIANT` anywhere in the type tree of an existing table.
 
-The current successful live widening test enables `timestampNtz` out of band,
-while the safety test demonstrates that the warehouse rejects the same change
-without that prerequisite.
+The successful live widening case still enables `timestampNtz` out of band.
+Without that prerequisite, the warehouse rejects the same otherwise-supported
+change.
 
 Relevant code:
 
+- `src/delta_engine/adapters/databricks/read.py` (`_managed_properties` and
+  observed-table construction)
+- `src/delta_engine/domain/model/table.py` (`ObservedTable`)
 - `src/delta_engine/application/validation.py` (type-widening matrix)
+- `src/delta_engine/domain/plan/actions.py` and
+  `src/delta_engine/domain/plan/diff.py`
 - `tests/live/test_sql_warehouse_live_safety.py`
 - `tests/live/test_sql_warehouse_live_types_and_layout.py`
 
-Databricks requires explicit feature enablement for existing tables using
-[TIMESTAMP_NTZ](https://docs.databricks.com/gcp/en/sql/language-manual/data-types/timestamp-ntz-type)
+Databricks documents explicit feature enablement for existing tables using
+[TIMESTAMP_NTZ](https://docs.databricks.com/aws/en/sql/language-manual/data-types/timestamp-ntz-type)
 or [VARIANT](https://docs.databricks.com/aws/en/tables/features/variant).
+`DESCRIBE DETAIL` exposes the enabled feature list in `tableFeatures`; see the
+[table-detail schema](https://docs.databricks.com/aws/en/delta/table-details).
 
 ### Proposed solution
 
-1. Preserve the observed `tableFeatures` in the reader model.
-2. Determine required features recursively from the desired type tree.
-3. Add an explicit `EnableTableFeature` action before any dependent column
+1. Observe enabled table features authoritatively, preferably from
+   `DESCRIBE DETAIL.tableFeatures`, and preserve them in `ObservedTable`.
+   Retaining an AS JSON property is acceptable only if it is documented to be
+   equivalent for every feature the engine supports.
+2. Determine required features recursively from the complete desired type tree,
+   including array elements, map keys and values, and struct fields.
+3. Add an explicit `EnableTableFeature` action before every dependent column
    action when the feature is absent.
-4. Compile that action to the documented `delta.feature.* = supported` table
+4. Compile that action to the documented `delta.feature.* = 'supported'` table
    property and include it in dry-run output.
-5. Do nothing when the feature is already enabled.
+5. Do nothing when the feature is already enabled, and do not emit a redundant
+   action for table creation when Databricks enables the feature from the
+   created schema.
+6. Add focused planner/compiler tests and live cases for both absent and
+   already-enabled feature state.
 
-The protocol change is permanent, so it must be visible in the plan. The
-alternative—rejecting the declaration and requiring an out-of-band command—is
-safe but does not provide declarative convergence. The proposed action is the
-preferred solution.
+Feature activation is a permanent protocol change, so it must be visible in
+the plan. Rejecting the declaration and requiring an out-of-band command would
+also be safe, but would not provide declarative convergence.
 
 ## 4. Validate foreign keys against the registered parent definition
 
@@ -420,34 +449,350 @@ would add a second read/execution protocol solely to preserve the guard. Failing
 the race explicitly is simpler and consistent with the engine's no-retry
 policy.
 
-## Proposed implementation boundary
+## Fresh-sweep findings (2026-07-20)
 
-The implementation PR for this review should contain all eight corrections,
-with these deliberate limits:
+The following findings are against the implementation after the seven resolved
+items above. They are not restatements of the original defects.
 
-- fail closed on lossy type parsing now; do not bundle the structured JSON
-  schema-reader refactor;
-- model required table-feature enablement because it is part of converging a
-  supported declared type, but do not add general runtime/version preflight;
-- enforce the current Databricks platform constraints without adding new
-  declaration capabilities; and
-- keep documentation restructuring and general documentation accuracy work for
-  the final documentation-review phase.
+## 9. Fail closed on unsupported `STRING` collations
 
-Before the implementation PR is ready for merge, run:
+### Cause
 
-- focused unit tests for each changed declaration, resolver, reader, and
-  compiler path;
+The AS JSON type parser recognizes `string` as a simple scalar and returns
+`String()` before considering the type document's `collation` field. A catalog
+column using a non-default collation is therefore observed as an ordinary
+string. The diff can report synchronization even though the effective string
+comparison and ordering semantics differ.
+
+The loss occurs recursively too: a collated string nested in an array, map, or
+struct follows the same simple-type path.
+
+Relevant code:
+
+- `src/delta_engine/adapters/databricks/sql/types.py`
+  (`data_type_from_json` and the simple-type mapping)
+- `src/delta_engine/domain/model/data_type.py` (`String`)
+- `tests/adapters/databricks/sql/test_types.py`
+
+Databricks includes the effective string collation in the structured type
+document returned by
+[`DESCRIBE TABLE ... AS JSON`](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-aux-describe-table)
+and supports collation in column definitions and alterations; see
+[manage column clauses](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-alter-table-manage-column).
+
+### Proposed solution
+
+1. Inspect `collation` before returning the simple `String` domain type at
+   every depth of the type tree.
+2. For the present product boundary, accept only an absent/default
+   `UTF8_BINARY` collation and fail the table read for any other value. Do not
+   silently coerce it to `String()`.
+3. If declarative collation support is added later, model the collation on
+   `String` and carry it through equality, SQL compilation, and alteration as
+   one complete change.
+4. Add parser tests for default, non-default, and nested collations, plus a live
+   observation pin for a non-default collated column.
+
+Failing closed is the narrow correctness fix; adding collation declarations is
+a separate product capability.
+
+## 10. Remove column tags before dropping governed-tagged columns
+
+### Cause
+
+`_diff_column_tags` iterates desired columns only. When full reconciliation
+drops an observed-only column, the plan emits `DropColumn` without unsetting
+that column's observed tags. The action ordering would still be wrong if the
+unset were added naively: `DROP_COLUMN` currently precedes the column-tag
+phase.
+
+Databricks requires governed tags to be removed before a tagged column can be
+dropped. See
+[governed-tag restrictions](https://docs.databricks.com/aws/en/database-objects/tags).
+
+Relevant code:
+
+- `src/delta_engine/domain/plan/diff.py` (`_diff_column_tags` and column
+  removal)
+- `src/delta_engine/domain/plan/actions.py` (`ActionPhase`)
+- `tests/domain/plan/test_diff.py`
+
+### Proposed solution
+
+1. In the scope that manages column structure, emit `UnsetColumnTag` for every
+   observed tag on every observed-only column.
+2. Order those unsets before `DropColumn`. If necessary, give tag unsets and tag
+   sets separate phases so ordinary updates retain their existing order.
+3. Keep tag-only and metadata-only scopes non-destructive: they must not infer a
+   column drop.
+4. Add a plan-order regression test. Add a live governed-tag drop test when the
+   test principal can create governed tags; otherwise retain an explicit
+   platform-assumption pin and exercise the SQL order with ordinary tags.
+
+## 11. Enforce Databricks tag declaration constraints
+
+### Cause
+
+`_validate_tags` enforces the existing per-object count and length rules, but it
+does not enforce all Databricks syntax and aggregate limits. In particular:
+
+- tag keys containing `.`, `,`, `-`, `=`, `/`, or `:` are accepted;
+- leading or trailing spaces in tag keys or values are accepted; and
+- the limit of 1,000 total column-tag assignments on one table is not checked.
+
+The current test suite even treats `any.custom-key` as valid, although the
+platform forbids both the period and hyphen. These declarations survive local
+validation and fail only when Databricks executes the DDL.
+
+Relevant code:
+
+- `src/delta_engine/api/delta_table.py` (`_validate_tags` and table-wide tag
+  validation)
+- `tests/api/test_delta_table.py`
+
+Platform reference:
+[Databricks tag constraints](https://docs.databricks.com/aws/en/database-objects/tags).
+
+### Proposed solution
+
+1. Reject every documented forbidden character in a tag key.
+2. Reject leading or trailing spaces in both keys and values without silently
+   trimming user input.
+3. Count tag assignments across all columns and reject totals above 1,000.
+4. Retain the existing per-object count and length checks.
+5. Replace the stale permissive test and add a boundary matrix for characters,
+   whitespace, 1,000 assignments, and 1,001 assignments.
+
+These are deterministic declaration errors and do not need runtime discovery.
+
+## 12. Normalize identifiers before layout and foreign-key validation
+
+This is a residual public-boundary gap after items 6 and 7; it does not reopen
+their domain-level fixes.
+
+### Cause
+
+Two validation paths inspect raw API input before the normalized domain objects
+are constructed:
+
+1. `_validate_layout` checks raw `partitioned_by` and `clustered_by` names, then
+   `DesiredTable` lowercases them. A mixed-case spelling can bypass a type
+   restriction or the partition-all-columns check. For example, a Binary column
+   named `flag` with `clustered_by=["FLAG"]` is accepted and stored as
+   `("flag",)` even though Binary is not a supported liquid-clustering type.
+2. `ForeignKey._to_constraint` compares raw mapping names with normalized parent
+   key columns and performs raw local-column lookups. A valid mapping such as
+   `{"parent_id": "ID"}` can therefore be rejected even though Databricks
+   identifiers are case-insensitive.
+
+Relevant code:
+
+- `src/delta_engine/api/delta_table.py` (`_validate_layout`,
+  `ForeignKey._to_constraint`, and `DeltaTable.__init__`)
+- `src/delta_engine/domain/model/table.py`
+- `src/delta_engine/domain/model/constraints.py`
+
+Databricks' identifier behavior is documented in
+[Names and identifiers](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-names);
+the clustering type restriction is documented in
+[Liquid clustering](https://docs.databricks.com/aws/en/delta/clustering).
+
+### Proposed solution
+
+1. Canonicalize layout names and both sides of every foreign-key mapping at the
+   beginning of their API conversion paths.
+2. Run membership, duplicate, all-columns, key-equivalence, and type checks only
+   against canonical names.
+3. Pass those same canonical values into the domain constructors; validation
+   and storage must not see different spellings.
+4. Add mixed-case positive and negative tests, including the Binary clustering
+   bypass and a mixed-case referenced primary-key column.
+
+## 13. Stop synthesizing unsafe physical constraint names
+
+### Cause
+
+Primary-key and foreign-key names are synthesized by concatenating table and
+column names:
+
+- `{table_name}_pk`; and
+- `{owner_table}_{local_columns}_fk`.
+
+That construction is not closed over the valid public declaration space. A
+255-character table name already produces an over-length primary-key name. A
+valid column name such as `net/gross` can introduce a character that Unity
+Catalog forbids in an object identifier. Separator ambiguity can also produce
+the same schema-wide constraint name from different table/column combinations.
+
+Relevant code:
+
+- `src/delta_engine/domain/model/constraints.py`
+- `src/delta_engine/adapters/databricks/sql/compile.py`
+- `src/delta_engine/adapters/databricks/read.py`
+
+Databricks makes the constraint name optional in
+[`ADD CONSTRAINT`](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-ddl-alter-table-add-constraint)
+and requires a supplied name to be unique within the schema. Unity Catalog
+identifier limits are described in
+[Names and identifiers](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-names).
+
+### Proposed solution
+
+1. Prefer omitting the physical constraint name in create/add DDL and let
+   Databricks allocate it. The reader already observes the resulting name, and
+   constraint equality/diffing should remain content-based.
+2. If explicit names prove necessary, introduce a platform-safe, bounded,
+   unambiguous generator with a stable digest and account for schema-wide
+   collision scope. Simple truncation is not sufficient.
+3. Add cases for a 255-character table name, special characters valid only for
+   columns, and ambiguous table/column concatenations.
+4. Confirm live that generated platform names can be observed and subsequently
+   used for drop/reconciliation.
+
+## 14. Make dependency-cycle detection iterative
+
+### Cause
+
+The strongly connected components traversal is recursive. A valid acyclic
+dependency chain near Python's recursion limit aborts the whole synchronization
+before per-table results can be produced. A local probe with 1,050 tables
+raised `RecursionError: maximum recursion depth exceeded`.
+
+Relevant code:
+
+- `src/delta_engine/application/dependency_resolution.py`
+  (`_strongly_connected_components`)
+- `src/delta_engine/application/engine.py` (`resolve`)
+- `tests/application/test_dependency_resolution.py`
+
+### Proposed solution
+
+1. Replace the recursive traversal with an iterative SCC implementation that
+   keeps discovery, low-link, and component state explicitly.
+2. Preserve the current deterministic component and failure ordering.
+3. Add a regression graph comfortably above the interpreter recursion limit,
+   covering both a deep acyclic chain and a deep graph containing a cycle.
+4. Do not raise the process recursion limit as a library side effect.
+
+## 15. Require integer `Decimal` precision and scale
+
+### Cause
+
+`Decimal.__post_init__` checks numeric ranges but not runtime types.
+`Decimal(10.5, 0)` and `Decimal(True, 0)` are accepted and can render invalid or
+misleading `DECIMAL` SQL. Python type annotations do not enforce this at
+runtime, and `bool` is an `int` subclass.
+
+Relevant code:
+
+- `src/delta_engine/domain/model/data_type.py` (`Decimal`)
+- `tests/domain/model/test_data_type.py`
+
+Databricks requires integer precision and scale in the
+[`DECIMAL` type](https://docs.databricks.com/aws/en/sql/language-manual/data-types/decimal-type).
+
+### Proposed solution
+
+1. Require `type(precision) is int` and `type(scale) is int` before applying the
+   existing range checks.
+2. Raise the normal declaration-time `ValueError` for floats, booleans, strings,
+   and other non-integer values.
+3. Add a type/value matrix while retaining the current precision and scale
+   boundary tests.
+
+## Residual concurrency limitation
+
+Synchronization is still an observe-plan-execute sequence of independent
+statements, not a transaction over the complete table declaration. Removing
+`IF NOT EXISTS` in item 8 correctly turns the concurrent-create no-op into a
+failure, but another actor can still alter an existing table between observation
+and any later DDL, or immediately after the final action. A successful report
+therefore means that the planned statements succeeded, not that the complete
+desired state was re-read and verified.
+
+This sweep does not classify that as a deterministic implementation defect
+without first choosing a concurrency contract. Before claiming a stronger
+postcondition, choose and document one of:
+
+- a single-writer/no-concurrent-DDL contract; or
+- post-execution observation and reconciliation verification, with a typed
+  failure when the desired state is not established at that verification
+  point.
+
+A verification read narrows the race and detects interleaving; it cannot prevent
+a later external writer from changing the table.
+
+## Fresh-sweep verification
+
+The sweep was performed on `main` at
+`406a51243e02b30bf457e7fa2c4bea0add2853d5`. Before this document edit:
+
+- `uv run pytest -q` completed with 956 passed and 63 credentialed/live tests
+  deselected;
+- `uv run ruff check .` passed;
+- `uv run mypy` passed for 56 source files; and
+- `uv run lint-imports` passed all seven architecture contracts.
+
+Targeted local probes reproduced the collation loss, governed-tag drop plan,
+invalid tag acceptance, mixed-case layout and foreign-key behavior, unsafe
+constraint-name generation, deep-graph recursion failure, and non-integer
+`Decimal` acceptance.
+
+The credentialed SQL warehouse suite was not run during this sweep because it
+mutates a real Unity Catalog workspace. Databricks/Delta-specific conclusions
+were instead compared with the official documentation linked above as retrieved
+on 2026-07-20. The new platform-sensitive cases remain required live coverage
+for their implementation PR.
+
+## Fresh-sweep implementation boundary
+
+The next correctness work should cover original item 3 and fresh items 9–15.
+It may be split into reviewable PRs, but no item should be marked resolved
+without its observation, planning, compilation, and ordering consequences being
+handled together.
+
+Recommended grouping:
+
+1. observed semantics and Delta protocol: items 3 and 9;
+2. tag validity and action ordering: items 10 and 11;
+3. declaration normalization and physical names: items 12 and 13; and
+4. general robustness: items 14 and 15.
+
+Deliberate limits:
+
+- fail closed on unsupported collations now; do not bundle first-class collation
+  declarations;
+- model required table-feature enablement because it is part of converging an
+  already-supported declared type, but do not add general runtime/version
+  preflight;
+- enforce current Databricks constraints without adding unrelated declaration
+  capabilities; and
+- decide the concurrency contract separately rather than implying that these
+  deterministic corrections make a multi-statement sync transactional.
+
+Before an implementation PR is ready for merge, run:
+
+- focused regression tests for each changed API, domain, resolver, reader,
+  planner, compiler, and ordering path;
 - the full non-live suite and normal lint, type, and architecture checks; and
-- the live SQL warehouse suite, including the restored comment transition and
-  new feature/reader guard cases, against Unity Catalog.
+- the live SQL warehouse cases for table features, collations, governed tags,
+  and platform-generated constraint names against Unity Catalog.
 
 ## Agreement checklist
 
-- [ ] The eight items above are accepted as correctness defects.
-- [ ] The proposed solution for each item is accepted.
-- [ ] Feature enablement will be represented as a visible planned action rather
-      than an out-of-band prerequisite.
-- [ ] Lossy schema parsing will fail closed now; structured JSON observation is
-      deferred.
-- [ ] Once agreed, implementation will be isolated in its own PR.
+- [ ] Original item 3 and fresh items 9–15 are accepted as correctness defects.
+- [ ] Table-feature enablement will be an observed, visible planned action
+      rather than an out-of-band prerequisite.
+- [ ] Unsupported collations will fail closed until first-class collation
+      declarations are intentionally added.
+- [ ] Governed column tags will be unset before drops, and declarations will
+      enforce the documented tag constraints.
+- [ ] API identifiers will be canonicalized before validation, and physical
+      constraint names will be delegated to Databricks unless a safe generator
+      is demonstrated.
+- [ ] Dependency traversal will be iterative and `Decimal` will enforce runtime
+      integer inputs.
+- [ ] The concurrency contract and success postcondition will be documented
+      explicitly.
+- [ ] Implementation will remain isolated from unrelated product and
+      documentation work.
