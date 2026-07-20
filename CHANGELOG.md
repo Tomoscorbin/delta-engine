@@ -1,3 +1,72 @@
+## v0.5.0 (2026-07-20)
+
+### Feat
+
+- read streaming tables as observed state
+- thread the observed relation kind to the compiler
+- compile the ALTER dialect per relation kind
+- gate streaming tables to tag-only declarations
+- carry the observed relation kind on table drift
+- model the observed relation kind in the domain
+- read only managed and external Delta tables as engine state
+- **reader**: add AS JSON query builder and missing-relation classifier
+- **reader**: assemble ObservedTable from a snapshot plus info_schema
+- **reader**: parse an AS JSON document into a table snapshot
+- **reader**: parse the table_constraints string into structured keys
+- **reader**: map structured AS JSON types to domain types
+
+### Fix
+
+- normalize identifier case to lowercase instead of rejecting mixed case
+- reject clustering keys and Map-of-Map declarations Databricks cannot deploy
+- validate foreign-key types against the registered parent declaration
+- fail the read on a decimal without precision and scale
+- **reader**: confirm the schema exists before reading a missing table as absent
+- **reader**: a missing schema or catalog fails the read instead of reading as absent
+- clean up planning
+- **reader**: fail the read on unmappable column types
+- **reader**: fail the read on malformed layout and type shapes
+- report schema version fix
+- walkthrough fix
+- vocab change - validation failed -> planning failed
+- **reader**: parse_table_snapshot raises MetadataParseError on malformed constraints
+- **reader**: constraint parser raises ConstraintParseError on malformed input and ignores unmanaged constraint types
+- **reader**: data_type_from_json returns None instead of raising on malformed types
+- write the live test summary once, not once per xdist worker
+- remove false-success race from table creation
+
+### Refactor
+
+- normalize observed identifiers once, in the domain constructors
+- make SQL compilation an explicit phase
+- rename the compiler statement target to _Target
+- derive the unsupported-relation message from the admit tables
+- carry the relation kind on the diff and plan, not the port
+- judge managed properties in the shared read
+- judge relation acceptance in the shared read
+- **domain**: rename Finding to Unresolvable and extract into its own module
+- **reader**: one deep read function per information_schema aspect
+- **reader**: package the describe as one absence-aware step
+- **reader**: name catalog rows and fold parsing into assembly
+- **reader**: own the describe result shape in the describe mapper
+- **reader**: name the injected query-runner type
+- **reader**: expose one shared read entry point
+- simplify column and primary-key diff helpers
+- removed redundant match case in planning.py
+- sync() logging cleaned up
+- inline scope-gate checks, TODO to revisit class form
+- make scope a short-circuiting validation gate
+- share observed-table assembly across the Databricks readers
+- **reader**: source primary and foreign keys from information_schema
+- **reader**: drop the unmappable-partition-column special case
+- **reader**: rename TableSnapshot -> TableDescription
+- **sql**: parse constraints to domain objects, colocate type mapping, rename describe module
+- **reader**: unify both backends behind one shared read_catalog_state
+- clean up engine
+- **reader**: remove the obsolete per-aspect read path and DDL type parser
+- **spark**: read via AS JSON; drive local e2e with a native OSS-Spark reader
+- **warehouse**: read via AS JSON through the shared assembly
+
 ## v0.4.0 (2026-07-14)
 
 ### BREAKING CHANGE
