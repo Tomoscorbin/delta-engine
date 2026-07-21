@@ -28,7 +28,7 @@ def describe_json_query(qualified_name: QualifiedName) -> str:
     The one primary read: it returns columns (structured types), the table
     comment, partition and clustering columns, and table properties in a single
     JSON document. ``AS JSON`` requires ``EXTENDED``. Requires DBR 16.2+; older
-    runtimes surface as ``ReadFailed``. Key constraints and tags are read from
+    runtimes surface as ``ReadError``. Key constraints and tags are read from
     information_schema instead of this document.
     """
     return f"DESCRIBE TABLE EXTENDED {backtick_qualified_name(qualified_name)} AS JSON"

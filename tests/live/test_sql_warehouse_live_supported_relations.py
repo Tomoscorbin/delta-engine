@@ -13,7 +13,8 @@ import pytest
 pytest.importorskip("databricks.sql")
 
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
-from delta_engine.application.ports import CatalogState, ReadFailed
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import CatalogState
 from delta_engine.domain.model import QualifiedName
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
@@ -42,10 +43,10 @@ def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
     )
 
     try:
-        state = _read(live_connection, view_name)
+        with pytest.raises(ReadError) as exc_info:
+            _read(live_connection, view_name)
 
-        assert isinstance(state, ReadFailed), state
-        assert state.failure.exception_type == "UnsupportedRelationError", state.failure
+        assert exc_info.value.exception_type == "UnsupportedRelationError"
     finally:
         execute_sql(live_connection, f"DROP VIEW IF EXISTS {qualified_table(view_name)}")
 
@@ -63,7 +64,7 @@ def test_a_non_delta_table_is_not_read_as_engine_state(live_connection, live_tab
     except Exception as exc:  # intentional broad except: environment capability probe
         pytest.skip(f"workspace cannot create an Iceberg table here: {exc}")
 
-    state = _read(live_connection, table_name)
+    with pytest.raises(ReadError) as exc_info:
+        _read(live_connection, table_name)
 
-    assert isinstance(state, ReadFailed), state
-    assert state.failure.exception_type == "UnsupportedRelationError", state.failure
+    assert exc_info.value.exception_type == "UnsupportedRelationError"

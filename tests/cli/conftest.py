@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from delta_engine.application.engine import Engine
+from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import (
     CatalogState,
     TableAbsent,
@@ -37,11 +38,14 @@ def observed_orders() -> TablePresent:
 class FakeReader:
     """Catalog reader answering from a fixed mapping; absent by default."""
 
-    def __init__(self, states: dict[str, CatalogState] | None = None) -> None:
+    def __init__(self, states: dict[str, CatalogState | ReadError] | None = None) -> None:
         self.states = states or {}
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
-        return self.states.get(str(qualified_name), TableAbsent())
+        result = self.states.get(str(qualified_name), TableAbsent())
+        if isinstance(result, ReadError):
+            raise result
+        return result
 
 
 class FakeExecutor:

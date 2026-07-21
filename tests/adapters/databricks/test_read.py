@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from delta_engine.adapters.databricks.read import read_catalog_state
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
@@ -11,7 +13,8 @@ from delta_engine.adapters.databricks.sql import (
     schema_exists_query,
     table_tags_query,
 )
-from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
     Integer,
@@ -60,6 +63,12 @@ def _router(responses):
         return value
 
     return run
+
+
+def _read_error(responses) -> ReadError:
+    with pytest.raises(ReadError) as exc_info:
+        read_catalog_state(_router(responses), QN)
+    return exc_info.value
 
 
 def test_tags_and_inbound_fks_attached():
@@ -205,10 +214,9 @@ def test_missing_table_in_a_missing_schema_reads_as_failed_not_absent():
     # rows for the schema probe: the schema does not exist.
     responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
 
-    state = read_catalog_state(_router(responses), QN)
+    error = _read_error(responses)
 
-    assert isinstance(state, ReadFailed)
-    assert "does not exist" in state.failure.message
+    assert "does not exist" in str(error)
 
 
 def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
@@ -220,7 +228,7 @@ def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
         schema_exists_query(QN): RuntimeError("[SCHEMA_NOT_FOUND] cat.information_schema"),
     }
 
-    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+    _read_error(responses)
 
 
 def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
@@ -229,22 +237,22 @@ def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
     for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
         responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
 
-        assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+        _read_error(responses)
 
 
 def test_other_describe_error_reads_as_failed():
     responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
 
-    state = read_catalog_state(_router(responses), QN)
+    error = _read_error(responses)
 
-    assert isinstance(state, ReadFailed)
-    assert "warehouse gone" in state.failure.message
+    assert "warehouse gone" in str(error)
+    assert isinstance(error.__cause__, RuntimeError)
 
 
 def test_empty_describe_result_reads_as_failed():
     responses = _describe_responses(**{describe_json_query(QN): []})
 
-    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+    _read_error(responses)
 
 
 def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent():
@@ -254,7 +262,7 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
         **{table_tags_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] tags view")}
     )
 
-    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+    _read_error(responses)
 
 
 def test_an_external_delta_table_reads_as_present():
@@ -275,10 +283,9 @@ def test_relation_kinds_the_engine_does_not_manage_read_as_failed():
         doc = _describe_doc(type=kind)
         responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-        state = read_catalog_state(_router(responses), QN)
+        error = _read_error(responses)
 
-        assert isinstance(state, ReadFailed)
-        assert state.failure.exception_type == "UnsupportedRelationError"
+        assert error.exception_type == "UnsupportedRelationError"
 
 
 def test_non_delta_formats_read_as_failed():
@@ -286,10 +293,9 @@ def test_non_delta_formats_read_as_failed():
         doc = _describe_doc(provider=provider)
         responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-        state = read_catalog_state(_router(responses), QN)
+        error = _read_error(responses)
 
-        assert isinstance(state, ReadFailed)
-        assert state.failure.exception_type == "UnsupportedRelationError"
+        assert error.exception_type == "UnsupportedRelationError"
 
 
 def test_document_without_relation_kind_or_provider_reads_as_failed():
@@ -298,29 +304,26 @@ def test_document_without_relation_kind_or_provider_reads_as_failed():
         doc.pop(missing)
         responses = _describe_responses(**{describe_json_query(QN): [(json.dumps(doc),)]})
 
-        state = read_catalog_state(_router(responses), QN)
+        error = _read_error(responses)
 
-        assert isinstance(state, ReadFailed)
-        assert state.failure.exception_type == "UnsupportedRelationError"
+        assert error.exception_type == "UnsupportedRelationError"
 
 
 def test_rejection_names_the_found_relation_and_the_supported_kinds():
     doc = _describe_doc(type="MATERIALIZED_VIEW")
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-    state = read_catalog_state(_router(responses), QN)
-
-    assert isinstance(state, ReadFailed)
+    error = _read_error(responses)
     # The admitted set is derived from the admit mapping, so the message
     # names every supported relation type and provider without going stale.
-    assert "MATERIALIZED_VIEW" in state.failure.message
-    assert "EXTERNAL, MANAGED, STREAMING_TABLE" in state.failure.message
-    assert "delta" in state.failure.message
+    assert "MATERIALIZED_VIEW" in str(error)
+    assert "EXTERNAL, MANAGED, STREAMING_TABLE" in str(error)
+    assert "delta" in str(error)
 
 
 def test_unmappable_column_type_reads_as_failed_not_present():
-    # A column whose type the domain cannot model fails the parse, which the total
-    # read boundary turns into ReadFailed rather than a partial present state that
+    # A column whose type the domain cannot model fails the parse, which the
+    # read boundary turns into ReadError rather than a partial present state that
     # silently omits the column.
     doc = _describe_doc(
         columns=[
@@ -330,7 +333,7 @@ def test_unmappable_column_type_reads_as_failed_not_present():
     )
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-    assert isinstance(read_catalog_state(_router(responses), QN), ReadFailed)
+    _read_error(responses)
 
 
 def test_a_streaming_table_reads_as_present_with_its_kind():
@@ -357,7 +360,6 @@ def test_a_non_delta_streaming_table_reads_as_failed():
     doc = _describe_doc(type="STREAMING_TABLE", provider="iceberg")
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-    state = read_catalog_state(_router(responses), QN)
+    error = _read_error(responses)
 
-    assert isinstance(state, ReadFailed)
-    assert state.failure.exception_type == "UnsupportedRelationError"
+    assert error.exception_type == "UnsupportedRelationError"

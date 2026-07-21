@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
     describe_json_query,
@@ -10,7 +12,8 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_query,
 )
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
-from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import Integer, QualifiedName, String
 
 QN = QualifiedName("cat", "sch", "tbl")
@@ -111,11 +114,13 @@ def test_missing_table_is_absent_after_confirming_the_schema_exists():
     assert connection.cursor_fake.queries == [describe_json_query(QN), schema_exists_query(QN)]
 
 
-def test_other_backend_error_is_read_failed():
+def test_other_backend_error_is_translated_to_read_error():
     responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
-    state = WarehouseReader(RoutedConnection(responses)).fetch_state(QN)
-    assert isinstance(state, ReadFailed)
-    assert "warehouse gone" in state.failure.message
+
+    with pytest.raises(ReadError) as exc_info:
+        WarehouseReader(RoutedConnection(responses)).fetch_state(QN)
+
+    assert "warehouse gone" in str(exc_info.value)
 
 
 def test_cursor_is_closed_after_a_successful_read():
@@ -127,5 +132,8 @@ def test_cursor_is_closed_after_a_successful_read():
 def test_cursor_is_closed_when_the_read_fails():
     responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
     connection = RoutedConnection(responses)
-    WarehouseReader(connection).fetch_state(QN)
+
+    with pytest.raises(ReadError):
+        WarehouseReader(connection).fetch_state(QN)
+
     assert connection.cursor_fake.closed is True

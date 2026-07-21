@@ -12,7 +12,6 @@ from delta_engine.application.failures import ExecutionFailure, ReadFailure, Val
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
-    ReadFailed,
     TablePresent,
 )
 from delta_engine.application.rendering import (
@@ -361,7 +360,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
         desired=DesiredTable(
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
-        read=ReadFailed(ReadFailure("IOError", "boom")),
+        read=ReadFailure("IOError", "boom"),
     )
 
     # When rendering the diff block

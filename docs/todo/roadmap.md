@@ -141,7 +141,7 @@ the Python API remains the write/apply mechanism.
 
 **Why.** `tableExists` answers true for views and non-Delta tables, and
 nothing downstream checks the format. A view limps to a confusing raw
-`ReadFailed` at `DESCRIBE DETAIL`. A Parquet/Iceberg table is worse:
+`ReadError` at `DESCRIBE DETAIL`. A Parquet/Iceberg table is worse:
 `DESCRIBE DETAIL` succeeds, the engine diffs it as Delta, and can plan
 `delta.*` properties, `CLUSTER BY`, and constraint DDL against it, failing (or
 partially succeeding) at execution with errors pointing nowhere near the

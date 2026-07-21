@@ -10,7 +10,11 @@ from types import SimpleNamespace
 
 from py4j.protocol import Py4JJavaError
 
-from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
+from delta_engine.adapters.databricks.exception_inspection import (
+    exception_message,
+    exception_type_name,
+    is_missing_relation,
+)
 
 
 def test_names_plain_exceptions_by_python_class():
@@ -68,15 +72,11 @@ class _AnalysisError(Exception):
 
 
 def test_missing_relation_from_spark_condition() -> None:
-    from delta_engine.adapters.databricks.errors import is_missing_relation
-
     assert is_missing_relation(_AnalysisError("TABLE_OR_VIEW_NOT_FOUND")) is True
     assert is_missing_relation(_AnalysisError("INSUFFICIENT_PERMISSIONS")) is False
 
 
 def test_missing_relation_from_warehouse_message_prefix() -> None:
-    from delta_engine.adapters.databricks.errors import is_missing_relation
-
     assert is_missing_relation(RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] Table … not found")) is True
     assert is_missing_relation(RuntimeError("connection reset")) is False
 
@@ -84,8 +84,6 @@ def test_missing_relation_from_warehouse_message_prefix() -> None:
 def test_missing_schema_or_catalog_is_not_a_missing_relation() -> None:
     # The engine creates tables, never schemas or catalogs, so a missing
     # container must not read as a creatable absence.
-    from delta_engine.adapters.databricks.errors import is_missing_relation
-
     assert is_missing_relation(_AnalysisError("SCHEMA_NOT_FOUND")) is False
     assert is_missing_relation(_AnalysisError("CATALOG_NOT_FOUND")) is False
     assert (

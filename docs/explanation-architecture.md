@@ -62,7 +62,8 @@ through a sync.
 | `DeltaTable`       | Public user declaration. It is the object users write in notebooks, scripts, and Python modules.                                                            |
 | `DesiredTable`     | Immutable domain snapshot of the target table state. `DeltaTable.to_desired_table()` lowers the public declaration into this shape.                         |
 | `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                     |
-| `CatalogState`     | The result of reading one table: `TablePresent`, `TableAbsent`, or `ReadFailed`.                                                                            |
+| `CatalogState`     | A known catalog answer: `TablePresent` or `TableAbsent`. An unreadable state crosses the port as `ReadError`.                                               |
+| `ReadResult`       | The persistent read outcome retained by a table run: a `CatalogState` or the engine-created `ReadFailure`.                                                  |
 | `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
@@ -110,7 +111,9 @@ flowchart LR
 
 - `TablePresent(table=ObservedTable(...))`
 - `TableAbsent()`
-- `ReadFailed(failure=ReadFailure(...))`
+
+If neither state can be determined, the adapter translates its backend
+exception into the application-owned `ReadError` and raises it.
 
 `PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan)` lowers
 a plan to the backend statements that apply it — the plan carries the observed
@@ -120,12 +123,13 @@ real, recording the statements on the table's report. On a real run, the
 engine passes that same tuple to `execute(statement)` one statement at a time,
 so the previewed SQL is exactly what executes.
 
-`fetch_state` is **total**: adapters return `ReadFailed` instead of raising.
-For execution, adapters translate backend exceptions into the application-owned
-`ExecutionError`. The engine catches that specific exception, records an
-`ExecutionFailure`, stops that table's remaining statements, and continues
-with independent tables. Unexpected exceptions still propagate. `compile` is
-pure and local; an exception from it is likewise a programming error.
+For both outbound ports, adapters translate expected backend failures into
+application-owned errors: `ReadError` or `ExecutionError`. The engine catches
+only those specific exceptions and turns them into persistent `ReadFailure` or
+`ExecutionFailure` values. A read failure blocks later phases for that table;
+an execution failure stops that table's remaining statements. Independent
+tables continue, while unexpected exceptions propagate. `compile` is pure and
+local; an exception from it is likewise a programming error.
 
 The Databricks adapters also own backend normalization, most of it shared
 between the two backends through the `sql` core and the `read` assembly. Both
@@ -155,7 +159,8 @@ translation are where the backends genuinely diverge: the Spark backend runs
 `spark.sql(...)` and unwraps `Py4JJavaError` to report the underlying JVM
 exception class, while the warehouse backend runs the same statements over a
 `databricks-sql` cursor and calls the shared, generic summarizer directly. Both
-paths turn backend exceptions into `ReadFailure` or `ExecutionFailure` values.
+paths turn backend exceptions into `ReadError` or `ExecutionError`; the engine
+constructs the corresponding report failure values.
 
 ### Type-model fidelity
 
@@ -257,7 +262,8 @@ sequenceDiagram
     User->>Engine: sync(customers, orders)
     Engine->>Engine: prepare desired tables
     Engine->>Reader: fetch_state(qualified_name)
-    Reader-->>Engine: TablePresent / TableAbsent / ReadFailed
+    Reader-->>Engine: TablePresent / TableAbsent / ReadError
+    Engine->>Engine: ReadError → ReadFailure
     Engine->>Differ: diff_table(desired, observed_or_none)
     Differ-->>Engine: TableMissing / TableDrift
     Engine->>Planner: plan_diff(diff)
@@ -305,7 +311,8 @@ skipped during execution. The engine still processes other tables.
 | `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
 | `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
 | `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Ordered, validated table-local actions      |
-| `CatalogState`     | Reader port            | Engine                           | Present, absent, or read-failed state       |
+| `CatalogState`     | Reader port            | Engine                           | Known present or absent state               |
+| `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
 | `ExecutionSummary` | Engine                 | Report                           | Attempted statement outcomes                |
 | `SyncReport`       | Engine                 | User code                        | Immutable run result                        |

@@ -2,11 +2,10 @@ from hypothesis import given, strategies as st
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
-    ExecutionError,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
-    ReadFailed,
+    ReadResult,
     TableAbsent,
     TablePresent,
 )
@@ -47,9 +46,8 @@ def test_present_state_holds_the_observed_table():
     # When recording its catalog state
     state = TablePresent(table=observed)
 
-    # Then it carries the observed table and is not a failure
+    # Then it carries the observed table
     assert state.table is observed
-    assert not isinstance(state, ReadFailed)
 
 
 def test_absent_state_is_distinct_from_a_failure():
@@ -58,19 +56,19 @@ def test_absent_state_is_distinct_from_a_failure():
     # When recording its catalog state
     state = TableAbsent()
 
-    # Then absence is its own state, not a failure
-    assert not isinstance(state, ReadFailed)
+    # Then absence is its own state
+    assert isinstance(state, TableAbsent)
 
 
-def test_read_failed_carries_the_failure():
+def test_read_result_retains_the_failure_without_a_wrapper():
     # Given a read that raised
     failure = ReadFailure(exception_type="RuntimeError", message="catalog unreachable")
 
     # When recording a failed read
-    result = ReadFailed(failure=failure)
+    result: ReadResult = failure
 
-    # Then it records the failure
-    assert result.failure is failure
+    # Then the failure itself is the result
+    assert result is failure
 
 
 def test_execution_summary_reports_no_failure_when_every_statement_succeeds():
@@ -119,14 +117,6 @@ def test_execution_outcome_variants_carry_the_right_payload():
     # Then success and failure carry only the fields appropriate to their arm
     assert failed.exception_type == "E"
     assert not hasattr(succeeded, "exception_type")
-
-
-def test_execution_error_is_a_regular_exception_with_normalized_details():
-    error = ExecutionError(exception_type="SparkException", message="boom")
-
-    assert isinstance(error, Exception)
-    assert error.exception_type == "SparkException"
-    assert str(error) == "boom"
 
 
 # ---------- property: ExecutionSummary internal consistency ----------

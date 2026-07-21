@@ -1,13 +1,38 @@
 """
-Application-level exception types for sync operations.
+Application-owned exception types.
 
-`SyncFailedError` owns how a failed run is communicated: it turns a
-`SyncReport` into a human-readable summary, including per-table detail lines and
-SQL previews for any failed actions.
+``ReadError`` and ``ExecutionError`` are transient signals raised by outbound
+adapters and caught by the engine. The engine turns them into persistent
+``Failure`` values for reports. ``DuplicateTableDefinitionError`` and
+``SyncFailedError`` are raised from the inbound sync boundary to callers.
 """
 
-from delta_engine.application.report import SyncReport, TableRunReport
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from delta_engine.domain.model import QualifiedName
+
+if TYPE_CHECKING:
+    from delta_engine.application.report import SyncReport, TableRunReport
+
+
+class ReadError(Exception):
+    """A normalized backend error raised while reading one table's state."""
+
+    def __init__(self, exception_type: str, message: str) -> None:
+        """Initialize the error with backend-neutral diagnostic details."""
+        super().__init__(message)
+        self.exception_type = exception_type
+
+
+class ExecutionError(Exception):
+    """A normalized backend error raised while executing one statement."""
+
+    def __init__(self, exception_type: str, message: str) -> None:
+        """Initialize the error with backend-neutral diagnostic details."""
+        super().__init__(message)
+        self.exception_type = exception_type
 
 
 class DuplicateTableDefinitionError(ValueError):

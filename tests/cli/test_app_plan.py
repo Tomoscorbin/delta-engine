@@ -5,8 +5,7 @@ import logging
 
 import pytest
 
-from delta_engine.application import ReadFailure
-from delta_engine.application.ports import ReadFailed
+from delta_engine.application.errors import ReadError
 import delta_engine.cli.app as cli_app
 from delta_engine.cli.app import app
 from delta_engine.cli.connection import Target, open_connection as real_open_connection
@@ -76,9 +75,7 @@ def test_catalog_read_failure_prints_the_plan_report_and_exits_one(
     runner, fake_engine, databricks_env, write_module
 ):
     module = write_module("plan_read_failure", ORDERS_ONLY)
-    fake_engine.states["dev.silver.orders"] = ReadFailed(
-        ReadFailure("PermissionDenied", "cannot inspect table")
-    )
+    fake_engine.states["dev.silver.orders"] = ReadError("PermissionDenied", "cannot inspect table")
 
     result = runner.invoke(app, ["plan", f"{module}:all_tables"])
 

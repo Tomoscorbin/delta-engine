@@ -3,8 +3,11 @@
 from collections.abc import Callable
 import logging
 
-from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
-from delta_engine.application.ports import ExecutionError
+from delta_engine.adapters.databricks.exception_inspection import (
+    exception_message,
+    exception_type_name,
+)
+from delta_engine.application.errors import ExecutionError
 
 logger = logging.getLogger(__name__)
 
