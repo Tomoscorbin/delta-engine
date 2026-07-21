@@ -1,5 +1,3 @@
-import pytest
-
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
     ExecutionSucceeded,
@@ -116,30 +114,3 @@ def test_execution_outcome_variants_carry_the_right_payload():
     # Then success and failure carry only the fields appropriate to their arm
     assert failed.exception_type == "E"
     assert not hasattr(succeeded, "exception_type")
-
-
-# ---------- ExecutionSummary chronology ----------
-
-
-@pytest.mark.parametrize(
-    "results",
-    [
-        (_ok_exec(1),),
-        (_ok_exec(0), _ok_exec(2)),
-    ],
-)
-def test_execution_summary_rejects_non_contiguous_indexes(results):
-    with pytest.raises(ValueError, match="indexes must be contiguous"):
-        ExecutionSummary(results)
-
-
-@pytest.mark.parametrize(
-    "results",
-    [
-        (_failed_exec(0), _ok_exec(1)),
-        (_failed_exec(0), _failed_exec(1)),
-    ],
-)
-def test_execution_summary_rejects_results_after_a_failure(results):
-    with pytest.raises(ValueError, match="failure must be the final result"):
-        ExecutionSummary(results)

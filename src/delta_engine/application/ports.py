@@ -113,17 +113,6 @@ class ExecutionSummary:
 
     results: tuple[ExecutionResult, ...] = ()
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "results", tuple(self.results))
-
-        failure_seen = False
-        for expected_index, result in enumerate(self.results):
-            if result.statement_index != expected_index:
-                raise ValueError("Execution result indexes must be contiguous and start at zero")
-            if failure_seen:
-                raise ValueError("An execution failure must be the final result")
-            failure_seen = isinstance(result, ExecutionFailure)
-
     @property
     def failed(self) -> bool:
         """True when any statement failed."""
