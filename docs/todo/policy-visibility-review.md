@@ -73,23 +73,17 @@ needs no further judgement, while a `TableDrift` is evaluated by every
 configured `SafetyRule`. The adjacent tuples therefore show every validation
 mechanism and its deterministic evaluation order in one short block.
 
-### Named scopes
+### Named scopes — consolidated
 
-Scope semantics are spread across:
+`application/scopes.py` owns the public scope names, their aspect sets, and
+the name-to-aspects translation. `DeltaTable` resolves its `scope` at the API
+boundary, while `StreamingTableTagsOnly` reuses `TAG_ASPECTS`; the public
+`"tags"` definition and streaming-table allowance cannot diverge.
 
-- scope-to-aspect mapping in `api/delta_table.py`;
-- streaming-table allowed aspects in `application/validation.py`;
-- the property exception in `domain/plan/diff.py`; and
-- managed foreign-key filtering in `application/dependency_resolution.py`.
-
-The latter two need to act locally, but the definitions of `full`, `metadata`,
-and `tags` should have one owner. An `application/scopes.py` module could hold
-the named aspect sets and their mapping. The API would translate public scope
-names there, and streaming validation would reuse the same tag-aspect set
-instead of restating it.
-
-The domain should continue to receive only `managed_aspects`; it should not
-import application policy.
+The domain continues to receive only `managed_aspects`. Its property exception
+in `domain/plan/diff.py` and the managed foreign-key filtering in
+`application/dependency_resolution.py` remain local consumers of individual
+aspects, rather than importing application policy.
 
 ### Execution sequencing
 
