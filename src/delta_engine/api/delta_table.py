@@ -86,11 +86,6 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
-def _primary_key_constraint_name(table_name: str) -> str:
-    """Return the physical name used for a table's generated primary key."""
-    return f"{table_name}_pk"
-
-
 def _foreign_key_constraint_name(
     *,
     owner_table_name: str,
@@ -491,7 +486,7 @@ class DeltaTable:
         partitioned_by: Iterable[str] = (),
         clustered_by: Iterable[str] = (),
         primary_key: Sequence[str] | None = None,
-        foreign_keys: Iterable[ForeignKey | ForeignKeyConstraint] | None = None,
+        foreign_keys: Iterable[ForeignKey] | None = None,
         scope: ScopeName = "full",
     ) -> None:
         """
@@ -512,9 +507,7 @@ class DeltaTable:
                 ``partitioned_by``.
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
-            foreign_keys: Foreign key relationships declared on this table. A
-                previously lowered ``ForeignKeyConstraint`` is also accepted,
-                which makes the public ``foreign_keys`` value round-trip safely.
+            foreign_keys: Foreign key relationships declared on this table.
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
@@ -559,7 +552,7 @@ class DeltaTable:
         primary_key_constraint = (
             PrimaryKeyConstraint(
                 columns=tuple(primary_key),
-                constraint_name=_primary_key_constraint_name(name),
+                constraint_name=f"{name}_pk",
             )
             if primary_key is not None
             else None
@@ -570,11 +563,10 @@ class DeltaTable:
 
         qualified_name = QualifiedName(catalog, schema, name)
         _validate_object_name_parts(qualified_name)
+        foreign_key_declarations = tuple(foreign_keys or ())
         lowered_foreign_keys = tuple(
-            declaration
-            if isinstance(declaration, ForeignKeyConstraint)
-            else declaration._to_constraint(qualified_name, columns, primary_key_columns)
-            for declaration in (foreign_keys or ())
+            declaration._to_constraint(qualified_name, columns, primary_key_columns)
+            for declaration in foreign_key_declarations
         )
 
         # Building DesiredTable here enforces all domain invariants (non-empty
@@ -593,6 +585,7 @@ class DeltaTable:
             foreign_keys=lowered_foreign_keys,
             managed_aspects=managed_aspects,
         )
+        self._foreign_keys = foreign_key_declarations
 
     @property
     def catalog(self) -> str:
@@ -649,9 +642,9 @@ class DeltaTable:
         return self._desired_table.primary_key_columns
 
     @property
-    def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
-        """Foreign key constraints declared on this table."""
-        return self._desired_table.foreign_keys
+    def foreign_keys(self) -> tuple[ForeignKey, ...]:
+        """Foreign key relationships supplied in the declaration."""
+        return self._foreign_keys
 
     def to_desired_table(self) -> DesiredTable:
         """Return the domain :class:`DesiredTable` for this table definition."""

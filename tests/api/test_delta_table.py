@@ -605,7 +605,7 @@ def test_delta_table_accepts_foreign_keys_parameter():
     )
 
     # Then the FK is lowered to an internal constraint carrying its generated name
-    [foreign_key] = table.foreign_keys
+    [foreign_key] = table.to_desired_table().foreign_keys
     assert foreign_key.local_columns == ("customer_id",)
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
@@ -625,8 +625,8 @@ def test_delta_table_defaults_to_no_foreign_keys():
     assert table.foreign_keys == ()
 
 
-def test_delta_table_accepts_its_lowered_foreign_keys():
-    # Given a table whose public foreign_keys value contains lowered constraints
+def test_delta_table_foreign_keys_round_trip_as_declarations():
+    # Given a table with a public foreign-key declaration
     customers = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -642,7 +642,7 @@ def test_delta_table_accepts_its_lowered_foreign_keys():
         foreign_keys=[ForeignKey(columns="customer_id", references=customers)],
     )
 
-    # When reusing that value in another declaration
+    # When reusing that declaration on another table
     copy = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -651,8 +651,10 @@ def test_delta_table_accepts_its_lowered_foreign_keys():
         foreign_keys=original.foreign_keys,
     )
 
-    # Then the lowered relationship remains intact
+    # Then the public declarations round-trip and lowering uses the new owner
     assert copy.foreign_keys == original.foreign_keys
+    [constraint] = copy.to_desired_table().foreign_keys
+    assert constraint.constraint_name == "orders_copy_customer_id_fk"
 
 
 def test_delta_table_rejects_fk_with_unknown_local_column():
@@ -1229,7 +1231,7 @@ def test_single_column_string_foreign_key_infers_and_normalizes_parent_column():
         foreign_keys=[declaration],
     )
 
-    [foreign_key] = orders.foreign_keys
+    [foreign_key] = orders.to_desired_table().foreign_keys
 
     assert declaration.columns == ("customer_id",)
     assert foreign_key.local_columns == ("customer_id",)
@@ -1254,7 +1256,7 @@ def test_single_column_sequence_infers_and_normalizes_parent_column():
         foreign_keys=[declaration],
     )
 
-    [foreign_key] = orders.foreign_keys
+    [foreign_key] = orders.to_desired_table().foreign_keys
 
     assert declaration.columns == ("customer_id",)
     assert foreign_key.local_columns == ("customer_id",)
@@ -1290,7 +1292,7 @@ def test_same_name_composite_foreign_key_is_inferred_by_normalized_name():
         ],
     )
 
-    [foreign_key] = entries.foreign_keys
+    [foreign_key] = entries.to_desired_table().foreign_keys
 
     assert foreign_key.local_columns == ("account_id", "tenant_id")
     assert foreign_key.referenced_columns == ("account_id", "tenant_id")
@@ -1381,7 +1383,7 @@ def test_delta_table_stores_composite_foreign_key_canonically():
     )
 
     # Then pairs are stored canonically (sorted by local column), pairing intact
-    [foreign_key] = orders.foreign_keys
+    [foreign_key] = orders.to_desired_table().foreign_keys
     assert foreign_key.local_columns == ("customer_id", "tenant_id")
     assert foreign_key.referenced_columns == ("id", "tenant_id")
 
@@ -1401,7 +1403,7 @@ def test_delta_table_supports_self_referential_foreign_key():
     )
 
     # Then the FK targets the table's own qualified name and primary key
-    [foreign_key] = employee.foreign_keys
+    [foreign_key] = employee.to_desired_table().foreign_keys
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "employee")
     assert foreign_key.referenced_columns == ("id",)
 
@@ -1609,7 +1611,7 @@ def test_foreign_key_with_matching_types_still_lowers():
     )
 
     # Then the foreign key lowers normally
-    assert orders.foreign_keys[0].local_columns == ("customer_id",)
+    assert orders.to_desired_table().foreign_keys[0].local_columns == ("customer_id",)
 
 
 def test_foreign_key_accepts_columns_as_any_mapping():
@@ -1626,7 +1628,7 @@ def test_foreign_key_accepts_columns_as_any_mapping():
 
     # Then the declaration copies the mapping and the lowered constraint holds an immutable tuple
     assert dict(declaration.columns) == {"customer_id": "id"}
-    [constraint] = orders.foreign_keys
+    [constraint] = orders.to_desired_table().foreign_keys
     assert constraint.local_columns == ("customer_id",)
 
 
@@ -1640,7 +1642,7 @@ def test_mapping_lowers_single_column_foreign_key():
         foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
     )
 
-    [foreign_key] = orders.foreign_keys
+    [foreign_key] = orders.to_desired_table().foreign_keys
     assert foreign_key.local_columns == ("customer_id",)
     assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
     assert foreign_key.referenced_columns == ("id",)
@@ -1672,7 +1674,7 @@ def test_mapping_lowers_composite_foreign_key_with_stated_pairing():
     )
 
     # Stored canonically (sorted by local column), pairing exactly as stated
-    [foreign_key] = orders.foreign_keys
+    [foreign_key] = orders.to_desired_table().foreign_keys
     assert foreign_key.local_columns == ("customer_id", "tenant_id")
     assert foreign_key.referenced_columns == ("id", "tenant_id")
 
@@ -1690,13 +1692,14 @@ def test_mapping_insertion_order_is_irrelevant():
     )
 
     def orders_with(mapping):
-        return DeltaTable(
+        table = DeltaTable(
             catalog="cat",
             schema="sch",
             name="orders",
             columns=[Column("tenant_id", Integer()), Column("customer_id", Integer())],
             foreign_keys=[ForeignKey(columns=mapping, references=accounts)],
-        ).foreign_keys[0]
+        )
+        return table.to_desired_table().foreign_keys[0]
 
     one = orders_with({"tenant_id": "tenant_id", "customer_id": "id"})
     two = orders_with({"customer_id": "id", "tenant_id": "tenant_id"})
