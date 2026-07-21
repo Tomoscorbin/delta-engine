@@ -15,7 +15,8 @@ reader can quickly find where policy decisions are made.
 The code already has several good policy homes:
 
 - `ActionPhase` is the visible owner of action precedence.
-- `DEFAULT_RULES` is the visible owner of most safety rules.
+- `MANDATORY_SCOPE_GATES` and `DEFAULT_SAFETY_RULES` together expose the
+  complete validation policy.
 - `Engine` owns run ordering, dependency blocking, and failure propagation.
 - `diff.py` owns desired/observed comparison semantics.
 - `sql/compile.py` owns backend statement lowering.
@@ -55,25 +56,22 @@ properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties)
 Property diff production can remain in `diff.py`; that is comparison logic,
 not property-policy ownership.
 
-### Validation composition
+### Validation composition — consolidated
 
-`DEFAULT_RULES` in `application/validation.py` looks like the complete policy,
-but it is not. Scope gates are applied separately by `_scope_failures()` and
-cannot be disabled through `rules`.
+Validation composition is now explicit in `application/validation.py` through
+two adjacent values:
 
-Make the distinction explicit with either:
+- `MANDATORY_SCOPE_GATES` lists the scope checks that always run; and
+- `DEFAULT_SAFETY_RULES` lists the safety rules callers may replace at the
+  lower-level validation boundary.
 
-```python
-DEFAULT_VALIDATION_POLICY = ValidationPolicy(
-    mandatory_gates=(...),
-    safety_rules=(...),
-)
-```
-
-or, more minimally, rename `DEFAULT_RULES` to `DEFAULT_SAFETY_RULES` and put a
-`MANDATORY_SCOPE_GATES` value beside it. The important part is that one short
-block shows every validation mechanism that runs. The individual rule
-implementations can remain together in `validation.py`.
+Every scope gate implements `ScopeGate` over the complete `TableDiff` union,
+returning no failures for an irrelevant diff arm. `validate_diff` evaluates
+all mandatory gates in declaration order and returns their accumulated
+failures before any safety rule runs. Once the gates pass, a `TableMissing`
+needs no further judgement, while a `TableDrift` is evaluated by every
+configured `SafetyRule`. The adjacent tuples therefore show every validation
+mechanism and its deterministic evaluation order in one short block.
 
 ### Named scopes
 

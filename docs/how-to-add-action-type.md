@@ -137,10 +137,10 @@ An action may emit several entries across categories (`CreateTable` lists its co
 If the new action can be unsafe, add a rule in
 `src/delta_engine/application/validation.py`. Rules receive the self-contained
 drift and match concrete types from `drift.actions` (or `drift.unresolvable`
-when judging unresolvable differences). The scope gate runs before any rule
-and short-circuits on out-of-scope drift, so a rule only ever sees
-differences the declaration manages — declare the correct `TableAspect` on
-the action (step 1) and no scope filtering is needed here:
+when judging unresolvable differences). The mandatory scope gates run before
+any safety rule and short-circuit the safety stage on failure, so a rule only
+ever sees differences the declaration manages — declare the correct
+`TableAspect` on the action (step 1) and no scope filtering is needed here:
 
 ```python
 from typing import ClassVar
@@ -163,7 +163,7 @@ class NoUnsafeCommentChange:
         )
 ```
 
-Add it to `DEFAULT_RULES` in the same file. `plan_diff` deliberately exposes
+Add it to `DEFAULT_SAFETY_RULES` in the same file. `plan_diff` deliberately exposes
 no rules parameter: accepted plans always use this default policy.
 
 ## 7. Write tests

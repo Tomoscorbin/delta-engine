@@ -42,6 +42,39 @@ from delta_engine.domain.plan import (
     UnsetProperty,
 )
 
+_STREAMING_TABLE_MANAGEABLE_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
+)
+
+# The widenings Delta can apply in place (observed -> desired), per the
+# Databricks type-widening matrix. Decimal targets are handled separately —
+# whether they fit depends on precision and scale, not the type alone.
+# Composite types are deliberately absent: this engine models arrays, maps,
+# and structs atomically, so they are never widened as a whole and any change
+# to them stays blocked (Delta itself can widen nested fields).
+_WIDENING_TARGETS: Final[Mapping[type[DataType], frozenset[type[DataType]]]] = MappingProxyType(
+    {
+        Byte: frozenset({Short, Integer, Long, Double}),
+        Short: frozenset({Integer, Long, Double}),
+        Integer: frozenset({Long, Double}),
+        Float: frozenset({Double}),
+        Date: frozenset({TimestampNtz}),
+    }
+)
+
+# Widening an integer column to Decimal needs room for every value the source
+# type can hold. Databricks specifies DECIMAL(10,0) as the minimum for
+# Byte/Short/Integer and DECIMAL(20,0) for Long — i.e. this many integer
+# digits (precision minus scale).
+_DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingProxyType(
+    {
+        Byte: 10,
+        Short: 10,
+        Integer: 10,
+        Long: 20,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
@@ -55,7 +88,21 @@ class ValidationResult:
         return bool(self.failures)
 
 
-class Rule(Protocol):
+class ScopeGate(Protocol):
+    """
+    Mandatory check over any diff.
+
+    Gates establish whether the diff is eligible for safety validation.
+    """
+
+    name: ClassVar[str]
+
+    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
+        """Return mandatory failures for this diff, or an empty tuple."""
+        ...
+
+
+class SafetyRule(Protocol):
     """
     Interface for drift validation rules.
 
@@ -118,36 +165,6 @@ class NullabilityTighteningOnExistingColumn:
             for change in drift.actions
             if isinstance(change, SetColumnNullability) and not change.desired_nullable
         )
-
-
-# The widenings Delta can apply in place (observed -> desired), per the
-# Databricks type-widening matrix. Decimal targets are handled separately —
-# whether they fit depends on precision and scale, not the type alone.
-# Composite types are deliberately absent: this engine models arrays, maps,
-# and structs atomically, so they are never widened as a whole and any change
-# to them stays blocked (Delta itself can widen nested fields).
-_WIDENING_TARGETS: Final[Mapping[type[DataType], frozenset[type[DataType]]]] = MappingProxyType(
-    {
-        Byte: frozenset({Short, Integer, Long, Double}),
-        Short: frozenset({Integer, Long, Double}),
-        Integer: frozenset({Long, Double}),
-        Float: frozenset({Double}),
-        Date: frozenset({TimestampNtz}),
-    }
-)
-
-# Widening an integer column to Decimal needs room for every value the source
-# type can hold. Databricks specifies DECIMAL(10,0) as the minimum for
-# Byte/Short/Integer and DECIMAL(20,0) for Long — i.e. this many integer
-# digits (precision minus scale).
-_DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingProxyType(
-    {
-        Byte: 10,
-        Short: 10,
-        Integer: 10,
-        Long: 20,
-    }
-)
 
 
 def _is_safe_widening(observed: DataType, desired: DataType) -> bool:
@@ -453,27 +470,13 @@ class PrimaryKeyReferencedByForeignKeys:
         return tuple(failures)
 
 
-DEFAULT_RULES: Final[tuple[Rule, ...]] = (
-    NonNullableColumnAdd(),
-    NullabilityTighteningOnExistingColumn(),
-    NonWideningColumnTypeChange(),
-    TypeWideningRequiredForTypeChange(),
-    PartitioningChangeNotSupported(),
-    PropertyTransitionNotSupported(DELTA_PROPERTY_POLICY),
-    PropertyMustBeDeclared(DELTA_PROPERTY_POLICY),
-    ColumnMappingRequiredForDrop(),
-    AmbiguousColumnRename(),
-    PrimaryKeyReferencedByForeignKeys(),
-)
-
-
 class UnmanagedAspectDrift:
     """
     Fail once per unmanaged aspect that has drifted.
 
     The drift arm of the scope gate: it defines what a declaration is allowed
     to govern and runs before any safety rule, short-circuiting
-    ``validate_diff``. It is not a member of ``DEFAULT_RULES`` and cannot be
+    ``validate_diff``. It is not a member of ``DEFAULT_SAFETY_RULES`` and cannot be
     suppressed — the accepted planning boundary turns every validated action
     into executable work, so ``rules=()`` still cannot admit actions from an
     aspect the declaration does not manage.
@@ -486,25 +489,30 @@ class UnmanagedAspectDrift:
 
     name: ClassVar[str] = "UnmanagedAspectDrift"
 
-    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag every drifted aspect the declaration does not manage."""
-        managed_aspects = drift.desired.managed_aspects
-        unmanaged_aspects = dict.fromkeys(
-            difference.aspect
-            for difference in (*drift.actions, *drift.unresolvable)
-            if difference.aspect not in managed_aspects
-        )
-        return tuple(
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    f"Operation not allowed: {aspect.label} has drifted"
-                    " but is not managed by this definition. Sync the table fully"
-                    " or update the declaration to match the live schema."
-                ),
-            )
-            for aspect in unmanaged_aspects
-        )
+        match diff:
+            case TableMissing():
+                return ()
+
+            case TableDrift() as drift:
+                unmanaged_aspects = dict.fromkeys(
+                    difference.aspect
+                    for difference in (*drift.actions, *drift.unresolvable)
+                    if difference.aspect not in drift.desired.managed_aspects
+                )
+
+                return tuple(
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            f"Operation not allowed: {aspect.label} has drifted"
+                            " but is not managed by this definition. Sync the table fully"
+                            " or update the declaration to match the live schema."
+                        ),
+                    )
+                    for aspect in unmanaged_aspects
+                )
 
 
 class MissingTableUnmanaged:
@@ -514,33 +522,36 @@ class MissingTableUnmanaged:
     The scope invariant for the ``TableMissing`` arm, peer to
     ``UnmanagedAspectDrift`` on the drift arm. It shares the naming shape of
     a rule (its ``name`` supplies the failure's ``rule_name``) but not the
-    ``Rule`` protocol — its subject is a missing table, which has no changes
+    ``SafetyRule`` protocol — its subject is a missing table, which has no changes
     to evaluate. Like the drift-arm invariant it runs unconditionally:
     ``rules=()`` must not enable metadata-only creates.
     """
 
     name: ClassVar[str] = "MissingTableUnmanaged"
 
-    def evaluate(self, missing: TableMissing) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag a missing table that this declaration cannot create."""
-        if TableAspect.TABLE_EXISTENCE in missing.desired.managed_aspects:
-            return ()
-        return (
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    "Operation not allowed: the table does not exist and this"
-                    " definition does not manage table existence, so it cannot"
-                    " be created. Manage the table fully or create it out-of-band"
-                    " first."
-                ),
-            ),
-        )
+        match diff:
+            case TableDrift():
+                return ()
 
+            case TableMissing() as missing:
+                if TableAspect.TABLE_EXISTENCE in missing.desired.managed_aspects:
+                    return ()
+                return (
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: the table does not exist and this"
+                            " definition does not manage table existence, so it cannot"
+                            " be created. Manage the table fully or create it out-of-band"
+                            " first."
+                        ),
+                    ),
+                )
 
-_STREAMING_TABLE_MANAGEABLE_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
-    {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
-)
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 class StreamingTableTagsOnly:
@@ -558,27 +569,55 @@ class StreamingTableTagsOnly:
 
     name: ClassVar[str] = "StreamingTableTagsOnly"
 
-    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+    def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
-        if drift.observed.kind is not TableKind.STREAMING_TABLE:
-            return ()
-        if drift.desired.managed_aspects <= _STREAMING_TABLE_MANAGEABLE_ASPECTS:
-            return ()
-        return (
-            ValidationFailure(
-                rule_name=self.name,
-                message=(
-                    "Operation not allowed: this relation is a streaming table,"
-                    " whose definition is owned by its pipeline. Only Unity"
-                    " Catalog tags can be managed on it: declare the table with"
-                    ' scope="tags", or change its definition in the owning'
-                    " pipeline."
-                ),
-            ),
-        )
+        match diff:
+            case TableMissing():
+                return ()
+
+            case TableDrift() as drift:
+                if drift.observed.kind is not TableKind.STREAMING_TABLE:
+                    return ()
+                if drift.desired.managed_aspects <= _STREAMING_TABLE_MANAGEABLE_ASPECTS:
+                    return ()
+                return (
+                    ValidationFailure(
+                        rule_name=self.name,
+                        message=(
+                            "Operation not allowed: this relation is a streaming table,"
+                            " whose definition is owned by its pipeline. Only Unity"
+                            " Catalog tags can be managed on it: declare the table with"
+                            ' scope="tags", or change its definition in the owning'
+                            " pipeline."
+                        ),
+                    ),
+                )
 
 
-def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> ValidationResult:
+MANDATORY_SCOPE_GATES: Final[tuple[ScopeGate, ...]] = (
+    MissingTableUnmanaged(),
+    StreamingTableTagsOnly(),
+    UnmanagedAspectDrift(),
+)
+
+DEFAULT_SAFETY_RULES: Final[tuple[SafetyRule, ...]] = (
+    NonNullableColumnAdd(),
+    NullabilityTighteningOnExistingColumn(),
+    NonWideningColumnTypeChange(),
+    TypeWideningRequiredForTypeChange(),
+    PartitioningChangeNotSupported(),
+    PropertyTransitionNotSupported(DELTA_PROPERTY_POLICY),
+    PropertyMustBeDeclared(DELTA_PROPERTY_POLICY),
+    ColumnMappingRequiredForDrop(),
+    AmbiguousColumnRename(),
+    PrimaryKeyReferencedByForeignKeys(),
+)
+
+
+def validate_diff(
+    diff: TableDiff,
+    rules: tuple[SafetyRule, ...] = DEFAULT_SAFETY_RULES,
+) -> ValidationResult:
     """
     Evaluate a table diff and return the verdict.
 
@@ -595,32 +634,19 @@ def validate_diff(diff: TableDiff, rules: tuple[Rule, ...] = DEFAULT_RULES) -> V
     the managed drift. A missing table that clears the gate is a
     fully-managed create and needs no safety judgement.
     """
-    scope_failures = _scope_failures(diff)
-    if scope_failures:
-        return ValidationResult(failures=scope_failures)
+    gate_failures = tuple(
+        failure for gate in MANDATORY_SCOPE_GATES for failure in gate.evaluate(diff)
+    )
+
+    if gate_failures:
+        return ValidationResult(failures=gate_failures)
+
     match diff:
         case TableMissing():
             return ValidationResult()
         case TableDrift() as drift:
             return ValidationResult(
                 failures=tuple(failure for rule in rules for failure in rule.evaluate(drift))
-            )
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
-def _scope_failures(diff: TableDiff) -> tuple[ValidationFailure, ...]:
-    """Return the scope-gate failures for either diff arm; empty when in scope."""
-    # TODO: these are stateless single-method classes, constructed per call and
-    # invoked directly here (not pluggable rules in DEFAULT_RULES). Reconsider
-    # whether they should be plain module-level functions rather than classes.
-    match diff:
-        case TableMissing() as missing:
-            return MissingTableUnmanaged().evaluate(missing)
-        case TableDrift() as drift:
-            return (
-                *StreamingTableTagsOnly().evaluate(drift),
-                *UnmanagedAspectDrift().evaluate(drift),
             )
         case _ as unreachable:
             assert_never(unreachable)
