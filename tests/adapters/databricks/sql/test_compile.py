@@ -285,10 +285,7 @@ def test_create_table_inlines_primary_key_constraint():
     action = _create_table(
         DesiredColumn("id", Integer(), nullable=False),
         DesiredColumn("name", String()),
-        primary_key=PrimaryKeyConstraint.generate(
-            table_name=_TARGET.name,
-            columns=("id",),
-        ),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{_TARGET.name}_pk"),
     )
 
     # When compiling

@@ -86,6 +86,16 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
+def _foreign_key_constraint_name(
+    *,
+    owner_table_name: str,
+    local_columns: tuple[str, ...],
+) -> str:
+    """Return the physical name used for a generated foreign key."""
+    columns = "_".join(sorted(local_columns))
+    return f"{owner_table_name}_{columns}_fk"
+
+
 def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
     """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
     for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
@@ -386,11 +396,14 @@ class ForeignKey:
                     f" is {referenced_type}"
                 )
 
-        return ForeignKeyConstraint.generate(
-            owner_table_name=owner_name.name,
+        return ForeignKeyConstraint(
             local_columns=local_columns,
             referenced_table=referenced.table,
             referenced_columns=referenced_columns,
+            constraint_name=_foreign_key_constraint_name(
+                owner_table_name=owner_name.name,
+                local_columns=local_columns,
+            ),
         )
 
     def _resolve_reference(
@@ -537,7 +550,10 @@ class DeltaTable:
             )
 
         primary_key_constraint = (
-            PrimaryKeyConstraint.generate(table_name=name, columns=tuple(primary_key))
+            PrimaryKeyConstraint(
+                columns=tuple(primary_key),
+                constraint_name=f"{name}_pk",
+            )
             if primary_key is not None
             else None
         )
@@ -547,9 +563,10 @@ class DeltaTable:
 
         qualified_name = QualifiedName(catalog, schema, name)
         _validate_object_name_parts(qualified_name)
+        foreign_key_declarations = tuple(foreign_keys or ())
         lowered_foreign_keys = tuple(
             declaration._to_constraint(qualified_name, columns, primary_key_columns)
-            for declaration in (foreign_keys or ())
+            for declaration in foreign_key_declarations
         )
 
         # Building DesiredTable here enforces all domain invariants (non-empty
@@ -568,6 +585,7 @@ class DeltaTable:
             foreign_keys=lowered_foreign_keys,
             managed_aspects=managed_aspects,
         )
+        self._foreign_keys = foreign_key_declarations
 
     @property
     def catalog(self) -> str:
@@ -624,9 +642,9 @@ class DeltaTable:
         return self._desired_table.primary_key_columns
 
     @property
-    def foreign_keys(self) -> tuple[ForeignKeyConstraint, ...]:
-        """Foreign key constraints declared on this table."""
-        return self._desired_table.foreign_keys
+    def foreign_keys(self) -> tuple[ForeignKey, ...]:
+        """Foreign key relationships supplied in the declaration."""
+        return self._foreign_keys
 
     def to_desired_table(self) -> DesiredTable:
         """Return the domain :class:`DesiredTable` for this table definition."""

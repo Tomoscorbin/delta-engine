@@ -127,20 +127,6 @@ def test_foreign_key_constraint_is_frozen():
         constraint.referenced_table = _customers()  # type: ignore[misc]
 
 
-def test_generate_names_constraint_from_table_and_local_columns():
-    # Given a table name and foreign key content
-    # When the engine generates the constraint
-    constraint = ForeignKeyConstraint.generate(
-        owner_table_name="orders",
-        local_columns=("customer_id",),
-        referenced_table=_customers(),
-        referenced_columns=("id",),
-    )
-
-    # Then the name follows {table}_{local_cols}_fk
-    assert constraint.constraint_name == "orders_customer_id_fk"
-
-
 def test_construction_canonicalizes_pair_order_by_local_column():
     # Given pairs declared in non-canonical order: b->y, a->x
     constraint = ForeignKeyConstraint(
@@ -172,26 +158,6 @@ def test_signature_ignores_declared_pair_order():
 
     # Then they are the same constraint — order is not part of identity
     assert one.signature == two.signature
-
-
-def test_generate_names_identically_for_permuted_pairs():
-    # Given the same relationship generated from two pair orders
-    one = ForeignKeyConstraint.generate(
-        owner_table_name="orders",
-        local_columns=("a", "b"),
-        referenced_table=_customers(),
-        referenced_columns=("x", "y"),
-    )
-    two = ForeignKeyConstraint.generate(
-        owner_table_name="orders",
-        local_columns=("b", "a"),
-        referenced_table=_customers(),
-        referenced_columns=("y", "x"),
-    )
-
-    # Then the generated name is order-independent and canonical
-    assert one.constraint_name == "orders_a_b_fk"
-    assert two.constraint_name == "orders_a_b_fk"
 
 
 def test_mixed_case_columns_and_name_normalize_to_lowercase():

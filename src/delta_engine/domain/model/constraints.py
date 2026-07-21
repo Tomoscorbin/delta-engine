@@ -1,7 +1,6 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
 from dataclasses import dataclass
-from typing import Self
 
 from delta_engine.domain.model.qualified_name import QualifiedName
 
@@ -41,11 +40,6 @@ class PrimaryKeyConstraint:
             raise ValueError("constraint_name must not be blank")
         object.__setattr__(self, "constraint_name", self.constraint_name.lower())
 
-    @classmethod
-    def generate(cls, *, table_name: str, columns: tuple[str, ...]) -> Self:
-        """Return a constraint over ``columns`` named ``{table_name}_pk``."""
-        return cls(columns=columns, constraint_name=f"{table_name}_pk")
-
 
 @dataclass(frozen=True, slots=True)
 class ForeignKeyConstraint:
@@ -74,24 +68,6 @@ class ForeignKeyConstraint:
     referenced_table: QualifiedName
     referenced_columns: tuple[str, ...]
     constraint_name: str
-
-    @classmethod
-    def generate(
-        cls,
-        *,
-        owner_table_name: str,
-        local_columns: tuple[str, ...],
-        referenced_table: QualifiedName,
-        referenced_columns: tuple[str, ...],
-    ) -> Self:
-        """Return a constraint named ``{owner_table_name}_{local_columns}_fk`` (canonical order)."""
-        columns = "_".join(sorted(local_columns))
-        return cls(
-            local_columns=local_columns,
-            referenced_table=referenced_table,
-            referenced_columns=referenced_columns,
-            constraint_name=f"{owner_table_name}_{columns}_fk",
-        )
 
     def __post_init__(self) -> None:
         if not self.local_columns:

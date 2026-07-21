@@ -116,16 +116,14 @@ translation. Spark and warehouse adapters supply their physical one-statement
 runner, while the warehouse adapter also contains its per-statement cursor
 lifecycle.
 
-### Constraint naming
+### Constraint naming — consolidated
 
-The documentation describes constraint names as API-generated, but
-`PrimaryKeyConstraint.generate()` and `ForeignKeyConstraint.generate()` live
-in the domain model. Naming physical catalog objects is deployment policy, not
-a domain invariant.
-
-Move the generation helpers beside `DeltaTable`/`ForeignKey` lowering. The
-domain constraint should validate a supplied name; the API lowering should
-choose it.
+Constraint names are deployment policy, not a domain invariant. The API
+lowering in `api/delta_table.py` now owns the generated `{table}_pk` and
+`{table}_{local_columns}_fk` names before constructing the domain values.
+`PrimaryKeyConstraint` and `ForeignKeyConstraint` only validate and
+canonicalize the supplied name, so observed catalog names and future explicit
+names follow the same domain contract.
 
 ### Declaration validation boundary
 
