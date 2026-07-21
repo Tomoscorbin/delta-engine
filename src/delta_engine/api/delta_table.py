@@ -461,6 +461,123 @@ class ForeignKey:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _NormalizedDeclaration:
+    """One frozen, canonical representation of public ``DeltaTable`` input."""
+
+    qualified_name: QualifiedName
+    columns: tuple[Column, ...]
+    comment: str
+    properties: Mapping[str, str | None]
+    tags: Mapping[str, str]
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    primary_key: tuple[str, ...] | None
+    foreign_key_declarations: tuple[ForeignKey, ...]
+    managed_aspects: frozenset[TableAspect]
+
+
+def _normalize_declaration(
+    *,
+    catalog: str,
+    schema: str,
+    name: str,
+    columns: Iterable[Column],
+    comment: str,
+    properties: Mapping[str, str | None] | None,
+    tags: Mapping[str, str] | None,
+    partitioned_by: Iterable[str],
+    clustered_by: Iterable[str],
+    primary_key: Sequence[str] | None,
+    foreign_keys: Iterable[ForeignKey] | None,
+    scope: ScopeName,
+) -> _NormalizedDeclaration:
+    """Freeze public inputs and canonicalize identifiers before judging them."""
+    # A bare string is itself a Sequence[str], so the type checker cannot
+    # reject it; refuse the shape before it silently means per-character
+    # columns.
+    if isinstance(primary_key, str):
+        raise TypeError(
+            "primary_key must be a sequence of column names, not a string;"
+            f" write primary_key=[{primary_key!r}] for a single-column key"
+        )
+
+    return _NormalizedDeclaration(
+        qualified_name=QualifiedName(catalog, schema, name),
+        columns=tuple(columns),
+        comment=comment,
+        properties=MappingProxyType(dict(properties or {})),
+        tags=MappingProxyType(dict(tags or {})),
+        partitioned_by=tuple(column.lower() for column in partitioned_by),
+        clustered_by=tuple(column.lower() for column in clustered_by),
+        primary_key=(
+            tuple(column.lower() for column in primary_key) if primary_key is not None else None
+        ),
+        foreign_key_declarations=tuple(foreign_keys or ()),
+        managed_aspects=managed_aspects_for(scope),
+    )
+
+
+def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
+    """Reject normalized declarations that the public API cannot deploy."""
+    DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
+    _validate_layout(
+        declaration.columns,
+        declaration.partitioned_by,
+        declaration.clustered_by,
+    )
+    _validate_column_names(
+        declaration.columns,
+        declaration.properties,
+        declaration.managed_aspects,
+    )
+    _validate_renames(declaration.columns, declaration.properties)
+
+    _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
+    for column in declaration.columns:
+        _validate_tags(f"column '{column.name}'", column.tags)
+
+    _validate_object_name_parts(declaration.qualified_name)
+
+
+def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
+    """Lower a valid public declaration into the domain model."""
+    primary_key_constraint = (
+        PrimaryKeyConstraint(
+            columns=declaration.primary_key,
+            constraint_name=f"{declaration.qualified_name.name}_pk",
+        )
+        if declaration.primary_key is not None
+        else None
+    )
+    primary_key_columns = (
+        primary_key_constraint.columns if primary_key_constraint is not None else ()
+    )
+    foreign_keys = tuple(
+        foreign_key._to_constraint(
+            declaration.qualified_name,
+            declaration.columns,
+            primary_key_columns,
+        )
+        for foreign_key in declaration.foreign_key_declarations
+    )
+
+    # DesiredTable enforces domain invariants (non-empty and unique columns,
+    # existing layout/key columns, and coherent constraints) at construction.
+    return DesiredTable(
+        qualified_name=declaration.qualified_name,
+        columns=declaration.columns,
+        comment=declaration.comment,
+        properties=declaration.properties,
+        tags=declaration.tags,
+        partitioned_by=declaration.partitioned_by,
+        clustered_by=declaration.clustered_by,
+        primary_key=primary_key_constraint,
+        foreign_keys=foreign_keys,
+        managed_aspects=declaration.managed_aspects,
+    )
+
+
 class DeltaTable:
     """
     Defines a Delta table schema.
@@ -523,69 +640,23 @@ class DeltaTable:
                 does not manage properties never compares them at all.
 
         """
-        managed_aspects = managed_aspects_for(scope)
-
-        user_properties = dict(properties or {})
-        DELTA_PROPERTY_POLICY.validate_declaration(user_properties)
-
-        columns = tuple(columns)
-        partitioned_by = tuple(partitioned_by)
-        clustered_by = tuple(clustered_by)
-        _validate_layout(columns, partitioned_by, clustered_by)
-        _validate_column_names(columns, user_properties, managed_aspects)
-        _validate_renames(columns, user_properties)
-
-        table_tags = dict(tags or {})
-        _validate_tags(f"table '{name}'", table_tags)
-        for column in columns:
-            _validate_tags(f"column '{column.name}'", column.tags)
-
-        # A bare string is itself a Sequence[str], so the type checker cannot
-        # reject it; refuse the shape before it silently means per-character
-        # columns.
-        if isinstance(primary_key, str):
-            raise TypeError(
-                "primary_key must be a sequence of column names, not a string;"
-                f" write primary_key=[{primary_key!r}] for a single-column key"
-            )
-
-        primary_key_constraint = (
-            PrimaryKeyConstraint(
-                columns=tuple(primary_key),
-                constraint_name=f"{name}_pk",
-            )
-            if primary_key is not None
-            else None
-        )
-        primary_key_columns = (
-            primary_key_constraint.columns if primary_key_constraint is not None else ()
-        )
-
-        qualified_name = QualifiedName(catalog, schema, name)
-        _validate_object_name_parts(qualified_name)
-        foreign_key_declarations = tuple(foreign_keys or ())
-        lowered_foreign_keys = tuple(
-            declaration._to_constraint(qualified_name, columns, primary_key_columns)
-            for declaration in foreign_key_declarations
-        )
-
-        # Building DesiredTable here enforces all domain invariants (non-empty
-        # columns, unique names, partition columns must exist, FK local columns
-        # must exist) at construction time rather than deferring them to
-        # to_desired_table().
-        self._desired_table = DesiredTable(
-            qualified_name=qualified_name,
+        declaration = _normalize_declaration(
+            catalog=catalog,
+            schema=schema,
+            name=name,
             columns=columns,
             comment=comment,
-            properties=user_properties,
-            tags=table_tags,
+            properties=properties,
+            tags=tags,
             partitioned_by=partitioned_by,
             clustered_by=clustered_by,
-            primary_key=primary_key_constraint,
-            foreign_keys=lowered_foreign_keys,
-            managed_aspects=managed_aspects,
+            primary_key=primary_key,
+            foreign_keys=foreign_keys,
+            scope=scope,
         )
-        self._foreign_keys = foreign_key_declarations
+        _validate_declaration(declaration)
+        self._desired_table = _lower_declaration(declaration)
+        self._foreign_key_declarations = declaration.foreign_key_declarations
 
     @property
     def catalog(self) -> str:
@@ -643,8 +714,8 @@ class DeltaTable:
 
     @property
     def foreign_keys(self) -> tuple[ForeignKey, ...]:
-        """Foreign key relationships supplied in the declaration."""
-        return self._foreign_keys
+        """Foreign key declarations, before lowering to domain constraints."""
+        return self._foreign_key_declarations
 
     def to_desired_table(self) -> DesiredTable:
         """Return the domain :class:`DesiredTable` for this table definition."""

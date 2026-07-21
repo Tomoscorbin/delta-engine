@@ -242,6 +242,26 @@ def test_delta_table_rejects_complex_typed_clustering_column():
         )
 
 
+@pytest.mark.parametrize(
+    ("layout", "message"),
+    [
+        ({"partitioned_by": ["ITEMS"]}, "Delta cannot partition"),
+        ({"clustered_by": ["ITEMS"]}, "clustering key"),
+    ],
+)
+def test_layout_keys_are_normalized_before_type_validation(layout, message):
+    # Column declarations are already canonical lowercase. Layout identifiers
+    # must use the same representation before API policy tries to resolve them.
+    with pytest.raises(ValueError, match=message):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("ID", Integer()), Column("Items", Array(String()))],
+            **layout,
+        )
+
+
 @pytest.mark.parametrize("data_type", [Boolean(), Binary()])
 def test_delta_table_rejects_boolean_or_binary_clustering_column(data_type):
     # Liquid clustering's supported-type list excludes Boolean and Binary, even
@@ -386,6 +406,17 @@ def test_delta_table_rejects_partitioning_by_every_column() -> None:
             name="orders",
             columns=[Column("id", Integer()), Column("day", String())],
             partitioned_by=["id", "day"],
+        )
+
+
+def test_partition_keys_are_normalized_before_whole_table_validation() -> None:
+    with pytest.raises(ValueError, match="every column"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[Column("ID", Integer()), Column("Day", String())],
+            partitioned_by=["ID", "DAY"],
         )
 
 
