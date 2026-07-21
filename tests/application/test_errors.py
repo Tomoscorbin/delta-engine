@@ -1,6 +1,5 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.dependency_resolution import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -15,7 +14,6 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -59,36 +57,22 @@ def _table_report(
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
-    validation_failures = tuple(
-        failure for failure in failures if isinstance(failure, ValidationFailure)
-    )
-    foreign_key_failures = tuple(
-        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
-    )
-
-    if isinstance(read, ReadFailure):
-        planning = None
-    elif validation_failures:
-        planning = PlanningFailed(validation_failures)
-    else:
-        planning = PlanningSucceeded(ActionPlan())
-
-    resolution = (
-        ResolutionFailed(_QN, foreign_key_failures)
-        if foreign_key_failures
-        else ResolutionSucceeded(_QN, ())
-    )
     statements = (
         () if execution is None else tuple(result.statement for result in execution.results)
     )
+    read_failures = (read,) if isinstance(read, ReadFailure) else ()
+    reported_failures = tuple(
+        failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
+    )
+    execution_failures = () if execution is None else execution.failures
 
-    return TableRunReport(
+    return TableRunReport._create(
         desired=desired,
         read=read,
-        planning=planning,
+        plan=ActionPlan(),
         planned_sql_statements=statements,
-        resolution=resolution,
-        execution_outcome=execution,
+        failures=(*read_failures, *reported_failures, *execution_failures),
+        execution=execution,
     )
 
 

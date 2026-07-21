@@ -3,7 +3,6 @@ import json
 
 import pytest
 
-from delta_engine.application.dependency_resolution import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -12,7 +11,6 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -25,7 +23,6 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
-from delta_engine.application.run_outcomes import ExecutionBlockedByDependency
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -86,36 +83,23 @@ def _report(
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
-    """Construct canonical phase outcomes from concise report-test inputs."""
-    validation_failures = tuple(
-        failure for failure in failures if isinstance(failure, ValidationFailure)
-    )
-    foreign_key_failures = tuple(
-        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
-    )
-
-    if isinstance(read, ReadFailure):
-        planning = None
-    elif validation_failures:
-        planning = PlanningFailed(validation_failures)
-    else:
-        planning = PlanningSucceeded(plan or ActionPlan())
-
-    if foreign_key_failures:
-        resolution = ResolutionFailed(desired.qualified_name, foreign_key_failures)
-    else:
-        resolution = ResolutionSucceeded(desired.qualified_name, ())
-
+    """Construct a frozen report snapshot from concise test inputs."""
     if execution is not None and not planned_sql_statements:
         planned_sql_statements = tuple(result.statement for result in execution.results)
 
-    return TableRunReport(
+    read_failures = (read,) if isinstance(read, ReadFailure) else ()
+    reported_failures = tuple(
+        failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
+    )
+    execution_failures = () if execution is None else execution.failures
+
+    return TableRunReport._create(
         desired=desired,
         read=read,
-        planning=planning,
+        plan=plan if plan is not None else ActionPlan(),
         planned_sql_statements=planned_sql_statements,
-        resolution=resolution,
-        execution_outcome=execution,
+        failures=(*read_failures, *reported_failures, *execution_failures),
+        execution=execution,
     )
 
 
@@ -351,12 +335,10 @@ def test_runtime_dependency_block_is_failure_but_not_statement_execution():
         references=QualifiedName("cat", "schema", "customers"),
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
     )
-    report = TableRunReport(
+    report = _report(
         desired=desired,
         read=TablePresent(table=_an_observed_table()),
-        planning=PlanningSucceeded(ActionPlan()),
-        resolution=ResolutionSucceeded(desired.qualified_name, ()),
-        execution_outcome=ExecutionBlockedByDependency((failure,)),
+        failures=(failure,),
     )
 
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
@@ -367,13 +349,14 @@ def test_runtime_dependency_block_is_failure_but_not_statement_execution():
 def test_report_rejects_execution_after_an_earlier_phase_failure():
     desired = _a_desired_table("orders")
 
-    with pytest.raises(ValueError, match="after an earlier phase failed"):
-        TableRunReport(
+    with pytest.raises(ValueError, match="earlier phase failure"):
+        TableRunReport._create(
             desired=desired,
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningFailed((ValidationFailure("Rule", "unsafe"),)),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
-            execution_outcome=ExecutionSummary(),
+            plan=ActionPlan(),
+            planned_sql_statements=(),
+            failures=(ValidationFailure("Rule", "unsafe"),),
+            execution=ExecutionSummary(),
         )
 
 
@@ -381,20 +364,52 @@ def test_report_rejects_results_for_different_planned_statements():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="planned statement prefix"):
-        TableRunReport(
+        TableRunReport._create(
             desired=desired,
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningSucceeded(
-                ActionPlan((SetTableComment(desired_comment="new", observed_comment="old"),))
-            ),
+            plan=ActionPlan((SetTableComment(desired_comment="new", observed_comment="old"),)),
             planned_sql_statements=("PLANNED",),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
-            execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER"),)),
+            failures=(),
+            execution=ExecutionSummary((_ok_exec(0, "OTHER"),)),
+        )
+
+
+def test_table_run_report_has_no_public_constructor():
+    with pytest.raises(TypeError, match=r"created by Engine\.sync"):
+        TableRunReport()
+
+
+def test_report_factory_rejects_a_missing_read_failure():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="Read failures must match"):
+        TableRunReport._create(
+            desired=desired,
+            read=ReadFailure("IOError", "boom"),
+            plan=ActionPlan(),
+            planned_sql_statements=(),
+            failures=(),
+            execution=None,
+        )
+
+
+def test_report_factory_rejects_a_missing_execution_failure():
+    desired = _a_desired_table("orders")
+    statement = "ALTER TABLE ..."
+
+    with pytest.raises(ValueError, match="Execution failures must match"):
+        TableRunReport._create(
+            desired=desired,
+            read=TablePresent(table=_an_observed_table()),
+            plan=ActionPlan(),
+            planned_sql_statements=(statement,),
+            failures=(),
+            execution=ExecutionSummary((_failed_exec(0, statement),)),
         )
 
 
 def test_table_run_report_carries_its_desired_definition():
-    # Given a freshly-born run: read set, other phase fields at defaults
+    # Given a completed, unchanged table run
     desired = _a_desired_table("customers")
     report = _report(
         desired=desired,

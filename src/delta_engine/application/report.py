@@ -1,9 +1,8 @@
 """
 Run reports: per-table and run-level outcome aggregates.
 
-`TableRunReport` retains one canonical outcome per completed phase and derives
-its public plan, failure stream, execution summary, and status; `SyncReport`
-aggregates a run.
+`TableRunReport` is the immutable public snapshot created from one completed
+engine run; `SyncReport` aggregates those table snapshots.
 """
 
 from collections.abc import Iterator, Mapping
@@ -11,22 +10,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, assert_never
+from typing import Any, Final, Self
 
-from delta_engine.application.dependency_resolution import ResolutionSucceeded, TableResolution
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
     ReadFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningResult, PlanningSucceeded
 from delta_engine.application.ports import ExecutionSummary, ReadResult
-from delta_engine.application.run_outcomes import (
-    ExecutionBlockedByDependency,
-    ExecutionOutcome,
-    collect_failures,
-)
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
@@ -89,118 +81,82 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
     ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class TableRunReport:
     """
-    Per-table report whose public views are derived from canonical phase outcomes.
+    Frozen public projection of one completed table run.
 
-    Carries the exact SQL statements its accepted plan compiles to
-    (``planned_sql_statements``), populated on every run — dry or real — so a
-    dry run can preview the DDL. Planned is not executed: a table blocked after
-    planning (for example by a foreign-key failure) still reports the SQL its
-    plan compiles to.
+    The engine creates reports through ``_create`` after all phases finish.
+    Keeping construction controlled means the plan, failures, and execution
+    summary are frozen together and cannot be supplied as contradictory public
+    constructor arguments. ``planned_sql_statements`` is populated on dry and
+    real runs so planned changes remain inspectable even when execution is
+    skipped or blocked.
     """
 
     desired: DesiredTable
     read: ReadResult
-    planning: PlanningResult | None = None
-    planned_sql_statements: tuple[str, ...] = ()
-    resolution: TableResolution | None = None
-    execution_outcome: ExecutionOutcome | None = None
+    plan: ActionPlan
+    planned_sql_statements: tuple[str, ...]
+    failures: tuple[Failure, ...]
+    execution: ExecutionSummary | None
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "planned_sql_statements",
-            tuple(self.planned_sql_statements),
+    def __init__(self) -> None:
+        raise TypeError("TableRunReport values are created by Engine.sync")
+
+    @classmethod
+    def _create(
+        cls,
+        *,
+        desired: DesiredTable,
+        read: ReadResult,
+        plan: ActionPlan,
+        planned_sql_statements: tuple[str, ...],
+        failures: tuple[Failure, ...],
+        execution: ExecutionSummary | None,
+    ) -> Self:
+        """Freeze one internally consistent table-run projection."""
+        statements = tuple(planned_sql_statements)
+        frozen_failures = tuple(failures)
+
+        expected_read_failures = (read,) if isinstance(read, ReadFailure) else ()
+        read_failures = tuple(
+            failure for failure in frozen_failures if failure.phase is FailurePhase.READ
         )
+        if read_failures != expected_read_failures:
+            raise ValueError("Read failures must match the retained read result")
 
-        if isinstance(self.read, ReadFailure):
-            if self.planning is not None:
-                raise ValueError("A read-failed report cannot have a planning outcome")
-        elif self.planning is None:
-            raise ValueError("A successfully read report requires a planning outcome")
-
-        if self.resolution is None:
-            raise ValueError("A completed table report requires a resolution outcome")
-        if self.resolution.qualified_name != self.qualified_name:
-            raise ValueError("Resolution outcome must belong to the report's desired table")
-
-        if self.planned_sql_statements and not isinstance(self.planning, PlanningSucceeded):
-            raise ValueError("Only an accepted plan can have compiled statements")
-
-        failures_before_execution = collect_failures(
-            read=self.read,
-            planning=self.planning,
-            resolution=self.resolution,
-            execution=None,
+        expected_execution_failures = () if execution is None else execution.failures
+        execution_failures = tuple(
+            failure for failure in frozen_failures if failure.phase is FailurePhase.EXECUTION
         )
-        if self.execution_outcome is not None and failures_before_execution:
-            raise ValueError("Execution cannot have an outcome after an earlier phase failed")
+        if execution_failures != expected_execution_failures:
+            raise ValueError("Execution failures must match the execution summary")
 
-        match self.execution_outcome:
-            case ExecutionSummary(results=results):
-                if not isinstance(self.planning, PlanningSucceeded):
-                    raise ValueError("Statement execution requires an accepted plan")
-                if not isinstance(self.resolution, ResolutionSucceeded):
-                    raise ValueError("Statement execution requires successful resolution")
-                if len(results) > len(self.planned_sql_statements):
-                    raise ValueError(
-                        "Execution cannot contain more results than planned statements"
-                    )
-                for result, statement in zip(
-                    results,
-                    self.planned_sql_statements,
-                    strict=False,
-                ):
-                    if result.statement != statement:
-                        raise ValueError(
-                            "Execution results must match the planned statement prefix"
-                        )
-            case ExecutionBlockedByDependency():
-                if not isinstance(self.resolution, ResolutionSucceeded):
-                    raise ValueError("Dependency blocking requires successful initial resolution")
-            case None:
-                pass
-            case _ as unreachable:
-                assert_never(unreachable)
+        if execution is not None:
+            if any(failure.phase is not FailurePhase.EXECUTION for failure in frozen_failures):
+                raise ValueError("Execution cannot follow an earlier phase failure")
+            if len(execution.results) > len(statements):
+                raise ValueError("Execution cannot contain more results than planned statements")
+            if (
+                tuple(result.statement for result in execution.results)
+                != statements[: len(execution.results)]
+            ):
+                raise ValueError("Execution results must match the planned statement prefix")
+
+        report = object.__new__(cls)
+        object.__setattr__(report, "desired", desired)
+        object.__setattr__(report, "read", read)
+        object.__setattr__(report, "plan", plan)
+        object.__setattr__(report, "planned_sql_statements", statements)
+        object.__setattr__(report, "failures", frozen_failures)
+        object.__setattr__(report, "execution", execution)
+        return report
 
     @property
     def qualified_name(self) -> QualifiedName:
         """The table identity from the declaration retained by this report."""
         return self.desired.qualified_name
-
-    @property
-    def plan(self) -> ActionPlan:
-        """The accepted plan, or an empty compatibility view when none was accepted."""
-        match self.planning:
-            case PlanningSucceeded(plan=plan):
-                return plan
-            case PlanningFailed() | None:
-                return ActionPlan()
-            case _ as unreachable:
-                assert_never(unreachable)
-
-    @property
-    def failures(self) -> tuple[Failure, ...]:
-        """All failures derived from their phase outcomes, in phase order."""
-        return collect_failures(
-            read=self.read,
-            planning=self.planning,
-            resolution=self.resolution,
-            execution=self.execution_outcome,
-        )
-
-    @property
-    def execution(self) -> ExecutionSummary | None:
-        """Attempted statement outcomes, or ``None`` when execution did not run."""
-        match self.execution_outcome:
-            case ExecutionSummary() as summary:
-                return summary
-            case ExecutionBlockedByDependency() | None:
-                return None
-            case _ as unreachable:
-                assert_never(unreachable)
 
     @property
     def status(self) -> TableRunStatus:

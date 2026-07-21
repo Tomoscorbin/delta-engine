@@ -1,16 +1,13 @@
-import dataclasses
 from datetime import datetime
 
 import pytest
 
-from delta_engine.application.dependency_resolution import ResolutionSucceeded
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
     action_entries,
 )
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -286,13 +283,13 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
     observed = ObservedTable(
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
-    return TableRunReport(
+    return TableRunReport._create(
         desired=desired,
         read=TablePresent(table=observed),
-        planning=PlanningFailed(
-            (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
-        ),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        plan=ActionPlan(),
+        planned_sql_statements=(),
+        failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
+        execution=None,
     )
 
 
@@ -307,7 +304,14 @@ def test_diff_block_points_to_failures_when_plan_is_empty_but_failures_exist():
 def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
-    healthy = dataclasses.replace(report, planning=PlanningSucceeded(ActionPlan()))
+    healthy = TableRunReport._create(
+        desired=report.desired,
+        read=report.read,
+        plan=ActionPlan(),
+        planned_sql_statements=(),
+        failures=(),
+        execution=None,
+    )
 
     block = render_diff_block(healthy)
 
@@ -357,12 +361,16 @@ def test_diff_block_marks_a_create_in_the_header():
 def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     # Given a table whose catalog read failed
     qualified_name = QualifiedName("cat", "sch", "orders")
-    report = TableRunReport(
+    failure = ReadFailure("IOError", "boom")
+    report = TableRunReport._create(
         desired=DesiredTable(
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
-        read=ReadFailure("IOError", "boom"),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        read=failure,
+        plan=ActionPlan(),
+        planned_sql_statements=(),
+        failures=(failure,),
+        execution=None,
     )
 
     # When rendering the diff block
@@ -375,21 +383,23 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 # ---------- grid rendering ----------
 
 
-def _grid_report(name, *, plan=None, failures=()):
+def _grid_report(name, *, plan=None, failures=(), execution=None):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (DesiredColumn("id", Integer()),)
     plan = plan if plan is not None else ActionPlan()
-    return TableRunReport(
+    execution_failures = () if execution is None else execution.failures
+    return TableRunReport._create(
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
             table=ObservedTable(
                 qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
             )
         ),
-        planning=PlanningFailed(tuple(failures)) if failures else PlanningSucceeded(plan),
+        plan=plan,
         # One fake statement per action, as the engine would have compiled.
         planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        failures=(*failures, *execution_failures),
+        execution=execution,
     )
 
 
@@ -440,9 +450,10 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
             AddColumn(DesiredColumn("c", Integer())),
         )
     )
-    report = dataclasses.replace(
-        _grid_report("orders", plan=plan),
-        execution_outcome=_execution(applied=2, failed=1),
+    report = _grid_report(
+        "orders",
+        plan=plan,
+        execution=_execution(applied=2, failed=1),
     )
 
     # When rendering the grid row

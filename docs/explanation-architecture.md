@@ -72,7 +72,7 @@ through a sync.
 | `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                    |
 | `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.                  |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
-| `TableRunReport`   | The complete per-table outcome. It retains canonical read, planning, resolution, and execution outcomes and derives its plan, failures, status, and statement-execution view. |
+| `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
@@ -316,7 +316,6 @@ execution. The engine still processes other tables.
 | `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
 | `ExecutionSummary` | Engine                 | Report                           | Attempted statement outcomes                |
-| `ExecutionOutcome` | Engine                 | Report                           | Attempted statements or runtime dependency blocking |
 | `SyncReport`       | Engine                 | User code                        | Immutable run result                        |
 
 ## Package map
@@ -718,14 +717,15 @@ status from the earliest failing phase:
 - `EXECUTION_FAILED`
 - `SUCCESS`
 
-The report exposes the full failure tuple, derived from the retained phase
-outcomes rather than stored as another source of truth. That matters when a
-table has multiple validation failures or multiple FK failures. For execution,
+When the run is frozen, the engine projects its canonical phase outcomes once
+into the report's immutable fields. That matters when a table has multiple
+validation failures or multiple FK failures: callers receive the complete
+failure tuple without another mutable source of run truth. For execution,
 the engine stops at the first failed statement because it is not transactional
 and later statements may depend on earlier ones. The `ExecutionSummary` records
-all attempted statements up to that point. A table blocked by a dependency has
-an explicit execution outcome, while its public `execution` view remains
-`None` because no statement was attempted.
+all attempted statements up to that point. Runtime dependency blocking remains
+private engine state; the report exposes its foreign-key failures and keeps
+`execution` as `None` because no statement was attempted.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would
