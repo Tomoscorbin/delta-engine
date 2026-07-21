@@ -117,7 +117,7 @@ def _(action: CreateTable, target: _Target) -> str:
     # A plain CREATE TABLE (no IF NOT EXISTS). CreateTable is only emitted after
     # the reader reports the table absent, but the read and the create are not
     # atomic: if another process creates the name in that window, this statement
-    # errors and the executor reports ExecutionFailed rather than a false
+    # errors and the engine reports an ExecutionFailure rather than a false
     # success.
     parts = [
         f"CREATE TABLE {target.name}",

@@ -47,12 +47,15 @@ from delta_engine.application.dependency_resolution import (
     resolve,
 )
 from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
-from delta_engine.application.failures import Failure
+from delta_engine.application.failures import ExecutionFailure, Failure
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded, plan_diff
 from delta_engine.application.ports import (
     CatalogState,
     CatalogStateReader,
     DesiredTableSource,
+    ExecutionError,
+    ExecutionResult,
+    ExecutionSucceeded,
     ExecutionSummary,
     PlanExecutor,
     ReadFailed,
@@ -383,7 +386,7 @@ class Engine:
             if not run.plan:
                 continue
 
-            summary = self.executor.execute(run.planned_sql_statements)
+            summary = self._execute_statements(run.planned_sql_statements)
             run.execution = summary
             run.failures.extend(summary.failures)
 
@@ -398,3 +401,29 @@ class Engine:
             )
 
         return runs
+
+    def _execute_statements(self, statements: tuple[str, ...]) -> ExecutionSummary:
+        """Execute statements in order and stop after the first expected failure."""
+        results: list[ExecutionResult] = []
+        for index, statement in enumerate(statements):
+            try:
+                self.executor.execute(statement)
+            except ExecutionError as error:
+                results.append(
+                    ExecutionFailure(
+                        statement_index=index,
+                        statement=statement,
+                        exception_type=error.exception_type,
+                        message=str(error),
+                    )
+                )
+                break
+
+            results.append(
+                ExecutionSucceeded(
+                    statement_index=index,
+                    statement=statement,
+                )
+            )
+
+        return ExecutionSummary(tuple(results))

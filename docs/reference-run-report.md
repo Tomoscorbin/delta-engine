@@ -91,7 +91,7 @@ When a table executed, `execution` is:
 | `total`   | `int` | Statements planned (`planned_sql_statements`) |
 
 It is `None` for a dry run and for any table skipped by an earlier-phase
-failure. Execution runs statement by statement and stops at the first
+failure. The engine executes statement by statement and stops at the first
 failure, so `applied < total` means the trailing statements were never
 attempted.
 

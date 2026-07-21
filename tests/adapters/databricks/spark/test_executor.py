@@ -2,7 +2,6 @@ import pyspark.sql.types as T
 
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
-from delta_engine.application.ports import ExecutionSucceeded
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -29,10 +28,11 @@ def _dummy_qualified_name() -> QualifiedName:
     return QualifiedName("cat", "sch", "tbl")
 
 
-def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan):
-    """Compile then execute, the same two-stage flow the engine drives."""
+def _apply(spark, qualified_name: QualifiedName, plan: ActionPlan) -> None:
+    """Compile and execute each statement, as the engine drives the adapter."""
     executor = SparkExecutor(spark)
-    return executor.execute(executor.compile(qualified_name, plan))
+    for statement in executor.compile(qualified_name, plan):
+        executor.execute(statement)
 
 
 class _FakeSpark:
@@ -85,31 +85,25 @@ def test_executor_compiles_plan_and_executes_statements_in_order():
     )
 
     # When compiling and executing the plan
-    summary = _apply(spark, _dummy_qualified_name(), plan)
+    _apply(spark, _dummy_qualified_name(), plan)
 
     # Then the compiled SQL is sent to Spark in action order
     assert spark.executed == [
         "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT",
         "ALTER TABLE `cat`.`sch`.`tbl` DROP COLUMN `legacy`",
     ]
-    assert [type(result) for result in summary.results] == [
-        ExecutionSucceeded,
-        ExecutionSucceeded,
-    ]
 
 
-def test_execute_returns_empty_summary_for_empty_plan():
+def test_empty_plan_executes_no_statements():
     # Given an empty plan
     plan = ActionPlan(actions=())
     spark = _FakeSpark()
 
     # When compiling and executing the plan
-    summary = _apply(spark, _dummy_qualified_name(), plan)
+    _apply(spark, _dummy_qualified_name(), plan)
 
-    # Then nothing ran and the summary is non-failing
+    # Then nothing ran
     assert spark.executed == []
-    assert summary.results == ()
-    assert summary.failed is False
 
 
 # ----------- Tests against real local Spark/Delta (auto-marked local_e2e via the
@@ -125,10 +119,9 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
     plan = ActionPlan(actions=(CreateTable(table=desired),))
 
     # When applying the plan
-    summary = _apply(spark, desired.qualified_name, plan)
+    _apply(spark, desired.qualified_name, plan)
 
     # Then the table exists and its schema matches exactly
-    assert summary.failed is False
     assert spark.catalog.tableExists(str(desired.qualified_name))
 
     actual_schema = spark.table(str(desired.qualified_name)).schema
@@ -160,10 +153,9 @@ def test_add_column_action_adds_column_to_existing_table(spark, make_temp_table)
     )
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the new column exists with the expected type
-    assert summary.failed is False
     age_field = _get_field(spark, full_table_name, "age")
     assert age_field.dataType.simpleString() == "int"
 
@@ -179,10 +171,9 @@ def test_drop_column_action_removes_column_from_existing_table(spark, make_temp_
     plan = ActionPlan(actions=(DropColumn(ObservedColumn("to_remove", Integer())),))
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the column no longer exists
-    assert summary.failed is False
     assert "to_remove" not in spark.table(full_table_name).columns
 
 
@@ -202,10 +193,9 @@ def test_set_property_action_sets_table_property(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the property exists with the expected value
-    assert summary.failed is False
     assert _get_table_props(spark, full_table_name).get(property_name) == "yes"
 
 
@@ -224,10 +214,9 @@ def test_set_column_comment_sets_comment_on_column(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the column metadata contains the new comment
-    assert summary.failed is False
     field = _get_field(spark, full_table_name, "name")
     assert dict(field.metadata).get("comment") == "customer name"
 
@@ -241,10 +230,9 @@ def test_set_table_comment_sets_comment_on_table(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the table comment is set
-    assert summary.failed is False
     assert _get_table_comment(spark, full_table_name) == "staging table"
 
 
@@ -263,10 +251,9 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
     )
 
     # When applying the plan
-    summary = _apply(spark, qualified_name, plan)
+    _apply(spark, qualified_name, plan)
 
     # Then the column becomes nullable
-    assert summary.failed is False
     assert _get_field(spark, full_table_name, "id").nullable is True
 
 

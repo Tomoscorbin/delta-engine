@@ -11,7 +11,6 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.ports import (
     CatalogState,
-    ExecutionFailed,
     ExecutionSummary,
     ReadFailed,
     TableAbsent,
@@ -121,13 +120,11 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
 
 def test_message_renders_execution_failure_detail_with_sql():
     # Given a table whose execution phase failed on one action
-    failed_result = ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=2,
-            exception_type="SparkException",
-            message="boom",
-            statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
-        ),
+    failed_result = ExecutionFailure(
+        statement_index=2,
+        exception_type="SparkException",
+        message="boom",
+        statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
     )
     report = _table_report(
         read=TableAbsent(),

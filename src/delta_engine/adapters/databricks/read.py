@@ -7,7 +7,7 @@ from information_schema as structured rows — Unity Catalog tags, this table's
 own primary and foreign keys, and inbound foreign keys. Only how a query is
 physically run differs per backend, so it is injected as a callable:
 ``read_catalog_state`` is the one entry point both readers call, the
-read-side twin of the write side's ``execution.execute_statements``. Each
+read-side twin of the write side's ``execution.execute_statement``. Each
 backend supplies only how a query runs (returning its rows) and owns its own
 connection resource; the describe, the acceptance policies (which relation
 kinds are read, which observed property keys become engine state), assembly,

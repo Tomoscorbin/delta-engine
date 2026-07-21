@@ -116,17 +116,16 @@ flowchart LR
 a plan to the backend statements that apply it — the plan carries the observed
 relation kind its actions lower against, so the SQL dialect follows what the
 reader saw — and the engine calls it in the plan phase on every run, dry or
-real, recording the statements on the table's report. `execute(statements)` then runs that same tuple and returns an
-`ExecutionSummary` with one result per attempted statement, so the previewed
-SQL is exactly what executes.
+real, recording the statements on the table's report. On a real run, the
+engine passes that same tuple to `execute(statement)` one statement at a time,
+so the previewed SQL is exactly what executes.
 
-`fetch_state` and `execute` are **total**. Adapter implementations catch
-backend exceptions and return typed failures instead of raising
-backend-specific exceptions through the port. This is not just a convenience
-for callers. It is what lets one unreadable or unmodifiable table fail while
-the engine keeps processing the rest of the run and returns a complete report.
-`compile` is the exception: it is pure and local, cannot fail against a
-backend, and an exception from it is a programming error that propagates.
+`fetch_state` is **total**: adapters return `ReadFailed` instead of raising.
+For execution, adapters translate backend exceptions into the application-owned
+`ExecutionError`. The engine catches that specific exception, records an
+`ExecutionFailure`, stops that table's remaining statements, and continues
+with independent tables. Unexpected exceptions still propagate. `compile` is
+pure and local; an exception from it is likewise a programming error.
 
 The Databricks adapters also own backend normalization, most of it shared
 between the two backends through the `sql` core and the `read` assembly. Both
@@ -267,8 +266,11 @@ sequenceDiagram
     Executor-->>Engine: SQL statements
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
-    Engine->>Executor: execute(statements)
-    Executor-->>Engine: ExecutionSummary
+    loop each statement until the first failure
+        Engine->>Executor: execute(statement)
+        Executor-->>Engine: success or ExecutionError
+    end
+    Engine->>Engine: build ExecutionSummary
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
@@ -304,8 +306,8 @@ skipped during execution. The engine still processes other tables.
 | `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
 | `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Ordered, validated table-local actions      |
 | `CatalogState`     | Reader port            | Engine                           | Present, absent, or read-failed state       |
-| SQL statements     | Executor (`compile`)   | Executor (`execute`), report     | The DDL a plan lowers to                    |
-| `ExecutionSummary` | Executor port          | Engine, report                   | Attempted statement outcomes                |
+| SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
+| `ExecutionSummary` | Engine                 | Report                           | Attempted statement outcomes                |
 | `SyncReport`       | Engine                 | User code                        | Immutable run result                        |
 
 ## Package map
@@ -709,9 +711,9 @@ status from the earliest failing phase:
 
 The report keeps the full failure tuple, not just the status. That matters when
 a table has multiple validation failures or multiple FK failures. For execution,
-the Databricks executor stops at the first failed statement because the engine
-is not transactional and later statements may depend on earlier ones. The
-`ExecutionSummary` records all attempted statements up to that point.
+the engine stops at the first failed statement because it is not transactional
+and later statements may depend on earlier ones. The `ExecutionSummary` records
+all attempted statements up to that point.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would
