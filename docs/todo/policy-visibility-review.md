@@ -125,14 +125,10 @@ lowering in `api/delta_table.py` now owns the generated `{table}_pk` and
 canonicalize the supplied name, so observed catalog names and future explicit
 names follow the same domain contract.
 
-### Declaration validation boundary
+### Declaration validation boundary — consolidated
 
-The declaration checks are in the right broad layer: `api/delta_table.py` owns
-what a public declaration may express. The constructor currently sequences
-normalization, property checks, layout checks, tag checks, and lowering
-directly.
-
-Make that boundary visually explicit with a sequence such as:
+`api/delta_table.py` owns what a public declaration may express. The
+`DeltaTable` constructor now exposes that lifecycle directly:
 
 ```python
 normalized = _normalize_declaration(...)
@@ -140,10 +136,19 @@ _validate_declaration(normalized)
 self._desired_table = _lower_declaration(normalized)
 ```
 
-The focused validators can remain in the same module. This is primarily a
-readability improvement, not a reason to create pass-through abstractions.
-Normalization should precede validation so the policy and stored values use
-the same representation.
+`_NormalizedDeclaration` is the frozen handoff between those stages. Iterable
+and mapping inputs are copied once, and identifiers use their canonical
+lowercase representation before any declaration policy tries to resolve them.
+The focused property, layout, column-name, rename, object-name, and tag
+validators remain in the same module, while `_lower_declaration` constructs
+constraints and delegates structural invariants to `DesiredTable`. Public
+`ForeignKey` declarations are retained separately because lowering resolves
+their table references and declaration syntax into domain
+`ForeignKeyConstraint` values.
+
+This ordering also closes a policy gap: mixed-case partition and clustering
+keys can no longer evade API type or whole-table layout checks before the
+domain normalizes them.
 
 ## Policy that is already in an appropriate place
 
