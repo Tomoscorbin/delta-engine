@@ -3,12 +3,14 @@ from datetime import datetime
 
 import pytest
 
+from delta_engine.application.dependency_resolution import ResolutionSucceeded
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
     action_entries,
 )
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -285,12 +287,12 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
     return TableRunReport(
-        qualified_name=qualified_name,
         desired=desired,
         read=TablePresent(table=observed),
-        plan=ActionPlan(),
-        failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
-        execution=None,
+        planning=PlanningFailed(
+            (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
+        ),
+        resolution=ResolutionSucceeded(qualified_name, ()),
     )
 
 
@@ -305,7 +307,7 @@ def test_diff_block_points_to_failures_when_plan_is_empty_but_failures_exist():
 def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
-    healthy = dataclasses.replace(report, failures=())
+    healthy = dataclasses.replace(report, planning=PlanningSucceeded(ActionPlan()))
 
     block = render_diff_block(healthy)
 
@@ -356,11 +358,11 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     # Given a table whose catalog read failed
     qualified_name = QualifiedName("cat", "sch", "orders")
     report = TableRunReport(
-        qualified_name=qualified_name,
         desired=DesiredTable(
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
         read=ReadFailure("IOError", "boom"),
+        resolution=ResolutionSucceeded(qualified_name, ()),
     )
 
     # When rendering the diff block
@@ -378,30 +380,30 @@ def _grid_report(name, *, plan=None, failures=()):
     columns = (DesiredColumn("id", Integer()),)
     plan = plan if plan is not None else ActionPlan()
     return TableRunReport(
-        qualified_name=qualified_name,
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
             table=ObservedTable(
                 qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
             )
         ),
-        plan=plan,
+        planning=PlanningFailed(tuple(failures)) if failures else PlanningSucceeded(plan),
         # One fake statement per action, as the engine would have compiled.
         planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),
-        failures=failures,
+        resolution=ResolutionSucceeded(qualified_name, ()),
     )
 
 
 def _execution(*, applied: int, failed: int) -> ExecutionSummary:
     succeeded = tuple(
-        ExecutionSucceeded(statement_index=index, statement="SQL") for index in range(applied)
+        ExecutionSucceeded(statement_index=index, statement=f"SQL {index}")
+        for index in range(applied)
     )
     failures = tuple(
         ExecutionFailure(
             statement_index=applied + index,
             exception_type="AnalysisException",
             message="boom",
-            statement="SQL",
+            statement=f"SQL {applied + index}",
         )
         for index in range(failed)
     )
@@ -440,8 +442,7 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
     )
     report = dataclasses.replace(
         _grid_report("orders", plan=plan),
-        execution=_execution(applied=2, failed=1),
-        failures=(ExecutionFailure(2, "AnalysisException", "boom", "SQL"),),
+        execution_outcome=_execution(applied=2, failed=1),
     )
 
     # When rendering the grid row

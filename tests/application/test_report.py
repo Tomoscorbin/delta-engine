@@ -1,16 +1,22 @@
 from datetime import datetime
 import json
 
+import pytest
+
+from delta_engine.application.dependency_resolution import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.failures import (
     ExecutionFailure,
+    Failure,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
     ValidationFailure,
 )
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
+    ReadResult,
     TableAbsent,
     TablePresent,
 )
@@ -19,6 +25,7 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
+from delta_engine.application.run_outcomes import ExecutionBlockedByDependency
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -70,6 +77,48 @@ def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom")
     )
 
 
+def _report(
+    *,
+    desired: DesiredTable,
+    read: ReadResult,
+    plan: ActionPlan | None = None,
+    planned_sql_statements: tuple[str, ...] = (),
+    failures: tuple[Failure, ...] = (),
+    execution: ExecutionSummary | None = None,
+) -> TableRunReport:
+    """Construct canonical phase outcomes from concise report-test inputs."""
+    validation_failures = tuple(
+        failure for failure in failures if isinstance(failure, ValidationFailure)
+    )
+    foreign_key_failures = tuple(
+        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
+    )
+
+    if isinstance(read, ReadFailure):
+        planning = None
+    elif validation_failures:
+        planning = PlanningFailed(validation_failures)
+    else:
+        planning = PlanningSucceeded(plan or ActionPlan())
+
+    if foreign_key_failures:
+        resolution = ResolutionFailed(desired.qualified_name, foreign_key_failures)
+    else:
+        resolution = ResolutionSucceeded(desired.qualified_name, ())
+
+    if execution is not None and not planned_sql_statements:
+        planned_sql_statements = tuple(result.statement for result in execution.results)
+
+    return TableRunReport(
+        desired=desired,
+        read=read,
+        planning=planning,
+        planned_sql_statements=planned_sql_statements,
+        resolution=resolution,
+        execution_outcome=execution,
+    )
+
+
 # ---------- Tests
 
 
@@ -79,8 +128,7 @@ def test_table_status_success_when_all_actions_succeed():
     execution = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
 
     # When aggregating
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "tbl"),
+    report = _report(
         desired=_a_desired_table("tbl"),
         read=read,
         execution=execution,
@@ -94,25 +142,15 @@ def test_table_status_success_when_all_actions_succeed():
 
 def test_sync_report_has_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
-    t_ok = TableRunReport(
-        qualified_name=QualifiedName("cat", "s", "a"),
+    t_ok = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
-    t_bad = TableRunReport(
-        qualified_name=QualifiedName("cat", "s", "b"),
+    t_bad = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_failed_exec(0),)),
-        failures=(
-            ExecutionFailure(
-                statement_index=0,
-                exception_type="ValueError",
-                message="boom",
-                statement="ALTER TABLE ...",
-            ),
-        ),
     )
 
     # When aggregating the sync
@@ -123,8 +161,7 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
 
 
 def test_table_has_changes_when_plan_is_non_empty():
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "tbl"),
+    report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
@@ -133,8 +170,7 @@ def test_table_has_changes_when_plan_is_non_empty():
 
 
 def test_table_has_no_changes_when_plan_is_empty():
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "tbl"),
+    report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -144,8 +180,7 @@ def test_table_has_no_changes_when_plan_is_empty():
 def test_validation_failed_table_has_failures_but_no_changes():
     # Validation refuses the drift before planning, so the plan stays empty:
     # the table reports failures, not changes.
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "tbl"),
+    report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
@@ -155,14 +190,12 @@ def test_validation_failed_table_has_failures_but_no_changes():
 
 
 def test_sync_report_has_changes_when_any_table_plans_actions():
-    changed = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "a"),
+    changed = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
     )
-    unchanged = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "b"),
+    unchanged = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -171,8 +204,7 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
 
 
 def test_sync_report_has_no_changes_when_no_table_plans_actions():
-    unchanged = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "b"),
+    unchanged = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -181,15 +213,13 @@ def test_sync_report_has_no_changes_when_no_table_plans_actions():
 
 
 def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
-    with_sql = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "a"),
+    with_sql = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
         planned_sql_statements=("ALTER TABLE a SET ...",),
     )
-    without_sql = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "b"),
+    without_sql = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
@@ -199,20 +229,16 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
 
 def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
-    ok_name = QualifiedName("cat", "s", "x")
-    failed_name = QualifiedName("cat", "s", "y")
-    t_ok = TableRunReport(
-        qualified_name=ok_name,
+    failed_name = QualifiedName("cat", "schema", "y")
+    t_ok = _report(
         desired=_a_desired_table("x"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
     )
-    t_bad = TableRunReport(
-        qualified_name=failed_name,
+    t_bad = _report(
         desired=_a_desired_table("y"),
         read=TableAbsent(),
         failures=(ValidationFailure("R", "v"),),
-        execution=ExecutionSummary(),
     )
 
     # When aggregating the sync report
@@ -229,8 +255,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
 
 def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
     # Given a table that read cleanly but has an FK failure in failures
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "sch", "orders"),
+    report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -251,8 +276,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
 
 def test_table_run_report_status_is_planning_failed_when_only_validation_failure_present():
     # Given a table that read cleanly but has a validation failure and no FK failure
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "sch", "tbl"),
+    report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -267,8 +291,7 @@ def test_table_run_report_status_is_planning_failed_when_only_validation_failure
 
 def test_table_run_report_status_is_planning_failed_when_both_fk_and_validation_present():
     # Given a table with both a validation failure and an FK failure
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "sch", "orders"),
+    report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(
@@ -289,8 +312,7 @@ def test_table_run_report_status_is_planning_failed_when_both_fk_and_validation_
 
 def test_table_run_report_with_no_failures_is_success():
     # Given a clean table with no failures
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "sch", "ok"),
+    report = _report(
         desired=_a_desired_table("ok"),
         read=TablePresent(table=_an_observed_table()),
         execution=ExecutionSummary((_ok_exec(0),)),
@@ -304,37 +326,77 @@ def test_table_run_report_with_no_failures_is_success():
 def test_status_reflects_the_earliest_failing_phase():
     # Given a table with an execution failure only
     read = TablePresent(table=_an_observed_table())
-    exec_only = TableRunReport(
-        qualified_name=QualifiedName("cat", "s", "e"),
+    exec_only = _report(
         desired=_a_desired_table("e"),
         read=read,
         execution=ExecutionSummary((_failed_exec(0),)),
-        failures=(
-            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
-        ),
     )
     # Then it is EXECUTION_FAILED
     assert exec_only.status is TableRunStatus.EXECUTION_FAILED
 
-    # Given a read failure present in the stream, it dominates any later phase
-    read_and_exec = TableRunReport(
-        qualified_name=QualifiedName("cat", "s", "r"),
+    # Given a read failure
+    read_failed = _report(
         desired=_a_desired_table("r"),
         read=ReadFailure("IOError", "boom"),
-        failures=(
-            ReadFailure("IOError", "boom"),
-            ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),
-        ),
     )
-    # Then READ_FAILED wins (earliest phase)
-    assert read_and_exec.status is TableRunStatus.READ_FAILED
+    # Then its canonical read outcome determines the status
+    assert read_failed.status is TableRunStatus.READ_FAILED
+
+
+def test_runtime_dependency_block_is_failure_but_not_statement_execution():
+    desired = _a_desired_table("orders")
+    failure = ForeignKeyFailure(
+        table=desired.qualified_name,
+        local_columns=("customer_id",),
+        references=QualifiedName("cat", "schema", "customers"),
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+    )
+    report = TableRunReport(
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+        planning=PlanningSucceeded(ActionPlan()),
+        resolution=ResolutionSucceeded(desired.qualified_name, ()),
+        execution_outcome=ExecutionBlockedByDependency((failure,)),
+    )
+
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert report.failures == (failure,)
+    assert report.execution is None
+
+
+def test_report_rejects_execution_after_an_earlier_phase_failure():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="after an earlier phase failed"):
+        TableRunReport(
+            desired=desired,
+            read=TablePresent(table=_an_observed_table()),
+            planning=PlanningFailed((ValidationFailure("Rule", "unsafe"),)),
+            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            execution_outcome=ExecutionSummary(),
+        )
+
+
+def test_report_rejects_results_for_different_planned_statements():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="planned statement prefix"):
+        TableRunReport(
+            desired=desired,
+            read=TablePresent(table=_an_observed_table()),
+            planning=PlanningSucceeded(
+                ActionPlan((SetTableComment(desired_comment="new", observed_comment="old"),))
+            ),
+            planned_sql_statements=("PLANNED",),
+            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER"),)),
+        )
 
 
 def test_table_run_report_carries_its_desired_definition():
     # Given a freshly-born run: read set, other phase fields at defaults
     desired = _a_desired_table("customers")
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "customers"),
+    report = _report(
         desired=desired,
         read=TablePresent(table=_an_observed_table()),
     )
@@ -347,8 +409,7 @@ def test_table_run_report_carries_its_desired_definition():
 
 
 def _a_changed_table_report():
-    return TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "orders"),
+    return _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
@@ -374,8 +435,7 @@ def test_table_to_dict_states_the_planned_change():
 
 
 def test_table_to_dict_reports_failures_with_phase_and_type():
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "orders"),
+    report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
@@ -394,13 +454,13 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
 
 def test_table_to_dict_reports_execution_counts_when_executed():
     # The counts are statement-denominated: statements applied of statements planned.
-    report = TableRunReport(
-        qualified_name=QualifiedName("cat", "schema", "orders"),
+    statement = "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
+    report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
-        planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
-        execution=ExecutionSummary((_ok_exec(0),)),
+        planned_sql_statements=(statement,),
+        execution=ExecutionSummary((_ok_exec(0, preview=statement),)),
     )
     assert report.to_dict()["execution"] == {"applied": 1, "total": 1}
 

@@ -26,6 +26,7 @@ from delta_engine.application.report import (
     TableRunReport,
     TableRunStatus,
 )
+from delta_engine.application.run_outcomes import ExecutionBlockedByDependency
 from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
@@ -984,6 +985,7 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
 
     assert customers.execution is not None
     assert orders.execution is None
+    assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
     assert executor.executed_names == ["cat.sch.customers"]
 
     _assert_has_fk_failure(

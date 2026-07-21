@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from delta_engine.application.dependency_resolution import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -14,7 +15,9 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
+    ExecutionSucceeded,
     ExecutionSummary,
     ReadResult,
     TableAbsent,
@@ -25,6 +28,7 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.plan import ActionPlan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
@@ -54,12 +58,37 @@ def _table_report(
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
+    desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
+    validation_failures = tuple(
+        failure for failure in failures if isinstance(failure, ValidationFailure)
+    )
+    foreign_key_failures = tuple(
+        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
+    )
+
+    if isinstance(read, ReadFailure):
+        planning = None
+    elif validation_failures:
+        planning = PlanningFailed(validation_failures)
+    else:
+        planning = PlanningSucceeded(ActionPlan())
+
+    resolution = (
+        ResolutionFailed(_QN, foreign_key_failures)
+        if foreign_key_failures
+        else ResolutionSucceeded(_QN, ())
+    )
+    statements = (
+        () if execution is None else tuple(result.statement for result in execution.results)
+    )
+
     return TableRunReport(
-        qualified_name=_QN,
-        desired=DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),)),
+        desired=desired,
         read=read,
-        failures=failures,
-        execution=execution,
+        planning=planning,
+        planned_sql_statements=statements,
+        resolution=resolution,
+        execution_outcome=execution,
     )
 
 
@@ -73,7 +102,6 @@ def test_message_headline_counts_failed_tables():
     # Given a run with a single failed table
     report = _table_report(
         read=ReadFailure("AnalysisException", "table not found"),
-        failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 
     # When building the error message
@@ -87,7 +115,6 @@ def test_message_renders_read_failure_detail():
     # Given a table whose read phase failed
     report = _table_report(
         read=ReadFailure("AnalysisException", "table not found"),
-        failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 
     # When building the error message
@@ -142,14 +169,12 @@ def test_message_renders_execution_failure_detail_with_sql():
     )
     report = _table_report(
         read=TableAbsent(),
-        execution=ExecutionSummary((failed_result,)),
-        failures=(
-            ExecutionFailure(
-                statement_index=2,
-                exception_type="SparkException",
-                message="boom",
-                statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
-            ),
+        execution=ExecutionSummary(
+            (
+                ExecutionSucceeded(0, "ALTER TABLE cat.sch.tbl STEP 0"),
+                ExecutionSucceeded(1, "ALTER TABLE cat.sch.tbl STEP 1"),
+                failed_result,
+            )
         ),
     )
 

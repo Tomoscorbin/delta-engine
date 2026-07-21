@@ -1,8 +1,7 @@
-from hypothesis import given, strategies as st
+import pytest
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
-    ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadResult,
@@ -119,34 +118,28 @@ def test_execution_outcome_variants_carry_the_right_payload():
     assert not hasattr(succeeded, "exception_type")
 
 
-# ---------- property: ExecutionSummary internal consistency ----------
+# ---------- ExecutionSummary chronology ----------
 
 
-_EXECUTION_RESULT = st.one_of(
-    st.builds(
-        ExecutionSucceeded,
-        statement_index=st.integers(min_value=0, max_value=100),
-        statement=st.just("ALTER TABLE ..."),
-    ),
-    st.builds(
-        ExecutionFailure,
-        statement_index=st.integers(min_value=0, max_value=100),
-        exception_type=st.just("SparkException"),
-        message=st.text(max_size=40),
-        statement=st.just("ALTER TABLE ..."),
-    ),
+@pytest.mark.parametrize(
+    "results",
+    [
+        (_ok_exec(1),),
+        (_ok_exec(0), _ok_exec(2)),
+    ],
 )
+def test_execution_summary_rejects_non_contiguous_indexes(results):
+    with pytest.raises(ValueError, match="indexes must be contiguous"):
+        ExecutionSummary(results)
 
 
-@given(st.lists(_EXECUTION_RESULT, max_size=10))
-def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
-    results: list[ExecutionResult],
-) -> None:
-    # Given: any mix of succeeded and failed execution results
-    summary = ExecutionSummary(tuple(results))
-
-    # Then: failed, failures, failed_count, and applied_count all agree
-    assert summary.failed == (summary.failed_count > 0)
-    assert summary.failed_count == len(summary.failures)
-    assert summary.applied_count + summary.failed_count == len(summary.results)
-    assert all(isinstance(f, ExecutionFailure) for f in summary.failures)
+@pytest.mark.parametrize(
+    "results",
+    [
+        (_failed_exec(0), _ok_exec(1)),
+        (_failed_exec(0), _failed_exec(1)),
+    ],
+)
+def test_execution_summary_rejects_results_after_a_failure(results):
+    with pytest.raises(ValueError, match="failure must be the final result"):
+        ExecutionSummary(results)
