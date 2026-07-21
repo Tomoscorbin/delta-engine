@@ -625,6 +625,36 @@ def test_delta_table_defaults_to_no_foreign_keys():
     assert table.foreign_keys == ()
 
 
+def test_delta_table_accepts_its_lowered_foreign_keys():
+    # Given a table whose public foreign_keys value contains lowered constraints
+    customers = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="customers",
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
+    )
+    original = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders",
+        columns=[Column("customer_id", Integer())],
+        foreign_keys=[ForeignKey(columns="customer_id", references=customers)],
+    )
+
+    # When reusing that value in another declaration
+    copy = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="orders_copy",
+        columns=[Column("customer_id", Integer())],
+        foreign_keys=original.foreign_keys,
+    )
+
+    # Then the lowered relationship remains intact
+    assert copy.foreign_keys == original.foreign_keys
+
+
 def test_delta_table_rejects_fk_with_unknown_local_column():
     # Given a referenced table and a FK whose local column is not declared
     customers = DeltaTable(

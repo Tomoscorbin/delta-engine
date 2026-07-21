@@ -86,6 +86,21 @@ class _SelfReference:
 Self: Final = _SelfReference()
 
 
+def _primary_key_constraint_name(table_name: str) -> str:
+    """Return the physical name used for a table's generated primary key."""
+    return f"{table_name}_pk"
+
+
+def _foreign_key_constraint_name(
+    *,
+    owner_table_name: str,
+    local_columns: tuple[str, ...],
+) -> str:
+    """Return the physical name used for a generated foreign key."""
+    columns = "_".join(sorted(local_columns))
+    return f"{owner_table_name}_{columns}_fk"
+
+
 def _validate_object_name_parts(qualified_name: QualifiedName) -> None:
     """Reject catalog, schema, or table name parts Unity Catalog cannot store."""
     for label, part in zip(("catalog", "schema", "name"), qualified_name.parts, strict=True):
@@ -386,11 +401,14 @@ class ForeignKey:
                     f" is {referenced_type}"
                 )
 
-        return ForeignKeyConstraint.generate(
-            owner_table_name=owner_name.name,
+        return ForeignKeyConstraint(
             local_columns=local_columns,
             referenced_table=referenced.table,
             referenced_columns=referenced_columns,
+            constraint_name=_foreign_key_constraint_name(
+                owner_table_name=owner_name.name,
+                local_columns=local_columns,
+            ),
         )
 
     def _resolve_reference(
@@ -473,7 +491,7 @@ class DeltaTable:
         partitioned_by: Iterable[str] = (),
         clustered_by: Iterable[str] = (),
         primary_key: Sequence[str] | None = None,
-        foreign_keys: Iterable[ForeignKey] | None = None,
+        foreign_keys: Iterable[ForeignKey | ForeignKeyConstraint] | None = None,
         scope: ScopeName = "full",
     ) -> None:
         """
@@ -494,7 +512,9 @@ class DeltaTable:
                 ``partitioned_by``.
             primary_key: Column names forming the table's primary key, in the
                 order the constraint is rendered; None means no key.
-            foreign_keys: Foreign key relationships declared on this table.
+            foreign_keys: Foreign key relationships declared on this table. A
+                previously lowered ``ForeignKeyConstraint`` is also accepted,
+                which makes the public ``foreign_keys`` value round-trip safely.
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
@@ -537,7 +557,10 @@ class DeltaTable:
             )
 
         primary_key_constraint = (
-            PrimaryKeyConstraint.generate(table_name=name, columns=tuple(primary_key))
+            PrimaryKeyConstraint(
+                columns=tuple(primary_key),
+                constraint_name=_primary_key_constraint_name(name),
+            )
             if primary_key is not None
             else None
         )
@@ -548,7 +571,9 @@ class DeltaTable:
         qualified_name = QualifiedName(catalog, schema, name)
         _validate_object_name_parts(qualified_name)
         lowered_foreign_keys = tuple(
-            declaration._to_constraint(qualified_name, columns, primary_key_columns)
+            declaration
+            if isinstance(declaration, ForeignKeyConstraint)
+            else declaration._to_constraint(qualified_name, columns, primary_key_columns)
             for declaration in (foreign_keys or ())
         )
 

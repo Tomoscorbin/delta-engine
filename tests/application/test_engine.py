@@ -153,10 +153,7 @@ def _existing_id_table_synced(fqn: str) -> TablePresent:
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
             columns=(ObservedColumn("id", String(), nullable=False),),
-            primary_key=PrimaryKeyConstraint.generate(
-                table_name=table_name,
-                columns=("id",),
-            ),
+            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name=f"{table_name}_pk"),
         )
     )
 

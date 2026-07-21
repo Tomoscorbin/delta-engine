@@ -119,9 +119,7 @@ def test_desired_table_rejects_pk_column_not_in_columns():
         DesiredTable(
             qualified_name=_QN,
             columns=(_COL,),
-            primary_key=PrimaryKeyConstraint.generate(
-                table_name="orders", columns=("missing_col",)
-            ),
+            primary_key=PrimaryKeyConstraint(columns=("missing_col",), constraint_name="orders_pk"),
         )
 
 
@@ -144,7 +142,7 @@ def test_desired_table_rejects_nullable_primary_key_column():
         DesiredTable(
             qualified_name=_QN,
             columns=(DesiredColumn("id", Integer(), nullable=True),),
-            primary_key=PrimaryKeyConstraint.generate(table_name="orders", columns=("id",)),
+            primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
         )
 
 
@@ -158,8 +156,8 @@ def test_desired_table_reports_the_offending_nullable_primary_key_column():
                 DesiredColumn("id", Integer(), nullable=False),
                 DesiredColumn("tenant_id", Integer(), nullable=True),
             ),
-            primary_key=PrimaryKeyConstraint.generate(
-                table_name="orders", columns=("id", "tenant_id")
+            primary_key=PrimaryKeyConstraint(
+                columns=("id", "tenant_id"), constraint_name="orders_pk"
             ),
         )
 
@@ -190,11 +188,11 @@ def test_desired_table_defaults_to_no_foreign_keys():
 
 def test_desired_table_stores_foreign_keys():
     # Given a foreign key referencing another table (name generated at the API layer)
-    fk = ForeignKeyConstraint.generate(
-        owner_table_name="orders",
+    fk = ForeignKeyConstraint(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_customer_id_fk",
     )
     table = DesiredTable(
         qualified_name=QualifiedName("cat", "sch", "orders"),
@@ -216,11 +214,11 @@ def test_desired_table_stores_foreign_keys():
 
 def test_desired_table_rejects_fk_referencing_unknown_local_column():
     # Given a FK whose local column is not declared (name provided so construction succeeds)
-    fk = ForeignKeyConstraint.generate(
-        owner_table_name="orders",
+    fk = ForeignKeyConstraint(
         local_columns=("nonexistent",),
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
+        constraint_name="orders_nonexistent_fk",
     )
 
     # When / Then the DesiredTable rejects the FK referencing a column that does not exist
@@ -285,17 +283,17 @@ def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
 def test_desired_table_rejects_foreign_keys_whose_generated_names_collide():
     # Given two FKs over different local columns whose generated names collide:
     # ('a', 'b_c') and ('a_b', 'c') both derive t_a_b_c_fk
-    first = ForeignKeyConstraint.generate(
-        owner_table_name="t",
+    first = ForeignKeyConstraint(
         local_columns=("a", "b_c"),
         referenced_table=QualifiedName("cat", "sch", "p1"),
         referenced_columns=("x", "y"),
+        constraint_name="t_a_b_c_fk",
     )
-    second = ForeignKeyConstraint.generate(
-        owner_table_name="t",
+    second = ForeignKeyConstraint(
         local_columns=("a_b", "c"),
         referenced_table=QualifiedName("cat", "sch", "p2"),
         referenced_columns=("x", "y"),
+        constraint_name="t_a_b_c_fk",
     )
 
     # When / Then the collision is rejected, naming both column tuples
@@ -709,9 +707,7 @@ def test_desired_table_rejects_a_primary_key_on_a_rename_source() -> None:
                     "customer_name", String(), nullable=False, renamed_from="customer_nm"
                 ),
             ),
-            primary_key=PrimaryKeyConstraint.generate(
-                table_name="orders", columns=("customer_nm",)
-            ),
+            primary_key=PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="orders_pk"),
         )
 
 

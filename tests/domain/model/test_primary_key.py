@@ -29,16 +29,6 @@ def test_equal_by_value():
     )
 
 
-def test_generate_names_constraint_from_table():
-    # Given a table name and key columns
-    # When the engine generates the constraint
-    constraint = PrimaryKeyConstraint.generate(table_name="orders", columns=("id",))
-
-    # Then the name follows {table}_pk and the columns are carried through
-    assert constraint.constraint_name == "orders_pk"
-    assert constraint.columns == ("id",)
-
-
 def test_mixed_case_columns_and_name_normalize_to_lowercase():
     pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
     assert pk.columns == ("orderid",)
