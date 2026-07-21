@@ -18,7 +18,7 @@ from delta_engine.application.diff_entries import (
     DiffEntry,
     action_entries,
 )
-from delta_engine.application.ports import ReadFailed
+from delta_engine.application.failures import ReadFailure
 from delta_engine.application.report import SyncReport, TableRunReport
 from delta_engine.domain.plan import ActionPlan, CreateTable
 
@@ -57,7 +57,7 @@ def _render_entry_groups(entries: list[DiffEntry]) -> list[str]:
 def render_diff_block(report: TableRunReport) -> str:
     """Render one table's change block: its name then its planned changes, grouped."""
     header = str(report.qualified_name)
-    if isinstance(report.read, ReadFailed):
+    if isinstance(report.read, ReadFailure):
         return f"{header}\n  (could not read — no diff)"
     if not report.plan:
         if report.has_failures:

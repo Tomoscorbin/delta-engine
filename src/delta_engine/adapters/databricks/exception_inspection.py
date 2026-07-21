@@ -1,7 +1,7 @@
 """
-Render exceptions safely for failure records.
+Inspect Databricks exceptions without introducing backend dependencies.
 
-One total rendering policy covers both backends. Most PySpark failures arrive
+One total inspection policy covers both backends. Most PySpark failures arrive
 already converted to PySpark's own exception hierarchy
 (``AnalysisException`` and friends), and every databricks-sql-connector
 failure is a plain Python exception — for all of those the Python class
@@ -55,8 +55,8 @@ def exception_message(exception: BaseException) -> str:
 
     ``Py4JJavaError.__str__`` makes another gateway call to render the wrapped
     Java exception. If the gateway itself failed, that secondary call can
-    raise and break the readers' and executor's total boundary while they are
-    trying to record the original failure. A stable fallback keeps failure
+    raise and break the readers' and executor's error boundary while they are
+    trying to record the original failure. A stable fallback keeps error
     construction non-throwing even when the backend can no longer describe
     its exception.
     """

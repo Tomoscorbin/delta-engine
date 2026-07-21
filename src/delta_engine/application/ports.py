@@ -41,54 +41,39 @@ class TableAbsent:
     """The catalog confirmed the table does not exist; the engine will create it."""
 
 
-@dataclass(frozen=True, slots=True)
-class ReadFailed:
-    """A catalog read that raised before any state could be determined."""
+# A catalog state is known only when the table was found or its absence was
+# confirmed. Failure to determine either state crosses the port as ReadError.
+type CatalogState = TablePresent | TableAbsent
 
-    failure: ReadFailure
-
-
-# The three answers a catalog can give about a table: it is there, it is not
-# there, or it could not be read.
-type CatalogState = TablePresent | TableAbsent | ReadFailed
+# The persistent outcome retained by a table run. The adapter never constructs
+# ReadFailure; the engine creates it when it catches ReadError.
+type ReadResult = CatalogState | ReadFailure
 
 
 class CatalogStateReader(Protocol):
     """
     Reads the current catalog state for a single table.
 
-    The boundary every adapter must honour: ``fetch_state`` is **total**. A read
-    that cannot determine state -- a backend error, an unmappable schema, a
-    permissions failure -- is returned as ``ReadFailed``, never raised. The
-    engine reads many tables in one run and branches on the returned state rather
-    than guarding each call, so an exception escaping here would abort the whole
-    sync instead of failing the one table. Implementations contain their own
-    failure modes.
+    Returning normally means the adapter determined that the table is present
+    or absent. A backend error, unmappable schema, or permissions failure is
+    translated into :class:`delta_engine.application.errors.ReadError`. The
+    engine catches that specific error per table and records a
+    :class:`ReadFailure`; unexpected adapter errors propagate.
     """
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """
-        Return the table's current state: present, absent, or unreadable.
-
-        Total: returns ``ReadFailed`` on any error rather than raising.
+        Return the table's current state: present or absent.
 
         Args:
             qualified_name: Fully qualified object name to look up.
 
+        Raises:
+            ReadError: The adapter could not determine the catalog state and
+                translated its backend-specific exception.
+
         """
         ...
-
-
-# ---------- Statement execution boundary ----------
-
-
-class ExecutionError(Exception):
-    """A normalized backend error raised while executing one statement."""
-
-    def __init__(self, exception_type: str, message: str) -> None:
-        """Initialize the error with backend-neutral diagnostic details."""
-        super().__init__(message)
-        self.exception_type = exception_type
 
 
 # ---------- ExecutionResult ----------
@@ -161,7 +146,8 @@ class PlanExecutor(Protocol):
 
     The application owns statement ordering, result construction, and stopping
     after the first failure. An adapter contains its backend's exception types
-    and translates an expected execution failure into :class:`ExecutionError`.
+    and translates an expected execution failure into
+    :class:`delta_engine.application.errors.ExecutionError`.
     The engine catches that specific exception and records an
     :class:`ExecutionFailure`; unexpected programming errors still propagate.
     """

@@ -1,6 +1,11 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
+from delta_engine.application.errors import (
+    DuplicateTableDefinitionError,
+    ExecutionError,
+    ReadError,
+    SyncFailedError,
+)
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -10,9 +15,8 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.ports import (
-    CatalogState,
     ExecutionSummary,
-    ReadFailed,
+    ReadResult,
     TableAbsent,
 )
 from delta_engine.application.report import (
@@ -34,9 +38,19 @@ def test_duplicate_table_definition_error_is_a_value_error_with_the_name():
     assert str(error) == "Duplicate table definition: cat.sch.tbl"
 
 
+def test_port_errors_are_regular_exceptions_with_normalized_details():
+    for error in (
+        ReadError(exception_type="AnalysisException", message="cannot read"),
+        ExecutionError(exception_type="SparkException", message="cannot execute"),
+    ):
+        assert isinstance(error, Exception)
+        assert error.exception_type.endswith("Exception")
+        assert str(error).startswith("cannot")
+
+
 def _table_report(
     *,
-    read: CatalogState,
+    read: ReadResult,
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
@@ -58,7 +72,7 @@ def _message_for(table_report: TableRunReport) -> str:
 def test_message_headline_counts_failed_tables():
     # Given a run with a single failed table
     report = _table_report(
-        read=ReadFailed(ReadFailure("AnalysisException", "table not found")),
+        read=ReadFailure("AnalysisException", "table not found"),
         failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 
@@ -72,7 +86,7 @@ def test_message_headline_counts_failed_tables():
 def test_message_renders_read_failure_detail():
     # Given a table whose read phase failed
     report = _table_report(
-        read=ReadFailed(ReadFailure("AnalysisException", "table not found")),
+        read=ReadFailure("AnalysisException", "table not found"),
         failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 

@@ -16,8 +16,8 @@ Both live in `delta_engine.application.ports`. You do not inherit from them; you
 ### CatalogStateReader
 
 ```python
-from delta_engine.application.ports import CatalogStateReader, CatalogState, ReadFailed, TableAbsent, TablePresent
-from delta_engine.application.failures import ReadFailure
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import CatalogStateReader, CatalogState, TableAbsent, TablePresent
 from delta_engine.domain.model import QualifiedName
 
 class MyReader:
@@ -27,23 +27,26 @@ class MyReader:
             # Return TablePresent(table=...) if it does.
             ...
         except Exception as exc:
-            # MUST catch all exceptions and return ReadFailed — never raise.
-            return ReadFailed(
-                failure=ReadFailure(
-                    exception_type=type(exc).__name__,
-                    message=str(exc),
-                ),
-            )
+            # Translate backend-specific failures into the port's error.
+            raise ReadError(
+                exception_type=type(exc).__name__,
+                message=str(exc),
+            ) from exc
 ```
 
-`fetch_state` is **total**: it must never raise. Return `ReadFailed` for any error. A raised exception escapes the engine's per-table error boundary and aborts the entire sync.
+Returning normally means the state is known: the table is either present or
+absent. Raise `ReadError` when the adapter cannot determine either state. The
+engine catches that specific error for the current table, records a
+`ReadFailure`, and continues with independent tables. Backend-specific and
+unexpected exceptions are outside the port contract and propagate.
 
 ### PlanExecutor
 
 Execution is a two-stage boundary. `compile` turns a domain plan into the backend statements it lowers to, without touching the backend:
 
 ```python
-from delta_engine.application.ports import ExecutionError, PlanExecutor
+from delta_engine.application.errors import ExecutionError
+from delta_engine.application.ports import PlanExecutor
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 

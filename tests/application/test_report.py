@@ -11,7 +11,6 @@ from delta_engine.application.failures import (
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
-    ReadFailed,
     TableAbsent,
     TablePresent,
 )
@@ -321,7 +320,7 @@ def test_status_reflects_the_earliest_failing_phase():
     read_and_exec = TableRunReport(
         qualified_name=QualifiedName("cat", "s", "r"),
         desired=_a_desired_table("r"),
-        read=ReadFailed(ReadFailure("IOError", "boom")),
+        read=ReadFailure("IOError", "boom"),
         failures=(
             ReadFailure("IOError", "boom"),
             ExecutionFailure(statement_index=0, exception_type="E", message="m", statement="SQL"),

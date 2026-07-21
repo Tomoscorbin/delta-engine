@@ -94,6 +94,23 @@ success, while an expected backend failure is translated to `ExecutionError`.
 The engine catches only that typed boundary error, records an
 `ExecutionFailure`, and leaves unexpected programming errors visible.
 
+### Boundary errors and report failures — consolidated
+
+Application-owned exceptions and persistent run failures now have separate,
+named homes. `application/errors.py` owns every exception crossing an
+application boundary, including the outbound-port signals `ReadError` and
+`ExecutionError`. `application/failures.py` owns the closed family of immutable
+values retained by reports: `ReadFailure`, `ValidationFailure`,
+`ForeignKeyFailure`, and `ExecutionFailure`.
+
+Adapters inspect backend exceptions in
+`adapters/databricks/exception_inspection.py`, then raise the corresponding
+application error. `Engine` catches that typed signal and adds the contextual
+failure value to the table run. Consequently `CatalogState` means only a known
+state (`TablePresent` or `TableAbsent`), while `ReadResult` is the persistent
+report union of that state with `ReadFailure`; the redundant
+`ReadFailed(ReadFailure(...))` wrapper is gone.
+
 `adapters/databricks/execution.py` retains only the shared Databricks exception
 translation. Spark and warehouse adapters supply their physical one-statement
 runner, while the warehouse adapter also contains its per-statement cursor

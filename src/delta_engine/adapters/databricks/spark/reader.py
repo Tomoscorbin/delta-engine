@@ -4,8 +4,8 @@ Reader adapter for Databricks Unity Catalog over a SparkSession.
 Unity Catalog only. Reads one table's state through the shared
 ``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus five
 information_schema queries). This backend supplies only how a query runs —
-``spark.sql(...).collect()`` — while parsing, assembly, error classification,
-and the total boundary are shared with the warehouse backend.
+``spark.sql(...).collect()`` — while parsing, assembly, and error translation
+are shared with the warehouse backend.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class SparkReader:
         self.spark = spark
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
-        """Return ``TablePresent``, ``TableAbsent``, or ``ReadFailed`` — the boundary is total."""
+        """Return the known catalog state, raising ``ReadError`` when it cannot be read."""
         return read_catalog_state(self._run_query, qualified_name)
 
     def _run_query(self, sql: str) -> list[Row]:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from delta_engine.adapters.databricks.spark.reader import SparkReader
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
@@ -12,7 +14,8 @@ from delta_engine.adapters.databricks.sql import (
     schema_exists_query,
     table_tags_query,
 )
-from delta_engine.application.ports import ReadFailed, TableAbsent, TablePresent
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import Integer, QualifiedName
 
 QN = QualifiedName("cat", "sch", "tbl")
@@ -104,6 +107,10 @@ def test_missing_table_is_absent_after_confirming_the_schema_exists():
     assert spark.queries == [describe_json_query(QN), schema_exists_query(QN)]
 
 
-def test_other_error_is_read_failed():
+def test_other_error_is_translated_to_read_error():
     spark = FakeSpark({describe_json_query(QN): FakeAnalysisError("INSUFFICIENT_PERMISSIONS")})
-    assert isinstance(SparkReader(spark).fetch_state(QN), ReadFailed)
+
+    with pytest.raises(ReadError) as exc_info:
+        SparkReader(spark).fetch_state(QN)
+
+    assert exc_info.value.exception_type == "FakeAnalysisError"

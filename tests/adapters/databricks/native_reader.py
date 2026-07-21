@@ -23,9 +23,12 @@ from __future__ import annotations
 from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 
-from delta_engine.adapters.databricks.errors import exception_message, exception_type_name
-from delta_engine.application.failures import ReadFailure
-from delta_engine.application.ports import CatalogState, ReadFailed, TableAbsent, TablePresent
+from delta_engine.adapters.databricks.exception_inspection import (
+    exception_message,
+    exception_type_name,
+)
+from delta_engine.application.errors import ReadError
+from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
 from delta_engine.domain.model import (
     Array,
@@ -129,13 +132,14 @@ class NativeSparkReader:
         self.spark = spark
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
-        """Return ``TablePresent``, ``TableAbsent``, or ``ReadFailed`` — the boundary is total."""
+        """Return the known catalog state, raising ``ReadError`` when it cannot be read."""
         try:
             return self._read(qualified_name)
         except Exception as exception:
-            return ReadFailed(
-                failure=ReadFailure(exception_type_name(exception), exception_message(exception))
-            )
+            raise ReadError(
+                exception_type=exception_type_name(exception),
+                message=exception_message(exception),
+            ) from exception
 
     def _read(self, qualified_name: QualifiedName) -> CatalogState:
         if not self.spark.catalog.tableExists(f"{qualified_name.schema}.{qualified_name.name}"):

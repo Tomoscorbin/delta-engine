@@ -8,8 +8,9 @@ connection is duck-typed (``.cursor()`` yielding ``execute``/``fetchall``). One
 cursor is acquired lazily on the first query and runs every statement — the
 describe and the information_schema follow-ups — then closed when the read
 finishes. Acquiring it lazily, inside the runner, keeps cursor acquisition
-within the shared total boundary, so a dead connection becomes a ``ReadFailed``
-rather than an escaping exception. This mirrors ``WarehouseExecutor.execute``.
+within the shared translation boundary, so a dead connection becomes a
+``ReadError`` rather than an untyped exception. This mirrors
+``WarehouseExecutor.execute``.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ class WarehouseReader:
         self._connection = connection
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
-        """Return ``TablePresent``, ``TableAbsent``, or ``ReadFailed`` — the boundary is total."""
+        """Return the known catalog state, raising ``ReadError`` when it cannot be read."""
         cursor: Cursor | None = None
 
         def run_query(sql: str) -> Sequence[Any]:

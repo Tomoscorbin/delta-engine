@@ -3,7 +3,12 @@ import pytest
 
 import delta_engine.application.engine as engine_module
 from delta_engine.application.engine import Engine
-from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
+from delta_engine.application.errors import (
+    DuplicateTableDefinitionError,
+    ExecutionError,
+    ReadError,
+    SyncFailedError,
+)
 from delta_engine.application.failures import (
     ExecutionFailure,
     ForeignKeyFailure,
@@ -12,9 +17,7 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.ports import (
     CatalogState,
-    ExecutionError,
     ExecutionSucceeded,
-    ReadFailed,
     TableAbsent,
     TablePresent,
 )
@@ -234,13 +237,16 @@ def _execution_error(
 
 
 class _RecordingReader:
-    def __init__(self, mapping: dict[str, CatalogState] | None = None) -> None:
+    def __init__(self, mapping: dict[str, CatalogState | ReadError] | None = None) -> None:
         self.mapping = mapping or {}
         self.calls: list[QualifiedName] = []
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         self.calls.append(qualified_name)
-        return self.mapping.get(str(qualified_name), TableAbsent())
+        result = self.mapping.get(str(qualified_name), TableAbsent())
+        if isinstance(result, ReadError):
+            raise result
+        return result
 
     @property
     def fetched_names(self) -> list[str]:
@@ -561,7 +567,7 @@ def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
         def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
             events.append(f"read:{qualified_name}")
             if str(qualified_name) == "c.s.b":
-                return ReadFailed(ReadFailure("IOError", "cannot read"))
+                raise ReadError("IOError", "cannot read")
             return TableAbsent()
 
     class _EventRecordingExecutor:
@@ -616,7 +622,7 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
     fqn = "c.s.read_fail"
     reader = _RecordingReader(
         {
-            fqn: ReadFailed(ReadFailure("IOError", "cannot read")),
+            fqn: ReadError("IOError", "cannot read"),
         }
     )
     executor = _RecordingExecutor(per_table_errors=[])
@@ -630,11 +636,24 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
     [table_report] = list(exc_info.value.report)
     assert table_report.status is TableRunStatus.READ_FAILED
     assert len(table_report.failures) == 1
+    assert isinstance(table_report.read, ReadFailure)
+    assert table_report.read is table_report.failures[0]
     assert len(table_report.plan) == 0
     assert table_report.execution is None
     assert executor.executed_names == []
 
     assert str(exc_info.value).count("Read error: IOError - cannot read") == 1
+
+
+def test_unexpected_reader_exception_propagates():
+    class BuggyReader:
+        def fetch_state(self, _qualified_name: QualifiedName) -> CatalogState:
+            raise RuntimeError("adapter bug")
+
+    engine = Engine(reader=BuggyReader(), executor=_RecordingExecutor())
+
+    with pytest.raises(RuntimeError, match="adapter bug"):
+        engine.sync(_spec("c.s.table"))
 
 
 def test_validation_failed_table_is_not_executed_but_independent_table_still_runs():
@@ -788,7 +807,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     # Given a fails to read and b depends on a
     reader = _RecordingReader(
         {
-            "cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read")),
+            "cat.sch.a": ReadError("IOError", "cannot read"),
         }
     )
     executor = _RecordingExecutor(per_table_errors=[])
@@ -1243,7 +1262,7 @@ def test_dry_run_records_the_sql_that_would_execute():
 def test_failed_table_records_no_planned_sql():
     # Given a table whose read fails, so no plan is built
     fqn = "c.s.unreadable"
-    reader = _RecordingReader({fqn: ReadFailed(ReadFailure("IOError", "cannot read"))})
+    reader = _RecordingReader({fqn: ReadError("IOError", "cannot read")})
     executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 

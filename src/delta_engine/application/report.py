@@ -17,7 +17,7 @@ from delta_engine.application.failures import (
     Failure,
     FailurePhase,
 )
-from delta_engine.application.ports import CatalogState, ExecutionSummary
+from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
@@ -94,7 +94,7 @@ class TableRunReport:
 
     qualified_name: QualifiedName
     desired: DesiredTable
-    read: CatalogState
+    read: ReadResult
     plan: ActionPlan = field(default_factory=ActionPlan)
     planned_sql_statements: tuple[str, ...] = ()
     failures: tuple[Failure, ...] = ()

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from delta_engine.adapters.databricks.execution import execute_statement
-from delta_engine.application.ports import ExecutionError
+from delta_engine.application.errors import ExecutionError
 
 
 class RecordingRunner:

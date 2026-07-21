@@ -79,9 +79,9 @@ has observed. See the
 
 ### Proposed solution
 
-1. Read the catalog object type and reject views with a specific `ReadFailed`.
+1. Read the catalog object type and reject views with a specific `ReadError`.
 2. Require the detail format to be `delta` in both readers.
-3. Return a clear `ReadFailed` for every other format before mapping columns or
+3. Raise a clear `ReadError` for every other format before mapping columns or
    planning changes.
 
 Add shared mapper tests plus live coverage for a view and, where the test
@@ -96,7 +96,7 @@ acceptance policy in `read.py`: the shared read admits only relations with
 judged in `read_catalog_state` — and raises `UnsupportedRelationError` for
 everything else — views, materialized views, streaming tables, foreign
 tables, non-Delta formats, and any relation kind Databricks adds later — which
-surfaces as `ReadFailed` at the total read boundary. An acceptance set rather
+surfaces as `ReadError` at the typed read boundary. An acceptance set rather
 than a rejection list, so unknown kinds fail closed by construction. Existing
 EXTERNAL tables are read and reconciled; creating one is a tracked follow-up
 (todo.md). Unit coverage in `sql/test_describe.py` and `test_read.py`; live
@@ -150,8 +150,8 @@ fail closed on every unmappable observed column. Malformed column entries,
 malformed type shapes, and malformed layout lists fail the read; and any type
 the domain cannot model — an unknown or future type name (for example
 `geography`), an unrepresentable nested type, or a domain-constructor rejection
-— now also fails the parse rather than being skipped, surfacing as `ReadFailed`
-at the total read boundary. No observed column is silently omitted, so the
+— now also fails the parse rather than being skipped, surfacing as `ReadError`
+at the typed read boundary. No observed column is silently omitted, so the
 earlier idea of surfacing "skipped columns" in the report is dropped as moot:
 there is no shrunken observed state left to report.
 

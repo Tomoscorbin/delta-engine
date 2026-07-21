@@ -118,7 +118,7 @@ def _columns_from_json(document: dict, qualified_name: QualifiedName) -> tuple[O
             # rather than drop the column. This engine owns the full column set —
             # an observed column absent from the declaration is planned for DROP
             # COLUMN — so silently dropping one would read as "in sync" when it is
-            # not. Surfaces as ReadFailed at the total read boundary.
+            # not. Surfaces as ReadError at the reader boundary.
             raise MetadataParseError(
                 f"{qualified_name}: column {name!r} has an unsupported type {type_obj!r}"
             )

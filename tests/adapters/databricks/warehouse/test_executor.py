@@ -4,7 +4,7 @@ import pytest
 
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
-from delta_engine.application.ports import ExecutionError
+from delta_engine.application.errors import ExecutionError
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan, SetTableComment
 

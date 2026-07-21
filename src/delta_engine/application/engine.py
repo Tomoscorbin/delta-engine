@@ -46,19 +46,22 @@ from delta_engine.application.dependency_resolution import (
     TableResolution,
     resolve,
 )
-from delta_engine.application.errors import DuplicateTableDefinitionError, SyncFailedError
-from delta_engine.application.failures import ExecutionFailure, Failure
+from delta_engine.application.errors import (
+    DuplicateTableDefinitionError,
+    ExecutionError,
+    ReadError,
+    SyncFailedError,
+)
+from delta_engine.application.failures import ExecutionFailure, Failure, ReadFailure
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded, plan_diff
 from delta_engine.application.ports import (
-    CatalogState,
     CatalogStateReader,
     DesiredTableSource,
-    ExecutionError,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
     PlanExecutor,
-    ReadFailed,
+    ReadResult,
     TableAbsent,
     TablePresent,
 )
@@ -112,7 +115,7 @@ class _TableRun:
 
     qualified_name: QualifiedName
     desired: DesiredTable
-    read: CatalogState
+    read: ReadResult
     plan: ActionPlan = field(default_factory=ActionPlan)
     planned_sql_statements: tuple[str, ...] = ()
     diff: TableDiff | None = None
@@ -227,11 +230,18 @@ class Engine:
         runs: list[_TableRun] = []
         for table in tables:
             qualified_name = table.qualified_name
-            state = self.reader.fetch_state(qualified_name)
-            run = _TableRun(qualified_name=qualified_name, desired=table, read=state)
+            state: ReadResult
+            try:
+                state = self.reader.fetch_state(qualified_name)
+            except ReadError as error:
+                state = ReadFailure(
+                    exception_type=error.exception_type,
+                    message=str(error),
+                )
 
+            run = _TableRun(qualified_name=qualified_name, desired=table, read=state)
             match state:
-                case ReadFailed(failure=failure):
+                case ReadFailure() as failure:
                     run.failures.append(failure)
                     logger.error(
                         "Read failed for %s: %s - %s",
@@ -254,7 +264,7 @@ class Engine:
         for run in runs:
             observed: ObservedTable | None
             match run.read:
-                case ReadFailed():
+                case ReadFailure():
                     continue
                 case TablePresent(table=table):
                     observed = table

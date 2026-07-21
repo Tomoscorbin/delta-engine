@@ -9,7 +9,7 @@ import sys
 from types import ModuleType
 from typing import TYPE_CHECKING
 
-from delta_engine.adapters.databricks.errors import exception_message
+from delta_engine.adapters.databricks.exception_inspection import exception_message
 from delta_engine.cli.errors import ConfigError
 
 if TYPE_CHECKING:
