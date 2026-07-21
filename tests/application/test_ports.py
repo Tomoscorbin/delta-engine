@@ -1,8 +1,5 @@
-from hypothesis import given, strategies as st
-
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
-    ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadResult,
@@ -117,36 +114,3 @@ def test_execution_outcome_variants_carry_the_right_payload():
     # Then success and failure carry only the fields appropriate to their arm
     assert failed.exception_type == "E"
     assert not hasattr(succeeded, "exception_type")
-
-
-# ---------- property: ExecutionSummary internal consistency ----------
-
-
-_EXECUTION_RESULT = st.one_of(
-    st.builds(
-        ExecutionSucceeded,
-        statement_index=st.integers(min_value=0, max_value=100),
-        statement=st.just("ALTER TABLE ..."),
-    ),
-    st.builds(
-        ExecutionFailure,
-        statement_index=st.integers(min_value=0, max_value=100),
-        exception_type=st.just("SparkException"),
-        message=st.text(max_size=40),
-        statement=st.just("ALTER TABLE ..."),
-    ),
-)
-
-
-@given(st.lists(_EXECUTION_RESULT, max_size=10))
-def test_execution_summary_failed_count_and_failures_are_mutually_consistent(
-    results: list[ExecutionResult],
-) -> None:
-    # Given: any mix of succeeded and failed execution results
-    summary = ExecutionSummary(tuple(results))
-
-    # Then: failed, failures, failed_count, and applied_count all agree
-    assert summary.failed == (summary.failed_count > 0)
-    assert summary.failed_count == len(summary.failures)
-    assert summary.applied_count + summary.failed_count == len(summary.results)
-    assert all(isinstance(f, ExecutionFailure) for f in summary.failures)

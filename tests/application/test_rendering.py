@@ -1,4 +1,3 @@
-import dataclasses
 from datetime import datetime
 
 import pytest
@@ -285,10 +284,10 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
     return TableRunReport(
-        qualified_name=qualified_name,
         desired=desired,
         read=TablePresent(table=observed),
         plan=ActionPlan(),
+        planned_sql_statements=(),
         failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
         execution=None,
     )
@@ -305,7 +304,14 @@ def test_diff_block_points_to_failures_when_plan_is_empty_but_failures_exist():
 def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
-    healthy = dataclasses.replace(report, failures=())
+    healthy = TableRunReport(
+        desired=report.desired,
+        read=report.read,
+        plan=ActionPlan(),
+        planned_sql_statements=(),
+        failures=(),
+        execution=None,
+    )
 
     block = render_diff_block(healthy)
 
@@ -355,12 +361,16 @@ def test_diff_block_marks_a_create_in_the_header():
 def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     # Given a table whose catalog read failed
     qualified_name = QualifiedName("cat", "sch", "orders")
+    failure = ReadFailure("IOError", "boom")
     report = TableRunReport(
-        qualified_name=qualified_name,
         desired=DesiredTable(
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
-        read=ReadFailure("IOError", "boom"),
+        read=failure,
+        plan=ActionPlan(),
+        planned_sql_statements=(),
+        failures=(failure,),
+        execution=None,
     )
 
     # When rendering the diff block
@@ -373,12 +383,12 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 # ---------- grid rendering ----------
 
 
-def _grid_report(name, *, plan=None, failures=()):
+def _grid_report(name, *, plan=None, failures=(), execution=None):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (DesiredColumn("id", Integer()),)
     plan = plan if plan is not None else ActionPlan()
+    execution_failures = () if execution is None else execution.failures
     return TableRunReport(
-        qualified_name=qualified_name,
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
             table=ObservedTable(
@@ -388,20 +398,22 @@ def _grid_report(name, *, plan=None, failures=()):
         plan=plan,
         # One fake statement per action, as the engine would have compiled.
         planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),
-        failures=failures,
+        failures=(*failures, *execution_failures),
+        execution=execution,
     )
 
 
 def _execution(*, applied: int, failed: int) -> ExecutionSummary:
     succeeded = tuple(
-        ExecutionSucceeded(statement_index=index, statement="SQL") for index in range(applied)
+        ExecutionSucceeded(statement_index=index, statement=f"SQL {index}")
+        for index in range(applied)
     )
     failures = tuple(
         ExecutionFailure(
             statement_index=applied + index,
             exception_type="AnalysisException",
             message="boom",
-            statement="SQL",
+            statement=f"SQL {applied + index}",
         )
         for index in range(failed)
     )
@@ -438,10 +450,10 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
             AddColumn(DesiredColumn("c", Integer())),
         )
     )
-    report = dataclasses.replace(
-        _grid_report("orders", plan=plan),
+    report = _grid_report(
+        "orders",
+        plan=plan,
         execution=_execution(applied=2, failed=1),
-        failures=(ExecutionFailure(2, "AnalysisException", "boom", "SQL"),),
     )
 
     # When rendering the grid row

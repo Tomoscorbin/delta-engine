@@ -15,6 +15,7 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.ports import (
+    ExecutionSucceeded,
     ExecutionSummary,
     ReadResult,
     TableAbsent,
@@ -25,6 +26,7 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
+from delta_engine.domain.plan import ActionPlan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
@@ -54,11 +56,22 @@ def _table_report(
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
+    desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
+    statements = (
+        () if execution is None else tuple(result.statement for result in execution.results)
+    )
+    read_failures = (read,) if isinstance(read, ReadFailure) else ()
+    reported_failures = tuple(
+        failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
+    )
+    execution_failures = () if execution is None else execution.failures
+
     return TableRunReport(
-        qualified_name=_QN,
-        desired=DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),)),
+        desired=desired,
         read=read,
-        failures=failures,
+        plan=ActionPlan(),
+        planned_sql_statements=statements,
+        failures=(*read_failures, *reported_failures, *execution_failures),
         execution=execution,
     )
 
@@ -73,7 +86,6 @@ def test_message_headline_counts_failed_tables():
     # Given a run with a single failed table
     report = _table_report(
         read=ReadFailure("AnalysisException", "table not found"),
-        failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 
     # When building the error message
@@ -87,7 +99,6 @@ def test_message_renders_read_failure_detail():
     # Given a table whose read phase failed
     report = _table_report(
         read=ReadFailure("AnalysisException", "table not found"),
-        failures=(ReadFailure("AnalysisException", "table not found"),),
     )
 
     # When building the error message
@@ -142,14 +153,12 @@ def test_message_renders_execution_failure_detail_with_sql():
     )
     report = _table_report(
         read=TableAbsent(),
-        execution=ExecutionSummary((failed_result,)),
-        failures=(
-            ExecutionFailure(
-                statement_index=2,
-                exception_type="SparkException",
-                message="boom",
-                statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
-            ),
+        execution=ExecutionSummary(
+            (
+                ExecutionSucceeded(0, "ALTER TABLE cat.sch.tbl STEP 0"),
+                ExecutionSucceeded(1, "ALTER TABLE cat.sch.tbl STEP 1"),
+                failed_result,
+            )
         ),
     )
 

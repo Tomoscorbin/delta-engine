@@ -27,7 +27,7 @@ read → diff → plan → compile → resolve → execute → report
 | **Plan**    | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
 | **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
 | **Resolve** | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                     |
-| **Execute** | Apply the compiled statements                | An execution summary per table (skipped entirely on a dry run)     |
+| **Execute** | Apply the compiled statements                | Attempted results, a dependency block, or skipped on a dry run     |
 
 The result is a `SyncReport` with one entry per table. On a real run, if any
 table failed, the engine raises `SyncFailedError` with that report attached; a
