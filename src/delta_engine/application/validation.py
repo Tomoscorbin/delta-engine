@@ -11,6 +11,7 @@ from delta_engine.application.properties import (
     Property,
     PropertyPolicy,
 )
+from delta_engine.application.scopes import TAG_ASPECTS
 from delta_engine.domain.model import (
     Byte,
     DataType,
@@ -40,10 +41,6 @@ from delta_engine.domain.plan import (
     TableDrift,
     TableMissing,
     UnsetProperty,
-)
-
-_STREAMING_TABLE_MANAGEABLE_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
-    {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
 )
 
 # The widenings Delta can apply in place (observed -> desired), per the
@@ -565,6 +562,8 @@ class StreamingTableTagsOnly:
     outside it. The gate judges the declaration's claimed aspects against the
     observed kind — not the drift — so it fires even when the table is
     currently in sync, and a dry run surfaces the misdeclaration immediately.
+    ``TAG_ASPECTS`` is shared with the public ``"tags"`` scope so the two
+    policies cannot diverge.
     """
 
     name: ClassVar[str] = "StreamingTableTagsOnly"
@@ -578,7 +577,7 @@ class StreamingTableTagsOnly:
             case TableDrift() as drift:
                 if drift.observed.kind is not TableKind.STREAMING_TABLE:
                     return ()
-                if drift.desired.managed_aspects <= _STREAMING_TABLE_MANAGEABLE_ASPECTS:
+                if drift.desired.managed_aspects <= TAG_ASPECTS:
                     return ()
                 return (
                     ValidationFailure(

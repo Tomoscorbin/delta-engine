@@ -14,11 +14,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Literal, NamedTuple
+from typing import Final, NamedTuple
 
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
+from delta_engine.application.scopes import ScopeName, managed_aspects_for
 from delta_engine.domain.model import (
-    ALL_ASPECTS,
     Array,
     Binary,
     Boolean,
@@ -33,33 +33,6 @@ from delta_engine.domain.model import (
     TableAspect,
     Variant,
 )
-
-METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
-    {
-        TableAspect.TABLE_COMMENT,
-        TableAspect.COLUMN_COMMENTS,
-        TableAspect.COLUMN_TAGS,
-        TableAspect.TABLE_TAGS,
-        TableAspect.PRIMARY_KEY,
-        TableAspect.FOREIGN_KEYS,
-    }
-)
-
-TAG_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
-    {
-        TableAspect.COLUMN_TAGS,
-        TableAspect.TABLE_TAGS,
-    }
-)
-
-# The public API exposes named scopes only, each mapping to an aspect set.
-# The TableAspect enum stays internal so a declaration can only manage
-# combinations the engine's safety rules are written against.
-_ASPECTS_BY_SCOPE: Final[Mapping[str, frozenset[TableAspect]]] = {
-    "full": ALL_ASPECTS,
-    "metadata": METADATA_ASPECTS,
-    "tags": TAG_ASPECTS,
-}
 
 # Delta permits these characters in column names only under column mapping.
 _CHARACTERS_REQUIRING_COLUMN_MAPPING: Final[frozenset[str]] = frozenset(" ,;{}()\n\t=")
@@ -501,7 +474,7 @@ class DeltaTable:
         clustered_by: Iterable[str] = (),
         primary_key: Sequence[str] | None = None,
         foreign_keys: Iterable[ForeignKey] | None = None,
-        scope: Literal["full", "metadata", "tags"] = "full",
+        scope: ScopeName = "full",
     ) -> None:
         """
         Initialise a DeltaTable definition.
@@ -537,12 +510,7 @@ class DeltaTable:
                 does not manage properties never compares them at all.
 
         """
-        # The Literal type catches bad scopes at type-check time; this guard
-        # covers untyped callers.
-        if scope not in _ASPECTS_BY_SCOPE:
-            expected = ", ".join(repr(known_scope) for known_scope in _ASPECTS_BY_SCOPE)
-            raise ValueError(f"Unknown scope {scope!r}; expected one of: {expected}")
-        managed_aspects = _ASPECTS_BY_SCOPE[scope]
+        managed_aspects = managed_aspects_for(scope)
 
         user_properties = dict(properties or {})
         DELTA_PROPERTY_POLICY.validate_declaration(user_properties)
