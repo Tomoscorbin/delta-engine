@@ -197,7 +197,7 @@ class _TableRun:
 
         execution = self.execution if isinstance(self.execution, ExecutionSummary) else None
 
-        return TableRunReport._create(
+        return TableRunReport(
             desired=self.desired,
             read=self.read,
             plan=plan,

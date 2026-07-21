@@ -283,7 +283,7 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
     observed = ObservedTable(
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
-    return TableRunReport._create(
+    return TableRunReport(
         desired=desired,
         read=TablePresent(table=observed),
         plan=ActionPlan(),
@@ -304,7 +304,7 @@ def test_diff_block_points_to_failures_when_plan_is_empty_but_failures_exist():
 def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
-    healthy = TableRunReport._create(
+    healthy = TableRunReport(
         desired=report.desired,
         read=report.read,
         plan=ActionPlan(),
@@ -362,7 +362,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     # Given a table whose catalog read failed
     qualified_name = QualifiedName("cat", "sch", "orders")
     failure = ReadFailure("IOError", "boom")
-    report = TableRunReport._create(
+    report = TableRunReport(
         desired=DesiredTable(
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
@@ -388,7 +388,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
     columns = (DesiredColumn("id", Integer()),)
     plan = plan if plan is not None else ActionPlan()
     execution_failures = () if execution is None else execution.failures
-    return TableRunReport._create(
+    return TableRunReport(
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
             table=ObservedTable(

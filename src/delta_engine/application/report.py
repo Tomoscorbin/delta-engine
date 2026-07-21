@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, Self
+from typing import Any, Final
 
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
@@ -81,17 +81,16 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
     ]
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class TableRunReport:
     """
     Frozen public projection of one completed table run.
 
-    The engine creates reports through ``_create`` after all phases finish.
-    Keeping construction controlled means the plan, failures, and execution
-    summary are frozen together and cannot be supplied as contradictory public
-    constructor arguments. ``planned_sql_statements`` is populated on dry and
-    real runs so planned changes remain inspectable even when execution is
-    skipped or blocked.
+    The engine creates a report after all phases finish. Construction validates
+    that the read result, failures, planned statements, and execution summary
+    describe one internally consistent run. ``planned_sql_statements`` is
+    populated on dry and real runs so planned changes remain inspectable even
+    when execution is skipped or blocked.
     """
 
     desired: DesiredTable
@@ -101,57 +100,37 @@ class TableRunReport:
     failures: tuple[Failure, ...]
     execution: ExecutionSummary | None
 
-    def __init__(self) -> None:
-        raise TypeError("TableRunReport values are created by Engine.sync")
+    def __post_init__(self) -> None:
+        """Normalize immutable collections and reject contradictory run facts."""
+        statements = tuple(self.planned_sql_statements)
+        frozen_failures = tuple(self.failures)
+        object.__setattr__(self, "planned_sql_statements", statements)
+        object.__setattr__(self, "failures", frozen_failures)
 
-    @classmethod
-    def _create(
-        cls,
-        *,
-        desired: DesiredTable,
-        read: ReadResult,
-        plan: ActionPlan,
-        planned_sql_statements: tuple[str, ...],
-        failures: tuple[Failure, ...],
-        execution: ExecutionSummary | None,
-    ) -> Self:
-        """Freeze one internally consistent table-run projection."""
-        statements = tuple(planned_sql_statements)
-        frozen_failures = tuple(failures)
-
-        expected_read_failures = (read,) if isinstance(read, ReadFailure) else ()
+        expected_read_failures = (self.read,) if isinstance(self.read, ReadFailure) else ()
         read_failures = tuple(
             failure for failure in frozen_failures if failure.phase is FailurePhase.READ
         )
         if read_failures != expected_read_failures:
             raise ValueError("Read failures must match the retained read result")
 
-        expected_execution_failures = () if execution is None else execution.failures
+        expected_execution_failures = () if self.execution is None else self.execution.failures
         execution_failures = tuple(
             failure for failure in frozen_failures if failure.phase is FailurePhase.EXECUTION
         )
         if execution_failures != expected_execution_failures:
             raise ValueError("Execution failures must match the execution summary")
 
-        if execution is not None:
+        if self.execution is not None:
             if any(failure.phase is not FailurePhase.EXECUTION for failure in frozen_failures):
                 raise ValueError("Execution cannot follow an earlier phase failure")
-            if len(execution.results) > len(statements):
+            if len(self.execution.results) > len(statements):
                 raise ValueError("Execution cannot contain more results than planned statements")
             if (
-                tuple(result.statement for result in execution.results)
-                != statements[: len(execution.results)]
+                tuple(result.statement for result in self.execution.results)
+                != statements[: len(self.execution.results)]
             ):
                 raise ValueError("Execution results must match the planned statement prefix")
-
-        report = object.__new__(cls)
-        object.__setattr__(report, "desired", desired)
-        object.__setattr__(report, "read", read)
-        object.__setattr__(report, "plan", plan)
-        object.__setattr__(report, "planned_sql_statements", statements)
-        object.__setattr__(report, "failures", frozen_failures)
-        object.__setattr__(report, "execution", execution)
-        return report
 
     @property
     def qualified_name(self) -> QualifiedName:

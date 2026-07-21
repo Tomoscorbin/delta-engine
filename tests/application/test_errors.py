@@ -66,7 +66,7 @@ def _table_report(
     )
     execution_failures = () if execution is None else execution.failures
 
-    return TableRunReport._create(
+    return TableRunReport(
         desired=desired,
         read=read,
         plan=ActionPlan(),

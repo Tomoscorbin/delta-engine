@@ -93,7 +93,7 @@ def _report(
     )
     execution_failures = () if execution is None else execution.failures
 
-    return TableRunReport._create(
+    return TableRunReport(
         desired=desired,
         read=read,
         plan=plan if plan is not None else ActionPlan(),
@@ -350,7 +350,7 @@ def test_report_rejects_execution_after_an_earlier_phase_failure():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="earlier phase failure"):
-        TableRunReport._create(
+        TableRunReport(
             desired=desired,
             read=TablePresent(table=_an_observed_table()),
             plan=ActionPlan(),
@@ -364,7 +364,7 @@ def test_report_rejects_results_for_different_planned_statements():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="planned statement prefix"):
-        TableRunReport._create(
+        TableRunReport(
             desired=desired,
             read=TablePresent(table=_an_observed_table()),
             plan=ActionPlan((SetTableComment(desired_comment="new", observed_comment="old"),)),
@@ -374,16 +374,11 @@ def test_report_rejects_results_for_different_planned_statements():
         )
 
 
-def test_table_run_report_has_no_public_constructor():
-    with pytest.raises(TypeError, match=r"created by Engine\.sync"):
-        TableRunReport()
-
-
-def test_report_factory_rejects_a_missing_read_failure():
+def test_report_rejects_a_missing_read_failure():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="Read failures must match"):
-        TableRunReport._create(
+        TableRunReport(
             desired=desired,
             read=ReadFailure("IOError", "boom"),
             plan=ActionPlan(),
@@ -393,12 +388,12 @@ def test_report_factory_rejects_a_missing_read_failure():
         )
 
 
-def test_report_factory_rejects_a_missing_execution_failure():
+def test_report_rejects_a_missing_execution_failure():
     desired = _a_desired_table("orders")
     statement = "ALTER TABLE ..."
 
     with pytest.raises(ValueError, match="Execution failures must match"):
-        TableRunReport._create(
+        TableRunReport(
             desired=desired,
             read=TablePresent(table=_an_observed_table()),
             plan=ActionPlan(),
