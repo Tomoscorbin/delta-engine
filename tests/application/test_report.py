@@ -1,8 +1,6 @@
 from datetime import datetime
 import json
 
-import pytest
-
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -344,63 +342,6 @@ def test_runtime_dependency_block_is_failure_but_not_statement_execution():
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert report.failures == (failure,)
     assert report.execution is None
-
-
-def test_report_rejects_execution_after_an_earlier_phase_failure():
-    desired = _a_desired_table("orders")
-
-    with pytest.raises(ValueError, match="earlier phase failure"):
-        TableRunReport(
-            desired=desired,
-            read=TablePresent(table=_an_observed_table()),
-            plan=ActionPlan(),
-            planned_sql_statements=(),
-            failures=(ValidationFailure("Rule", "unsafe"),),
-            execution=ExecutionSummary(),
-        )
-
-
-def test_report_rejects_results_for_different_planned_statements():
-    desired = _a_desired_table("orders")
-
-    with pytest.raises(ValueError, match="planned statement prefix"):
-        TableRunReport(
-            desired=desired,
-            read=TablePresent(table=_an_observed_table()),
-            plan=ActionPlan((SetTableComment(desired_comment="new", observed_comment="old"),)),
-            planned_sql_statements=("PLANNED",),
-            failures=(),
-            execution=ExecutionSummary((_ok_exec(0, "OTHER"),)),
-        )
-
-
-def test_report_rejects_a_missing_read_failure():
-    desired = _a_desired_table("orders")
-
-    with pytest.raises(ValueError, match="Read failures must match"):
-        TableRunReport(
-            desired=desired,
-            read=ReadFailure("IOError", "boom"),
-            plan=ActionPlan(),
-            planned_sql_statements=(),
-            failures=(),
-            execution=None,
-        )
-
-
-def test_report_rejects_a_missing_execution_failure():
-    desired = _a_desired_table("orders")
-    statement = "ALTER TABLE ..."
-
-    with pytest.raises(ValueError, match="Execution failures must match"):
-        TableRunReport(
-            desired=desired,
-            read=TablePresent(table=_an_observed_table()),
-            plan=ActionPlan(),
-            planned_sql_statements=(statement,),
-            failures=(),
-            execution=ExecutionSummary((_failed_exec(0, statement),)),
-        )
 
 
 def test_table_run_report_carries_its_desired_definition():

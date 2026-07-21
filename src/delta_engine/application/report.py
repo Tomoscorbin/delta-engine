@@ -16,7 +16,6 @@ from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
-    ReadFailure,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.domain.model import DesiredTable, QualifiedName
@@ -86,11 +85,10 @@ class TableRunReport:
     """
     Frozen public projection of one completed table run.
 
-    The engine creates a report after all phases finish. Construction validates
-    that the read result, failures, planned statements, and execution summary
-    describe one internally consistent run. ``planned_sql_statements`` is
-    populated on dry and real runs so planned changes remain inspectable even
-    when execution is skipped or blocked.
+    The engine creates a report after all phases finish, projecting its
+    canonical phase outcomes into this immutable snapshot.
+    ``planned_sql_statements`` is populated on dry and real runs so planned
+    changes remain inspectable even when execution is skipped or blocked.
     """
 
     desired: DesiredTable
@@ -99,38 +97,6 @@ class TableRunReport:
     planned_sql_statements: tuple[str, ...]
     failures: tuple[Failure, ...]
     execution: ExecutionSummary | None
-
-    def __post_init__(self) -> None:
-        """Normalize immutable collections and reject contradictory run facts."""
-        statements = tuple(self.planned_sql_statements)
-        frozen_failures = tuple(self.failures)
-        object.__setattr__(self, "planned_sql_statements", statements)
-        object.__setattr__(self, "failures", frozen_failures)
-
-        expected_read_failures = (self.read,) if isinstance(self.read, ReadFailure) else ()
-        read_failures = tuple(
-            failure for failure in frozen_failures if failure.phase is FailurePhase.READ
-        )
-        if read_failures != expected_read_failures:
-            raise ValueError("Read failures must match the retained read result")
-
-        expected_execution_failures = () if self.execution is None else self.execution.failures
-        execution_failures = tuple(
-            failure for failure in frozen_failures if failure.phase is FailurePhase.EXECUTION
-        )
-        if execution_failures != expected_execution_failures:
-            raise ValueError("Execution failures must match the execution summary")
-
-        if self.execution is not None:
-            if any(failure.phase is not FailurePhase.EXECUTION for failure in frozen_failures):
-                raise ValueError("Execution cannot follow an earlier phase failure")
-            if len(self.execution.results) > len(statements):
-                raise ValueError("Execution cannot contain more results than planned statements")
-            if (
-                tuple(result.statement for result in self.execution.results)
-                != statements[: len(self.execution.results)]
-            ):
-                raise ValueError("Execution results must match the planned statement prefix")
 
     @property
     def qualified_name(self) -> QualifiedName:
