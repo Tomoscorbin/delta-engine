@@ -498,9 +498,11 @@ removals produce `UnsetTableTag`, and foreign-key additions produce
 `SetForeignKey`. Unsupported or ambiguous states use one of the three
 unresolvable difference types, which the current default policy rejects.
 
-`validate_diff` is where policy lives. A missing table passes when the
-declaration manages table existence because creating it from the full
-declaration is safe. A drift is evaluated by the rules in `DEFAULT_RULES`.
+`validate_diff` is where policy lives. `MANDATORY_SCOPE_GATES` lists the scope
+checks that always run, and `DEFAULT_SAFETY_RULES` lists the configurable
+safety checks that run only after those gates pass. A missing table passes when
+the declaration manages table existence because creating it from the full
+declaration is safe. An eligible drift is evaluated by every default safety rule.
 The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
@@ -580,9 +582,9 @@ connected components to produce a dependency-first order. It reports:
   a read failure, validation failure, unresolvable FK, invalid FK target, or FK
   cycle.
 
-Each rule implements the `Rule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gate runs before any rule and short-circuits on out-of-scope drift, so a rule only ever sees differences the declaration manages and does no scope filtering of its own.
+Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` checks the scope gate first: a `TableMissing` clears it when table existence is managed — creating a table from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no rule ever sees a missing table; a `TableDrift` clears it when no unmanaged aspect has drifted. Only past the gate does `validate_diff` call every rule in `DEFAULT_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default policy in place and turns the verdict into the accepted/rejected planning sum.
+`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid and no unmanaged aspect has drifted. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default composition in place and turns the verdict into the accepted/rejected planning sum.
 
 Execution walks the dependency-first order produced by the resolver and keeps a
 set of every table that has failed so far. Before each table executes, the engine

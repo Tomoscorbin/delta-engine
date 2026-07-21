@@ -2,7 +2,8 @@ from typing import ClassVar
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
-    DEFAULT_RULES,
+    DEFAULT_SAFETY_RULES,
+    MANDATORY_SCOPE_GATES,
     ValidationResult,
     validate_diff,
 )
@@ -112,7 +113,7 @@ def _validate(
     desired: DesiredTable,
     observed: ObservedTable | None,
     *,
-    rules=DEFAULT_RULES,
+    rules=DEFAULT_SAFETY_RULES,
 ) -> ValidationResult:
     return validate_diff(diff_table(desired, observed), rules=rules)
 
@@ -138,15 +139,25 @@ def test_validation_result_failed_property():
     assert passing.failed is False
 
 
-# ---- DEFAULT_RULES
+# ---- validation composition
+
+
+def test_mandatory_scope_gates_cover_all_scope_policies_in_evaluation_order():
+    gate_names = tuple(type(gate).__name__ for gate in MANDATORY_SCOPE_GATES)
+
+    assert gate_names == (
+        "MissingTableUnmanaged",
+        "StreamingTableTagsOnly",
+        "UnmanagedAspectDrift",
+    )
 
 
 def test_default_rules_cover_all_safety_policies():
-    # Given the DEFAULT_RULES constant — scope invariants are not default rules
-    rule_names = {type(rule).__name__ for rule in DEFAULT_RULES}
+    # Given the DEFAULT_SAFETY_RULES constant — scope invariants are not default rules
+    rule_names = tuple(type(rule).__name__ for rule in DEFAULT_SAFETY_RULES)
 
-    # Then the expected safety policies are enabled by default
-    assert rule_names == {
+    # Then the expected safety policies are enabled in deterministic evaluation order
+    assert rule_names == (
         "NonNullableColumnAdd",
         "NullabilityTighteningOnExistingColumn",
         "NonWideningColumnTypeChange",
@@ -157,7 +168,7 @@ def test_default_rules_cover_all_safety_policies():
         "ColumnMappingRequiredForDrop",
         "AmbiguousColumnRename",
         "PrimaryKeyReferencedByForeignKeys",
-    }
+    )
 
 
 def test_validate_diff_uses_default_rules_when_rules_are_not_supplied():
@@ -1123,3 +1134,21 @@ def test_an_absent_streaming_table_under_tags_scope_still_fails_missing_table():
 
     # Then tags scope does not manage existence; nothing streaming-specific fires
     assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
+
+
+def test_scope_failure_prevents_safety_evaluation():
+    class MustNotRun:
+        name: ClassVar[str] = "MustNotRun"
+
+        def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+            raise AssertionError("safety rule ran after scope rejection")
+
+    diff = _drift(
+        AddColumn(DesiredColumn("extra", Integer())),
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+    )
+
+    result = validate_diff(diff, rules=(MustNotRun(),))
+
+    assert result.failed
+    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
