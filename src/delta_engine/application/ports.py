@@ -79,6 +79,18 @@ class CatalogStateReader(Protocol):
         ...
 
 
+# ---------- Statement execution boundary ----------
+
+
+class ExecutionError(Exception):
+    """A normalized backend error raised while executing one statement."""
+
+    def __init__(self, exception_type: str, message: str) -> None:
+        """Initialize the error with backend-neutral diagnostic details."""
+        super().__init__(message)
+        self.exception_type = exception_type
+
+
 # ---------- ExecutionResult ----------
 
 
@@ -97,17 +109,9 @@ class ExecutionSucceeded:
     statement: str
 
 
-@dataclass(frozen=True, slots=True)
-class ExecutionFailed:
-    """A single statement that raised while executing."""
-
-    failure: ExecutionFailure
-
-
-# An executed statement either succeeds or fails. The split makes "succeeded but
-# carries a failure" (and "failed but carries none") unrepresentable, so no
-# runtime invariant guard is needed.
-type ExecutionResult = ExecutionSucceeded | ExecutionFailed
+# A completed statement is either recorded as successful or as the execution
+# failure itself.
+type ExecutionResult = ExecutionSucceeded | ExecutionFailure
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,14 +131,12 @@ class ExecutionSummary:
     @property
     def failed(self) -> bool:
         """True when any statement failed."""
-        return any(isinstance(result, ExecutionFailed) for result in self.results)
+        return any(isinstance(result, ExecutionFailure) for result in self.results)
 
     @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
         """The failure detail from each failed statement, in execution order."""
-        return tuple(
-            result.failure for result in self.results if isinstance(result, ExecutionFailed)
-        )
+        return tuple(result for result in self.results if isinstance(result, ExecutionFailure))
 
     @property
     def failed_count(self) -> int:
@@ -149,18 +151,19 @@ class ExecutionSummary:
 
 class PlanExecutor(Protocol):
     """
-    Compiles a plan into statements and runs them against a backing engine.
+    Compile a plan and execute individual statements against a backing engine.
 
     Execution is a two-stage boundary: ``compile`` turns a domain plan into the
-    backend statements it lowers to, and ``execute`` runs those statements. The
-    engine compiles once per invocation: a dry run exposes those statements,
-    while a real run passes that invocation's same statements to ``execute``.
+    backend statements it lowers to, and ``execute`` attempts one of those
+    statements. The engine compiles once per invocation: a dry run exposes those
+    statements, while a real run passes that invocation's same statements to
+    ``execute`` one at a time.
 
-    Like :class:`CatalogStateReader`, ``execute`` is **total**: a statement that
-    fails is captured in the returned ``ExecutionSummary`` (which records both the
-    statements that succeeded and the one that failed), not raised. The engine
-    records the summary on the table's report and moves on, so a failure executing
-    one table does not abort the others.
+    The application owns statement ordering, result construction, and stopping
+    after the first failure. An adapter contains its backend's exception types
+    and translates an expected execution failure into :class:`ExecutionError`.
+    The engine catches that specific exception and records an
+    :class:`ExecutionFailure`; unexpected programming errors still propagate.
     """
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
@@ -172,7 +175,8 @@ class PlanExecutor(Protocol):
         from the plan.
 
         The ordering is the plan's own deterministic order, which is the order
-        ``execute`` runs the statements. An empty plan compiles to no statements.
+        the application passes statements to ``execute``. An empty plan compiles
+        to no statements.
 
         Pure and side-effect free: the engine calls this on every run -- dry or
         real -- to record the SQL on the table's report. Unlike ``execute``,
@@ -182,12 +186,20 @@ class PlanExecutor(Protocol):
         """
         ...
 
-    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
+    def execute(self, statement: str) -> None:
         """
-        Run ``statements`` (from :meth:`compile`) in order.
+        Execute one statement produced by :meth:`compile`.
 
-        Total: failures are captured in the returned ``ExecutionSummary`` rather
-        than raised. The statements are the complete unit of work — the table
-        they target is already baked into each statement by ``compile``.
+        Returning normally means the statement succeeded. The application adds
+        the statement and its sequence index to the execution summary.
+
+        Args:
+            statement: The backend statement to execute verbatim.
+
+        Raises:
+            ExecutionError: The backend could not execute the statement. The
+                adapter must translate backend-specific exceptions into this
+                type.
+
         """
         ...

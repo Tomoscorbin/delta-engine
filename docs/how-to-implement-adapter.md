@@ -43,8 +43,7 @@ class MyReader:
 Execution is a two-stage boundary. `compile` turns a domain plan into the backend statements it lowers to, without touching the backend:
 
 ```python
-from delta_engine.application.ports import PlanExecutor, ExecutionSummary, ExecutionSucceeded, ExecutionFailed
-from delta_engine.application.failures import ExecutionFailure
+from delta_engine.application.ports import ExecutionError, PlanExecutor
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan.actions import ActionPlan
 
@@ -64,32 +63,26 @@ dialect differs by kind (Databricks streaming tables take
 `ALTER STREAMING TABLE`) read it off the plan; a backend with one dialect
 may ignore it.
 
-`execute` then runs the statements `compile` produced — the engine passes the same tuple it recorded on the report, so what was previewed is exactly what runs. The statements are the complete unit of work; the table they target is already baked into each one by `compile`:
+The engine passes those same compiled statements to `execute` one at a time.
+The table they target is already baked into each statement. Returning normally
+means the statement succeeded; translate an expected backend failure into
+`ExecutionError`:
 
 ```python
-    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
-        results = []
-        for i, statement in enumerate(statements):
-            try:
-                self._run(statement)
-                results.append(ExecutionSucceeded(
-                    statement_index=i,
-                    statement=statement,
-                ))
-            except Exception as exc:
-                results.append(ExecutionFailed(
-                    failure=ExecutionFailure(
-                        statement_index=i,
-                        exception_type=type(exc).__name__,
-                        message=str(exc),
-                        statement=statement,
-                    ),
-                ))
-                break  # stop at first failure — the engine is non-transactional
-        return ExecutionSummary(results=tuple(results))
+    def execute(self, statement: str) -> None:
+        try:
+            self._run(statement)
+        except Exception as exc:
+            raise ExecutionError(
+                exception_type=type(exc).__name__,
+                message=str(exc),
+            ) from exc
 ```
 
-`execute` **is** total. Stop at the first failure and return the summary — the engine records partial results and moves on to the next table.
+The application owns statement indexes, constructs the `ExecutionSummary`, and
+stops after the first `ExecutionError`. It then records the partial result and
+moves on to the next independent table. Exceptions other than
+`ExecutionError` are port-contract or programming errors and propagate.
 
 ## Wire the engine
 

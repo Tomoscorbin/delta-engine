@@ -9,7 +9,6 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.ports import (
-    ExecutionFailed,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadFailed,
@@ -64,10 +63,11 @@ def _ok_exec(idx=0, preview="ALTER TABLE ..."):
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
-    return ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=idx, exception_type=exc, message=msg, statement=preview
-        ),
+    return ExecutionFailure(
+        statement_index=idx,
+        exception_type=exc,
+        message=msg,
+        statement=preview,
     )
 
 

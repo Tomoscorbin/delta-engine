@@ -85,17 +85,19 @@ in `domain/plan/diff.py` and the managed foreign-key filtering in
 `application/dependency_resolution.py` remain local consumers of individual
 aspects, rather than importing application policy.
 
-### Execution sequencing
+### Execution sequencing — consolidated
 
-`adapters/databricks/execution.py` owns the stop-on-first-failure loop, even
-though both Databricks executors share it and adapter documentation describes
-the behavior as a general adapter contract.
+`Engine` owns the stop-on-first-failure loop and constructs each table's
+`ExecutionSummary`, including application-owned statement indexes. The
+`PlanExecutor` port executes one statement at a time: normal return means
+success, while an expected backend failure is translated to `ExecutionError`.
+The engine catches only that typed boundary error, records an
+`ExecutionFailure`, and leaves unexpected programming errors visible.
 
-If stop-on-first-failure is engine-wide policy, raise it to the application
-boundary. One possible shape is for adapters to execute and translate one
-statement, while application code owns iteration and stopping. If the policy
-is intentionally adapter-specific, the port documentation should say so
-explicitly.
+`adapters/databricks/execution.py` retains only the shared Databricks exception
+translation. Spark and warehouse adapters supply their physical one-statement
+runner, while the warehouse adapter also contains its per-statement cursor
+lifecycle.
 
 ### Constraint naming
 

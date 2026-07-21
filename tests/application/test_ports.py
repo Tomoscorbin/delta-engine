@@ -2,7 +2,7 @@ from hypothesis import given, strategies as st
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
-    ExecutionFailed,
+    ExecutionError,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
@@ -29,10 +29,11 @@ def _ok_exec(idx=0, preview="ALTER TABLE ..."):
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
-    return ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=idx, exception_type=exc, message=msg, statement=preview
-        ),
+    return ExecutionFailure(
+        statement_index=idx,
+        exception_type=exc,
+        message=msg,
+        statement=preview,
     )
 
 
@@ -108,28 +109,24 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
 def test_execution_outcome_variants_carry_the_right_payload():
     # Given the two execution outcomes
     succeeded = ExecutionSucceeded(statement_index=0, statement="SQL")
-    failed = ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=1, exception_type="E", message="m", statement="SQL"
-        ),
+    failed = ExecutionFailure(
+        statement_index=1,
+        exception_type="E",
+        message="m",
+        statement="SQL",
     )
 
-    # Then a failure is only representable on the failed variant
-    assert failed.failure.exception_type == "E"
-    assert not hasattr(succeeded, "failure")
+    # Then success and failure carry only the fields appropriate to their arm
+    assert failed.exception_type == "E"
+    assert not hasattr(succeeded, "exception_type")
 
 
-def test_execution_failed_carries_index_only_on_its_failure_detail():
-    # Given a failed action
-    failed = ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=3, exception_type="E", message="m", statement="SQL"
-        ),
-    )
+def test_execution_error_is_a_regular_exception_with_normalized_details():
+    error = ExecutionError(exception_type="SparkException", message="boom")
 
-    # Then the index lives on the failure detail, not duplicated on the carrier
-    assert failed.failure.statement_index == 3
-    assert not hasattr(failed, "statement_index")
+    assert isinstance(error, Exception)
+    assert error.exception_type == "SparkException"
+    assert str(error) == "boom"
 
 
 # ---------- property: ExecutionSummary internal consistency ----------
@@ -142,14 +139,11 @@ _EXECUTION_RESULT = st.one_of(
         statement=st.just("ALTER TABLE ..."),
     ),
     st.builds(
-        ExecutionFailed,
-        failure=st.builds(
-            ExecutionFailure,
-            statement_index=st.integers(min_value=0, max_value=100),
-            exception_type=st.just("SparkException"),
-            message=st.text(max_size=40),
-            statement=st.just("ALTER TABLE ..."),
-        ),
+        ExecutionFailure,
+        statement_index=st.integers(min_value=0, max_value=100),
+        exception_type=st.just("SparkException"),
+        message=st.text(max_size=40),
+        statement=st.just("ALTER TABLE ..."),
     ),
 )
 

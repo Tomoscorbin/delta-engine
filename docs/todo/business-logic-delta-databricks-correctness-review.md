@@ -440,7 +440,7 @@ Relevant code:
 
 ### Proposed solution
 
-Remove `IF NOT EXISTS`. A concurrent create should produce an `ExecutionFailed`
+Remove `IF NOT EXISTS`. A concurrent create should produce an `ExecutionFailure`
 instead of a false success. The user can rerun synchronization, at which point
 the reader will observe and diff the table that actually exists.
 

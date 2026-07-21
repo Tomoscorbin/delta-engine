@@ -10,7 +10,6 @@ from delta_engine.application.diff_entries import (
 )
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
 from delta_engine.application.ports import (
-    ExecutionFailed,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadFailed,
@@ -399,13 +398,11 @@ def _execution(*, applied: int, failed: int) -> ExecutionSummary:
         ExecutionSucceeded(statement_index=index, statement="SQL") for index in range(applied)
     )
     failures = tuple(
-        ExecutionFailed(
-            failure=ExecutionFailure(
-                statement_index=applied + index,
-                exception_type="AnalysisException",
-                message="boom",
-                statement="SQL",
-            ),
+        ExecutionFailure(
+            statement_index=applied + index,
+            exception_type="AnalysisException",
+            message="boom",
+            statement="SQL",
         )
         for index in range(failed)
     )

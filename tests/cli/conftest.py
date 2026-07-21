@@ -10,8 +10,6 @@ from typer.testing import CliRunner
 from delta_engine.application.engine import Engine
 from delta_engine.application.ports import (
     CatalogState,
-    ExecutionSucceeded,
-    ExecutionSummary,
     TableAbsent,
     TablePresent,
 )
@@ -52,13 +50,8 @@ class FakeExecutor:
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         return tuple(f"-- {qualified_name}: {type(action).__name__}" for action in plan)
 
-    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
-        return ExecutionSummary(
-            results=tuple(
-                ExecutionSucceeded(statement_index=index, statement=statement)
-                for index, statement in enumerate(statements)
-            )
-        )
+    def execute(self, statement: str) -> None:
+        pass
 
 
 class _StubConnection:

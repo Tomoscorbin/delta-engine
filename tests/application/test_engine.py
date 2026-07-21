@@ -12,10 +12,8 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.ports import (
     CatalogState,
-    ExecutionFailed,
-    ExecutionResult,
+    ExecutionError,
     ExecutionSucceeded,
-    ExecutionSummary,
     ReadFailed,
     TableAbsent,
     TablePresent,
@@ -228,27 +226,11 @@ def _existing_tag_drifted_table(fqn: str, kind: TableKind = TableKind.TABLE) -> 
     )
 
 
-def _ok_exec(statement_index: int = 0) -> ExecutionResult:
-    return ExecutionSucceeded(
-        statement_index=statement_index,
-        statement="-- ok",
-    )
-
-
-def _failed_exec(
-    statement_index: int = 0,
-    *,
+def _execution_error(
     exception_type: str = "AnalysisException",
     message: str = "boom",
-) -> ExecutionResult:
-    return ExecutionFailed(
-        failure=ExecutionFailure(
-            statement_index=statement_index,
-            exception_type=exception_type,
-            message=message,
-            statement="-- bad sql",
-        ),
-    )
+) -> ExecutionError:
+    return ExecutionError(exception_type, message)
 
 
 class _RecordingReader:
@@ -267,19 +249,20 @@ class _RecordingReader:
 
 class _RecordingExecutor:
     """
-    Records execution calls and returns configured results.
+    Record statement attempts and raise configured execution errors.
 
-    If per_call_results is None, every execution succeeds. If an explicit list
-    is supplied, each call consumes one item and unexpected extra calls fail
-    loudly.
+    Each configured item is the outcome for one table in execution order:
+    ``None`` succeeds and ``ExecutionError`` fails its first statement. Without
+    configuration, every table succeeds.
     """
 
     def __init__(
         self,
-        per_call_results: list[tuple[ExecutionResult, ...]] | None = None,
+        per_table_errors: list[ExecutionError | None] | None = None,
     ) -> None:
-        self.calls: list[tuple[str, ...]] = []
-        self._per_call_results = None if per_call_results is None else list(per_call_results)
+        self.calls: list[str] = []
+        self._per_table_errors = None if per_table_errors is None else list(per_table_errors)
+        self._active_table: str | None = None
 
     def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
         return tuple(
@@ -287,22 +270,53 @@ class _RecordingExecutor:
             for index in range(len(plan))
         )
 
-    def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
-        self.calls.append(statements)
+    def execute(self, statement: str) -> None:
+        self.calls.append(statement)
+        table = statement.split(" FOR ", 1)[1]
 
-        if self._per_call_results is None:
-            return ExecutionSummary((_ok_exec(),))
+        if self._per_table_errors is None or table == self._active_table:
+            return
 
-        if not self._per_call_results:
-            raise AssertionError(f"Unexpected execution call: {statements}")
+        self._active_table = table
+        if not self._per_table_errors:
+            raise AssertionError(f"Unexpected execution call: {statement}")
 
-        return ExecutionSummary(self._per_call_results.pop(0))
+        error = self._per_table_errors.pop(0)
+        if error is not None:
+            raise error
 
     @property
     def executed_names(self) -> list[str]:
-        # compile embeds the table name in each fake statement; recover it so
-        # tests can assert which tables executed, since execute takes no name.
-        return [statements[0].split(" FOR ", 1)[1] for statements in self.calls]
+        names: list[str] = []
+        for statement in self.calls:
+            name = statement.split(" FOR ", 1)[1]
+            if not names or names[-1] != name:
+                names.append(name)
+        return names
+
+
+class _FailingMultiStatementExecutor:
+    """Compile three statements and fail the middle one for every table."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(3))
+
+    def execute(self, statement: str) -> None:
+        self.calls.append(statement)
+        if statement.startswith("STATEMENT 1 FOR "):
+            raise ExecutionError("AnalysisException", "boom")
+
+    @property
+    def executed_names(self) -> list[str]:
+        names: list[str] = []
+        for statement in self.calls:
+            name = statement.split(" FOR ", 1)[1]
+            if not names or names[-1] != name:
+                names.append(name)
+        return names
 
 
 def _reports_by_name(report: SyncReport) -> dict[str, TableRunReport]:
@@ -357,7 +371,7 @@ def _assert_has_fk_failure(
 def test_syncing_no_tables_returns_empty_report_without_reading_or_executing():
     # Given no tables to sync
     reader = _RecordingReader()
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -379,12 +393,7 @@ def test_sync_returns_report_when_all_tables_succeed():
             "c.b.orders": TableAbsent(),
         }
     )
-    executor = _RecordingExecutor(
-        [
-            (_ok_exec(0),),
-            (_ok_exec(0),),
-        ]
-    )
+    executor = _RecordingExecutor([None, None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -445,7 +454,7 @@ def test_unchanged_table_is_reported_successful_without_execution():
     # Given the observed table already matches the desired declaration
     fqn = "c.s.same"
     reader = _RecordingReader({fqn: _existing_id_table_synced(fqn)})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -462,7 +471,7 @@ def test_real_run_records_the_applied_plan_on_the_report():
     # Given a new table that will be created
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing for real
@@ -479,7 +488,7 @@ def test_tag_scoped_dry_run_plans_only_tag_actions():
     # Given a tag-scoped declaration over an existing table with tag drift
     fqn = "c.s.streaming_events"
     reader = _RecordingReader({fqn: _existing_tag_drifted_table(fqn)})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing as a dry run
@@ -501,7 +510,7 @@ def test_dry_run_is_recorded_on_the_report():
     # Given a dry run over one table
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing as a dry run
@@ -516,7 +525,7 @@ def test_real_run_records_dry_run_false():
     # Given a normal (applied) run
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing for real
@@ -561,9 +570,8 @@ def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
             # The name is embedded so execute can recover the target table.
             return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
 
-        def execute(self, statements: tuple[str, ...]) -> ExecutionSummary:
-            events.append(f"execute:{statements[0].split(' FOR ', 1)[1]}")
-            return ExecutionSummary((_ok_exec(0),))
+        def execute(self, statement: str) -> None:
+            events.append(f"execute:{statement.split(' FOR ', 1)[1]}")
 
     engine = Engine(
         reader=_EventRecordingReader(),
@@ -611,7 +619,7 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
             fqn: ReadFailed(ReadFailure("IOError", "cannot read")),
         }
     )
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -637,7 +645,7 @@ def test_validation_failed_table_is_not_executed_but_independent_table_still_run
             "c.s.b": TableAbsent(),
         }
     )
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -665,12 +673,7 @@ def test_execution_failure_is_reported_but_independent_later_table_still_execute
             "c.s.b": TableAbsent(),
         }
     )
-    executor = _RecordingExecutor(
-        [
-            (_failed_exec(0),),
-            (_ok_exec(0),),
-        ]
-    )
+    executor = _RecordingExecutor([_execution_error(), None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -690,31 +693,48 @@ def test_execution_failure_is_reported_but_independent_later_table_still_execute
     assert executor.executed_names == ["c.s.a", "c.s.b"]
 
 
-def test_execution_summary_is_retained_when_one_action_fails():
-    # Given execution returns a mixed summary for one table
+def test_execution_stops_after_first_failure_and_retains_attempted_results():
+    # Given one table compiles to three statements and the middle one fails
     fqn = "c.s.exec_fail"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(
-        [
-            (
-                _ok_exec(0),
-                _failed_exec(1),
-                _ok_exec(2),
-            )
-        ]
-    )
+    executor = _FailingMultiStatementExecutor()
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
     with pytest.raises(SyncFailedError) as exc_info:
         engine.sync(_spec(fqn))
 
-    # Then the whole execution summary is kept on the report
+    # Then only the attempted prefix is recorded and the third statement is not run
     [table_report] = list(exc_info.value.report)
     assert table_report.status is TableRunStatus.EXECUTION_FAILED
     assert table_report.execution is not None
-    assert len(table_report.execution.results) == 3
+    assert [type(result) for result in table_report.execution.results] == [
+        ExecutionSucceeded,
+        ExecutionFailure,
+    ]
+    failure = table_report.execution.results[1]
+    assert isinstance(failure, ExecutionFailure)
+    assert failure.statement_index == 1
+    assert failure.statement == f"STATEMENT 1 FOR {fqn}"
+    assert executor.calls == [
+        f"STATEMENT 0 FOR {fqn}",
+        f"STATEMENT 1 FOR {fqn}",
+    ]
     assert executor.executed_names == [fqn]
+
+
+def test_unexpected_executor_exception_propagates():
+    class BuggyExecutor:
+        def compile(self, qualified_name: QualifiedName, _plan: ActionPlan) -> tuple[str, ...]:
+            return (f"STATEMENT FOR {qualified_name}",)
+
+        def execute(self, _statement: str) -> None:
+            raise RuntimeError("adapter bug")
+
+    engine = Engine(reader=_RecordingReader(), executor=BuggyExecutor())
+
+    with pytest.raises(RuntimeError, match="adapter bug"):
+        engine.sync(_spec("c.s.table"))
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +763,7 @@ def test_sync_processes_tables_in_fk_dependency_order():
 def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     # Given orders references customers, but customers is not registered
     reader = _RecordingReader()
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -771,7 +791,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
             "cat.sch.a": ReadFailed(ReadFailure("IOError", "cannot read")),
         }
     )
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -805,7 +825,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
             "cat.sch.orders": TableAbsent(),
         }
     )
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -842,7 +862,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
 def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     # Given orders references customers, but customers has no primary key
     reader = _RecordingReader()
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -877,7 +897,7 @@ def test_sync_fails_fk_whose_types_mismatch_the_registered_parent():
     # String, but the customers declaration registered for this sync types id
     # as a Long
     reader = _RecordingReader()
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     registered_customers = DeltaTable(
@@ -920,8 +940,8 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
     reader = _RecordingReader()
     executor = _RecordingExecutor(
         [
-            (_failed_exec(0),),  # customers
-            (_ok_exec(0),),  # orders should not be reached after the engine fix
+            _execution_error(),  # customers
+            None,  # orders should not be reached after the engine fix
         ]
     )
     engine = Engine(reader=reader, executor=executor)
@@ -960,7 +980,7 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
 def test_execution_failure_blocks_transitively_along_fk_chain():
     # Given c -> b -> a, and a fails during execution
     reader = _RecordingReader()
-    executor = _RecordingExecutor([(_failed_exec(0),)])  # a only; b and c must not run
+    executor = _RecordingExecutor([_execution_error()])  # a only; b and c must not run
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -996,7 +1016,7 @@ def test_execution_failure_blocks_transitively_along_fk_chain():
 def test_partial_execution_failure_in_parent_blocks_dependent():
     # Given customers' plan fails on one action among successful ones
     reader = _RecordingReader()
-    executor = _RecordingExecutor([(_ok_exec(0), _failed_exec(1))])
+    executor = _FailingMultiStatementExecutor()
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1028,7 +1048,7 @@ def test_execution_failure_blocks_dependent_that_needed_no_changes():
     reader = _RecordingReader(
         {"cat.sch.orders": _existing_fk_table_synced("cat.sch.orders", "cat.sch.customers")}
     )
-    executor = _RecordingExecutor([(_failed_exec(0),)])  # customers only
+    executor = _RecordingExecutor([_execution_error()])  # customers only
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1072,7 +1092,7 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
     )
 
     reader = _RecordingReader()
-    executor = _RecordingExecutor([(_failed_exec(0),)])  # a only
+    executor = _RecordingExecutor([_execution_error()])  # a only
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1110,7 +1130,7 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
 def test_synced_fk_parent_with_no_work_does_not_block_dependent():
     # Given customers already matches its declaration and orders is absent
     reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
-    executor = _RecordingExecutor([(_ok_exec(0),)])  # orders only
+    executor = _RecordingExecutor([None])  # orders only
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1134,7 +1154,7 @@ def test_synced_fk_parent_with_no_work_does_not_block_dependent():
 def test_sync_rejects_duplicate_table_names_before_reading():
     # Given duplicate table declarations
     reader = _RecordingReader()
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1163,7 +1183,7 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
             "c.s.b": TableAbsent(),
         }
     )
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1188,7 +1208,7 @@ def test_dry_run_exposes_the_planned_actions_on_the_report():
     # Given a table that would be created
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1206,7 +1226,7 @@ def test_dry_run_records_the_sql_that_would_execute():
     # Given a table that would be created (dry run plans a CREATE)
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1224,7 +1244,7 @@ def test_failed_table_records_no_planned_sql():
     # Given a table whose read fails, so no plan is built
     fqn = "c.s.unreadable"
     reader = _RecordingReader({fqn: ReadFailed(ReadFailure("IOError", "cannot read"))})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1241,7 +1261,7 @@ def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
     # FK resolution runs after planning and compilation, so the plan and its
     # SQL are already legitimate facts — only the dependency check failed.
     reader = _RecordingReader()
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When performing a dry run
@@ -1262,7 +1282,7 @@ def test_dry_run_returns_validation_failures_without_raising_or_executing():
     # Given a table that would fail validation
     fqn = "c.s.val_fail"
     reader = _RecordingReader({fqn: _existing_id_table(fqn)})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1282,7 +1302,7 @@ def test_dry_run_returns_validation_failures_without_raising_or_executing():
 def test_dry_run_returns_fk_failures_without_raising_or_executing():
     # Given orders references customers, but customers is not registered
     reader = _RecordingReader()
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing in dry-run mode
@@ -1314,7 +1334,7 @@ def test_metadata_scoped_sync_applies_metadata_when_schema_matches():
     # Given a live table whose schema matches the declaration
     fqn = "cat.sch.orders"
     reader = _RecordingReader({fqn: _existing_matching_table(fqn)})
-    executor = _RecordingExecutor([(_ok_exec(0),)])
+    executor = _RecordingExecutor([None])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing a metadata-only declaration
@@ -1333,7 +1353,7 @@ def test_metadata_scoped_sync_fails_when_table_is_missing():
     # Given a metadata-only declaration for a missing table
     fqn = "cat.sch.orders"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
@@ -1362,7 +1382,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
             )
         }
     )
-    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_table_errors=[]))
     spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
     # When syncing (the plan would drop `stale`)
@@ -1390,7 +1410,7 @@ def test_sync_fails_loud_on_undeclared_managed_property():
             )
         }
     )
-    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_table_errors=[]))
     spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
     # When / Then the sync stops at validation naming the key
@@ -1416,7 +1436,7 @@ def test_metadata_scoped_column_removal_fails_without_drop_precondition():
             )
         }
     )
-    engine = Engine(reader=reader, executor=_RecordingExecutor(per_call_results=[]))
+    engine = Engine(reader=reader, executor=_RecordingExecutor(per_table_errors=[]))
 
     # When syncing
     with pytest.raises(SyncFailedError) as excinfo:
@@ -1436,7 +1456,7 @@ def test_planned_sql_targets_the_observed_relation_kind():
     reader = _RecordingReader(
         {fqn: _existing_tag_drifted_table(fqn, kind=TableKind.STREAMING_TABLE)}
     )
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing as a dry run
@@ -1457,7 +1477,7 @@ def test_created_tables_compile_as_ordinary_tables():
     # engine only creates ordinary tables
     fqn = "c.s.new_table"
     reader = _RecordingReader({fqn: TableAbsent()})
-    executor = _RecordingExecutor(per_call_results=[])
+    executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing as a dry run
