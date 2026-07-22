@@ -18,8 +18,6 @@ read -> diff -> plan -> execute round trip credential-free. Production reads
 go through ``SparkReader`` (AS JSON) instead.
 """
 
-from __future__ import annotations
-
 from pyspark.sql import SparkSession
 import pyspark.sql.types as T
 

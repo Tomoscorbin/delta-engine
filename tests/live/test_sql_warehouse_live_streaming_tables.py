@@ -32,6 +32,7 @@ pytest.importorskip("databricks.sql")
 
 from delta_engine import SyncFailedError, TableRunStatus, ValidationFailure
 from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.ports import TablePresent
 from delta_engine.databricks import build_sql_engine
@@ -143,7 +144,7 @@ def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
     target = qualified_table(table_name)
     execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('old'='remove-me')")
 
-    reader = WarehouseReader(live_connection)
+    reader = WarehouseReader(WarehouseSqlRunner(live_connection))
     state = reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
     assert isinstance(state, TablePresent), state
     assert state.table.kind is TableKind.STREAMING_TABLE

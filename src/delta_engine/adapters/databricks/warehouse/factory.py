@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.engine import Engine
@@ -21,6 +22,7 @@ def build_engine(connection: Connection) -> Engine:
     has no logging side effect; call :func:`configure_logging` separately if
     the coloured handler is wanted.
     """
-    reader = WarehouseReader(connection)
-    executor = WarehouseExecutor(connection)
+    runner = WarehouseSqlRunner(connection)
+    reader = WarehouseReader(runner)
+    executor = WarehouseExecutor(runner)
     return Engine(reader=reader, executor=executor)

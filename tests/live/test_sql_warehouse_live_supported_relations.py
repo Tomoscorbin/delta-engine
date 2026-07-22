@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState
@@ -25,7 +26,7 @@ from tests.live.sql_warehouse_live_helpers import (
 
 
 def _read(live_connection, table_name: str) -> CatalogState:
-    reader = WarehouseReader(live_connection)
+    reader = WarehouseReader(WarehouseSqlRunner(live_connection))
     return reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
 
 

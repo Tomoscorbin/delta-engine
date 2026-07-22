@@ -1,5 +1,6 @@
 import pyspark.sql.types as T
 
+from delta_engine.adapters.databricks.spark._runner import SparkSqlRunner
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.domain.model import (
@@ -30,7 +31,7 @@ def _dummy_qualified_name() -> QualifiedName:
 
 def _apply(spark, plan: ActionPlan) -> None:
     """Compile and execute each statement, as the engine drives the adapter."""
-    executor = SparkExecutor(spark)
+    executor = SparkExecutor(SparkSqlRunner(spark))
     for statement in executor.compile(plan):
         executor.execute(statement)
 
@@ -273,7 +274,7 @@ def test_compile_returns_the_statements_execute_would_run():
         target=qualified_name,
         actions=(SetTableComment(desired_comment="hello", observed_comment=""),),
     )
-    executor = SparkExecutor(spark=None)  # type: ignore[arg-type]  # compile never touches the session
+    executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
 
     # When compiling without executing
     statements = executor.compile(plan)
@@ -285,6 +286,6 @@ def test_compile_returns_the_statements_execute_would_run():
 
 
 def test_compile_of_empty_plan_returns_no_statements():
-    executor = SparkExecutor(spark=None)  # type: ignore[arg-type]
+    executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
     plan = ActionPlan(target=QualifiedName("cat", "schema", "tbl"))
     assert executor.compile(plan) == ()
