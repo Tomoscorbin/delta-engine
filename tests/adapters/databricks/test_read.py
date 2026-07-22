@@ -57,7 +57,9 @@ def _describe_responses(**overrides):
 
 def _router(responses):
     def run(query):
-        value = responses.get(query, [])
+        if query not in responses:
+            pytest.fail(f"unexpected SQL query: {query}", pytrace=False)
+        value = responses[query]
         if isinstance(value, Exception):
             raise value
         return value
@@ -193,8 +195,14 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
 
     read_catalog_state(run_query, QN)
 
-    assert calls[0] == describe_json_query(QN)
-    assert len(calls) == 6
+    assert calls == [
+        describe_json_query(QN),
+        column_tags_query(QN),
+        table_tags_query(QN),
+        primary_key_query(QN),
+        foreign_keys_query(QN),
+        referencing_foreign_keys_query(QN),
+    ]
 
 
 def test_missing_table_in_an_existing_schema_reads_as_absent():
@@ -212,7 +220,10 @@ def test_missing_table_in_a_missing_schema_reads_as_failed_not_absent():
     # absent would plan a CREATE TABLE that cannot succeed, and a dry run
     # would report that impossible plan as success. The router returns no
     # rows for the schema probe: the schema does not exist.
-    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+    responses = {
+        describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
+        schema_exists_query(QN): [],
+    }
 
     error = _read_error(responses)
 
@@ -228,7 +239,10 @@ def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
         schema_exists_query(QN): RuntimeError("[SCHEMA_NOT_FOUND] cat.information_schema"),
     }
 
-    _read_error(responses)
+    error = _read_error(responses)
+
+    assert error.exception_type == "RuntimeError"
+    assert "SCHEMA_NOT_FOUND" in str(error)
 
 
 def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
@@ -237,7 +251,10 @@ def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
     for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
         responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
 
-        _read_error(responses)
+        error = _read_error(responses)
+
+        assert error.exception_type == "RuntimeError"
+        assert condition in str(error)
 
 
 def test_other_describe_error_reads_as_failed():
@@ -252,7 +269,10 @@ def test_other_describe_error_reads_as_failed():
 def test_empty_describe_result_reads_as_failed():
     responses = _describe_responses(**{describe_json_query(QN): []})
 
-    _read_error(responses)
+    error = _read_error(responses)
+
+    assert error.exception_type == "MetadataParseError"
+    assert "DESCRIBE AS JSON returned no rows" in str(error)
 
 
 def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent():
@@ -262,7 +282,10 @@ def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent()
         **{table_tags_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] tags view")}
     )
 
-    _read_error(responses)
+    error = _read_error(responses)
+
+    assert error.exception_type == "RuntimeError"
+    assert "TABLE_OR_VIEW_NOT_FOUND" in str(error)
 
 
 def test_an_external_delta_table_reads_as_present():
@@ -333,7 +356,10 @@ def test_unmappable_column_type_reads_as_failed_not_present():
     )
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-    _read_error(responses)
+    error = _read_error(responses)
+
+    assert error.exception_type == "MetadataParseError"
+    assert "column 'region' has an unsupported type" in str(error)
 
 
 def test_a_streaming_table_reads_as_present_with_its_kind():

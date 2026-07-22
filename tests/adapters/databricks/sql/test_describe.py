@@ -194,12 +194,12 @@ def test_partitioning_and_clustering_carried_verbatim_in_order():
 
 def test_non_list_partition_columns_raises():
     # A present-but-non-list layout field is drift, not "no partitioning".
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="partition_columns is not a list"):
         _parse(_doc(partition_columns="region"))
 
 
 def test_non_list_clustering_columns_raises():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="clustering_columns is not a list"):
         _parse(_doc(clustering_columns="id"))
 
 
@@ -220,7 +220,7 @@ def test_absent_table_properties_carry_as_empty():
 
 
 def test_non_object_table_properties_raises():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="table_properties is not an object"):
         _parse(_doc(table_properties="delta.appendOnly=true"))
 
 
@@ -228,7 +228,7 @@ def test_unsupported_column_type_fails_the_read():
     # An unknown or future type name is a column the domain cannot model. The
     # engine owns the full column set, so dropping it would read as "in sync";
     # fail the read instead.
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="column 'weird' has an unsupported type"):
         _parse(
             _doc(
                 columns=[
@@ -241,7 +241,7 @@ def test_unsupported_column_type_fails_the_read():
 
 def test_malformed_type_object_raises():
     # A non-object type is a malformed shape, caught before type classification.
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="column 'amount' has a malformed type object"):
         _parse(
             _doc(
                 columns=[
@@ -253,7 +253,7 @@ def test_malformed_type_object_raises():
 
 
 def test_type_object_without_name_raises():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="column 'amount' has a malformed type object"):
         _parse(
             _doc(
                 columns=[
@@ -267,7 +267,7 @@ def test_type_object_without_name_raises():
 def test_unsupported_nested_type_fails_the_read():
     # A nested type the domain cannot represent (here an array with no element
     # type) is unreadable just like an unknown top-level type: fail, don't drop.
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="column 'tags' has an unsupported type"):
         _parse(
             _doc(
                 columns=[
@@ -279,33 +279,33 @@ def test_unsupported_nested_type_fails_the_read():
 
 
 def test_non_boolean_nullable_fails_the_read():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="column 'id' has a non-boolean nullable"):
         _parse(_doc(columns=[{"name": "id", "type": {"name": "int"}, "nullable": "false"}]))
 
 
 def test_empty_describe_result_raises():
     # The statement returns exactly one row; no rows means the table could not
     # be described, not that it is absent.
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="DESCRIBE AS JSON returned no rows"):
         table_description_from_rows([], QN)
 
 
 def test_malformed_json_and_missing_columns_raise():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="DESCRIBE AS JSON was not valid JSON"):
         _parse("{not json")
     doc = json.loads(_doc())
     doc.pop("columns")
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="AS JSON has no columns array"):
         _parse(json.dumps(doc))
 
 
 def test_non_object_document_raises():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="expected a JSON object"):
         _parse("[1, 2, 3]")
 
 
 def test_malformed_column_entry_raises():
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match="malformed column entry"):
         _parse(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]))
 
 
@@ -344,17 +344,18 @@ def test_unknown_describe_fields_are_ignored() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "malformed"),
+    ("field", "malformed", "expected_message"),
     (
-        ("table_comment", False),
-        ("column_comment", 0),
-        ("layout_item", {"name": "region"}),
-        ("property_value", True),
+        ("table_comment", False, "table comment is not a string"),
+        ("column_comment", 0, "column 'id' comment is not a string"),
+        ("layout_item", {"name": "region"}, "partition_columns entries must be strings"),
+        ("property_value", True, "table_properties values must be strings"),
     ),
 )
 def test_non_string_describe_leaf_values_raise_metadata_parse_error(
     field: str,
     malformed: object,
+    expected_message: str,
 ) -> None:
     document = json.loads(_doc())
     if field == "table_comment":
@@ -366,5 +367,5 @@ def test_non_string_describe_leaf_values_raise_metadata_parse_error(
     else:
         document["table_properties"] = {"delta.appendOnly": malformed}
 
-    with pytest.raises(MetadataParseError):
+    with pytest.raises(MetadataParseError, match=expected_message):
         _parse(json.dumps(document))
