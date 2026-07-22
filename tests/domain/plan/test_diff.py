@@ -117,6 +117,25 @@ def test_drift_carries_the_desired_table():
     assert not hasattr(diff, "plan")
 
 
+def test_drift_derives_target_from_the_shared_table_identity():
+    # Given matching desired and observed table identities
+    diff = diff_table(_desired(), _observed())
+
+    # Then the comparison exposes their one shared target
+    assert isinstance(diff, TableDrift)
+    assert diff.target == _QUALIFIED_NAME
+
+
+def test_drift_rejects_different_desired_and_observed_tables():
+    # Given a desired and observed referencing different tables
+    desired = _desired(qualified_name=QualifiedName("cat", "sch", "customers"))
+    observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
+
+    # When / Then constructing their comparison is rejected
+    with pytest.raises(ValueError, match="Cannot compare different tables"):
+        TableDrift(desired=desired, observed=observed)
+
+
 # ---------- column structure changes
 
 

@@ -48,7 +48,7 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(
-                target=drift.desired.qualified_name,
+                target=drift.target,
                 actions=drift.actions,
                 kind=drift.observed.kind,
             )

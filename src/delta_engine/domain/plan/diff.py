@@ -21,6 +21,7 @@ from delta_engine.domain.model import (
     DesiredTable,
     ObservedColumn,
     ObservedTable,
+    QualifiedName,
     TableAspect,
 )
 from delta_engine.domain.plan.actions import (
@@ -107,6 +108,17 @@ class TableDrift:
     observed: ObservedTable
     actions: tuple[Action, ...] = ()
     unresolvable: tuple[Unresolvable, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.desired.qualified_name != self.observed.qualified_name:
+            raise ValueError(
+                "Cannot compare different tables:"
+                f" {self.desired.qualified_name} != {self.observed.qualified_name}"
+            )
+
+    @property
+    def target(self) -> QualifiedName:
+        return self.desired.qualified_name
 
 
 type TableDiff = TableMissing | TableDrift

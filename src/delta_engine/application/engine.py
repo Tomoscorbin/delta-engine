@@ -91,7 +91,6 @@ class _ExecutionBlockedByDependency:
     failures: tuple[ForeignKeyFailure, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "failures", tuple(self.failures))
         if not self.failures:
             raise ValueError("Dependency blocking requires at least one failure")
 
