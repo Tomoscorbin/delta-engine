@@ -13,6 +13,7 @@ from delta_engine.adapters.databricks.sql import (
     schema_exists_query,
     table_tags_query,
 )
+from delta_engine.adapters.databricks.sql.describe import MetadataParseError
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import (
@@ -227,41 +228,43 @@ def test_missing_table_in_a_missing_schema_reads_as_failed_not_absent():
 
     error = _read_error(responses)
 
-    assert "does not exist" in str(error)
+    assert isinstance(error.__cause__, RuntimeError)
 
 
 def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
     # A nonexistent catalog also reports TABLE_OR_VIEW_NOT_FOUND on describe;
     # the schema probe then fails because <catalog>.information_schema cannot
     # resolve, and that failure is the read's outcome.
+    schema_error = RuntimeError("[SCHEMA_NOT_FOUND] cat.information_schema")
     responses = {
         describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
-        schema_exists_query(QN): RuntimeError("[SCHEMA_NOT_FOUND] cat.information_schema"),
+        schema_exists_query(QN): schema_error,
     }
 
     error = _read_error(responses)
 
-    assert error.exception_type == "RuntimeError"
+    assert error.__cause__ is schema_error
 
 
 def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
     # Where the backend does name the missing container on the describe, that
     # is not a creatable absence either.
     for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
-        responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
+        describe_error = RuntimeError(f"[{condition}] nope")
+        responses = {describe_json_query(QN): describe_error}
 
         error = _read_error(responses)
 
-        assert error.exception_type == "RuntimeError"
+        assert error.__cause__ is describe_error
 
 
 def test_other_describe_error_reads_as_failed():
-    responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
+    describe_error = RuntimeError("warehouse gone")
+    responses = {describe_json_query(QN): describe_error}
 
     error = _read_error(responses)
 
-    assert "warehouse gone" in str(error)
-    assert isinstance(error.__cause__, RuntimeError)
+    assert error.__cause__ is describe_error
 
 
 def test_empty_describe_result_reads_as_failed():
@@ -269,19 +272,18 @@ def test_empty_describe_result_reads_as_failed():
 
     error = _read_error(responses)
 
-    assert error.exception_type == "MetadataParseError"
+    assert isinstance(error.__cause__, MetadataParseError)
 
 
 def test_missing_relation_while_reading_info_schema_reads_as_failed_not_absent():
     # Missing-relation means "table absent" only for the describe. A failure while
     # attaching tags means the table was found but the read could not complete.
-    responses = _describe_responses(
-        **{table_tags_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] tags view")}
-    )
+    tags_error = RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] tags view")
+    responses = _describe_responses(**{table_tags_query(QN): tags_error})
 
     error = _read_error(responses)
 
-    assert error.exception_type == "RuntimeError"
+    assert error.__cause__ is tags_error
 
 
 def test_an_external_delta_table_reads_as_present():
@@ -354,7 +356,7 @@ def test_unmappable_column_type_reads_as_failed_not_present():
 
     error = _read_error(responses)
 
-    assert error.exception_type == "MetadataParseError"
+    assert isinstance(error.__cause__, MetadataParseError)
 
 
 def test_a_streaming_table_reads_as_present_with_its_kind():
