@@ -10,12 +10,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, assert_never
 
+from delta_engine.application.dependency_resolution import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+    TableResolution,
+)
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
+    ReadFailure,
+)
+from delta_engine.application.planning import (
+    PlanningFailed,
+    PlanningResult,
+    PlanningSucceeded,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.domain.model import DesiredTable, QualifiedName
@@ -83,6 +96,25 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionBlockedByDependency:
+    """Execution was skipped because a referenced table failed while executing."""
+
+    failures: tuple[ForeignKeyFailure, ...]
+
+    def __post_init__(self) -> None:
+        if not self.failures:
+            raise ValueError("Dependency blocking requires at least one failure")
+        if any(
+            failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+            for failure in self.failures
+        ):
+            raise ValueError("Execution blocking requires dependency-blocking failures")
+
+
+type ExecutionOutcome = ExecutionSummary | ExecutionBlockedByDependency
+
+
+@dataclass(frozen=True, slots=True)
 class TableRunReport:
     """
     Frozen public projection of one completed table run.
@@ -97,10 +129,88 @@ class TableRunReport:
 
     desired: DesiredTable
     read: ReadResult
-    plan: ActionPlan | None
+    planning: PlanningResult | None
     planned_sql_statements: tuple[str, ...]
-    failures: tuple[Failure, ...]
-    execution: ExecutionSummary | None
+    resolution: TableResolution
+    execution_outcome: ExecutionOutcome | None
+
+    def __post_init__(self) -> None:
+        read_failed = isinstance(self.read, ReadFailure)
+        planning_failed = isinstance(self.planning, PlanningFailed)
+        resolution_failed = isinstance(self.resolution, ResolutionFailed)
+
+        if self.resolution.qualified_name != self.qualified_name:
+            raise ValueError("Resolution outcome must belong to the reported table")
+        if read_failed and self.planning is not None:
+            raise ValueError("Planning cannot follow a failed read")
+        if not read_failed and self.planning is None:
+            raise ValueError("A successful read requires a planning outcome")
+
+        plan = self.plan
+        if plan is not None and plan.target != self.qualified_name:
+            raise ValueError("Planned action target must match the reported table")
+        if self.planned_sql_statements and plan is None:
+            raise ValueError("Compiled statements require a successful planning outcome")
+        if self.execution_outcome is not None and (
+            read_failed or planning_failed or resolution_failed
+        ):
+            raise ValueError("Execution cannot follow a failed earlier phase")
+        if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and not isinstance(
+            self.resolution, ResolutionSucceeded
+        ):
+            raise ValueError("Execution blocking requires successful dependency resolution")
+
+        execution = self.execution
+        if execution is not None:
+            executed = tuple(result.statement for result in execution.results)
+            if executed != self.planned_sql_statements[: len(executed)]:
+                raise ValueError("Execution results must match the planned statement prefix")
+
+    @property
+    def plan(self) -> ActionPlan | None:
+        """The accepted plan, or ``None`` when reading or planning failed."""
+        match self.planning:
+            case PlanningSucceeded(plan=plan):
+                return plan
+            case PlanningFailed() | None:
+                return None
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    @property
+    def execution(self) -> ExecutionSummary | None:
+        """The attempted statements, excluding dependency-blocked execution."""
+        match self.execution_outcome:
+            case ExecutionSummary() as summary:
+                return summary
+            case ExecutionBlockedByDependency() | None:
+                return None
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    @property
+    def failures(self) -> tuple[Failure, ...]:
+        """Flatten canonical phase outcomes into lifecycle order for callers."""
+        failures: list[Failure] = []
+
+        if isinstance(self.read, ReadFailure):
+            failures.append(self.read)
+        if isinstance(self.planning, PlanningFailed):
+            failures.extend(self.planning.failures)
+        if isinstance(self.resolution, ResolutionFailed):
+            failures.extend(self.resolution.failures)
+
+        match self.execution_outcome:
+            case ExecutionSummary() as summary:
+                failures.extend(summary.failures)
+            case ExecutionBlockedByDependency(failures=blocked):
+                failures.extend(blocked)
+            case None:
+                pass
+            case _ as unreachable:
+                assert_never(unreachable)
+
+        return tuple(failures)
 
     @property
     def qualified_name(self) -> QualifiedName:

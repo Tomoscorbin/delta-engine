@@ -1,3 +1,5 @@
+import pytest
+
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.ports import (
     ExecutionSucceeded,
@@ -99,6 +101,16 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
     assert summary.failed is False
     assert summary.failed_count == 0
     assert summary.applied_count == 0
+
+
+def test_execution_summary_rejects_non_contiguous_statement_indexes():
+    with pytest.raises(ValueError, match="contiguous"):
+        ExecutionSummary((_ok_exec(1),))
+
+
+def test_execution_summary_rejects_results_after_a_failure():
+    with pytest.raises(ValueError, match="after a failure"):
+        ExecutionSummary((_failed_exec(0), _ok_exec(1)))
 
 
 def test_execution_outcome_variants_carry_the_right_payload():

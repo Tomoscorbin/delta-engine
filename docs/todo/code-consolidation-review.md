@@ -189,6 +189,15 @@ Do not introduce one public class per lifecycle phase merely to eliminate
 that derives report status, eligibility, and the flattened failure stream from
 those outcomes.
 
+### Implemented
+
+`_TableRun` and `TableRunReport` now retain the read, planning, resolution, and
+execution outcomes directly. The public plan, execution summary, failure list,
+status, and table identity are derived projections, so they cannot disagree
+with those outcomes. Completed reports reject impossible phase histories, and
+`ExecutionSummary` enforces contiguous, stop-on-first-failure execution whose
+statements must match the compiled statement prefix.
+
 ## 3. Put the table target on `ActionPlan`
 
 ### Cause

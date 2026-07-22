@@ -113,6 +113,14 @@ class ExecutionSummary:
 
     results: tuple[ExecutionResult, ...] = ()
 
+    def __post_init__(self) -> None:
+        """Reject histories that the stop-at-first-failure executor cannot produce."""
+        for expected_index, result in enumerate(self.results):
+            if result.statement_index != expected_index:
+                raise ValueError("Execution result indexes must be contiguous")
+            if expected_index and isinstance(self.results[expected_index - 1], ExecutionFailure):
+                raise ValueError("Execution cannot continue after a failure")
+
     @property
     def failed(self) -> bool:
         """True when any statement failed."""

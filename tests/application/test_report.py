@@ -1,6 +1,12 @@
 from datetime import datetime
 import json
 
+import pytest
+
+from delta_engine.application.dependency_resolution import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+)
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -9,6 +15,7 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -17,6 +24,7 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.report import (
+    ExecutionBlockedByDependency,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -90,34 +98,52 @@ def _report(
     planned_sql_statements: tuple[str, ...] = (),
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
+    execution_blocked: bool = False,
 ) -> TableRunReport:
     """Construct a frozen report snapshot from concise test inputs."""
     if execution is not None and not planned_sql_statements:
         planned_sql_statements = tuple(result.statement for result in execution.results)
 
-    read_failures = (read,) if isinstance(read, ReadFailure) else ()
-    reported_failures = tuple(
-        failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
+    planning_failures = tuple(
+        failure for failure in failures if isinstance(failure, ValidationFailure)
     )
-    execution_failures = () if execution is None else execution.failures
+    resolution_failures = tuple(
+        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
+    )
     if plan is _PLAN_UNSET:
-        planning_failed = any(isinstance(failure, ValidationFailure) for failure in failures)
         report_plan = (
             None
-            if isinstance(read, ReadFailure) or planning_failed
+            if isinstance(read, ReadFailure) or planning_failures
             else ActionPlan(target=desired.qualified_name)
         )
     else:
         assert plan is None or isinstance(plan, ActionPlan)
         report_plan = plan
 
+    if isinstance(read, ReadFailure):
+        planning = None
+    elif planning_failures:
+        planning = PlanningFailed(planning_failures)
+    else:
+        assert isinstance(report_plan, ActionPlan)
+        planning = PlanningSucceeded(report_plan)
+
+    resolution = (
+        ResolutionFailed(desired.qualified_name, resolution_failures)
+        if resolution_failures and not execution_blocked
+        else ResolutionSucceeded(desired.qualified_name, ())
+    )
+    execution_outcome = (
+        ExecutionBlockedByDependency(resolution_failures) if execution_blocked else execution
+    )
+
     return TableRunReport(
         desired=desired,
         read=read,
-        plan=report_plan,
+        planning=planning,
         planned_sql_statements=planned_sql_statements,
-        failures=(*read_failures, *reported_failures, *execution_failures),
-        execution=execution,
+        resolution=resolution,
+        execution_outcome=execution_outcome,
     )
 
 
@@ -358,6 +384,7 @@ def test_runtime_dependency_block_is_failure_but_not_statement_execution():
         desired=desired,
         read=TablePresent(table=_an_observed_table()),
         failures=(failure,),
+        execution_blocked=True,
     )
 
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
@@ -378,6 +405,54 @@ def test_table_run_report_carries_its_desired_definition():
     assert report.status is TableRunStatus.SUCCESS
     assert report.failures == ()
     assert report.plan == ActionPlan(target=desired.qualified_name)
+
+
+def test_table_run_report_rejects_planning_after_a_failed_read():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
+        TableRunReport(
+            desired=desired,
+            read=ReadFailure("IOError", "boom"),
+            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            planned_sql_statements=(),
+            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            execution_outcome=None,
+        )
+
+
+def test_table_run_report_rejects_execution_after_failed_resolution():
+    desired = _a_desired_table("orders")
+    failure = ForeignKeyFailure(
+        table=desired.qualified_name,
+        local_columns=("customer_id",),
+        references=QualifiedName("cat", "schema", "customers"),
+        reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+    )
+
+    with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
+        TableRunReport(
+            desired=desired,
+            read=TablePresent(table=_an_observed_table()),
+            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            planned_sql_statements=("SQL",),
+            resolution=ResolutionFailed(desired.qualified_name, (failure,)),
+            execution_outcome=ExecutionSummary((_ok_exec(0, "SQL"),)),
+        )
+
+
+def test_table_run_report_rejects_execution_unrelated_to_planned_sql():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="planned statement prefix"):
+        TableRunReport(
+            desired=desired,
+            read=TablePresent(table=_an_observed_table()),
+            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            planned_sql_statements=("PLANNED SQL",),
+            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
+        )
 
 
 def _a_changed_table_report():
