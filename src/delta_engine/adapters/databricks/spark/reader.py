@@ -9,8 +9,6 @@ Physical Spark invocation and session guards live in the backend-private SQL
 runner.
 """
 
-from __future__ import annotations
-
 from pyspark.sql import Row
 
 from delta_engine.adapters.databricks.read import read_catalog_state

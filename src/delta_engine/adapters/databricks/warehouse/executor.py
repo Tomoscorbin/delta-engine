@@ -1,7 +1,5 @@
 """Compile plans and execute individual statements through a SQL warehouse."""
 
-from __future__ import annotations
-
 from delta_engine.adapters.databricks.execution import execute_statement
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner

@@ -10,8 +10,6 @@ when the read finishes. Lazy acquisition keeps a dead connection inside the
 shared ``ReadError`` translation boundary.
 """
 
-from __future__ import annotations
-
 from delta_engine.adapters.databricks.read import read_catalog_state
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.application.ports import CatalogState
