@@ -3,16 +3,18 @@ Reader adapter for Databricks Unity Catalog over a SparkSession.
 
 Unity Catalog only. Reads one table's state through the shared
 ``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus five
-information_schema queries). This backend supplies only how a query runs —
-``spark.sql(...).collect()`` — while parsing, assembly, and error translation
-are shared with the warehouse backend.
+information_schema queries). This backend supplies only how a query runs while
+parsing, assembly, and error translation are shared with the warehouse backend.
+Physical Spark invocation and session guards live in the backend-private SQL
+runner.
 """
 
 from __future__ import annotations
 
-from pyspark.sql import Row, SparkSession
+from pyspark.sql import Row
 
 from delta_engine.adapters.databricks.read import read_catalog_state
+from delta_engine.adapters.databricks.spark._runner import SparkSqlRunner
 from delta_engine.application.ports import CatalogState
 from delta_engine.domain.model import QualifiedName
 
@@ -20,8 +22,8 @@ from delta_engine.domain.model import QualifiedName
 class SparkReader:
     """Catalog state reader backed by a Databricks/Spark session."""
 
-    def __init__(self, spark: SparkSession) -> None:
-        self.spark = spark
+    def __init__(self, runner: SparkSqlRunner) -> None:
+        self._runner = runner
 
     def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
         """Return the known catalog state, raising ``ReadError`` when it cannot be read."""
@@ -29,4 +31,4 @@ class SparkReader:
 
     def _run_query(self, sql: str) -> list[Row]:
         """Run one SQL statement on the session and return its rows."""
-        return self.spark.sql(sql).collect()
+        return self._runner.run(sql).collect()

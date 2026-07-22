@@ -2,6 +2,7 @@
 
 from pyspark.sql import SparkSession
 
+from delta_engine.adapters.databricks.spark._runner import SparkSqlRunner
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.spark.reader import SparkReader
 from delta_engine.application.engine import Engine
@@ -16,6 +17,7 @@ def build_engine(spark: SparkSession) -> Engine:
     startup to install the package's coloured handler; embedders who own their
     own logging simply leave it alone.
     """
-    reader = SparkReader(spark)
-    executor = SparkExecutor(spark)
+    runner = SparkSqlRunner(spark)
+    reader = SparkReader(runner)
+    executor = SparkExecutor(runner)
     return Engine(reader=reader, executor=executor)
