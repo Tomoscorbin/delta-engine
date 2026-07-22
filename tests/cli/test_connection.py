@@ -272,9 +272,8 @@ def test_close_failure_is_logged_without_replacing_success(fake_dependencies, mo
 
     with caplog.at_level(logging.WARNING):
         with open_connection():
-            completed = True
+            pass
 
-    assert completed is True
     assert failing_connection.close_calls == 1
     assert "Failed to close" in caplog.text
 

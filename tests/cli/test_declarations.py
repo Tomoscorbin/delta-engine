@@ -34,15 +34,13 @@ def test_reference_parses_and_round_trips():
     assert str(reference) == "myproject.tables:all_tables"
 
 
-@pytest.mark.parametrize("text", ["mod", "mod:", ":attr", "mod:attr:extra"])
-def test_malformed_reference_is_a_configuration_error(text):
-    with pytest.raises(ConfigError, match="MODULE:ATTRIBUTE"):
-        DeclarationRef.parse(text)
-
-
 @pytest.mark.parametrize(
     "text",
     [
+        "mod",
+        "mod:",
+        ":attr",
+        "mod:attr:extra",
         "./tables.py:all_tables",
         ".relative:all_tables",
         "tables.py/:all_tables",
@@ -51,9 +49,15 @@ def test_malformed_reference_is_a_configuration_error(text):
         "myproject.tables:all_tables.first",
     ],
 )
-def test_path_like_and_non_identifier_references_are_configuration_errors(text):
-    with pytest.raises(ConfigError, match="MODULE:ATTRIBUTE"):
+def test_malformed_references_are_configuration_errors(text):
+    # Given a reference that is not an importable MODULE:ATTRIBUTE pair
+
+    # When parsing the reference
+    with pytest.raises(ConfigError) as exc_info:
         DeclarationRef.parse(text)
+
+    # Then the diagnostic identifies the required input shape
+    assert "MODULE:ATTRIBUTE" in str(exc_info.value)
 
 
 def test_non_empty_ordered_sequence_loads_in_declared_order(write_module):
