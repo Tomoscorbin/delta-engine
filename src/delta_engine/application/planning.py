@@ -54,7 +54,7 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
             )
         case TableMissing() as missing:
             plan = ActionPlan(
-                target=missing.desired.qualified_name,
+                target=missing.target,
                 actions=missing.actions,
             )
         case _ as unreachable:
