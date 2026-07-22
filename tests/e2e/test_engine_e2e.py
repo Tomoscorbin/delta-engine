@@ -59,6 +59,42 @@ def test_engine_sync_happy_path(spark, temp_schema):
     assert spark.catalog.getTable(fq).description == "E2E happy path table"
 
 
+def test_engine_preserves_spark_variable_expressions_in_comments(spark, temp_schema):
+    variable_substitution = "spark.sql.variable.substitute"
+    original_setting = spark.conf.get(variable_substitution)
+    table_name = f"e2e_literal_{uuid4().hex[:8]}"
+    fq = f"{TEST_CATALOG}.{temp_schema}.{table_name}"
+    literal = "documentation containing ${env:HOME}"
+    declaration = DeltaTable(
+        TEST_CATALOG,
+        temp_schema,
+        table_name,
+        columns=(Column("id", Integer(), comment=literal),),
+        comment=literal,
+    )
+    engine = Engine(reader=NativeSparkReader(spark), executor=_spark_executor(spark))
+
+    # Spark normally substitutes ${...} before parsing, even inside quoted SQL
+    # literals. Exercise that default explicitly so this remains a regression
+    # test for the runner's session guard rather than merely for SQL quoting.
+    spark.conf.set(variable_substitution, "true")
+    try:
+        report = engine.sync(declaration)
+
+        assert report.has_failures is False
+        assert spark.catalog.getTable(fq).description == literal
+        [field] = spark.table(fq).schema.fields
+        assert field.metadata.get("comment") == literal
+        assert spark.conf.get(variable_substitution) == "true"
+
+        second_report = engine.sync(declaration)
+
+        assert len(second_report.table_reports[0].plan) == 0
+        assert spark.conf.get(variable_substitution) == "true"
+    finally:
+        spark.conf.set(variable_substitution, original_setting)
+
+
 def test_engine_sync_adds_nullable_and_drops_columns_happy_path(spark, temp_schema):
     # Given an existing Delta table with id, name, to_remove
     table_name = f"e2e_cols_{uuid4().hex[:8]}"

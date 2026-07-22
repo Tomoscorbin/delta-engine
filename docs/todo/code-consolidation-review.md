@@ -407,7 +407,10 @@ one lazily acquired cursor for their metadata batch, while each write statement
 gets a fresh cursor scope. Cursor-close failures are logged at DEBUG without
 replacing the read or execution outcome. The existing shared read and execution
 boundaries continue to translate failures independently into `ReadError` and
-`ExecutionError`.
+`ExecutionError`. A local Spark end-to-end regression enables substitution,
+syncs table and column comments containing `${env:HOME}`, reads them back
+verbatim, and proves the declaration converges without leaking a changed
+session setting.
 
 ## 7. Preserve tag transition context in the action
 
