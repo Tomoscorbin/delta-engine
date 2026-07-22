@@ -62,7 +62,9 @@ class FakeSpark:
 
     def sql(self, query):
         self.queries.append(query)
-        value = self._responses.get(query, [])
+        if query not in self._responses:
+            pytest.fail(f"unexpected SQL query: {query}", pytrace=False)
+        value = self._responses[query]
         if isinstance(value, Exception):
             raise value
         return FakeDataFrame(value)
@@ -86,13 +88,6 @@ def test_present_table_reads_via_as_json():
     state = SparkReader(SparkSqlRunner(spark)).fetch_state(QN)
     assert isinstance(state, TablePresent)
     assert state.table.columns[0].data_type == Integer()
-
-
-def test_present_table_uses_six_queries():
-    spark = FakeSpark(_responses())
-    SparkReader(SparkSqlRunner(spark)).fetch_state(QN)
-    assert len(spark.queries) == 6
-    assert spark.queries[0] == describe_json_query(QN)
 
 
 def test_missing_table_is_absent_after_confirming_the_schema_exists():

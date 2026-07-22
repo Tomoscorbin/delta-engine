@@ -57,7 +57,9 @@ def _describe_responses(**overrides):
 
 def _router(responses):
     def run(query):
-        value = responses.get(query, [])
+        if query not in responses:
+            pytest.fail(f"unexpected SQL query: {query}", pytrace=False)
+        value = responses[query]
         if isinstance(value, Exception):
             raise value
         return value
@@ -193,8 +195,14 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
 
     read_catalog_state(run_query, QN)
 
-    assert calls[0] == describe_json_query(QN)
-    assert len(calls) == 6
+    assert calls == [
+        describe_json_query(QN),
+        column_tags_query(QN),
+        table_tags_query(QN),
+        primary_key_query(QN),
+        foreign_keys_query(QN),
+        referencing_foreign_keys_query(QN),
+    ]
 
 
 def test_missing_table_in_an_existing_schema_reads_as_absent():
@@ -212,7 +220,10 @@ def test_missing_table_in_a_missing_schema_reads_as_failed_not_absent():
     # absent would plan a CREATE TABLE that cannot succeed, and a dry run
     # would report that impossible plan as success. The router returns no
     # rows for the schema probe: the schema does not exist.
-    responses = {describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope")}
+    responses = {
+        describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),
+        schema_exists_query(QN): [],
+    }
 
     error = _read_error(responses)
 

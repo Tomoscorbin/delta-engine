@@ -54,10 +54,12 @@ class RoutedCursor:
 
     def execute(self, query):
         self.queries.append(query)
-        value = self._responses.get(query)
+        if query not in self._responses:
+            pytest.fail(f"unexpected SQL query: {query}", pytrace=False)
+        value = self._responses[query]
         if isinstance(value, Exception):
             raise value
-        self._current = value if value is not None else []
+        self._current = value
 
     def fetchall(self):
         return list(self._current)
@@ -106,13 +108,6 @@ def test_present_table_reads_via_as_json():
     # The table_constraints embedded in the AS JSON doc is not read: the primary
     # key comes from information_schema, which returns nothing here.
     assert observed.primary_key is None
-
-
-def test_present_table_uses_six_queries():
-    connection = RoutedConnection(_responses())
-    _reader(connection).fetch_state(QN)
-    assert len(connection.cursor_fake.queries) == 6
-    assert connection.cursor_fake.queries[0] == describe_json_query(QN)
 
 
 def test_missing_table_is_absent_after_confirming_the_schema_exists():
