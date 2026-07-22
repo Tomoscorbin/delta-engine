@@ -725,7 +725,7 @@ def test_changed_foreign_key_signature_produces_remove_and_add_changes():
     }
 
 
-def test_observed_only_column_tags_are_ignored_because_column_is_removed():
+def test_observed_only_column_tags_are_unset_before_the_column_is_removed():
     # Given an observed-only column that also has catalog tags
     observed_only_column = ObservedColumn("stale", Integer(), tags={"old": "true"})
 
@@ -735,10 +735,12 @@ def test_observed_only_column_tags_are_ignored_because_column_is_removed():
         _observed(columns=(DesiredColumn("id", Integer()), observed_only_column)),
     )
 
-    # Then the column removal is enough; no tag-unset noise is produced for a
-    # column that will be dropped
+    # Then removing the column also states the prerequisite tag cleanup
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropColumn(observed_only_column),)
+    assert diff.actions == (
+        UnsetColumnTag(column_name="stale", name="old"),
+        DropColumn(observed_only_column),
+    )
 
 
 # ---------- column renames
