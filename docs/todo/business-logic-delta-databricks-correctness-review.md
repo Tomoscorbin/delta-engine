@@ -45,7 +45,7 @@ path currently produces an incorrect result.
 | 7 ✅ | Medium | Layout and map-type validation is too permissive | Unsupported declarations reach execution |
 | 8 ✅ | Medium | `CREATE TABLE IF NOT EXISTS` can report false success | A concurrent incompatible create is treated as success |
 | 9 | High | Non-default `STRING` collations are erased on observation | Collation drift can be reported as synchronized |
-| 10 | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
+| 10 ✅ | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
 | 12 | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
 | 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
@@ -528,6 +528,15 @@ Relevant code:
 4. Add a plan-order regression test. Add a live governed-tag drop test when the
    test principal can create governed tags; otherwise retain an explicit
    platform-assumption pin and exercise the SQL order with ordinary tags.
+
+### Implemented
+
+Observed tags on removed columns now produce `UnsetColumnTag` actions alongside
+the `DropColumn`. Action ordering places column-tag sets first, tag unsets next,
+and column drops last, preserving ordinary tag reconciliation while ensuring
+cleanup runs before removal. Domain regression coverage pins both fact
+production and plan ordering; live governed-tag coverage remains unavailable
+until the test principal can create governed tags.
 
 ## 11. Enforce Databricks tag declaration constraints
 

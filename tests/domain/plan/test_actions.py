@@ -252,9 +252,9 @@ def test_plan_full_phase_order_with_all_action_types():
         AddColumn,
         AlterColumnType,
         AlterClustering,
-        DropColumn,
         SetColumnTag,
         UnsetColumnTag,
+        DropColumn,
         SetColumnComment,
         SetTableComment,
         SetColumnNullability,
@@ -299,6 +299,15 @@ def test_plan_reclusters_after_add_and_before_drop():
     )
 
     assert [type(action) for action in plan] == [AddColumn, AlterClustering, DropColumn]
+
+
+def test_plan_unsets_column_tags_before_dropping_columns():
+    plan = _plan(
+        DropColumn(_observed_column("legacy")),
+        UnsetColumnTag("legacy", "governed"),
+    )
+
+    assert [type(action) for action in plan] == [UnsetColumnTag, DropColumn]
 
 
 @pytest.mark.parametrize(

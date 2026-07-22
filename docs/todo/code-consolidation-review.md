@@ -114,6 +114,15 @@ aspect.
 Keep this focused. A generic mapping-diff framework would obscure the column
 specifics, especially rename projection and ordered column declarations.
 
+### Implemented
+
+Column correspondence is now built once after rename projection as an immutable
+`_ColumnAlignment` of added, removed, and matched columns. One `_diff_columns`
+boundary consumes that classification to produce structure, comment, and tag
+actions without rebuilding name maps per aspect. Removed columns now retain
+their observed tags long enough to plan the required tag cleanup before the
+column drop, resolving correctness-review item 10.
+
 ## 2. Make phase outcomes the only source of run truth
 
 ### Cause

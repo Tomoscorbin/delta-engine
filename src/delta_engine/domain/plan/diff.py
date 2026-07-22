@@ -146,12 +146,13 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     # declared Y — so renames are resolved first, and each aspect is then diffed
     # in the frame that matches how a rename treats it.
     rename_projection = _apply_renames(desired, observed)
+    column_alignment = _align_columns(desired.columns, rename_projection.columns)
+
     actions: tuple[Action, ...] = (
         *rename_projection.renames,
-        # Preserved by a rename: diff under the new names.
-        *_diff_column_structure(desired.columns, rename_projection.columns),
-        *_diff_column_comments(desired.columns, rename_projection.columns),
-        *_diff_column_tags(desired.columns, rename_projection.columns),
+        # Preserved by a rename: diff under the new names established by the
+        # projection, against the declaration's canonical names.
+        *_diff_columns(column_alignment),
         *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
         # Dropped by a rename: diff under raw names so a renamed key column
         # surfaces as an explicit drop-and-set, not silent carry-forward.
@@ -173,6 +174,15 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
 
 
 @dataclass(frozen=True, slots=True)
+class _ColumnAlignment:
+    """Desired and rename-projected observed columns classified by name."""
+
+    added: tuple[DesiredColumn, ...]
+    removed: tuple[ObservedColumn, ...]
+    matched: tuple[tuple[DesiredColumn, ObservedColumn], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _RenameProjection:
     """Observed names projected through applicable declaration rename hints."""
 
@@ -181,6 +191,29 @@ class _RenameProjection:
     clustered_by: tuple[str, ...]
     renames: tuple[RenameColumn, ...]
     conflicts: tuple[ColumnRenameConflict, ...]
+
+
+def _align_columns(
+    desired_columns: tuple[DesiredColumn, ...],
+    observed_columns: tuple[ObservedColumn, ...],
+) -> _ColumnAlignment:
+    """Classify columns once in stable desired and observed order."""
+    desired_by_name = {column.name: column for column in desired_columns}
+    observed_by_name = {column.name: column for column in observed_columns}
+
+    added = tuple(column for column in desired_columns if column.name not in observed_by_name)
+    removed = tuple(column for column in observed_columns if column.name not in desired_by_name)
+    matched = tuple(
+        (column, observed_by_name[column.name])
+        for column in desired_columns
+        if column.name in observed_by_name
+    )
+
+    return _ColumnAlignment(
+        added=added,
+        removed=removed,
+        matched=matched,
+    )
 
 
 def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameProjection:
@@ -228,91 +261,60 @@ def _relabel_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[
     return tuple(renames.get(name, name) for name in names)
 
 
-def _diff_column_structure(
-    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
-) -> list[AddColumn | DropColumn | AlterColumnType | SetColumnNullability]:
-    """Return actions for added and dropped columns, plus drift on matched pairs."""
-    desired_by_name = {column.name: column for column in desired_columns}
-    observed_by_name = {column.name: column for column in observed_columns}
-    actions: list[AddColumn | DropColumn | AlterColumnType | SetColumnNullability] = []
+def _diff_columns(alignment: _ColumnAlignment) -> list[Action]:
+    """Return every action implied by the shared column correspondence."""
+    actions: list[Action] = []
 
-    for name, desired_only_column in desired_by_name.items():
-        if name not in observed_by_name:
-            actions.append(AddColumn(column=desired_only_column))
-    for name, observed_only_column in observed_by_name.items():
-        if name not in desired_by_name:
-            actions.append(DropColumn(column=observed_only_column))
-
-    for name, desired_column in desired_by_name.items():
-        observed_column = observed_by_name.get(name)
-        if observed_column is not None:
-            actions.extend(_diff_column_pair(desired_column, observed_column))
-    return actions
-
-
-def _diff_column_pair(
-    desired: DesiredColumn, observed: ObservedColumn
-) -> list[AlterColumnType | SetColumnNullability]:
-    """Return the type and nullability actions for a name-matched column pair."""
-    actions: list[AlterColumnType | SetColumnNullability] = []
-    if desired.data_type != observed.data_type:
-        actions.append(
-            AlterColumnType(
-                column_name=desired.name,
-                desired_type=desired.data_type,
-                observed_type=observed.data_type,
-            )
+    for desired in alignment.added:
+        actions.append(AddColumn(column=desired))
+        actions.extend(
+            SetColumnTag(column_name=desired.name, name=name, value=value)
+            for name, value in desired.tags.items()
         )
-    if desired.nullable != observed.nullable:
-        actions.append(
-            SetColumnNullability(
-                column_name=desired.name,
-                desired_nullable=desired.nullable,
-                observed_nullable=observed.nullable,
-            )
+
+    for observed in alignment.removed:
+        # Governed tags must be removed before Databricks permits the column
+        # drop. ActionPlan owns the corresponding execution order.
+        actions.extend(
+            UnsetColumnTag(column_name=observed.name, name=name) for name in observed.tags
         )
-    return actions
+        actions.append(DropColumn(column=observed))
 
-
-def _diff_column_comments(
-    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
-) -> list[SetColumnComment]:
-    """Return comment actions for name-matched column pairs."""
-    observed_by_name = {column.name: column for column in observed_columns}
-    actions: list[SetColumnComment] = []
-    for column in desired_columns:
-        observed_column = observed_by_name.get(column.name)
-        if observed_column is None or column.comment == observed_column.comment:
-            continue
-        actions.append(
-            SetColumnComment(
-                column_name=column.name,
-                desired_comment=column.comment,
-                observed_comment=observed_column.comment,
-            )
-        )
-    return actions
-
-
-def _diff_column_tags(
-    desired_columns: tuple[DesiredColumn, ...], observed_columns: tuple[ObservedColumn, ...]
-) -> list[SetColumnTag | UnsetColumnTag]:
-    """Return full-state tag actions for matched and newly added columns."""
-    observed_by_name = {column.name: column for column in observed_columns}
-    actions: list[SetColumnTag | UnsetColumnTag] = []
-    for column in desired_columns:
-        observed_column = observed_by_name.get(column.name)
-        observed_tags: Mapping[str, str] = (
-            observed_column.tags if observed_column is not None else {}
-        )
-        for tag_name, tag_value in column.tags.items():
-            if observed_tags.get(tag_name) != tag_value:
-                actions.append(
-                    SetColumnTag(column_name=column.name, name=tag_name, value=tag_value)
+    for desired, observed in alignment.matched:
+        if desired.data_type != observed.data_type:
+            actions.append(
+                AlterColumnType(
+                    column_name=desired.name,
+                    desired_type=desired.data_type,
+                    observed_type=observed.data_type,
                 )
-        for tag_name in observed_tags:
-            if tag_name not in column.tags:
-                actions.append(UnsetColumnTag(column_name=column.name, name=tag_name))
+            )
+        if desired.nullable != observed.nullable:
+            actions.append(
+                SetColumnNullability(
+                    column_name=desired.name,
+                    desired_nullable=desired.nullable,
+                    observed_nullable=observed.nullable,
+                )
+            )
+        if desired.comment != observed.comment:
+            actions.append(
+                SetColumnComment(
+                    column_name=desired.name,
+                    desired_comment=desired.comment,
+                    observed_comment=observed.comment,
+                )
+            )
+
+        for name, value in desired.tags.items():
+            if observed.tags.get(name) != value:
+                actions.append(SetColumnTag(column_name=desired.name, name=name, value=value))
+        actions.extend(
+            UnsetColumnTag(column_name=desired.name, name=name)
+            for name in observed.tags
+            if name not in desired.tags
+        )
+
     return actions
 
 
