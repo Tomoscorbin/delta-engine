@@ -1,5 +1,9 @@
 from datetime import UTC, datetime
 
+from delta_engine.application.dependency_resolution import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+)
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -14,6 +18,7 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -60,24 +65,32 @@ def _table_report(
     statements = (
         () if execution is None else tuple(result.statement for result in execution.results)
     )
-    read_failures = (read,) if isinstance(read, ReadFailure) else ()
-    reported_failures = tuple(
-        failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
+    planning_failures = tuple(
+        failure for failure in failures if isinstance(failure, ValidationFailure)
     )
-    execution_failures = () if execution is None else execution.failures
-    planning_failed = any(isinstance(failure, ValidationFailure) for failure in failures)
+    resolution_failures = tuple(
+        failure for failure in failures if isinstance(failure, ForeignKeyFailure)
+    )
+    planning = (
+        None
+        if isinstance(read, ReadFailure)
+        else PlanningFailed(planning_failures)
+        if planning_failures
+        else PlanningSucceeded(ActionPlan(target=desired.qualified_name))
+    )
+    resolution = (
+        ResolutionFailed(desired.qualified_name, resolution_failures)
+        if resolution_failures
+        else ResolutionSucceeded(desired.qualified_name, ())
+    )
 
     return TableRunReport(
         desired=desired,
         read=read,
-        plan=(
-            None
-            if isinstance(read, ReadFailure) or planning_failed
-            else ActionPlan(target=desired.qualified_name)
-        ),
+        planning=planning,
         planned_sql_statements=statements,
-        failures=(*read_failures, *reported_failures, *execution_failures),
-        execution=execution,
+        resolution=resolution,
+        execution_outcome=execution,
     )
 
 

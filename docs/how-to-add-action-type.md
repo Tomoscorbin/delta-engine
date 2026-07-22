@@ -121,7 +121,8 @@ Use `backtick` for identifiers and `quote_literal` for string literals (both in 
 In `src/delta_engine/application/diff_entries.py`, register a `singledispatch`
 arm on `action_entries` so the action shows up in reports. Return one or more
 `DiffEntry` values — each tags the line with a `DiffCategory` (columns, keys,
-properties, tags, comments), a `+`/`-`/`~` symbol, and its aligned cells:
+clustering, partitioning, properties, tags, comments), a `+`/`-`/`~` symbol,
+and its aligned cells:
 
 ```python
 @action_entries.register

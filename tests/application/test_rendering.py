@@ -2,12 +2,14 @@ from datetime import datetime
 
 import pytest
 
+from delta_engine.application.dependency_resolution import ResolutionSucceeded
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
     action_entries,
 )
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
+from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -282,6 +284,39 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
     assert clustering == [DiffEntry(DiffCategory.CLUSTERING, "+", ("clustering (region)",))]
 
 
+def test_create_table_entries_include_all_state_embedded_in_create():
+    # Given a CREATE TABLE carrying structural, layout, property, and comment state
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "tbl"),
+            columns=(
+                DesiredColumn("id", Integer(), nullable=False, comment="identifier"),
+                DesiredColumn("day", String(), comment="partition date"),
+            ),
+            comment="daily orders",
+            properties={
+                "delta.appendOnly": "true",
+                "delta.logRetentionDuration": None,
+            },
+            partitioned_by=("day",),
+            primary_key=_primary_key(),
+        )
+    )
+
+    # Then reporting states every fact that CREATE TABLE establishes. A None
+    # property asserts absence and is therefore not a creation change.
+    assert action_entries(action) == (
+        DiffEntry(DiffCategory.COLUMNS, "+", ("id", "Integer", "NOT NULL")),
+        DiffEntry(DiffCategory.COLUMNS, "+", ("day", "String")),
+        DiffEntry(DiffCategory.KEYS, "+", ("primary key (id)",)),
+        DiffEntry(DiffCategory.PARTITIONING, "+", ("partitioning (day)",)),
+        DiffEntry(DiffCategory.PROPERTIES, "+", ("delta.appendOnly = 'true'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("column id: 'identifier'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("column day: 'partition date'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("table: 'daily orders'",)),
+    )
+
+
 def test_every_action_type_has_registered_diff_entries():
     # Given every concrete Action subclass the plan vocabulary defines
     import inspect
@@ -315,10 +350,12 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
     return TableRunReport(
         desired=desired,
         read=TablePresent(table=observed),
-        plan=None,
+        planning=PlanningFailed(
+            (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
+        ),
         planned_sql_statements=(),
-        failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
-        execution=None,
+        resolution=ResolutionSucceeded(qualified_name, ()),
+        execution_outcome=None,
     )
 
 
@@ -336,10 +373,10 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     healthy = TableRunReport(
         desired=report.desired,
         read=report.read,
-        plan=ActionPlan(target=report.desired.qualified_name),
+        planning=PlanningSucceeded(ActionPlan(target=report.desired.qualified_name)),
         planned_sql_statements=(),
-        failures=(),
-        execution=None,
+        resolution=report.resolution,
+        execution_outcome=None,
     )
 
     block = render_diff_block(healthy)
@@ -395,10 +432,10 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
         read=failure,
-        plan=None,
+        planning=None,
         planned_sql_statements=(),
-        failures=(failure,),
-        execution=None,
+        resolution=ResolutionSucceeded(qualified_name, ()),
+        execution_outcome=None,
     )
 
     # When rendering the diff block
@@ -416,7 +453,10 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
     columns = (DesiredColumn("id", Integer()),)
     if plan is None and not failures:
         plan = ActionPlan(target=qualified_name)
-    execution_failures = () if execution is None else execution.failures
+    planning_failures = tuple(
+        failure for failure in failures if isinstance(failure, ValidationFailure)
+    )
+    planning = PlanningFailed(planning_failures) if planning_failures else PlanningSucceeded(plan)
     return TableRunReport(
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
@@ -424,13 +464,13 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
                 qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
             )
         ),
-        plan=plan,
+        planning=planning,
         # One fake statement per action, as the engine would have compiled.
         planned_sql_statements=tuple(
             f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
         ),
-        failures=(*failures, *execution_failures),
-        execution=execution,
+        resolution=ResolutionSucceeded(qualified_name, ()),
+        execution_outcome=execution,
     )
 
 

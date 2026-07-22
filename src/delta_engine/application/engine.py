@@ -51,12 +51,7 @@ from delta_engine.application.errors import (
     ReadError,
     SyncFailedError,
 )
-from delta_engine.application.failures import (
-    ExecutionFailure,
-    Failure,
-    ForeignKeyFailure,
-    ReadFailure,
-)
+from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningResult,
@@ -75,6 +70,8 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.report import (
+    ExecutionBlockedByDependency,
+    ExecutionOutcome,
     SyncReport,
     TableRunReport,
 )
@@ -82,20 +79,6 @@ from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class _ExecutionBlockedByDependency:
-    """Execution was not attempted because a referenced table failed during execution."""
-
-    failures: tuple[ForeignKeyFailure, ...]
-
-    def __post_init__(self) -> None:
-        if not self.failures:
-            raise ValueError("Dependency blocking requires at least one failure")
-
-
-type _ExecutionOutcome = ExecutionSummary | _ExecutionBlockedByDependency
 
 
 def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
@@ -142,7 +125,7 @@ class _TableRun:
     planning: PlanningResult | None = None
     planned_sql_statements: tuple[str, ...] = ()
     resolution: TableResolution | None = None
-    execution: _ExecutionOutcome | None = None
+    execution: ExecutionOutcome | None = None
 
     @property
     def qualified_name(self) -> QualifiedName:
@@ -159,46 +142,27 @@ class _TableRun:
                 assert_never(unreachable)
 
     @property
-    def failures(self) -> tuple[Failure, ...]:
-        failures: list[Failure] = []
-
-        if isinstance(self.read, ReadFailure):
-            failures.append(self.read)
-
-        if isinstance(self.planning, PlanningFailed):
-            failures.extend(self.planning.failures)
-
-        if isinstance(self.resolution, ResolutionFailed):
-            failures.extend(self.resolution.failures)
-
-        match self.execution:
-            case ExecutionSummary() as summary:
-                failures.extend(summary.failures)
-            case _ExecutionBlockedByDependency(failures=blocked):
-                failures.extend(blocked)
-            case None:
-                pass
-            case _ as unreachable:
-                assert_never(unreachable)
-
-        return tuple(failures)
-
-    @property
     def has_failures(self) -> bool:
         """True when any completed phase has failed for this table."""
-        return bool(self.failures)
+        return (
+            isinstance(self.read, ReadFailure)
+            or isinstance(self.planning, PlanningFailed)
+            or isinstance(self.resolution, ResolutionFailed)
+            or isinstance(self.execution, ExecutionBlockedByDependency)
+            or (isinstance(self.execution, ExecutionSummary) and self.execution.failed)
+        )
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
-        execution = self.execution if isinstance(self.execution, ExecutionSummary) else None
-
+        if self.resolution is None:
+            raise RuntimeError(f"Completed table run was not resolved: {self.qualified_name}")
         return TableRunReport(
             desired=self.desired,
             read=self.read,
-            plan=self.plan,
+            planning=self.planning,
             planned_sql_statements=self.planned_sql_statements,
-            failures=self.failures,
-            execution=execution,
+            resolution=self.resolution,
+            execution_outcome=self.execution,
         )
 
 
@@ -435,7 +399,7 @@ class Engine:
                 if dependency.referenced_table in failed_during_execution
             )
             if blocking_failures:
-                run.execution = _ExecutionBlockedByDependency(blocking_failures)
+                run.execution = ExecutionBlockedByDependency(blocking_failures)
                 failed_during_execution.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",

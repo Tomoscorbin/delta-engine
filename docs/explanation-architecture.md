@@ -720,15 +720,16 @@ status from the earliest failing phase:
 - `EXECUTION_FAILED`
 - `SUCCESS`
 
-When the run is frozen, the engine projects its canonical phase outcomes once
-into the report's immutable fields. That matters when a table has multiple
-validation failures or multiple FK failures: callers receive the complete
-failure tuple without another mutable source of run truth. For execution,
-the engine stops at the first failed statement because it is not transactional
-and later statements may depend on earlier ones. The `ExecutionSummary` records
-all attempted statements up to that point. Runtime dependency blocking remains
-private engine state; the report exposes its foreign-key failures and keeps
-`execution` as `None` because no statement was attempted.
+When the run is frozen, the report retains its canonical phase outcomes. Its
+plan, failure tuple, status, and attempted execution summary are derived views.
+That matters when a table has multiple validation failures or multiple FK
+failures: callers receive the complete failure tuple without another mutable
+source of run truth. For execution, the engine stops at the first failed
+statement because it is not transactional and later statements may depend on
+earlier ones. The `ExecutionSummary` records all attempted statements up to
+that point. Runtime dependency blocking is retained as an execution outcome;
+the report exposes its foreign-key failures and keeps `execution` as `None`
+because no statement was attempted.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would

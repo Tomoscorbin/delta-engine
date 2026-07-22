@@ -189,6 +189,15 @@ Do not introduce one public class per lifecycle phase merely to eliminate
 that derives report status, eligibility, and the flattened failure stream from
 those outcomes.
 
+### Implemented
+
+`_TableRun` and `TableRunReport` now retain the read, planning, resolution, and
+execution outcomes directly. The public plan, execution summary, failure list,
+status, and table identity are derived projections, so they cannot disagree
+with those outcomes. Completed reports reject impossible phase histories, and
+`ExecutionSummary` enforces contiguous, stop-on-first-failure execution whose
+statements must match the compiled statement prefix.
+
 ## 3. Put the table target on `ActionPlan`
 
 ### Cause
@@ -286,6 +295,16 @@ less truthful. Instead:
 
 The domain action remains the owner of what a create means; SQL and rendering
 remain separate consumers of that meaning.
+
+### Implemented
+
+Creation remains a single `CreateTable` aggregate. Its semantic diff projection
+now reports every declared fact embedded in the create statement: columns and
+nullability, primary key, partitioning or clustering, valued properties, column
+comments, and the table comment. Tags and foreign keys remain visible through
+their explicit follow-up actions. Coverage exercises a populated creation in
+both semantic reporting and compiled SQL; property absence assertions are
+correctly omitted because a new table already satisfies them.
 
 ## 5. Put key identity on the key values
 
