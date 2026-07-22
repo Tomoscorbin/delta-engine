@@ -1,16 +1,9 @@
 """
-Diff desired and observed table state into actions and unresolvable differences.
+Compare desired and observed table state.
 
-``diff_table`` states every difference separating the observed table from
-its declaration, deciding nothing about safety or scope. Differences come
-in two structural kinds:
-
-- Actions — remedied differences. Each carries the one executable
-  operation that closes its gap, plus the desired/observed state
-  validation and reporting need.
-- Unresolvable — differences no action can close (an ambiguous rename, an
-  undeclared managed property, a partitioning change). They exist to be
-  judged; the default validation policy rejects each one.
+The differ reports every discrepancy as either an executable action or an
+unresolvable difference. Validation, safety policy, execution ordering, and
+backend compilation live elsewhere.
 """
 
 from collections.abc import Mapping
@@ -61,37 +54,14 @@ class TableMissing:
     desired: DesiredTable
 
     @property
-    def actions(self) -> tuple[Action, ...]:
-        """
-        Creation actions realizing the complete desired state.
+    def target(self) -> QualifiedName:
+        """The qualified name of the missing table."""
+        return self.desired.qualified_name
 
-        CREATE TABLE covers columns, comment, properties, layout, and the
-        primary key; Unity Catalog tags and foreign keys are applied by
-        follow-up actions.
-        """
-        table_tag_actions = tuple(
-            SetTableTag(name=name, desired_value=value, observed_value=None)
-            for name, value in self.desired.tags.items()
-        )
-        column_tag_actions = tuple(
-            SetColumnTag(
-                column_name=column.name,
-                name=name,
-                desired_value=value,
-                observed_value=None,
-            )
-            for column in self.desired.columns
-            for name, value in column.tags.items()
-        )
-        foreign_key_actions = tuple(
-            SetForeignKey(constraint=constraint) for constraint in self.desired.foreign_keys
-        )
-        return (
-            CreateTable(self.desired),
-            *table_tag_actions,
-            *column_tag_actions,
-            *foreign_key_actions,
-        )
+    @property
+    def actions(self) -> tuple[Action, ...]:
+        """Creation actions realizing the complete desired state."""
+        return _actions_for_missing_table(self.desired)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +86,7 @@ class TableDrift:
     unresolvable: tuple[Unresolvable, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.desired.qualified_name != self.observed.qualified_name:
-            raise ValueError(
-                "Cannot compare different tables:"
-                f" {self.desired.qualified_name} != {self.observed.qualified_name}"
-            )
+        _require_same_table(self.desired, self.observed)
 
     @property
     def target(self) -> QualifiedName:
@@ -130,53 +96,145 @@ class TableDrift:
 type TableDiff = TableMissing | TableDrift
 
 
-def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
-    """
-    Compute the actions and unresolvable differences separating observed from desired state.
+def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
+    """Reject endpoints that do not describe the same table."""
+    if desired.qualified_name != observed.qualified_name:
+        raise ValueError(
+            "Cannot compare different tables:"
+            f" {desired.qualified_name} != {observed.qualified_name}"
+        )
 
-    A rename pre-pass projects observed columns and layout names through
-    ``renamed_from`` hints so residual drift is expressed under the declared
-    column name. The projection covers exactly the aspects ``RENAME COLUMN``
-    preserves (column contents, tags, partitioning, clustering); primary and
-    foreign keys, which the rename drops, are deliberately compared under raw
-    observed names so their replacement is stated as explicit drop and set
-    actions. The diff remains scope-blind except for properties, whose
-    declaration has assertion semantics and therefore produces no facts when
-    that aspect is unmanaged.
-    """
+
+def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
+    """Describe every difference between desired and observed table state."""
     if observed is None:
         return TableMissing(desired=desired)
 
-    # Column identity is the column name, so aspects normally diff by name.
-    # A declared rename breaks that — the column observed as X is the one now
-    # declared Y — so renames are resolved first, and each aspect is then diffed
-    # in the frame that matches how a rename treats it.
-    rename_projection = _apply_renames(desired, observed)
-    column_alignment = _align_columns(desired.columns, rename_projection.columns)
+    return _diff_existing_table(desired, observed)
 
-    actions: tuple[Action, ...] = (
-        *rename_projection.renames,
-        # Preserved by a rename: diff under the new names established by the
-        # projection, against the declaration's canonical names.
-        *_diff_columns(column_alignment),
-        *_diff_clustering(desired.clustered_by, rename_projection.clustered_by),
-        # Dropped by a rename: diff under raw names so a renamed key column
-        # surfaces as an explicit drop-and-set, not silent carry-forward.
-        *_diff_primary_key(desired, observed),
-        *_diff_foreign_keys(desired, observed),
-        # Not column-keyed: renames don't apply.
-        *_diff_table_comment(desired, observed),
-        *_diff_properties(desired, observed),
-        *_diff_table_tags(desired, observed),
-    )
-    unresolvable: tuple[Unresolvable, ...] = (
-        *rename_projection.conflicts,
-        *_diff_undeclared_properties(desired, observed),
-        *_diff_partitioning(desired.partitioned_by, rename_projection.partitioned_by),
-    )
+
+def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> TableDrift:
+    """Describe every difference between two states of the same existing table."""
+    _require_same_table(desired, observed)
+
+    renames = _resolve_column_renames(desired, observed)
+
+    column_actions = _diff_columns(desired.columns, renames.columns)
+    layout_actions, layout_unresolvable = _diff_layout(desired, renames)
+    constraint_actions = _diff_constraints(desired, observed)
+    metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
+
     return TableDrift(
-        desired=desired, observed=observed, actions=actions, unresolvable=unresolvable
+        desired=desired,
+        observed=observed,
+        actions=(
+            *renames.actions,
+            *column_actions,
+            *layout_actions,
+            *constraint_actions,
+            *metadata_actions,
+        ),
+        unresolvable=(
+            *renames.conflicts,
+            *metadata_unresolvable,
+            *layout_unresolvable,
+        ),
     )
+
+
+def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
+    """
+    Return every action needed to realize a missing table.
+
+    CREATE TABLE establishes columns, comment, properties, layout, and the
+    primary key. Unity Catalog tags and foreign keys require follow-up actions.
+    """
+    table_tag_actions = tuple(
+        SetTableTag(name=name, desired_value=value, observed_value=None)
+        for name, value in desired.tags.items()
+    )
+    column_tag_actions = tuple(
+        SetColumnTag(
+            column_name=column.name,
+            name=name,
+            desired_value=value,
+            observed_value=None,
+        )
+        for column in desired.columns
+        for name, value in column.tags.items()
+    )
+    foreign_key_actions = tuple(
+        SetForeignKey(constraint=constraint) for constraint in desired.foreign_keys
+    )
+    return (
+        CreateTable(desired),
+        *table_tag_actions,
+        *column_tag_actions,
+        *foreign_key_actions,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _RenameResolution:
+    """
+    Observed state after applying unambiguous column rename declarations.
+
+    Columns and physical layout use this projected name frame. Constraints
+    continue to compare against raw observed state because a physical rename
+    drops them.
+    """
+
+    columns: tuple[ObservedColumn, ...]
+    partitioned_by: tuple[str, ...]
+    clustered_by: tuple[str, ...]
+    actions: tuple[RenameColumn, ...]
+    conflicts: tuple[ColumnRenameConflict, ...]
+
+
+def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameResolution:
+    """Resolve applicable rename hints and project rename-preserved observed state."""
+    declared_renames = {
+        column.renamed_from: column.name
+        for column in desired.columns
+        if column.renamed_from is not None
+    }
+    observed_names = {column.name for column in observed.columns}
+    applied_renames: dict[str, str] = {}
+    conflicted_sources: set[str] = set()
+    actions: list[RenameColumn] = []
+    conflicts: list[ColumnRenameConflict] = []
+
+    for old_name, new_name in declared_renames.items():
+        if old_name not in observed_names:
+            continue
+
+        if new_name in observed_names:
+            conflicted_sources.add(old_name)
+            conflicts.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
+            continue
+
+        applied_renames[old_name] = new_name
+        actions.append(RenameColumn(old_name=old_name, new_name=new_name))
+
+    projected_columns = tuple(
+        replace(column, name=applied_renames[column.name])
+        if column.name in applied_renames
+        else column
+        for column in observed.columns
+        if column.name not in conflicted_sources
+    )
+    return _RenameResolution(
+        columns=projected_columns,
+        partitioned_by=_project_names(observed.partitioned_by, applied_renames),
+        clustered_by=_project_names(observed.clustered_by, applied_renames),
+        actions=tuple(actions),
+        conflicts=tuple(conflicts),
+    )
+
+
+def _project_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[str, ...]:
+    """Project column names through the applied rename mapping."""
+    return tuple(renames.get(name, name) for name in names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,15 +246,24 @@ class _ColumnAlignment:
     matched: tuple[tuple[DesiredColumn, ObservedColumn], ...]
 
 
-@dataclass(frozen=True, slots=True)
-class _RenameProjection:
-    """Observed names projected through applicable declaration rename hints."""
+def _diff_columns(
+    desired_columns: tuple[DesiredColumn, ...],
+    observed_columns: tuple[ObservedColumn, ...],
+) -> tuple[Action, ...]:
+    """Return every action required to converge the table's columns."""
+    alignment = _align_columns(desired_columns, observed_columns)
+    actions: list[Action] = []
 
-    columns: tuple[ObservedColumn, ...]
-    partitioned_by: tuple[str, ...]
-    clustered_by: tuple[str, ...]
-    renames: tuple[RenameColumn, ...]
-    conflicts: tuple[ColumnRenameConflict, ...]
+    for desired in alignment.added:
+        actions.extend(_actions_for_added_column(desired))
+
+    for observed in alignment.removed:
+        actions.extend(_actions_for_removed_column(observed))
+
+    for desired, observed in alignment.matched:
+        actions.extend(_diff_existing_column(desired, observed))
+
+    return tuple(actions)
 
 
 def _align_columns(
@@ -222,58 +289,11 @@ def _align_columns(
     )
 
 
-def _apply_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameProjection:
-    """Project observed identity through unambiguous declaration rename hints."""
-    renames = {
-        column.renamed_from: column.name
-        for column in desired.columns
-        if column.renamed_from is not None
-    }
-    observed_names = {column.name for column in observed.columns}
-    relabeled = observed.columns
-    applied_renames: dict[str, str] = {}
-    conflicted_sources: set[str] = set()
-    rename_actions: list[RenameColumn] = []
-    conflicts: list[ColumnRenameConflict] = []
-    for old_name, new_name in renames.items():
-        if old_name not in observed_names:
-            continue
-        if new_name in observed_names:
-            conflicted_sources.add(old_name)
-            conflicts.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
-            continue
-        relabeled = tuple(
-            replace(column, name=new_name) if column.name == old_name else column
-            for column in relabeled
-        )
-        applied_renames[old_name] = new_name
-        rename_actions.append(RenameColumn(old_name=old_name, new_name=new_name))
-
-    # A conflicted source yields no column facts — whether it is surplus or
-    # the rename's origin is unknowable, so the conflict is carried as an unresolvable
-    # difference instead of a DropColumn.
-    relabeled = tuple(column for column in relabeled if column.name not in conflicted_sources)
-    return _RenameProjection(
-        columns=relabeled,
-        partitioned_by=_relabel_names(observed.partitioned_by, applied_renames),
-        clustered_by=_relabel_names(observed.clustered_by, applied_renames),
-        renames=tuple(rename_actions),
-        conflicts=tuple(conflicts),
-    )
-
-
-def _relabel_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[str, ...]:
-    """Project a tuple of column names through applied renames."""
-    return tuple(renames.get(name, name) for name in names)
-
-
-def _diff_columns(alignment: _ColumnAlignment) -> list[Action]:
-    """Return every action implied by the shared column correspondence."""
-    actions: list[Action] = []
-
-    for desired in alignment.added:
-        actions.append(AddColumn(column=desired))
-        actions.extend(
+def _actions_for_added_column(desired: DesiredColumn) -> tuple[Action, ...]:
+    """Add a column, then establish tags not covered by ADD COLUMN."""
+    return (
+        AddColumn(column=desired),
+        *(
             SetColumnTag(
                 column_name=desired.name,
                 name=name,
@@ -281,87 +301,203 @@ def _diff_columns(alignment: _ColumnAlignment) -> list[Action]:
                 observed_value=None,
             )
             for name, value in desired.tags.items()
+        ),
+    )
+
+
+def _actions_for_removed_column(observed: ObservedColumn) -> tuple[Action, ...]:
+    """Remove governed tags before dropping their observed column."""
+    return (
+        *(UnsetColumnTag(column_name=observed.name, name=name) for name in observed.tags),
+        DropColumn(column=observed),
+    )
+
+
+def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> tuple[Action, ...]:
+    """Return every field and tag action for a matched column."""
+    actions: list[Action] = []
+
+    if desired.data_type != observed.data_type:
+        actions.append(
+            AlterColumnType(
+                column_name=desired.name,
+                desired_type=desired.data_type,
+                observed_type=observed.data_type,
+            )
+        )
+    if desired.nullable != observed.nullable:
+        actions.append(
+            SetColumnNullability(
+                column_name=desired.name,
+                desired_nullable=desired.nullable,
+                observed_nullable=observed.nullable,
+            )
+        )
+    if desired.comment != observed.comment:
+        actions.append(
+            SetColumnComment(
+                column_name=desired.name,
+                desired_comment=desired.comment,
+                observed_comment=observed.comment,
+            )
         )
 
-    for observed in alignment.removed:
-        # Governed tags must be removed before Databricks permits the column
-        # drop. ActionPlan owns the corresponding execution order.
-        actions.extend(
-            UnsetColumnTag(column_name=observed.name, name=name) for name in observed.tags
-        )
-        actions.append(DropColumn(column=observed))
+    actions.extend(_diff_column_tags(desired, observed))
+    return tuple(actions)
 
-    for desired, observed in alignment.matched:
-        if desired.data_type != observed.data_type:
+
+def _diff_column_tags(
+    desired: DesiredColumn, observed: ObservedColumn
+) -> tuple[SetColumnTag | UnsetColumnTag, ...]:
+    """Return full-state tag actions for a matched column."""
+    actions: list[SetColumnTag | UnsetColumnTag] = []
+    for name, desired_value in desired.tags.items():
+        observed_value = observed.tags.get(name)
+        if observed_value != desired_value:
             actions.append(
-                AlterColumnType(
+                SetColumnTag(
                     column_name=desired.name,
-                    desired_type=desired.data_type,
-                    observed_type=observed.data_type,
-                )
-            )
-        if desired.nullable != observed.nullable:
-            actions.append(
-                SetColumnNullability(
-                    column_name=desired.name,
-                    desired_nullable=desired.nullable,
-                    observed_nullable=observed.nullable,
-                )
-            )
-        if desired.comment != observed.comment:
-            actions.append(
-                SetColumnComment(
-                    column_name=desired.name,
-                    desired_comment=desired.comment,
-                    observed_comment=observed.comment,
+                    name=name,
+                    desired_value=desired_value,
+                    observed_value=observed_value,
                 )
             )
 
-        for name, desired_value in desired.tags.items():
-            observed_value = observed.tags.get(name)
-            if observed_value != desired_value:
-                actions.append(
-                    SetColumnTag(
-                        column_name=desired.name,
-                        name=name,
-                        desired_value=desired_value,
-                        observed_value=observed_value,
-                    )
-                )
+    actions.extend(
+        UnsetColumnTag(column_name=desired.name, name=name)
+        for name in observed.tags
+        if name not in desired.tags
+    )
+    return tuple(actions)
 
-        actions.extend(
-            UnsetColumnTag(column_name=desired.name, name=name)
-            for name in observed.tags
-            if name not in desired.tags
+
+def _diff_layout(
+    desired: DesiredTable,
+    observed: _RenameResolution,
+) -> tuple[tuple[AlterClustering, ...], tuple[PartitioningChanged, ...]]:
+    """Return resolvable and unresolvable physical-layout differences."""
+    actions: tuple[AlterClustering, ...] = ()
+    if set(desired.clustered_by) != set(observed.clustered_by):
+        actions = (
+            AlterClustering(
+                desired_clustering=desired.clustered_by,
+                observed_clustering=observed.clustered_by,
+            ),
         )
 
-    return actions
+    unresolvable: tuple[PartitioningChanged, ...] = ()
+    if desired.partitioned_by != observed.partitioned_by:
+        unresolvable = (
+            PartitioningChanged(
+                desired_partitioning=desired.partitioned_by,
+                observed_partitioning=observed.partitioned_by,
+            ),
+        )
+
+    return actions, unresolvable
 
 
-def _diff_table_comment(desired: DesiredTable, observed: ObservedTable) -> list[SetTableComment]:
+def _diff_constraints(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[DropPrimaryKey | SetPrimaryKey | SetForeignKey | DropForeignKey, ...]:
+    """
+    Return primary- and foreign-key actions against raw observed names.
+
+    Renaming a constrained column drops its constraints, so a renamed key must
+    surface as an explicit drop and set rather than compare in the projected
+    name frame used by columns and physical layout.
+    """
+    return (
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed),
+    )
+
+
+def _diff_primary_key(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
+    """
+    Return primary-key actions; a changed key becomes a drop and a set.
+
+    A primary key is identified by its column set, with absence its own
+    identity. Dropping one carries its inbound references so validation can
+    judge the transition.
+    """
+    desired_key = desired.primary_key
+    observed_key = observed.primary_key
+
+    desired_columns = frozenset(desired_key.columns) if desired_key is not None else None
+    observed_columns = frozenset(observed_key.columns) if observed_key is not None else None
+    if desired_columns == observed_columns:
+        return ()
+
+    actions: list[DropPrimaryKey | SetPrimaryKey] = []
+    if observed_key is not None:
+        actions.append(
+            DropPrimaryKey(
+                primary_key=observed_key,
+                referencing_foreign_keys=observed.referencing_foreign_keys,
+            )
+        )
+    if desired_key is not None:
+        actions.append(SetPrimaryKey(primary_key=desired_key))
+    return tuple(actions)
+
+
+def _diff_foreign_keys(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[SetForeignKey | DropForeignKey, ...]:
+    """Return foreign-key actions matched by content signature."""
+    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+    actions: list[SetForeignKey | DropForeignKey] = []
+    for signature, constraint in desired_by_signature.items():
+        if signature not in observed_by_signature:
+            actions.append(SetForeignKey(constraint=constraint))
+    for signature, constraint in observed_by_signature.items():
+        if signature not in desired_by_signature:
+            actions.append(DropForeignKey(constraint=constraint))
+    return tuple(actions)
+
+
+def _diff_table_metadata(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[tuple[Action, ...], tuple[PropertyUndeclared, ...]]:
+    """Return table comment, property, and tag differences in stable order."""
+    property_actions, property_unresolvable = _diff_properties(desired, observed)
+    return (
+        (
+            *_diff_table_comment(desired, observed),
+            *property_actions,
+            *_diff_table_tags(desired, observed),
+        ),
+        property_unresolvable,
+    )
+
+
+def _diff_table_comment(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[SetTableComment, ...]:
     """Return the table-comment action, or nothing when comments agree."""
     if desired.comment == observed.comment:
-        return []
-    return [
+        return ()
+    return (
         SetTableComment(
             desired_comment=desired.comment,
             observed_comment=observed.comment,
-        )
-    ]
+        ),
+    )
 
 
 def _diff_properties(
     desired: DesiredTable, observed: ObservedTable
-) -> list[SetProperty | UnsetProperty]:
-    """Return exact-declaration property actions for declared keys."""
-    # Properties are the sole aspect the differ scopes, and this is fact
-    # production, not enforcement (enforcement is validation's scope gate):
-    # exact-declaration semantics mean an unmanaged PROPERTIES aspect asserts
-    # nothing and so yields no facts. Without this, every managed catalog
-    # property the declaration omits would read as unmanaged drift and fail
-    # the gate on every restricted sync.
+) -> tuple[
+    tuple[SetProperty | UnsetProperty, ...],
+    tuple[PropertyUndeclared, ...],
+]:
+    """Return all differences implied by exact property declarations."""
     if TableAspect.PROPERTIES not in desired.managed_aspects:
-        return []
+        return (), ()
 
     actions: list[SetProperty | UnsetProperty] = []
     for name, declared_value in desired.properties.items():
@@ -376,28 +512,18 @@ def _diff_properties(
                     observed_value=observed_value,
                 )
             )
-    return actions
 
-
-def _diff_undeclared_properties(
-    desired: DesiredTable, observed: ObservedTable
-) -> list[PropertyUndeclared]:
-    """Return unresolvable differences for managed catalog keys the declaration omits."""
-    # See _diff_properties: exact-declaration semantics, so an unmanaged
-    # PROPERTIES aspect produces nothing for the scope gate to reject.
-    if TableAspect.PROPERTIES not in desired.managed_aspects:
-        return []
-
-    return [
+    unresolvable = tuple(
         PropertyUndeclared(name=name, observed_value=observed_value)
         for name, observed_value in observed.properties.items()
         if name not in desired.properties
-    ]
+    )
+    return tuple(actions), unresolvable
 
 
 def _diff_table_tags(
     desired: DesiredTable, observed: ObservedTable
-) -> list[SetTableTag | UnsetTableTag]:
+) -> tuple[SetTableTag | UnsetTableTag, ...]:
     """Return full-state table-tag actions."""
     actions: list[SetTableTag | UnsetTableTag] = []
     for name, desired_value in desired.tags.items():
@@ -413,80 +539,4 @@ def _diff_table_tags(
     for name in observed.tags:
         if name not in desired.tags:
             actions.append(UnsetTableTag(name=name))
-    return actions
-
-
-def _diff_partitioning(
-    desired_partitioning: tuple[str, ...], observed_partitioning: tuple[str, ...]
-) -> list[PartitioningChanged]:
-    """Return a partitioning difference, or nothing when specifications agree."""
-    if desired_partitioning == observed_partitioning:
-        return []
-    return [
-        PartitioningChanged(
-            desired_partitioning=desired_partitioning,
-            observed_partitioning=observed_partitioning,
-        )
-    ]
-
-
-def _diff_clustering(
-    desired_clustering: tuple[str, ...], observed_clustering: tuple[str, ...]
-) -> list[AlterClustering]:
-    """Return a clustering action, treating clustering-key identity as a set."""
-    if set(desired_clustering) == set(observed_clustering):
-        return []
-    return [
-        AlterClustering(
-            desired_clustering=desired_clustering,
-            observed_clustering=observed_clustering,
-        )
-    ]
-
-
-def _diff_primary_key(
-    desired: DesiredTable, observed: ObservedTable
-) -> list[DropPrimaryKey | SetPrimaryKey]:
-    """
-    Return primary-key actions; a changed key becomes a drop and a set.
-
-    A primary key is identified by its column set, with absence its own
-    identity, so an unchanged identity yields nothing. Any change drops the
-    observed key (carrying the foreign keys that reference it, which the drop
-    must account for) and sets the declared one.
-    """
-    desired_key = desired.primary_key
-    observed_key = observed.primary_key
-
-    desired_columns = frozenset(desired_key.columns) if desired_key is not None else None
-    observed_columns = frozenset(observed_key.columns) if observed_key is not None else None
-    if desired_columns == observed_columns:
-        return []
-
-    actions: list[DropPrimaryKey | SetPrimaryKey] = []
-    if observed_key is not None:
-        actions.append(
-            DropPrimaryKey(
-                primary_key=observed_key,
-                referencing_foreign_keys=observed.referencing_foreign_keys,
-            )
-        )
-    if desired_key is not None:
-        actions.append(SetPrimaryKey(primary_key=desired_key))
-    return actions
-
-
-def _diff_foreign_keys(
-    desired: DesiredTable, observed: ObservedTable
-) -> list[SetForeignKey | DropForeignKey]:
-    """Return foreign-key actions matched by content signature."""
-    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
-    actions: list[SetForeignKey | DropForeignKey] = []
-    for signature, constraint in desired_by_signature.items():
-        if signature not in observed_by_signature:
-            actions.append(SetForeignKey(constraint=constraint))
-    for signature, constraint in observed_by_signature.items():
-        if signature not in desired_by_signature:
-            actions.append(DropForeignKey(constraint=constraint))
-    return actions
+    return tuple(actions)
