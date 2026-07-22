@@ -262,23 +262,37 @@ def test_help_and_version_keep_the_minimal_public_surface(runner):
     assert delta_engine.__version__ in version_result.stdout
 
 
-def test_output_never_contains_connection_credentials(
-    runner, fake_engine, databricks_env, write_module, monkeypatch
+def test_connection_configuration_errors_do_not_expose_credentials(
+    runner, databricks_env, write_module, monkeypatch
 ):
+    # Given credentials that appear in an SDK configuration error
+    from databricks.sdk import core as sdk_core
+
+    class BrokenConfig:
+        def __init__(self, **kwargs) -> None:
+            raise ValueError("bad token test-access-token and secret test-client-secret")
+
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-access-token")
     monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setattr(sdk_core, "Config", BrokenConfig)
+    monkeypatch.setattr(cli_app, "open_connection", real_open_connection)
     module = write_module("plan_no_credentials", ORDERS_ONLY)
 
+    # When the CLI reports the connection failure
     result = runner.invoke(app, ["plan", f"{module}:all_tables"])
 
+    # Then it fails cleanly with the credential values redacted
+    assert result.exit_code == 1
     combined = result.stdout + result.stderr
     assert "test-access-token" not in combined
     assert "test-client-secret" not in combined
+    assert "<redacted>" in result.stderr
 
 
 def test_engine_logging_state_does_not_leak_across_invocations(
     runner, fake_engine, databricks_env, write_module
 ):
+    # Given the caller's logging state before a CLI invocation
     package_logger = logging.getLogger("delta_engine")
     root_logger = logging.getLogger()
     package_handlers_before = list(package_logger.handlers)
@@ -286,8 +300,11 @@ def test_engine_logging_state_does_not_leak_across_invocations(
     package_propagate_before = package_logger.propagate
     module = write_module("plan_logging", ORDERS_ONLY)
 
-    runner.invoke(app, ["plan", f"{module}:all_tables"])
+    # When a successful plan completes
+    result = runner.invoke(app, ["plan", f"{module}:all_tables"])
 
+    # Then it reports success and restores the caller's logging state
+    assert result.exit_code == 0
     assert package_logger.handlers == package_handlers_before
     assert root_logger.handlers == root_handlers_before
     assert package_logger.propagate is package_propagate_before

@@ -17,7 +17,7 @@ from delta_engine.application.ports import (
 import delta_engine.cli.app as cli_app
 from delta_engine.cli.connection import Target
 from delta_engine.domain.model import (
-    DesiredColumn,
+    ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
@@ -30,7 +30,7 @@ def observed_orders() -> TablePresent:
     return TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName("dev", "silver", "orders"),
-            columns=(DesiredColumn("id", String()),),
+            columns=(ObservedColumn("id", String()),),
         )
     )
 

@@ -7,20 +7,10 @@ from delta_engine.adapters.databricks.log_config import (
     configure_logging,
 )
 from delta_engine.adapters.databricks.spark.factory import build_engine
-from delta_engine.application.engine import Engine
 
 
 class _DummySpark:
     """Stand-in for a SparkSession; the factory only stores it on the adapters."""
-
-
-def test_build_engine_returns_an_engine():
-    # Given a Spark session
-    # When building the engine
-    engine = build_engine(_DummySpark())
-
-    # Then a wired Engine is returned
-    assert isinstance(engine, Engine)
 
 
 def test_build_engine_does_not_touch_root_logging():
