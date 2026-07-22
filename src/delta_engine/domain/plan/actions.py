@@ -171,13 +171,18 @@ class UnsetProperty(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetTableTag(Action):
-    """Set a Unity Catalog tag on a table."""
+    """Set a Unity Catalog table tag, preserving both sides of the transition."""
 
     name: str
-    value: str
+    desired_value: str
+    observed_value: str | None
 
     aspect: ClassVar[TableAspect] = TableAspect.TABLE_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_TABLE_TAG
+
+    def __post_init__(self) -> None:
+        if self.desired_value == self.observed_value:
+            raise ValueError(f"SetTableTag carries no difference: {self.desired_value!r}")
 
     @property
     def subject(self) -> str:
@@ -220,14 +225,19 @@ class SetColumnComment(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetColumnTag(Action):
-    """Set a Unity Catalog tag on a column."""
+    """Set a Unity Catalog column tag, preserving both sides of the transition."""
 
     column_name: str
     name: str
-    value: str
+    desired_value: str
+    observed_value: str | None
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_TAG
+
+    def __post_init__(self) -> None:
+        if self.desired_value == self.observed_value:
+            raise ValueError(f"SetColumnTag carries no difference: {self.desired_value!r}")
 
     @property
     def subject(self) -> str:

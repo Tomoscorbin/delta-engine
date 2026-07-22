@@ -173,8 +173,8 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     assert result.plan.target == desired.qualified_name
     assert result.plan.actions == (
         CreateTable(desired),
-        SetTableTag(name="env", value="dev"),
-        SetColumnTag(column_name="id", name="pii", value="false"),
+        SetTableTag(name="env", desired_value="dev", observed_value=None),
+        SetColumnTag(column_name="id", name="pii", desired_value="false", observed_value=None),
         SetForeignKey(constraint=foreign_key),
     )
 

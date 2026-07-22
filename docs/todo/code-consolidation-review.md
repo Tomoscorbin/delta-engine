@@ -403,6 +403,15 @@ This is deliberately not a generic `SetMappingEntry` action. Table tags,
 column tags, and properties have different aspects, SQL, validation, and
 ownership semantics; only their missing transition context needs fixing.
 
+### Implemented
+
+`SetTableTag` and `SetColumnTag` now carry required desired and observed
+values, and reject transitions whose values are equal. Diffing records `None`
+when a tag is absent and the previous string value when replacing one.
+Diff-entry projection consequently reports new tags as additions and
+replacements as changes with their previous value, while SQL compilation uses
+only the desired value.
+
 ## Behavior that is already appropriately distributed
 
 These should not be consolidated merely because a new feature touches more than

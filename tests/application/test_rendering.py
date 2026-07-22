@@ -166,16 +166,37 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.PROPERTIES, "-", ("delta.logRetentionDuration",)),),
         ),
         (
-            SetTableTag(name="env", value="prod"),
-            (DiffEntry(DiffCategory.TAGS, "~", ("env = 'prod'",)),),
+            SetTableTag(name="env", desired_value="prod", observed_value=None),
+            (DiffEntry(DiffCategory.TAGS, "+", ("env = 'prod'",)),),
+        ),
+        (
+            SetTableTag(name="env", desired_value="prod", observed_value="dev"),
+            (DiffEntry(DiffCategory.TAGS, "~", ("env = 'prod' (was 'dev')",)),),
         ),
         (
             UnsetTableTag(name="env"),
             (DiffEntry(DiffCategory.TAGS, "-", ("env",)),),
         ),
         (
-            SetColumnTag(column_name="email", name="pii", value="true"),
-            (DiffEntry(DiffCategory.TAGS, "~", ("column email.pii = 'true'",)),),
+            SetColumnTag(
+                column_name="email", name="pii", desired_value="true", observed_value=None
+            ),
+            (DiffEntry(DiffCategory.TAGS, "+", ("column email.pii = 'true'",)),),
+        ),
+        (
+            SetColumnTag(
+                column_name="email",
+                name="pii",
+                desired_value="true",
+                observed_value="false",
+            ),
+            (
+                DiffEntry(
+                    DiffCategory.TAGS,
+                    "~",
+                    ("column email.pii = 'true' (was 'false')",),
+                ),
+            ),
         ),
         (
             UnsetColumnTag(column_name="email", name="pii"),

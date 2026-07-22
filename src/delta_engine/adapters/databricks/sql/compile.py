@@ -184,7 +184,7 @@ def _(action: UnsetProperty, target: _Target) -> str:
 
 @_compile_action.register
 def _(action: SetTableTag, target: _Target) -> str:
-    pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
+    pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
     return f"{target.alter_clause} SET TAGS ({pair})"
 
 
@@ -196,7 +196,7 @@ def _(action: UnsetTableTag, target: _Target) -> str:
 @_compile_action.register
 def _(action: SetColumnTag, target: _Target) -> str:
     column = backtick(action.column_name)
-    pair = f"{quote_literal(action.name)}={quote_literal(action.value)}"
+    pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
     return f"{target.alter_clause} ALTER COLUMN {column} SET TAGS ({pair})"
 
 

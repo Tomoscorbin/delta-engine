@@ -752,7 +752,7 @@ def test_tag_only_scope_fails_when_table_comment_drifts():
 def test_tag_only_scope_fails_when_column_comment_drifts():
     # Given a tag-only declaration with column comment drift
     diff = _drift(
-        SetColumnTag(column_name="id", name="pii", value="true"),
+        SetColumnTag(column_name="id", name="pii", desired_value="true", observed_value=None),
         SetColumnComment(column_name="id", desired_comment="new", observed_comment="old"),
         managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
     )
@@ -1035,7 +1035,7 @@ _TAG_ASPECTS_ONLY = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
 def test_streaming_table_passes_when_the_declaration_manages_only_tags():
     # Given a tags-scope declaration over a streaming table with tag drift
     diff = _drift(
-        SetColumnTag(column_name="id", name="pii", value="true"),
+        SetColumnTag(column_name="id", name="pii", desired_value="true", observed_value=None),
         managed_aspects=_TAG_ASPECTS_ONLY,
         kind=TableKind.STREAMING_TABLE,
     )
