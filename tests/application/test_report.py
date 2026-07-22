@@ -72,11 +72,21 @@ def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom")
     )
 
 
+_PLAN_UNSET = object()
+
+
+def _plan(name: str, *actions) -> ActionPlan:
+    return ActionPlan(
+        target=QualifiedName("cat", "schema", name),
+        actions=actions,
+    )
+
+
 def _report(
     *,
     desired: DesiredTable,
     read: ReadResult,
-    plan: ActionPlan | None = None,
+    plan: ActionPlan | None | object = _PLAN_UNSET,
     planned_sql_statements: tuple[str, ...] = (),
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
@@ -90,11 +100,21 @@ def _report(
         failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
     )
     execution_failures = () if execution is None else execution.failures
+    if plan is _PLAN_UNSET:
+        planning_failed = any(isinstance(failure, ValidationFailure) for failure in failures)
+        report_plan = (
+            None
+            if isinstance(read, ReadFailure) or planning_failed
+            else ActionPlan(target=desired.qualified_name)
+        )
+    else:
+        assert plan is None or isinstance(plan, ActionPlan)
+        report_plan = plan
 
     return TableRunReport(
         desired=desired,
         read=read,
-        plan=plan if plan is not None else ActionPlan(),
+        plan=report_plan,
         planned_sql_statements=planned_sql_statements,
         failures=(*read_failures, *reported_failures, *execution_failures),
         execution=execution,
@@ -146,7 +166,7 @@ def test_table_has_changes_when_plan_is_non_empty():
     report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
+        plan=_plan("tbl", SetTableComment(desired_comment="hello", observed_comment="")),
     )
     assert report.has_changes is True
 
@@ -160,8 +180,8 @@ def test_table_has_no_changes_when_plan_is_empty():
 
 
 def test_validation_failed_table_has_failures_but_no_changes():
-    # Validation refuses the drift before planning, so the plan stays empty:
-    # the table reports failures, not changes.
+    # Validation refuses the drift before a plan exists: the table reports
+    # failures, not changes.
     report = _report(
         desired=_a_desired_table("tbl"),
         read=TablePresent(table=_an_observed_table()),
@@ -169,13 +189,14 @@ def test_validation_failed_table_has_failures_but_no_changes():
     )
     assert report.has_failures is True
     assert report.has_changes is False
+    assert report.plan is None
 
 
 def test_sync_report_has_changes_when_any_table_plans_actions():
     changed = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
+        plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
     )
     unchanged = _report(
         desired=_a_desired_table("b"),
@@ -198,7 +219,7 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
     with_sql = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
+        plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
         planned_sql_statements=("ALTER TABLE a SET ...",),
     )
     without_sql = _report(
@@ -356,14 +377,14 @@ def test_table_run_report_carries_its_desired_definition():
     assert report.desired is desired
     assert report.status is TableRunStatus.SUCCESS
     assert report.failures == ()
-    assert report.plan == ActionPlan()
+    assert report.plan == ActionPlan(target=desired.qualified_name)
 
 
 def _a_changed_table_report():
     return _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
+        plan=_plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
         planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
     )
 
@@ -409,7 +430,7 @@ def test_table_to_dict_reports_execution_counts_when_executed():
     report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),)),
+        plan=_plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
         planned_sql_statements=(statement,),
         execution=ExecutionSummary((_ok_exec(0, preview=statement),)),
     )

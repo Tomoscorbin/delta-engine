@@ -47,7 +47,7 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 )
 
 
-def _change_records(plan: ActionPlan) -> list[dict[str, str]]:
+def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
     """
     Summarise the plan as flat change records, in plan order.
 
@@ -56,6 +56,8 @@ def _change_records(plan: ActionPlan) -> list[dict[str, str]]:
     into several), and not a complete description of the change — the
     authoritative description is the planned SQL.
     """
+    if plan is None:
+        return []
     return [
         {
             "kind": entry.category.name.lower(),
@@ -87,13 +89,15 @@ class TableRunReport:
 
     The engine creates a report after all phases finish, projecting its
     canonical phase outcomes into this immutable snapshot.
+    ``plan`` is ``None`` when reading or planning failed; a successfully
+    planned no-op retains an empty, target-bearing plan.
     ``planned_sql_statements`` is populated on dry and real runs so planned
     changes remain inspectable even when execution is skipped or blocked.
     """
 
     desired: DesiredTable
     read: ReadResult
-    plan: ActionPlan
+    plan: ActionPlan | None
     planned_sql_statements: tuple[str, ...]
     failures: tuple[Failure, ...]
     execution: ExecutionSummary | None

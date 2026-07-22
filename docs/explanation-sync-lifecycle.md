@@ -43,7 +43,8 @@ executing one is a good idea. Ambiguous or unsupported states remain domain
 differences rather than being labelled as blockers; the application default
 policy decides to reject them. The planning boundary always validates that
 complete diff and returns either an accepted `ActionPlan` or failures; a
-rejected result has no plan.
+rejected result has no plan. An accepted plan carries the qualified table
+target and relation kind needed for compilation as well as its ordered actions.
 
 This separation is why rejections are precise: a failed sync names the exact
 rule that fired and the column or table it fired on, rather than a generic

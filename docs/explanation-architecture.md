@@ -69,7 +69,7 @@ through a sync.
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                      |
 | `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
-| `ActionPlan`       | The ordered, table-local actions that should be executed if the table is allowed to run.                                                                    |
+| `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.                  |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
 | `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
@@ -115,13 +115,14 @@ flowchart LR
 If neither state can be determined, the adapter translates its backend
 exception into the application-owned `ReadError` and raises it.
 
-`PlanExecutor` is a two-stage boundary. `compile(qualified_name, plan)` lowers
-a plan to the backend statements that apply it — the plan carries the observed
-relation kind its actions lower against, so the SQL dialect follows what the
-reader saw — and the engine calls it in the plan phase on every run, dry or
-real, recording the statements on the table's report. On a real run, the
-engine passes that same tuple to `execute(statement)` one statement at a time,
-so the previewed SQL is exactly what executes.
+`PlanExecutor` is a two-stage boundary. `compile(plan)` lowers a plan to the
+backend statements that apply it. The plan carries both its qualified table
+target and the observed relation kind its actions lower against, so neither
+identity nor SQL dialect travels as parallel context. The engine calls it in
+the plan phase on every run, dry or real, recording the statements on the
+table's report. On a real run, the engine passes that same tuple to
+`execute(statement)` one statement at a time, so the previewed SQL is exactly
+what executes.
 
 For both outbound ports, adapters translate expected backend failures into
 application-owned errors: `ReadError` or `ExecutionError`. The engine catches
@@ -269,7 +270,7 @@ sequenceDiagram
     Differ-->>Engine: TableMissing / TableDrift
     Engine->>Planner: plan_diff(diff)
     Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
-    Engine->>Executor: compile(qualified_name, plan)
+    Engine->>Executor: compile(plan)
     Executor-->>Engine: SQL statements
     Engine->>Resolver: resolve(tables, blocked=failed_tables)
     Resolver-->>Engine: dependency order + FK failures
@@ -311,7 +312,7 @@ execution. The engine still processes other tables.
 | `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                      |
 | `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
 | `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
-| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Ordered, validated table-local actions      |
+| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Targeted, ordered, validated actions         |
 | `CatalogState`     | Reader port            | Engine                           | Known present or absent state               |
 | `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
@@ -517,13 +518,15 @@ The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
 
-The engine calls `plan_diff` once. A `PlanningFailed` keeps the run's plan empty
-and records its validation failures; a `PlanningSucceeded` supplies the only
-plan the compiler can receive.
+The engine calls `plan_diff` once. A `PlanningFailed` leaves the run without a
+plan and records its validation failures; a `PlanningSucceeded` supplies the
+only plan the compiler can receive. A successful no-op is distinct: it carries
+an empty plan with a real target and relation kind.
 
 ## Deterministic action plans
 
-An `ActionPlan` owns action ordering. Callers do not sort actions manually.
+An `ActionPlan` owns its table target, relation kind, and action ordering.
+Callers do not pass target context beside it or sort actions manually.
 
 Every action declares two ordering fields:
 

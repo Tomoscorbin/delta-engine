@@ -59,13 +59,14 @@ def render_diff_block(report: TableRunReport) -> str:
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailure):
         return f"{header}\n  (could not read — no diff)"
-    if not report.plan:
+    plan = report.plan
+    if not plan:
         if report.has_failures:
             return f"{header}\n  ({_NO_CHANGES} — see failures)"
         return f"{header}\n  ({_NO_CHANGES})"
-    if _plan_creates_table(report.plan):
+    if _plan_creates_table(plan):
         header = f"{header}  (CREATE)"
-    entries = [entry for action in report.plan for entry in action_entries(action)]
+    entries = [entry for action in plan for entry in action_entries(action)]
     return "\n".join([header, *_render_entry_groups(entries)])
 
 
@@ -78,8 +79,10 @@ def _grid_statements_cell(report: TableRunReport) -> str:
     return str(len(report.planned_sql_statements))
 
 
-def _humanized_action_summary(plan: ActionPlan) -> str:
+def _humanized_action_summary(plan: ActionPlan | None) -> str:
     """Summarise a plan as per-category change counts in display order, e.g. '2 columns, 1 key'."""
+    if plan is None:
+        return _NO_CHANGES
     counts: Counter[DiffCategory] = Counter()
     for action in plan:
         for entry in action_entries(action):

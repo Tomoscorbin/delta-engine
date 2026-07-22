@@ -90,11 +90,14 @@ def test_execute_suppresses_cursor_close_failure_after_success():
 def test_compile_returns_backend_statements_without_touching_connection():
     connection = FakeConnection()
     executor = WarehouseExecutor(connection)
-    plan = ActionPlan((SetTableComment(desired_comment="hello", observed_comment=""),))
+    plan = ActionPlan(
+        target=QN,
+        actions=(SetTableComment(desired_comment="hello", observed_comment=""),),
+    )
 
-    statements = executor.compile(QN, plan)
+    statements = executor.compile(plan)
 
-    assert statements == compile_plan(QN, plan)
+    assert statements == compile_plan(plan)
     assert len(statements) == 1
     assert connection.cursor_requests == 0
 
@@ -102,7 +105,7 @@ def test_compile_returns_backend_statements_without_touching_connection():
 def test_compile_of_empty_plan_returns_no_statements():
     connection = FakeConnection()
 
-    statements = WarehouseExecutor(connection).compile(QN, ActionPlan())
+    statements = WarehouseExecutor(connection).compile(ActionPlan(target=QN))
 
     assert statements == ()
     assert connection.cursor_requests == 0

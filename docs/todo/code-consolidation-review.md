@@ -221,6 +221,14 @@ This pairs naturally with finding 2: a phase that was never planned should be
 represented separately from a successfully planned no-op. A successful empty
 plan still has a real target and kind.
 
+### Implemented
+
+`ActionPlan` now carries its required `QualifiedName` target and rejects a
+`CreateTable` for a different name. `plan_diff` supplies that target on both
+diff arms, and `PlanExecutor.compile` plus the Databricks SQL compiler accept
+the plan alone. Reports use `plan=None` when reading or planning failed while a
+successful no-op retains an empty, target-bearing plan.
+
 ## 4. Make the creation aggregate honest
 
 ### Cause

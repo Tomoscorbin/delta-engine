@@ -14,6 +14,7 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     ObservedColumn,
     PrimaryKeyConstraint,
+    QualifiedName,
     TableAspect,
     TableKind,
 )
@@ -400,21 +401,31 @@ class ActionPlan:
     """
     Validated executable actions held in deterministic execution order.
 
-    A plan keeps its actions sorted by execution phase and then by subject
-    name, regardless of the order they are supplied in: ordering is an
-    invariant of the plan, not a step a caller has to remember.
+    A plan carries the qualified table target its actions apply to and keeps
+    those actions sorted by execution phase and then by subject name,
+    regardless of the order they are supplied in. Target identity and ordering
+    are invariants of the plan, not context a caller has to supply later.
 
     ``kind`` is the relation kind of the table the actions lower against —
     part of what the plan means, since the same actions compile to different
     statements per kind. Defaults to the ordinary table kind.
     """
 
+    target: QualifiedName
     actions: tuple[Action, ...] = ()
     kind: TableKind = TableKind.TABLE
 
     def __post_init__(self) -> None:
-        """Sort the actions into execution order, preserving input order on ties."""
-        object.__setattr__(self, "actions", tuple(sorted(self.actions, key=_execution_order)))
+        """Validate the creation target and sort actions, preserving order on ties."""
+        ordered_actions = tuple(sorted(self.actions, key=_execution_order))
+
+        for action in ordered_actions:
+            if isinstance(action, CreateTable) and action.table.qualified_name != self.target:
+                raise ValueError(
+                    "CreateTable target does not match ActionPlan target:"
+                    f" {action.table.qualified_name} != {self.target}"
+                )
+        object.__setattr__(self, "actions", ordered_actions)
 
     def __len__(self) -> int:
         return len(self.actions)

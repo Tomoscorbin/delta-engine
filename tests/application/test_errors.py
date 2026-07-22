@@ -65,11 +65,16 @@ def _table_report(
         failure for failure in failures if not isinstance(failure, ReadFailure | ExecutionFailure)
     )
     execution_failures = () if execution is None else execution.failures
+    planning_failed = any(isinstance(failure, ValidationFailure) for failure in failures)
 
     return TableRunReport(
         desired=desired,
         read=read,
-        plan=ActionPlan(),
+        plan=(
+            None
+            if isinstance(read, ReadFailure) or planning_failed
+            else ActionPlan(target=desired.qualified_name)
+        ),
         planned_sql_statements=statements,
         failures=(*read_failures, *reported_failures, *execution_failures),
         execution=execution,

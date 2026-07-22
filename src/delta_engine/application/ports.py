@@ -152,13 +152,13 @@ class PlanExecutor(Protocol):
     :class:`ExecutionFailure`; unexpected programming errors still propagate.
     """
 
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
         """
         Return the statements that apply ``plan``, in execution order.
 
-        The plan carries the relation kind its actions lower against
-        (``plan.kind``) — backends whose statements differ by kind read it
-        from the plan.
+        The plan carries the qualified table target and relation kind its
+        actions lower against (``plan.target`` and ``plan.kind``). Backends
+        read both from the plan rather than accepting parallel context.
 
         The ordering is the plan's own deterministic order, which is the order
         the application passes statements to ``execute``. An empty plan compiles

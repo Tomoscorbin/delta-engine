@@ -79,15 +79,15 @@ class _Target:
         return f"{_ALTER_CLAUSES[self.kind]} {self.name}"
 
 
-def compile_plan(qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
     """
-    Compile an :class:`ActionPlan` for ``qualified_name`` into SQL statements, in plan order.
+    Compile an :class:`ActionPlan` into SQL statements, in plan order.
 
-    The plan's relation kind selects the ALTER dialect every ALTER-family
-    statement targets ``qualified_name`` with; non-ALTER statements
-    (CREATE TABLE, COMMENT ON) are unaffected by it.
+    The plan supplies both the qualified table target and the relation kind
+    selecting the ALTER dialect. Non-ALTER statements (CREATE TABLE, COMMENT
+    ON) use the same plan target but are unaffected by the relation kind.
     """
-    target = _Target(qualified_name=qualified_name, kind=plan.kind)
+    target = _Target(qualified_name=plan.target, kind=plan.kind)
     return tuple(_compile_action(action, target) for action in plan)
 
 

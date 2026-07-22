@@ -47,9 +47,16 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
         return PlanningFailed(failures=validation.failures)
     match diff:
         case TableDrift() as drift:
-            plan = ActionPlan(drift.actions, kind=drift.observed.kind)
+            plan = ActionPlan(
+                target=drift.desired.qualified_name,
+                actions=drift.actions,
+                kind=drift.observed.kind,
+            )
         case TableMissing() as missing:
-            plan = ActionPlan(missing.actions)
+            plan = ActionPlan(
+                target=missing.desired.qualified_name,
+                actions=missing.actions,
+            )
         case _ as unreachable:
             assert_never(unreachable)
     return PlanningSucceeded(plan=plan)

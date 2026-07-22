@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from delta_engine.adapters.databricks.execution import execute_statement
 from delta_engine.adapters.databricks.sql import compile_plan
-from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
 if TYPE_CHECKING:
@@ -20,13 +19,13 @@ class WarehouseExecutor:
     def __init__(self, connection: Connection) -> None:
         self._connection = connection
 
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
         """
         Compile ``plan`` to its SQL statements in execution order.
 
         Does not touch the warehouse.
         """
-        return compile_plan(qualified_name, plan)
+        return compile_plan(plan)
 
     def execute(self, statement: str) -> None:
         """

@@ -52,6 +52,10 @@ def _observed_column(name: str) -> ObservedColumn:
     return ObservedColumn(name=name, data_type=Integer())
 
 
+def _plan(*plan_actions: Action) -> ActionPlan:
+    return ActionPlan(target=_TARGET, actions=plan_actions)
+
+
 def _primary_key(name: str = "table_pk", columns: tuple[str, ...] = ("id",)):
     return PrimaryKeyConstraint(columns=columns, constraint_name=name)
 
@@ -97,8 +101,8 @@ def _concrete_action_types() -> list[type[Action]]:
 
 
 def test_actionplan_truthiness_and_length():
-    empty = ActionPlan(())
-    non_empty = ActionPlan((DropColumn(_observed_column("legacy")),))
+    empty = _plan()
+    non_empty = _plan(DropColumn(_observed_column("legacy")))
 
     assert not empty
     assert len(empty) == 0
@@ -106,8 +110,20 @@ def test_actionplan_truthiness_and_length():
     assert len(non_empty) == 1
 
 
+def test_actionplan_retains_its_table_target():
+    assert _plan().target == _TARGET
+
+
+def test_actionplan_rejects_create_table_for_a_different_target():
+    with pytest.raises(ValueError, match="CreateTable target does not match ActionPlan target"):
+        ActionPlan(
+            target=QualifiedName("cat", "sch", "other"),
+            actions=(_create_table_action(),),
+        )
+
+
 def test_plan_orders_within_a_phase_by_subject_name():
-    plan = ActionPlan((AddColumn(_column("b_col")), AddColumn(_column("a_col"))))
+    plan = _plan(AddColumn(_column("b_col")), AddColumn(_column("a_col")))
 
     assert [action.subject for action in plan] == ["a_col", "b_col"]
 
@@ -116,15 +132,13 @@ def test_plan_ordering_is_stable_when_phase_and_subject_tie():
     first = SetProperty(name="alpha", desired_value="1", observed_value=None)
     second = SetProperty(name="alpha", desired_value="2", observed_value=None)
 
-    assert tuple(ActionPlan((first, second))) == (first, second)
+    assert tuple(_plan(first, second)) == (first, second)
 
 
 def test_plan_ordering_ignores_non_subject_fields():
-    plan = ActionPlan(
-        (
-            SetProperty(name="b_key", desired_value="aaa", observed_value=None),
-            SetProperty(name="a_key", desired_value="zzz", observed_value=None),
-        )
+    plan = _plan(
+        SetProperty(name="b_key", desired_value="aaa", observed_value=None),
+        SetProperty(name="a_key", desired_value="zzz", observed_value=None),
     )
 
     assert [action.subject for action in plan] == ["a_key", "b_key"]
@@ -200,32 +214,30 @@ _SAMPLE_ACTIONS: list[Action] = [
 
 @given(st.permutations(_SAMPLE_ACTIONS))
 def test_actionplan_order_is_independent_of_input_permutation(shuffled: list[Action]) -> None:
-    assert tuple(ActionPlan(tuple(shuffled))) == tuple(ActionPlan(tuple(_SAMPLE_ACTIONS)))
+    assert tuple(_plan(*shuffled)) == tuple(_plan(*_SAMPLE_ACTIONS))
 
 
 def test_plan_full_phase_order_with_all_action_types():
-    plan = ActionPlan(
-        (
-            SetPrimaryKey(_primary_key()),
-            SetForeignKey(_foreign_key()),
-            SetTableComment("new", "old"),
-            AddColumn(_column("a_col")),
-            SetProperty("p_set", "1", None),
-            UnsetProperty("p_unset", "1"),
-            SetColumnNullability("nn_col", False, True),
-            DropForeignKey(_foreign_key("t_old_fk")),
-            _drop_primary_key(),
-            RenameColumn("old", "new"),
-            DropColumn(_observed_column("d_col")),
-            SetColumnTag("email", "pii", "true"),
-            UnsetColumnTag("email", "old"),
-            SetColumnComment("c_col", "new", "old"),
-            _create_table_action(),
-            SetTableTag("env", "prod"),
-            UnsetTableTag("old_tag"),
-            AlterClustering(("region",), ()),
-            AlterColumnType("w_col", Long(), Integer()),
-        )
+    plan = _plan(
+        SetPrimaryKey(_primary_key()),
+        SetForeignKey(_foreign_key()),
+        SetTableComment("new", "old"),
+        AddColumn(_column("a_col")),
+        SetProperty("p_set", "1", None),
+        UnsetProperty("p_unset", "1"),
+        SetColumnNullability("nn_col", False, True),
+        DropForeignKey(_foreign_key("t_old_fk")),
+        _drop_primary_key(),
+        RenameColumn("old", "new"),
+        DropColumn(_observed_column("d_col")),
+        SetColumnTag("email", "pii", "true"),
+        UnsetColumnTag("email", "old"),
+        SetColumnComment("c_col", "new", "old"),
+        _create_table_action(),
+        SetTableTag("env", "prod"),
+        UnsetTableTag("old_tag"),
+        AlterClustering(("region",), ()),
+        AlterColumnType("w_col", Long(), Integer()),
     )
 
     assert [type(action) for action in plan] == [
@@ -252,14 +264,12 @@ def test_plan_full_phase_order_with_all_action_types():
 
 
 def test_plan_orders_constraint_drops_before_column_work():
-    plan = ActionPlan(
-        (
-            DropColumn(_observed_column("customer_id")),
-            _drop_primary_key(),
-            DropForeignKey(_foreign_key("orders_customer_id_fk")),
-            RenameColumn("old", "new"),
-            AddColumn(_column("added")),
-        )
+    plan = _plan(
+        DropColumn(_observed_column("customer_id")),
+        _drop_primary_key(),
+        DropForeignKey(_foreign_key("orders_customer_id_fk")),
+        RenameColumn("old", "new"),
+        AddColumn(_column("added")),
     )
 
     assert [type(action) for action in plan] == [
@@ -272,24 +282,20 @@ def test_plan_orders_constraint_drops_before_column_work():
 
 
 def test_plan_orders_property_before_type_widen_and_key_set():
-    plan = ActionPlan(
-        (
-            SetPrimaryKey(_primary_key()),
-            AlterColumnType("id", Long(), Integer()),
-            SetProperty("delta.enableTypeWidening", "true", None),
-        )
+    plan = _plan(
+        SetPrimaryKey(_primary_key()),
+        AlterColumnType("id", Long(), Integer()),
+        SetProperty("delta.enableTypeWidening", "true", None),
     )
 
     assert [type(action) for action in plan] == [SetProperty, AlterColumnType, SetPrimaryKey]
 
 
 def test_plan_reclusters_after_add_and_before_drop():
-    plan = ActionPlan(
-        (
-            DropColumn(_observed_column("old_region")),
-            AlterClustering(("region",), ("old_region",)),
-            AddColumn(_column("region")),
-        )
+    plan = _plan(
+        DropColumn(_observed_column("old_region")),
+        AlterClustering(("region",), ("old_region",)),
+        AddColumn(_column("region")),
     )
 
     assert [type(action) for action in plan] == [AddColumn, AlterClustering, DropColumn]
