@@ -426,9 +426,9 @@ def _diff_primary_key(
     desired_key = desired.primary_key
     observed_key = observed.primary_key
 
-    desired_columns = frozenset(desired_key.columns) if desired_key is not None else None
-    observed_columns = frozenset(observed_key.columns) if observed_key is not None else None
-    if desired_columns == observed_columns:
+    desired_signature = desired_key.signature if desired_key is not None else None
+    observed_signature = observed_key.signature if observed_key is not None else None
+    if desired_signature == observed_signature:
         return ()
 
     actions: list[DropPrimaryKey | SetPrimaryKey] = []

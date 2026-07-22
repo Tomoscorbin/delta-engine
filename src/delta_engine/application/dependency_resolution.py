@@ -378,7 +378,10 @@ def _classify_failures(
     # which this engine does not model.) Compared as sets: a primary key's
     # declaration order is not part of its identity, and referenced_columns is
     # aligned to local_columns, not PK order.
-    primary_key_by_name = {table.qualified_name: set(table.primary_key_columns) for table in tables}
+    primary_key_by_name = {
+        table.qualified_name: table.primary_key.signature if table.primary_key else frozenset()
+        for table in tables
+    }
 
     # Column types of every registered table, keyed by qualified name. A
     # foreign key's types were validated at declaration time against the
@@ -404,7 +407,7 @@ def _classify_failures(
             # participates in a cycle. The type check relies on the target
             # being the registered parent's primary key: only then is every
             # referenced column known to exist on the registered parent.
-            elif set(foreign_key.referenced_columns) != primary_key_by_name[referenced_table]:
+            elif foreign_key.referenced_key_signature != primary_key_by_name[referenced_table]:
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif not _foreign_key_types_match(
                 foreign_key,

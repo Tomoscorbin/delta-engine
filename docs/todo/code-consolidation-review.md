@@ -330,6 +330,13 @@ same vocabulary even before it creates the final constraint. Ordered columns
 remain available for deterministic SQL rendering; the signature states only
 semantic identity.
 
+### Implemented
+
+Primary-key identity is now exposed as `PrimaryKeyConstraint.signature`, with
+foreign keys exposing `referenced_key_signature`. API lowering, diffing, and
+dependency resolution use these shared projections instead of reconstructing
+set identity independently. Ordered columns remain available for SQL output.
+
 ## 6. Contain physical SQL invocation per backend
 
 ### Cause

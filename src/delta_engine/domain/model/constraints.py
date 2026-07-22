@@ -1,8 +1,16 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from delta_engine.domain.model.qualified_name import QualifiedName
+
+KeySignature = frozenset[str]
+
+
+def key_signature(columns: Iterable[str]) -> KeySignature:
+    """Return the order-independent identity of a key's columns."""
+    return frozenset(columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +31,11 @@ class PrimaryKeyConstraint:
 
     columns: tuple[str, ...]
     constraint_name: str
+
+    @property
+    def signature(self) -> KeySignature:
+        """Content identity, excluding physical name and declaration order."""
+        return key_signature(self.columns)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(column.lower() for column in self.columns))
@@ -124,6 +137,11 @@ class ForeignKeyConstraint:
         catalog's name) compare equal when they describe the same relationship.
         """
         return (self.local_columns, self.referenced_table, self.referenced_columns)
+
+    @property
+    def referenced_key_signature(self) -> KeySignature:
+        """Identity of the primary key targeted by this foreign key."""
+        return key_signature(self.referenced_columns)
 
 
 @dataclass(frozen=True, slots=True)

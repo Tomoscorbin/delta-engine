@@ -3,6 +3,7 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
     PrimaryKeyConstraint,
+    key_signature,
 )
 from delta_engine.domain.model.data_type import (
     Array,
@@ -65,4 +66,5 @@ __all__ = [
     "Timestamp",
     "TimestampNtz",
     "Variant",
+    "key_signature",
 ]

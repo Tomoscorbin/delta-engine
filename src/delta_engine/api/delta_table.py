@@ -32,6 +32,7 @@ from delta_engine.domain.model import (
     Struct,
     TableAspect,
     Variant,
+    key_signature,
 )
 
 # Delta permits these characters in column names only under column mapping.
@@ -367,8 +368,8 @@ class ForeignKey:
         local_columns = tuple(local for local, _ in pairs)
         referenced_columns = tuple(parent for _, parent in pairs)
 
-        declared = set(referenced_columns)
-        key = set(referenced.key_columns)
+        declared = key_signature(referenced_columns)
+        key = key_signature(referenced.key_columns)
         if declared != key:
             missing = sorted(key - declared)
             extra = sorted(declared - key)
