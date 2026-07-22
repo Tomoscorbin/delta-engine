@@ -18,6 +18,7 @@ from delta_engine.adapters.databricks.sql import (
     referencing_foreign_keys_query,
     table_tags_query,
 )
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.engine import Engine
@@ -79,9 +80,10 @@ def _streaming_table_connection() -> RoutedConnection:
 
 def _engine() -> Engine:
     connection = _streaming_table_connection()
+    runner = WarehouseSqlRunner(connection)
     return Engine(
-        reader=WarehouseReader(connection),
-        executor=WarehouseExecutor(connection),
+        reader=WarehouseReader(runner),
+        executor=WarehouseExecutor(runner),
     )
 
 

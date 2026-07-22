@@ -1,14 +1,21 @@
 """WarehouseExecutor compiles plans and contains each cursor execution."""
 
+import logging
+
 import pytest
 
 from delta_engine.adapters.databricks.sql import compile_plan
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.application.errors import ExecutionError
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan, SetTableComment
 
 QN = QualifiedName("cat", "sch", "tbl")
+
+
+def _executor(connection) -> WarehouseExecutor:
+    return WarehouseExecutor(WarehouseSqlRunner(connection))
 
 
 class RecordingCursor:
@@ -48,7 +55,7 @@ class ClosedConnection:
 def test_execute_runs_one_statement_and_closes_its_cursor():
     connection = FakeConnection()
 
-    result = WarehouseExecutor(connection).execute("SELECT 1")
+    result = _executor(connection).execute("SELECT 1")
 
     assert result is None
     assert connection.cursor_requests == 1
@@ -60,7 +67,7 @@ def test_execute_translates_statement_failure_and_closes_cursor():
     connection = FakeConnection()
 
     with pytest.raises(ExecutionError) as exc_info:
-        WarehouseExecutor(connection).execute("SELECT * FROM __nope__")
+        _executor(connection).execute("SELECT * FROM __nope__")
 
     assert exc_info.value.exception_type == "Exception"
     assert "boom: permission denied" in str(exc_info.value)
@@ -68,7 +75,7 @@ def test_execute_translates_statement_failure_and_closes_cursor():
 
 
 def test_execute_translates_cursor_acquisition_failure():
-    executor = WarehouseExecutor(ClosedConnection())
+    executor = _executor(ClosedConnection())
 
     with pytest.raises(ExecutionError) as exc_info:
         executor.execute("SELECT 1")
@@ -77,19 +84,24 @@ def test_execute_translates_cursor_acquisition_failure():
     assert "closed connection" in str(exc_info.value)
 
 
-def test_execute_suppresses_cursor_close_failure_after_success():
+def test_execute_logs_and_suppresses_cursor_close_failure_after_success(caplog):
     connection = FakeConnection()
     connection.cursor_fake.close_raises = True
 
-    result = WarehouseExecutor(connection).execute("SELECT 1")
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="delta_engine.adapters.databricks.warehouse._runner",
+    ):
+        result = _executor(connection).execute("SELECT 1")
 
     assert result is None
     assert connection.cursor_fake.closed is True
+    assert "Failed to close warehouse cursor" in caplog.text
 
 
 def test_compile_returns_backend_statements_without_touching_connection():
     connection = FakeConnection()
-    executor = WarehouseExecutor(connection)
+    executor = _executor(connection)
     plan = ActionPlan(
         target=QN,
         actions=(SetTableComment(desired_comment="hello", observed_comment=""),),
@@ -105,7 +117,7 @@ def test_compile_returns_backend_statements_without_touching_connection():
 def test_compile_of_empty_plan_returns_no_statements():
     connection = FakeConnection()
 
-    statements = WarehouseExecutor(connection).compile(ActionPlan(target=QN))
+    statements = _executor(connection).compile(ActionPlan(target=QN))
 
     assert statements == ()
     assert connection.cursor_requests == 0

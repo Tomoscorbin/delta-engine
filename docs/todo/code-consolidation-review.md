@@ -397,6 +397,18 @@ Do not merge `ReadError` and `ExecutionError`, or move their translation into a
 generic transport. They signal different application operations. The shared
 piece is only the physical SQL/session mechanism.
 
+### Implemented
+
+Each backend now has one private physical SQL runner shared by its reader and
+executor. The Spark runner is the only caller of `spark.sql` and contains the
+session guard for `${...}` variable substitution. The warehouse runner is the
+only owner of cursor acquisition, execution, fetching, and cleanup: reads reuse
+one lazily acquired cursor for their metadata batch, while each write statement
+gets a fresh cursor scope. Cursor-close failures are logged at DEBUG without
+replacing the read or execution outcome. The existing shared read and execution
+boundaries continue to translate failures independently into `ReadError` and
+`ExecutionError`.
+
 ## 7. Preserve tag transition context in the action
 
 ### Cause
