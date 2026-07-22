@@ -196,25 +196,29 @@ def test_add_column_rejects_non_nullable_column():
         _compile_single(action)
 
 
-def test_create_table_renders_columns_nullability_comments_table_comment_and_properties():
-    # Given a CREATE TABLE with column metadata, table comment, and property
+def test_create_table_renders_all_state_embedded_in_creation():
+    # Given a CREATE TABLE with structure, comments, properties, partitioning, and a key
     action = _create_table(
-        DesiredColumn("id", Integer(), nullable=False),
-        DesiredColumn("name", String(), comment="customer"),
+        DesiredColumn("id", Integer(), nullable=False, comment="identifier"),
+        DesiredColumn("day", String(), comment="partition date"),
         comment="core table",
         properties={"delta.appendOnly": "true"},
+        partitioned_by=("day",),
+        primary_key=_primary_key(),
     )
 
     # When compiling
     statement = _compile_single(action)
 
-    # Then all CREATE TABLE clauses are rendered
+    # Then all state embedded in the creation aggregate is rendered
     assert statement == (
         "CREATE TABLE `cat`.`sch`.`tbl`"
-        " (`id` INT NOT NULL, `name` STRING COMMENT 'customer')"
+        " (`id` INT NOT NULL COMMENT 'identifier', `day` STRING COMMENT 'partition date',"
+        " CONSTRAINT `tbl_pk` PRIMARY KEY (`id`))"
         " USING delta"
         " COMMENT 'core table'"
         " TBLPROPERTIES ('delta.appendOnly'='true')"
+        " PARTITIONED BY (`day`)"
     )
 
 

@@ -296,6 +296,16 @@ less truthful. Instead:
 The domain action remains the owner of what a create means; SQL and rendering
 remain separate consumers of that meaning.
 
+### Implemented
+
+Creation remains a single `CreateTable` aggregate. Its semantic diff projection
+now reports every declared fact embedded in the create statement: columns and
+nullability, primary key, partitioning or clustering, valued properties, column
+comments, and the table comment. Tags and foreign keys remain visible through
+their explicit follow-up actions. Coverage exercises a populated creation in
+both semantic reporting and compiled SQL; property absence assertions are
+correctly omitted because a new table already satisfies them.
+
 ## 5. Put key identity on the key values
 
 ### Cause

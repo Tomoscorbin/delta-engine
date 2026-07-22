@@ -57,9 +57,10 @@ class DiffCategory(IntEnum):
     COLUMNS = 1
     KEYS = 2
     CLUSTERING = 3
-    PROPERTIES = 4
-    TAGS = 5
-    COMMENTS = 6
+    PARTITIONING = 4
+    PROPERTIES = 5
+    TAGS = 6
+    COMMENTS = 7
 
 
 # (singular, plural) nouns per category: the plural names the diff group heading;
@@ -69,6 +70,7 @@ CATEGORY_NOUN: Final[Mapping[DiffCategory, tuple[str, str]]] = MappingProxyType(
         DiffCategory.COLUMNS: ("column", "columns"),
         DiffCategory.KEYS: ("key", "keys"),
         DiffCategory.CLUSTERING: ("clustering", "clustering"),
+        DiffCategory.PARTITIONING: ("partitioning", "partitioning"),
         DiffCategory.PROPERTIES: ("property", "properties"),
         DiffCategory.TAGS: ("tag", "tags"),
         DiffCategory.COMMENTS: ("comment", "comments"),
@@ -122,14 +124,35 @@ def action_entries(action: Action) -> tuple[DiffEntry, ...]:
 @action_entries.register
 def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     entries = [_column_add_entry(column) for column in action.table.columns]
+
     primary_key_columns = action.table.primary_key_columns
     if primary_key_columns:
         entries.append(
             DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(primary_key_columns)})",))
         )
+
     if action.table.clustered_by:
         columns = ", ".join(action.table.clustered_by)
         entries.append(DiffEntry(DiffCategory.CLUSTERING, "+", (f"clustering ({columns})",)))
+
+    if action.table.partitioned_by:
+        columns = ", ".join(action.table.partitioned_by)
+        entries.append(DiffEntry(DiffCategory.PARTITIONING, "+", (f"partitioning ({columns})",)))
+
+    entries.extend(
+        DiffEntry(DiffCategory.PROPERTIES, "+", (f"{name} = '{value}'",))
+        for name, value in sorted(action.table.properties.items())
+        if value is not None
+    )
+
+    entries.extend(
+        DiffEntry(DiffCategory.COMMENTS, "+", (f"column {column.name}: '{column.comment}'",))
+        for column in action.table.columns
+        if column.comment
+    )
+    if action.table.comment:
+        entries.append(DiffEntry(DiffCategory.COMMENTS, "+", (f"table: '{action.table.comment}'",)))
+
     return tuple(entries)
 
 

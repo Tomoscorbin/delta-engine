@@ -66,7 +66,7 @@ description is `planned_sql_statements`:
 
 | Field       | Type  | Meaning                                                                            |
 | ----------- | ----- | ---------------------------------------------------------------------------------- |
-| `kind`      | `str` | Change category: `columns`, `keys`, `clustering`, `properties`, `tags`, `comments` |
+| `kind`      | `str` | Change category: `columns`, `keys`, `clustering`, `partitioning`, `properties`, `tags`, `comments` |
 | `operation` | `str` | `add`, `remove`, or `change`                                                       |
 | `subject`   | `str` | What the change targets, e.g. a column name or `table: '...'`                      |
 | `detail`    | `str` | Extra detail, e.g. `Integer → Long`; empty when there is none                      |

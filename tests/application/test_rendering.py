@@ -284,6 +284,39 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
     assert clustering == [DiffEntry(DiffCategory.CLUSTERING, "+", ("clustering (region)",))]
 
 
+def test_create_table_entries_include_all_state_embedded_in_create():
+    # Given a CREATE TABLE carrying structural, layout, property, and comment state
+    action = CreateTable(
+        table=DesiredTable(
+            qualified_name=QualifiedName("cat", "sch", "tbl"),
+            columns=(
+                DesiredColumn("id", Integer(), nullable=False, comment="identifier"),
+                DesiredColumn("day", String(), comment="partition date"),
+            ),
+            comment="daily orders",
+            properties={
+                "delta.appendOnly": "true",
+                "delta.logRetentionDuration": None,
+            },
+            partitioned_by=("day",),
+            primary_key=_primary_key(),
+        )
+    )
+
+    # Then reporting states every fact that CREATE TABLE establishes. A None
+    # property asserts absence and is therefore not a creation change.
+    assert action_entries(action) == (
+        DiffEntry(DiffCategory.COLUMNS, "+", ("id", "Integer", "NOT NULL")),
+        DiffEntry(DiffCategory.COLUMNS, "+", ("day", "String")),
+        DiffEntry(DiffCategory.KEYS, "+", ("primary key (id)",)),
+        DiffEntry(DiffCategory.PARTITIONING, "+", ("partitioning (day)",)),
+        DiffEntry(DiffCategory.PROPERTIES, "+", ("delta.appendOnly = 'true'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("column id: 'identifier'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("column day: 'partition date'",)),
+        DiffEntry(DiffCategory.COMMENTS, "+", ("table: 'daily orders'",)),
+    )
+
+
 def test_every_action_type_has_registered_diff_entries():
     # Given every concrete Action subclass the plan vocabulary defines
     import inspect
