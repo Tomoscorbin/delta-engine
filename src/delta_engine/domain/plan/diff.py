@@ -197,7 +197,7 @@ def _align_columns(
     desired_columns: tuple[DesiredColumn, ...],
     observed_columns: tuple[ObservedColumn, ...],
 ) -> _ColumnAlignment:
-    """Classify columns once in stable desired and observed order."""
+    """Classify columns in stable desired and observed order."""
     desired_by_name = {column.name: column for column in desired_columns}
     observed_by_name = {column.name: column for column in observed_columns}
 
