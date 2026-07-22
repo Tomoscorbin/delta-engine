@@ -177,13 +177,10 @@ class DesiredTable:
         representable.
 
         """
-        object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
-        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
-        object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
 
         _validate_table_structure(
             columns=self.columns,
@@ -306,17 +303,10 @@ class ObservedTable:
         return self.primary_key.columns if self.primary_key is not None else ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
-        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
-        object.__setattr__(
-            self,
-            "referencing_foreign_keys",
-            tuple(self.referencing_foreign_keys),
-        )
 
         _validate_table_structure(
             columns=self.columns,

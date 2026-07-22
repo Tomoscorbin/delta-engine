@@ -40,8 +40,6 @@ class PartitioningChanged:
     aspect: ClassVar[TableAspect] = TableAspect.PARTITIONING
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "desired_partitioning", tuple(self.desired_partitioning))
-        object.__setattr__(self, "observed_partitioning", tuple(self.observed_partitioning))
         if self.desired_partitioning == self.observed_partitioning:
             raise ValueError(
                 f"PartitioningChanged carries no difference: {self.desired_partitioning!r}"

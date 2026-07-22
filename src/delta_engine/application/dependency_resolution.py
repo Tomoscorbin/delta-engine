@@ -63,9 +63,6 @@ class ResolutionSucceeded:
     qualified_name: QualifiedName
     dependencies: tuple[ResolvedDependency, ...]
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dependencies", tuple(self.dependencies))
-
 
 @dataclass(frozen=True, slots=True)
 class ResolutionFailed:
@@ -75,7 +72,6 @@ class ResolutionFailed:
     failures: tuple[ForeignKeyFailure, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "failures", tuple(self.failures))
         if not self.failures:
             raise ValueError("ResolutionFailed requires at least one foreign-key failure")
 

@@ -300,9 +300,6 @@ class DropPrimaryKey(Action):
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
-
     @property
     def subject(self) -> str:
         return ""
@@ -361,8 +358,6 @@ class AlterClustering(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "desired_clustering", tuple(self.desired_clustering))
-        object.__setattr__(self, "observed_clustering", tuple(self.observed_clustering))
         if set(self.desired_clustering) == set(self.observed_clustering):
             raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
 
