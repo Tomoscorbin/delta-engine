@@ -191,16 +191,12 @@ class _TableRun:
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
-        plan = self.plan
-        if plan is None:
-            plan = ActionPlan()
-
         execution = self.execution if isinstance(self.execution, ExecutionSummary) else None
 
         return TableRunReport(
             desired=self.desired,
             read=self.read,
-            plan=plan,
+            plan=self.plan,
             planned_sql_statements=self.planned_sql_statements,
             failures=self.failures,
             execution=execution,
@@ -372,7 +368,6 @@ class Engine:
                 continue
 
             run.planned_sql_statements = self.executor.compile(
-                run.qualified_name,
                 plan,
             )
             logger.info(

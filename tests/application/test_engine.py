@@ -267,10 +267,9 @@ class _RecordingExecutor:
         self._per_table_errors = None if per_table_errors is None else list(per_table_errors)
         self._active_table: str | None = None
 
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
         return tuple(
-            f"STATEMENT {index} AS {plan.kind.name} FOR {qualified_name}"
-            for index in range(len(plan))
+            f"STATEMENT {index} AS {plan.kind.name} FOR {plan.target}" for index in range(len(plan))
         )
 
     def execute(self, statement: str) -> None:
@@ -304,8 +303,8 @@ class _FailingMultiStatementExecutor:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(3))
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(3))
 
     def execute(self, statement: str) -> None:
         self.calls.append(statement)
@@ -568,10 +567,10 @@ def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def compile(self, qualified_name: QualifiedName, plan: ActionPlan) -> tuple[str, ...]:
-            events.append(f"compile:{qualified_name}")
+        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+            events.append(f"compile:{plan.target}")
             # The name is embedded so execute can recover the target table.
-            return tuple(f"STATEMENT {index} FOR {qualified_name}" for index in range(len(plan)))
+            return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
 
         def execute(self, statement: str) -> None:
             events.append(f"execute:{statement.split(' FOR ', 1)[1]}")
@@ -635,7 +634,7 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
     assert len(table_report.failures) == 1
     assert isinstance(table_report.read, ReadFailure)
     assert table_report.read is table_report.failures[0]
-    assert len(table_report.plan) == 0
+    assert table_report.plan is None
     assert table_report.execution is None
     assert executor.executed_names == []
 
@@ -676,6 +675,7 @@ def test_validation_failed_table_is_not_executed_but_independent_table_still_run
     table_a = _assert_status(report, "c.s.a", TableRunStatus.PLANNING_FAILED)
     table_b = _assert_status(report, "c.s.b", TableRunStatus.SUCCESS)
 
+    assert table_a.plan is None
     assert table_a.execution is None
     assert table_b.execution is not None
     assert executor.executed_names == ["c.s.b"]
@@ -741,8 +741,8 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 
 def test_unexpected_executor_exception_propagates():
     class BuggyExecutor:
-        def compile(self, qualified_name: QualifiedName, _plan: ActionPlan) -> tuple[str, ...]:
-            return (f"STATEMENT FOR {qualified_name}",)
+        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+            return (f"STATEMENT FOR {plan.target}",)
 
         def execute(self, _statement: str) -> None:
             raise RuntimeError("adapter bug")

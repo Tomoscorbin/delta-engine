@@ -97,8 +97,16 @@ def _create_table(
     )
 
 
+def _plan(
+    *plan_actions: Action,
+    target: QualifiedName = _TARGET,
+    kind: TableKind = TableKind.TABLE,
+) -> ActionPlan:
+    return ActionPlan(target=target, actions=plan_actions, kind=kind)
+
+
 def _compile_single(action: Action, kind: TableKind = TableKind.TABLE) -> str:
-    (statement,) = compile_plan(_TARGET, ActionPlan(actions=(action,), kind=kind))
+    (statement,) = compile_plan(_plan(action, kind=kind))
     return statement
 
 
@@ -119,21 +127,19 @@ def _concrete_action_types() -> list[type[Action]]:
 
 
 def test_compile_empty_plan_returns_empty_tuple():
-    assert compile_plan(_TARGET, ActionPlan(actions=())) == ()
+    assert compile_plan(_plan()) == ()
 
 
 def test_compile_plan_compiles_each_action_in_action_plan_order():
     # Given an ActionPlan containing three actions
-    plan = ActionPlan(
-        actions=(
-            SetTableComment(desired_comment="first", observed_comment=""),
-            SetProperty(name="second", desired_value="true", observed_value=None),
-            DropColumn(column=_observed_column("third")),
-        )
+    plan = _plan(
+        SetTableComment(desired_comment="first", observed_comment=""),
+        SetProperty(name="second", desired_value="true", observed_value=None),
+        DropColumn(column=_observed_column("third")),
     )
 
     # When compiling the plan
-    statements = compile_plan(_TARGET, plan)
+    statements = compile_plan(plan)
 
     # Then each action in the normalized ActionPlan is compiled to its SQL statement
     assert statements == tuple(_compile_single(action) for action in plan)
@@ -142,10 +148,10 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
 def test_compile_backticks_table_and_column_identifiers():
     # Given identifiers that need quoting
     target = QualifiedName("cat-alog", "sch ema", "select")
-    plan = ActionPlan(actions=(AddColumn(DesiredColumn("weird column", Integer())),))
+    plan = _plan(AddColumn(DesiredColumn("weird column", Integer())), target=target)
 
     # When compiling
-    (statement,) = compile_plan(target, plan)
+    (statement,) = compile_plan(plan)
 
     # Then table and column identifiers are backticked
     assert statement == ("ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT")
@@ -488,8 +494,8 @@ def test_set_property_sql_ignores_observed_value():
     )
 
     # When compiling both
-    (first_statement,) = compile_plan(_TARGET, ActionPlan(actions=(first_write,)))
-    (update_statement,) = compile_plan(_TARGET, ActionPlan(actions=(update,)))
+    (first_statement,) = compile_plan(_plan(first_write))
+    (update_statement,) = compile_plan(_plan(update))
 
     # Then observed_value has no effect on rendered SQL
     assert first_statement == update_statement
@@ -511,8 +517,11 @@ def test_every_action_type_has_a_registered_compiler():
 
 
 def test_compile_rename_column():
-    plan = ActionPlan((RenameColumn(old_name="customer_nm", new_name="customer_name"),))
-    statements = compile_plan(QualifiedName("dev", "silver", "customers"), plan)
+    plan = _plan(
+        RenameColumn(old_name="customer_nm", new_name="customer_name"),
+        target=QualifiedName("dev", "silver", "customers"),
+    )
+    statements = compile_plan(plan)
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )

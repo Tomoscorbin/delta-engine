@@ -35,6 +35,7 @@ from delta_engine.domain.model import (
     String,
 )
 from delta_engine.domain.plan.actions import (
+    Action,
     ActionPlan,
     AddColumn,
     AlterClustering,
@@ -70,6 +71,13 @@ def _foreign_key(constraint_name: str = "orders_customer_id_fk") -> ForeignKeyCo
         referenced_table=QualifiedName("cat", "sch", "customers"),
         referenced_columns=("id",),
         constraint_name=constraint_name,
+    )
+
+
+def _plan(name: str, *actions: Action) -> ActionPlan:
+    return ActionPlan(
+        target=QualifiedName("cat", "sch", name),
+        actions=actions,
     )
 
 
@@ -286,15 +294,15 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
     return TableRunReport(
         desired=desired,
         read=TablePresent(table=observed),
-        plan=ActionPlan(),
+        plan=None,
         planned_sql_statements=(),
         failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
         execution=None,
     )
 
 
-def test_diff_block_points_to_failures_when_plan_is_empty_but_failures_exist():
-    # Given a table whose only drift is unsupported — empty plan, failed validation
+def test_diff_block_points_to_failures_when_no_plan_exists_and_failures_exist():
+    # Given a table whose only drift is unsupported — no plan, failed validation
     block = render_diff_block(_report_with_empty_plan_and_failure())
 
     # Then the block does not read as a healthy no-op
@@ -307,7 +315,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     healthy = TableRunReport(
         desired=report.desired,
         read=report.read,
-        plan=ActionPlan(),
+        plan=ActionPlan(target=report.desired.qualified_name),
         planned_sql_statements=(),
         failures=(),
         execution=None,
@@ -326,11 +334,10 @@ def test_diff_block_groups_lines_under_category_headings_in_plan_order():
     # Given a table whose plan sets the table comment and adds a column
     report = _grid_report(
         "orders",
-        plan=ActionPlan(
-            (
-                SetTableComment(desired_comment="c", observed_comment=""),
-                AddColumn(DesiredColumn("age", Integer())),
-            )
+        plan=_plan(
+            "orders",
+            SetTableComment(desired_comment="c", observed_comment=""),
+            AddColumn(DesiredColumn("age", Integer())),
         ),
     )
 
@@ -351,7 +358,7 @@ def test_diff_block_marks_a_create_in_the_header():
     # Given a plan that creates a table
     report = _grid_report(
         "orders",
-        plan=ActionPlan((CreateTable(table=_grid_report("orders").desired),)),
+        plan=_plan("orders", CreateTable(table=_grid_report("orders").desired)),
     )
 
     # Then the block header flags the table as newly created
@@ -367,7 +374,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
             qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
         ),
         read=failure,
-        plan=ActionPlan(),
+        plan=None,
         planned_sql_statements=(),
         failures=(failure,),
         execution=None,
@@ -386,7 +393,8 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 def _grid_report(name, *, plan=None, failures=(), execution=None):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (DesiredColumn("id", Integer()),)
-    plan = plan if plan is not None else ActionPlan()
+    if plan is None and not failures:
+        plan = ActionPlan(target=qualified_name)
     execution_failures = () if execution is None else execution.failures
     return TableRunReport(
         desired=DesiredTable(qualified_name=qualified_name, columns=columns),
@@ -397,7 +405,9 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
         ),
         plan=plan,
         # One fake statement per action, as the engine would have compiled.
-        planned_sql_statements=tuple(f"SQL {index}" for index in range(len(plan))),
+        planned_sql_statements=tuple(
+            f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
+        ),
         failures=(*failures, *execution_failures),
         execution=execution,
     )
@@ -424,12 +434,11 @@ def test_grid_detail_summarizes_changes_by_category_not_class_names():
     # Given a changed table with two column adds and one property set
     report = _grid_report(
         "orders",
-        plan=ActionPlan(
-            (
-                AddColumn(DesiredColumn("a", Integer())),
-                AddColumn(DesiredColumn("b", Integer())),
-                SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
-            )
+        plan=_plan(
+            "orders",
+            AddColumn(DesiredColumn("a", Integer())),
+            AddColumn(DesiredColumn("b", Integer())),
+            SetProperty(name="delta.appendOnly", desired_value="true", observed_value=None),
         ),
     )
 
@@ -443,12 +452,11 @@ def test_grid_detail_summarizes_changes_by_category_not_class_names():
 
 def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
     # Given a three-statement plan where two applied and one failed during execution
-    plan = ActionPlan(
-        (
-            AddColumn(DesiredColumn("a", Integer())),
-            AddColumn(DesiredColumn("b", Integer())),
-            AddColumn(DesiredColumn("c", Integer())),
-        )
+    plan = _plan(
+        "orders",
+        AddColumn(DesiredColumn("a", Integer())),
+        AddColumn(DesiredColumn("b", Integer())),
+        AddColumn(DesiredColumn("c", Integer())),
     )
     report = _grid_report(
         "orders",
@@ -499,7 +507,7 @@ def test_grid_detail_truncates_an_overlong_detail_with_an_ellipsis():
 def test_grid_aligns_the_status_column_across_header_and_rows():
     # Given two tables whose names differ in length
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     failed = _grid_report(
         "a_much_longer_name",
@@ -521,7 +529,7 @@ def test_grid_aligns_the_status_column_across_header_and_rows():
 def test_run_summary_footer_counts_changed_unchanged_and_failed():
     # Given a run over one changed, one unchanged, and one failed table
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     unchanged = _grid_report("b")
     failed = _grid_report("c", failures=(ValidationFailure(rule_name="R", message="m"),))
@@ -544,7 +552,7 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
 def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     # Given a run over one changed and one failed table
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     failed = _grid_report("b", failures=(ValidationFailure(rule_name="R", message="m"),))
     sync = SyncReport(
@@ -625,7 +633,7 @@ def test_render_report_failures_section_has_an_underlined_header():
 def test_render_report_has_no_failures_section_when_all_succeed():
     # Given a run where every table succeeds
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -640,7 +648,7 @@ def test_render_report_has_no_failures_section_when_all_succeed():
 def test_render_report_shows_dry_run_banner_only_for_dry_runs():
     # Given the same run rendered as a dry run and as an applied run
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     base = dict(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -659,7 +667,7 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
 def test_render_report_is_titled():
     # Given any run
     changed = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -677,7 +685,7 @@ def test_render_report_is_titled():
 def test_render_diff_is_titled():
     # Given any run
     first = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -695,9 +703,9 @@ def test_render_diff_is_titled():
 def test_render_diff_joins_each_tables_change_block_in_report_order():
     # Given a run over two tables with plans
     first = _grid_report(
-        "a", plan=ActionPlan((SetTableComment(desired_comment="c", observed_comment=""),))
+        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
     )
-    second = _grid_report("b", plan=ActionPlan((AddColumn(DesiredColumn("age", Integer())),)))
+    second = _grid_report("b", plan=_plan("b", AddColumn(DesiredColumn("age", Integer()))))
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),

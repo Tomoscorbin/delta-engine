@@ -77,6 +77,7 @@ def test_plan_diff_accepts_safe_actions():
     result = plan_diff(diff)
 
     assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == _NAME
     assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
 
 
@@ -149,6 +150,7 @@ def test_plan_diff_accepts_no_op_as_an_empty_plan():
     result = plan_diff(diff_table(_desired(), _observed()))
 
     assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == _NAME
     assert result.plan.actions == ()
 
 
@@ -168,6 +170,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     result = plan_diff(diff_table(desired, None))
 
     assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == desired.qualified_name
     assert result.plan.actions == (
         CreateTable(desired),
         SetTableTag(name="env", value="dev"),
@@ -360,6 +363,7 @@ def test_plan_carries_the_observed_relation_kind():
 
     # Then the plan knows what its actions lower against
     assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == desired.qualified_name
     assert result.plan.kind is TableKind.STREAMING_TABLE
 
 
@@ -369,4 +373,5 @@ def test_creation_plan_carries_the_ordinary_table_kind():
     result = plan_diff(diff_table(_desired(), None))
 
     assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == _NAME
     assert result.plan.kind is TableKind.TABLE
