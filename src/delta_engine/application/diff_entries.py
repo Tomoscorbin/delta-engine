@@ -199,7 +199,10 @@ def _(action: UnsetProperty) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetTableTag) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.TAGS, "~", (f"{action.name} = '{action.value}'",)),)
+    text = f"{action.name} = '{action.desired_value}'"
+    if action.observed_value is None:
+        return (DiffEntry(DiffCategory.TAGS, "+", (text,)),)
+    return (DiffEntry(DiffCategory.TAGS, "~", (f"{text} (was '{action.observed_value}')",)),)
 
 
 @action_entries.register
@@ -209,8 +212,10 @@ def _(action: UnsetTableTag) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: SetColumnTag) -> tuple[DiffEntry, ...]:
-    text = f"column {action.column_name}.{action.name} = '{action.value}'"
-    return (DiffEntry(DiffCategory.TAGS, "~", (text,)),)
+    text = f"column {action.column_name}.{action.name} = '{action.desired_value}'"
+    if action.observed_value is None:
+        return (DiffEntry(DiffCategory.TAGS, "+", (text,)),)
+    return (DiffEntry(DiffCategory.TAGS, "~", (f"{text} (was '{action.observed_value}')",)),)
 
 
 @action_entries.register

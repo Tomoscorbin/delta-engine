@@ -246,8 +246,8 @@ def test_column_tag_drift_produces_set_and_unset_changes():
         change for change in diff.actions if isinstance(change, (SetColumnTag, UnsetColumnTag))
     }
     assert tag_changes == {
-        SetColumnTag(column_name="id", name="new", value="x"),
-        SetColumnTag(column_name="id", name="pii", value="true"),
+        SetColumnTag(column_name="id", name="new", desired_value="x", observed_value=None),
+        SetColumnTag(column_name="id", name="pii", desired_value="true", observed_value="false"),
         UnsetColumnTag(column_name="id", name="old"),
     }
 
@@ -266,7 +266,10 @@ def test_added_columns_tags_produce_set_facts():
 
     # Then the added column's tags are changes too — ADD_COLUMN precedes SET_COLUMN_TAG
     assert isinstance(diff, TableDrift)
-    assert SetColumnTag(column_name="new", name="pii", value="true") in diff.actions
+    assert (
+        SetColumnTag(column_name="new", name="pii", desired_value="true", observed_value=None)
+        in diff.actions
+    )
 
 
 def test_identical_column_tags_produce_no_changes():
@@ -442,9 +445,19 @@ def test_table_tag_drift_produces_set_and_unset_changes():
     # Then the declared tag is set and the undeclared tag is unset — full-state
     assert isinstance(diff, TableDrift)
     assert set(diff.actions) == {
-        SetTableTag(name="env", value="prod"),
+        SetTableTag(name="env", desired_value="prod", observed_value=None),
         UnsetTableTag(name="stale"),
     }
+
+
+def test_changed_table_tag_preserves_observed_value():
+    diff = diff_table(
+        _desired(tags={"env": "prod"}),
+        _observed(tags={"env": "dev"}),
+    )
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (SetTableTag(name="env", desired_value="prod", observed_value="dev"),)
 
 
 # ---------- partitioning change

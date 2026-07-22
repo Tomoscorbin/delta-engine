@@ -383,7 +383,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` DROP CONSTRAINT IF EXISTS `orders_customer_id_fk`",
         ),
         (
-            SetTableTag(name="env", value="prod"),
+            SetTableTag(name="env", desired_value="prod", observed_value=None),
             "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('env'='prod')",
         ),
         (
@@ -391,7 +391,9 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` UNSET TAGS ('env')",
         ),
         (
-            SetColumnTag(column_name="email", name="pii", value="true"),
+            SetColumnTag(
+                column_name="email", name="pii", desired_value="true", observed_value=None
+            ),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('pii'='true')",
         ),
         (
@@ -467,11 +469,11 @@ def test_set_foreign_key_renders_composite_fk():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT 'it''s the key'",
         ),
         (
-            SetTableTag(name="o'k", value="v'x"),
+            SetTableTag(name="o'k", desired_value="v'x", observed_value=None),
             "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('o''k'='v''x')",
         ),
         (
-            SetColumnTag(column_name="email", name="o'k", value="v'x"),
+            SetColumnTag(column_name="email", name="o'k", desired_value="v'x", observed_value=None),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `email` SET TAGS ('o''k'='v''x')",
         ),
     ],
@@ -499,6 +501,33 @@ def test_set_property_sql_ignores_observed_value():
 
     # Then observed_value has no effect on rendered SQL
     assert first_statement == update_statement
+
+
+@pytest.mark.parametrize(
+    ("addition", "replacement"),
+    [
+        (
+            SetTableTag(name="env", desired_value="prod", observed_value=None),
+            SetTableTag(name="env", desired_value="prod", observed_value="dev"),
+        ),
+        (
+            SetColumnTag(
+                column_name="email",
+                name="pii",
+                desired_value="true",
+                observed_value=None,
+            ),
+            SetColumnTag(
+                column_name="email",
+                name="pii",
+                desired_value="true",
+                observed_value="false",
+            ),
+        ),
+    ],
+)
+def test_set_tag_sql_ignores_observed_value(addition: Action, replacement: Action):
+    assert _compile_single(addition) == _compile_single(replacement)
 
 
 def test_every_action_type_has_a_registered_compiler():
@@ -550,13 +579,13 @@ def test_create_table_properties_are_mapping_order_independent_and_omit_absent_k
 
 def test_tag_statements_compile_with_the_streaming_table_dialect():
     cases = {
-        SetTableTag(name="owner", value="gov"): (
+        SetTableTag(name="owner", desired_value="gov", observed_value=None): (
             "ALTER STREAMING TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
         ),
         UnsetTableTag(name="owner"): (
             "ALTER STREAMING TABLE `cat`.`sch`.`tbl` UNSET TAGS ('owner')"
         ),
-        SetColumnTag(column_name="id", name="pii", value="low"): (
+        SetColumnTag(column_name="id", name="pii", desired_value="low", observed_value=None): (
             "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET TAGS ('pii'='low')"
         ),
         UnsetColumnTag(column_name="id", name="pii"): (
@@ -568,7 +597,7 @@ def test_tag_statements_compile_with_the_streaming_table_dialect():
 
 
 def test_ordinary_tables_keep_the_alter_table_dialect():
-    statement = _compile_single(SetTableTag(name="owner", value="gov"))
+    statement = _compile_single(SetTableTag(name="owner", desired_value="gov", observed_value=None))
 
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
 

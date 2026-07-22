@@ -70,10 +70,16 @@ class TableMissing:
         follow-up actions.
         """
         table_tag_actions = tuple(
-            SetTableTag(name=name, value=value) for name, value in self.desired.tags.items()
+            SetTableTag(name=name, desired_value=value, observed_value=None)
+            for name, value in self.desired.tags.items()
         )
         column_tag_actions = tuple(
-            SetColumnTag(column_name=column.name, name=name, value=value)
+            SetColumnTag(
+                column_name=column.name,
+                name=name,
+                desired_value=value,
+                observed_value=None,
+            )
             for column in self.desired.columns
             for name, value in column.tags.items()
         )
@@ -268,7 +274,12 @@ def _diff_columns(alignment: _ColumnAlignment) -> list[Action]:
     for desired in alignment.added:
         actions.append(AddColumn(column=desired))
         actions.extend(
-            SetColumnTag(column_name=desired.name, name=name, value=value)
+            SetColumnTag(
+                column_name=desired.name,
+                name=name,
+                desired_value=value,
+                observed_value=None,
+            )
             for name, value in desired.tags.items()
         )
 
@@ -306,9 +317,18 @@ def _diff_columns(alignment: _ColumnAlignment) -> list[Action]:
                 )
             )
 
-        for name, value in desired.tags.items():
-            if observed.tags.get(name) != value:
-                actions.append(SetColumnTag(column_name=desired.name, name=name, value=value))
+        for name, desired_value in desired.tags.items():
+            observed_value = observed.tags.get(name)
+            if observed_value != desired_value:
+                actions.append(
+                    SetColumnTag(
+                        column_name=desired.name,
+                        name=name,
+                        desired_value=desired_value,
+                        observed_value=observed_value,
+                    )
+                )
+
         actions.extend(
             UnsetColumnTag(column_name=desired.name, name=name)
             for name in observed.tags
@@ -380,9 +400,16 @@ def _diff_table_tags(
 ) -> list[SetTableTag | UnsetTableTag]:
     """Return full-state table-tag actions."""
     actions: list[SetTableTag | UnsetTableTag] = []
-    for name, value in desired.tags.items():
-        if observed.tags.get(name) != value:
-            actions.append(SetTableTag(name=name, value=value))
+    for name, desired_value in desired.tags.items():
+        observed_value = observed.tags.get(name)
+        if observed_value != desired_value:
+            actions.append(
+                SetTableTag(
+                    name=name,
+                    desired_value=desired_value,
+                    observed_value=observed_value,
+                )
+            )
     for name in observed.tags:
         if name not in desired.tags:
             actions.append(UnsetTableTag(name=name))
