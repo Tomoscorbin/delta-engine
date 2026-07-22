@@ -23,8 +23,6 @@ workflow's ``--dist loadgroup``) and tests share a provisioned table where
 the facts allow.
 """
 
-import time
-
 import pytest
 
 pytest.importorskip("databricks.sql")
@@ -38,6 +36,7 @@ from delta_engine.application.ports import TablePresent
 from delta_engine.databricks import build_sql_engine
 from delta_engine.domain.model import QualifiedName, TableKind
 from delta_engine.schema import Column, DeltaTable, Integer
+from tests.live.capabilities import require_databricks_capability
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     fetch_rows,
@@ -48,9 +47,22 @@ from tests.live.sql_warehouse_live_helpers import (
 
 pytestmark = pytest.mark.xdist_group("streaming_table")
 
-_QUOTA_ERROR_MARKER = "QUOTA_EXCEEDED_EXCEPTION"
-_QUOTA_RETRY_ATTEMPTS = 6
+_QUOTA_ERROR_CONDITION = "QUOTA_EXCEEDED_EXCEPTION"
+_QUOTA_RETRY_TIMEOUT_SECONDS = 100
 _QUOTA_RETRY_WAIT_SECONDS = 20
+_STREAMING_TABLE_UNAVAILABLE_CONDITIONS = {
+    "FEATURE_NOT_ENABLED",
+    "FEATURE_NOT_ON_CLASSIC_WAREHOUSE",
+    "FEATURE_UNAVAILABLE",
+    "STREAMING_TABLE_NOT_SUPPORTED",
+}
+
+
+def _report_quota_retry(condition: str, delay: float) -> None:
+    print(
+        f"streaming-table capability probe hit {condition}; retrying in {delay:g}s",
+        flush=True,
+    )
 
 
 def _create_streaming_table(live_connection, live_tables) -> str:
@@ -65,22 +77,19 @@ def _create_streaming_table(live_connection, live_tables) -> str:
         f"CREATE STREAMING TABLE {qualified_table(table_name)} "
         f"AS SELECT id FROM STREAM({qualified_table(source_name)})"
     )
-    # The one-pipeline quota releases asynchronously after a previous test's
-    # DROP TABLE, so a quota rejection is retried before concluding the
-    # workspace cannot create streaming tables at all. Plain DROP TABLE drops
-    # a streaming table (verified live), so the live_tables teardown owns the
-    # cleanup; the source is dropped after it.
-    attempt = 1
-    while True:
-        try:
-            execute_sql(live_connection, create_statement)
-            return table_name
-        except Exception as exc:  # intentional broad except: environment capability probe
-            if _QUOTA_ERROR_MARKER in str(exc) and attempt < _QUOTA_RETRY_ATTEMPTS:
-                attempt += 1
-                time.sleep(_QUOTA_RETRY_WAIT_SECONDS)
-                continue
-            pytest.skip(f"workspace cannot create a streaming table here: {exc}")
+    # The one-pipeline quota releases asynchronously after a previous DROP TABLE,
+    # so retry that condition against a deadline. The live_tables teardown owns
+    # cleanup for both the streaming table and its source.
+    require_databricks_capability(
+        lambda: execute_sql(live_connection, create_statement),
+        capability="streaming tables",
+        unavailable_conditions=_STREAMING_TABLE_UNAVAILABLE_CONDITIONS,
+        retry_conditions={_QUOTA_ERROR_CONDITION},
+        retry_timeout_seconds=_QUOTA_RETRY_TIMEOUT_SECONDS,
+        retry_interval_seconds=_QUOTA_RETRY_WAIT_SECONDS,
+        report_retry=_report_quota_retry,
+    )
+    return table_name
 
 
 def _table_tags(live_connection, table_name: str) -> dict[str, str]:

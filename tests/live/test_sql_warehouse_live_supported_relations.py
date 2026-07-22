@@ -17,12 +17,19 @@ from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState
 from delta_engine.domain.model import QualifiedName
+from tests.live.capabilities import require_databricks_capability
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     live_catalog,
     live_schema,
     qualified_table,
 )
+
+_ICEBERG_UNAVAILABLE_CONDITIONS = {
+    "UC_DATASOURCE_NOT_SUPPORTED",
+    "UC_MANAGED_ICEBERG_UNSUPPORTED",
+    "UNSUPPORTED_MANAGED_TABLE_CREATION",
+}
 
 
 def _read(live_connection, table_name: str) -> CatalogState:
@@ -54,17 +61,19 @@ def test_a_view_is_not_read_as_a_table(live_connection, live_tables):
 
 def test_a_non_delta_table_is_not_read_as_engine_state(live_connection, live_tables):
     """An Iceberg table fails the read: the engine reads Delta tables only."""
-    # An ordinary managed table in a format the engine's DDL cannot manage.
-    # Skip cleanly if the workspace cannot create one.
+    # Given an ordinary managed table in a format the engine's DDL cannot manage
     table_name = live_tables("relation_iceberg")
-    try:
-        execute_sql(
+    require_databricks_capability(
+        lambda: execute_sql(
             live_connection,
             f"CREATE TABLE {qualified_table(table_name)} (id INT) USING ICEBERG",
-        )
-    except Exception as exc:  # intentional broad except: environment capability probe
-        pytest.skip(f"workspace cannot create an Iceberg table here: {exc}")
+        ),
+        capability="managed Iceberg tables",
+        unavailable_conditions=_ICEBERG_UNAVAILABLE_CONDITIONS,
+    )
 
+    # When the engine reads the non-Delta relation
+    # Then it rejects the relation instead of treating it as manageable state
     with pytest.raises(ReadError) as exc_info:
         _read(live_connection, table_name)
 
