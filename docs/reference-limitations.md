@@ -15,6 +15,7 @@ the page with the detail.
 | Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader reads managed and external Delta tables, plus Delta streaming tables for tag-only management, and any other relation a registered name resolves to (view, materialized view, foreign table, non-Delta format) fails its read ([architecture](explanation-architecture.md)) |
 | Python                | 3.12 or later                                                                                                                                                                                                                                                                                                                                                          |
 | PySpark               | Supplied by Databricks Runtime for the Spark backend and not installed by delta-engine; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                       |
+| Spark runtime         | The installed Delta Engine release enforces its documented DBR range when the Spark engine is constructed ([runtime compatibility](reference-runtime-compatibility.md))                                                                                                                                                                                               |
 | Reads (both backends) | Unity Catalog only — every read is one `DESCRIBE TABLE EXTENDED … AS JSON` plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both the Spark and SQL warehouse backends ([installation](installation.md))                              |
 
 ## Identifier handling
@@ -101,7 +102,7 @@ partitioning:
 | Unsupported key types    | `Array`, `Map`, `Struct`, and `Variant` columns cannot be clustering keys, rejected at declaration                                                             |
 | Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be named in `clustered_by`                     |
 | Stats and column order   | Databricks only collects the file statistics clustering relies on for a table's first 32 columns; a clustering key outside that range gets no skipping benefit |
-| Runtime compatibility    | Liquid clustering requires Databricks Runtime 13.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features)              |
+| Runtime compatibility    | Liquid clustering requires Databricks Runtime 13.3 LTS or later; the global DBR range is checked, but feature availability is not — see [runtime features](#runtime-features) |
 
 ## Concurrent catalog changes
 
@@ -114,16 +115,16 @@ concurrent creators for the same qualified table name.
 
 ## Runtime features
 
-delta-engine does not preflight Databricks Runtime or Delta protocol versions.
-Declaring a feature the workspace or table protocol does not support — key
-constraints, tags, change data feed — fails at execution with the original
-Databricks error. See
+delta-engine enforces the global DBR range for the Spark backend when the
+engine is constructed, but it does not preflight the runtime or Delta protocol
+requirement for every individual feature. Declaring a feature the workspace or
+table protocol does not support — key constraints, tags, change data feed —
+fails at execution with the original Databricks error. See
 [runtime and Delta feature compatibility](how-to-handle-sync-failures.md#runtime-and-delta-feature-compatibility).
 
 Reading a table relies on `DESCRIBE TABLE EXTENDED … AS JSON`, which needs
-Databricks Runtime 16.2 or later, or any SQL warehouse. Primary and foreign keys
-are then read from `information_schema`; because key constraints are available
-from Databricks Runtime 13.3 (GA 15.2) — below the AS JSON read floor — any
-runtime new enough to read a table can also observe its keys. As with every
-other runtime feature, delta-engine documents this floor rather than
-preflighting it — an unsupported runtime surfaces as a read failure.
+Databricks Runtime 16.2 or later, or any SQL warehouse. The Spark backend's
+global 16.4 floor is therefore sufficient for that reader. Primary and foreign
+keys are then read from `information_schema`; because key constraints are
+available below that global floor, any supported Spark runtime can also observe
+its keys.

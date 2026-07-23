@@ -11,7 +11,7 @@ tags:
 | ----------------------------------------- | --------------------------------------------------------------------------- |
 | Python 3.12 or later                      | Everything                                                                  |
 | A Databricks workspace with Unity Catalog | Running syncs against a real catalog                                        |
-| Databricks compute with a `SparkSession`  | Running syncs through the Spark backend                                     |
+| A supported Databricks Runtime with a `SparkSession` | Running syncs through the Spark backend; see [runtime compatibility](reference-runtime-compatibility.md) |
 | A Databricks SQL warehouse connection     | Running syncs through the SQL warehouse backend instead — no PySpark needed |
 
 The base package has no runtime dependencies. Declaring schemas, planning, and
@@ -42,7 +42,9 @@ Databricks provides Spark and Delta at runtime, so the base package is all you
 need there. Do not install `pyspark` or `delta-spark` over the runtime's
 mutually compatible versions. Delta Engine deliberately has no `spark` extra:
 its production Spark reader depends on Databricks Runtime and Unity Catalog
-features that local open-source Spark does not provide.
+features that local open-source Spark does not provide. The Spark factory
+checks the running DBR before doing any table work and fails closed outside the
+[supported range](reference-runtime-compatibility.md).
 
 ## Syncing through a SQL warehouse
 

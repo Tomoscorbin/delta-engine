@@ -33,7 +33,14 @@ def _is_pyspark_import_error(error: ModuleNotFoundError) -> bool:
 
 
 def build_spark_engine(spark: SparkSession) -> Engine:
-    """Create an engine that syncs through an active Spark session."""
+    """
+    Create an engine that syncs through a supported Databricks Spark session.
+
+    Raises:
+        RuntimeError: If PySpark is absent, or the Databricks Runtime is
+            unsupported or cannot be identified.
+
+    """
     try:
         from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
     except ModuleNotFoundError as error:

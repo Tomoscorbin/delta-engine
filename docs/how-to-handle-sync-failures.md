@@ -109,10 +109,15 @@ Execution failures are partial: statements before the failure ran and committed;
 
 ## Runtime and Delta feature compatibility
 
-delta-engine does not preflight Databricks Runtime or Delta table protocol
-versions for every feature it can declare. If you use a Databricks feature such
-as key constraints, tags, deletion vectors, or change data feed, make sure your
-workspace, runtime, table protocol, and privileges support that feature.
+The Spark factory first enforces the global DBR range documented in
+[runtime compatibility](reference-runtime-compatibility.md). It fails before
+constructing an engine if the runtime is unsupported or cannot be identified.
+
+Within that supported range, delta-engine does not preflight the runtime or
+Delta table protocol requirement for every feature it can declare. If you use a
+Databricks feature such as key constraints, tags, deletion vectors, or change
+data feed, make sure your workspace, runtime, table protocol, and privileges
+support that feature.
 
 When Databricks rejects a statement because the runtime or Delta table version is
 too old, the engine reports it as an `EXECUTION_FAILED` table with the original

@@ -10,6 +10,8 @@ name: Release
 #   - "tag" set          -> publish an EXISTING tag as-is (recovery / re-publish),
 #                           with no bump (e.g. tag = v0.1.0).
 #   - "dry_run" checked  -> preview the new-release version without publishing.
+#
+# Before cutting a new release, complete .github/RELEASE_CHECKLIST.md.
 
 on:
   workflow_dispatch:
@@ -105,6 +107,15 @@ jobs:
             awk '/^## /{c++} c==1{print} c==2{exit}' CHANGELOG.md > body.md || true
           fi
           [ -s body.md ] || echo "Release $VERSION" > body.md
+          # Future releases carry the exact Spark DBR range enforced by their
+          # own source. Historical tags without the policy module retain their
+          # historical release body rather than inheriting today's range.
+          if [ -f src/delta_engine/adapters/databricks/spark/runtime.py ]; then
+            echo >> body.md
+            uv run python -c \
+              'from delta_engine.adapters.databricks.spark.runtime import release_compatibility_markdown; print(release_compatibility_markdown())' \
+              >> body.md
+          fi
 
       - name: Build sdist and wheel
         if: steps.mode.outputs.publish == 'true'

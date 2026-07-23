@@ -8,10 +8,11 @@
 # MAGIC asserting the outcome. The `assert` statements are the test suite; this
 # MAGIC cluster is the test runner.
 # MAGIC
-# MAGIC **Requirements:** Databricks Runtime 13.3 LTS or later, Unity Catalog
-# MAGIC enabled (for primary keys, foreign keys, and tags), and the `APPLY TAG`
-# MAGIC privilege on the target schema. Set the `catalog` and `schema` widgets to a
-# MAGIC sandbox you can create and drop tables in.
+# MAGIC **Requirements:** a Databricks Runtime supported by the installed
+# MAGIC delta-engine release, Unity Catalog enabled (for primary keys, foreign
+# MAGIC keys, and tags), and the `APPLY TAG` privilege on the target schema. Set
+# MAGIC the `catalog` and `schema` widgets to a sandbox you can create and drop
+# MAGIC tables in.
 
 # COMMAND ----------
 

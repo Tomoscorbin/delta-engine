@@ -50,15 +50,16 @@ Treat distribution, compatibility, and usability as one product contract:
 3. Document a distinct installation path for each kind of user.
 4. Validate the built wheel and sdist, and exercise the exact wheel that consumers
    install rather than only the editable development checkout.
-5. Advertise compatibility only where there is test evidence, while allowing newer,
-   unknown environments to run unless a concrete incompatibility is known.
+5. Publish an explicit Spark DBR range and fail closed outside it; keep the supported
+   range separate from the narrower set of environments with live-test evidence.
 6. Make dependency, Python, and Databricks Runtime changes visible in the changelog and
    support matrix.
 7. Prefer a feature-level requirement over raising the whole package's environment floor.
 
-The goal is not to predict and prohibit every future incompatibility through package
-bounds. It is to make installation unsurprising, find incompatibilities early, and give
-users an exact, documented version combination they can keep running.
+The goal is not to predict every future incompatibility through Python package bounds.
+It is to make installation unsurprising, stop untested DBR major families before table
+work begins, and give users an exact, documented version combination they can keep
+running.
 
 ## Current distribution and versioning contract
 
@@ -221,18 +222,19 @@ environment-compatibility concerns.
 
 ## Databricks Runtime compatibility
 
-The current reader requires `DESCRIBE TABLE EXTENDED ... AS JSON`, establishing a
-Databricks Runtime floor of 16.2 for Spark compute. SQL warehouses support the same
+The current reader requires `DESCRIBE TABLE EXTENDED ... AS JSON`, which would establish
+a technical floor of DBR 16.2. The published Spark support floor is the maintained 16.4
+LTS line, and the exclusive maximum is DBR 19. SQL warehouses support the same read
 operation independently of a numbered cluster runtime.
 
 The relevant Databricks Runtime snapshot at review time is:
 
-| Runtime | Python | Apache Spark | Delta Lake | Proposed status |
+| Runtime | Python | Apache Spark | Delta Lake | Support policy |
 | --- | --- | --- | --- | --- |
-| 16.4 LTS | 3.12.3 | 3.5.2 | 3.3.1 | Supported and tested |
-| 17.3 LTS | 3.12.3 | 4.0.0 | 4.0.0 | Supported and tested |
-| 18 | 3.12.3 | 4.1.0 | 4.2.0 | Supported and tested |
-| 19 Beta | 3.12.3 | 4.2.0 | 4.2.0 | Experimental until a live smoke test passes |
+| 16.4 LTS | 3.12.3 | 3.5.2 | 3.3.1 | Supported by `>=16.4,<19`; not yet live-tested on classic compute |
+| 17.3 LTS | 3.12.3 | 4.0.0 | 4.0.0 | Supported by `>=16.4,<19`; not yet live-tested on classic compute |
+| 18 | 3.12.3 | 4.1.0 | 4.2.0 | Supported; Free Edition serverless reports the `18.x` family |
+| 19 Beta | 3.12.3 | 4.2.0 | 4.2.0 | Blocked until reviewed, tested, and enabled in a delta-engine release |
 
 This is a dated snapshot, not a permanent promise. Track the official
 [Databricks Runtime compatibility table](https://docs.databricks.com/aws/en/release-notes/runtime)
@@ -285,53 +287,43 @@ for tests on Databricks Runtime.
 
 ### Runtime assurance
 
-Publish a tested-runtime matrix and run a thin scheduled Spark smoke suite on:
+Publish the enforced range separately from live evidence. Before each release, build the
+candidate wheel from the exact `main` commit and run the focused Spark smoke notebook on
+Databricks Free Edition serverless compute. It builds the engine, creates an isolated
+table, proves a no-op, applies a safe change, proves convergence, and cleans up. Run the
+existing SQL warehouse live suite separately.
 
-1. the oldest supported LTS;
-2. each supported current LTS;
-3. the newest GA runtime;
-4. the newest beta as a non-blocking early warning.
-
-The smoke suite should install the exact released base wheel, import the public surfaces,
-build a Spark engine, read an existing table, plan a no-op and a change, and safely
-create/read/drop an isolated table. A beta failure should change the beta's documented
-status, not break supported releases.
+Free Edition cannot select classic DBR 16.4 or 17.3, so its result must not be presented
+as live evidence for those numbered runtimes. Add classic evidence only when the
+candidate wheel actually runs on selectable classic compute. No scheduled cluster
+matrix or cost-management automation is required for the initial policy.
 
 ### Forward-compatibility and support policy
 
-A passing runtime matrix is evidence about specific releases, not a guarantee about every
-future Databricks Runtime. Treat compatibility as an explicit, versioned product contract
-with four states:
+Compatibility is an explicit, versioned, fail-closed contract:
 
 | State | Meaning | Behaviour |
 | --- | --- | --- |
-| Minimum supported | Oldest runtime on which the package's baseline operations are maintained | Fail clearly below it |
-| Tested | Runtimes exercised by the live suite for this package release | Fully supported |
-| Newer, untested | A runtime newer than the tested ceiling with no known incompatibility | Allow it to run; do not claim tested support |
-| Known incompatible | A runtime for which a concrete failure is known | Fail early or publish a constrained package recommendation |
+| Supported | The runtime is inside the release's declared range | Construct the Spark engine |
+| Live-tested | A supported environment exercised by the recorded candidate smoke | Publish the evidence and date |
+| Outside range | The runtime is below the floor or at/above the exclusive maximum | Fail at Spark engine construction |
+| Unknown | The version query fails or returns an unparseable value | Fail because compatibility cannot be established |
 
-Do not encode the newest tested runtime as a hard upper limit. That would turn every
-compatible Databricks release into an unnecessary outage. Detect and reject known-old or
-known-bad environments, while scheduled beta/current-runtime tests provide early warning
-about forward incompatibilities.
+For example, a release declaring `>=16.4,<19` refuses DBR 19 even if it might work:
 
-For example, if `delta-engine 0.8` is tested on DBR 16.4, 17.3, and 18 when DBR
-19 appears:
+1. Change the candidate branch to permit DBR 19.
+2. Run the compatibility suite and live smoke against DBR 19.
+3. Make any required compatibility changes.
+4. Publish a patch release with the range expanded to `<20`.
 
-1. Test the already-released `delta-engine 0.8` wheel on DBR 19.
-2. If it passes, add DBR 19 to the tested matrix. A matching delta-engine release is not
-   required.
-3. If it needs a small compatibility change, release `0.8.1` with both the old and new
-   paths so it supports DBR 16.4 through 19.
-4. If only a new optional feature requires DBR 19, release it without changing the global
-   floor; attempts to use that feature on DBR 16.4 fail clearly, while ordinary operations
-   continue to work.
-5. Only if supporting both generations is impractical should a breaking delta-engine line
-   raise the minimum runtime. DBR 16.4 users then pin the final compatible package line.
+There is no one-to-one package numbering scheme such as “DBR 19 requires delta-engine
+19.” Each Delta Engine release declares a bounded range. New DBR families remain blocked
+until a new Delta Engine release expands that range.
 
-There is no intended one-to-one mapping such as “DBR 19 requires delta-engine 19.” Each
-delta-engine release supports a range of runtimes, and a new runtime first gets tested
-against the package that already exists.
+Databricks Runtime 18 and later use a unified release family that receives dated updates
+without changing the major number. A `<19` check can block DBR 19, but it cannot
+distinguish two dated DBR 18 images. Release-time live evidence records the image tested;
+the range is not a guarantee against every later platform update within the same family.
 
 Databricks gives LTS runtimes three years of support and recommends the latest LTS for
 stable workloads. A reasonable delta-engine policy is to support the current and previous
@@ -364,16 +356,15 @@ genuinely cannot operate on the older runtime.
 If the global floor must rise, make the package boundary explicit:
 
 ```text
-delta-engine old release line  -> DBR 16.4 and later
-delta-engine new breaking line -> DBR 18 and later
+delta-engine old release line  -> DBR >=16.4,<19
+delta-engine new breaking line -> DBR >=18,<20
 ```
 
 Old-runtime deployments must pin the old compatible package line. Python package metadata
 cannot make pip choose a delta-engine version from the Databricks Runtime version, so an
 unpinned `pip install delta-engine` cannot provide this guarantee automatically. The
-package should detect an unsupported baseline when the Databricks engine is constructed
-and report the newest compatible delta-engine range, while production jobs pin exact
-versions.
+package detects an unsupported runtime when the Databricks Spark engine is constructed
+and reports its own supported range, while production jobs pin exact versions.
 
 Before 1.0, a dropped runtime may technically be represented by a minor version under
 SemVer, but users still need an explicit compatibility promise. Once the public contract
@@ -472,11 +463,12 @@ Strengthen the runtime guard by:
       suite; do not add separate minimum, maximum, or newest-compatible matrices.
 - [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than
       a published compatibility promise.
-- [ ] Add live Spark-backend smoke tests for the documented Databricks Runtime matrix.
-- [ ] Publish supported, tested, and experimental runtime statuses in user-facing docs.
+- [x] Add a focused manual Free Edition Spark smoke notebook and release checklist;
+      keep classic-runtime evidence explicitly pending until those runtimes are exercised.
+- [x] Publish the enforced Spark range separately from live evidence in user-facing docs.
 - [ ] Define the supported-LTS window, deprecation notice, and maintenance period for the
       final package line supporting a retired runtime.
-- [ ] Add an adapter-private runtime context and a clear baseline incompatibility error;
+- [x] Add an adapter-private runtime context and a clear baseline incompatibility error;
       keep it out of base-package import paths.
 - [ ] Define feature-level runtime requirements where a reliable preflight prevents
       partial execution; do not raise the global baseline for optional features.

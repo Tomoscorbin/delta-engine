@@ -67,7 +67,7 @@ for what is and isn't backend-neutral, and
 | Install the package and sync your first table  | [Installation](installation.md), [Getting started](tutorial-getting-started.md) |
 | Run read-only schema plans in GitHub Actions    | [CLI reference](reference-cli.md)                                              |
 | Understand what a sync does before running one | [How a sync works](explanation-sync-lifecycle.md)                               |
-| Check whether the engine supports something    | [Capabilities and limitations](reference-limitations.md)                        |
+| Check whether the engine supports something    | [Capabilities and limitations](reference-limitations.md), [runtime compatibility](reference-runtime-compatibility.md) |
 | Declare keys, properties, tags, or comments    | The how-to guides in the sidebar                                                |
 | See why a change was rejected                  | [Safe-change rules](reference-safe-change-rules.md)                             |
 | Understand the internals or add a backend      | [Architecture](explanation-architecture.md)                                     |
@@ -104,6 +104,7 @@ how-to-handle-sync-failures
 :caption: Reference
 
 reference-limitations
+reference-runtime-compatibility
 reference-data-types
 reference-safe-change-rules
 reference-run-report

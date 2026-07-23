@@ -34,7 +34,10 @@ base package and use the runtime's Spark and Delta libraries. Outside
 Databricks compute, install the `[sql]` extra to sync through a SQL warehouse
 — for example, schema sync from CI without a Spark session or cluster. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
-for the supported installation paths and their requirements.
+for the supported installation paths and their requirements. The Spark backend
+also enforces the installed release's documented
+[Databricks Runtime range](https://tomoscorbin.github.io/delta-engine/reference-runtime-compatibility.html)
+when the engine is constructed.
 
 Install `delta-engine[cli]` to run
 `delta-engine plan MODULE:ATTRIBUTE` through any standard Databricks
@@ -102,6 +105,7 @@ for the model, or jump to what you need:
 
 - [CLI](https://tomoscorbin.github.io/delta-engine/reference-cli.html) — the read-only plan command, connection contract, output, and exit codes
 - [Capabilities and limitations](https://tomoscorbin.github.io/delta-engine/reference-limitations.html) — what the engine can and cannot manage
+- [Databricks runtime compatibility](https://tomoscorbin.github.io/delta-engine/reference-runtime-compatibility.html) — supported Spark DBRs and live evidence
 - [Data types](https://tomoscorbin.github.io/delta-engine/reference-data-types.html) — supported types and Spark SQL equivalents
 - [Safe-change rules](https://tomoscorbin.github.io/delta-engine/reference-safe-change-rules.html) — changes the engine blocks at validation
 - [Run report schema](https://tomoscorbin.github.io/delta-engine/reference-run-report.html) — the `to_dict()` payload, field by field

@@ -9,7 +9,7 @@ the test suite; running the notebook on a cluster is how you run them.
 
 ### Requirements
 
-- Databricks Runtime 13.3 LTS or later
+- A Databricks Runtime supported by the installed delta-engine release
 - Unity Catalog enabled (for primary keys, foreign keys, and tags)
 - `APPLY TAG` privilege on the target schema, plus permission to create and drop
   tables there
@@ -32,3 +32,15 @@ notebooks, not into imported files).
 A successful run prints a verification line after each act and raises nothing. If
 any `assert` fails, that act's expectation was not met — read the printed report
 above the failure.
+
+## release_smoke_test.py
+
+A focused pre-release check for the Spark backend on Databricks Free Edition.
+It reports the installed delta-engine and Databricks versions, constructs the
+engine, creates an isolated table, verifies a no-op, applies a safe comment
+change, verifies convergence, and drops the table in `finally`.
+
+Build the candidate wheel from the exact `main` commit, upload it to the
+workspace, and install it before running the notebook. Set the `catalog` and
+`schema` widgets to a disposable Unity Catalog namespace. Record the output as
+described in `.github/RELEASE_CHECKLIST.md`.
