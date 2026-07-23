@@ -26,28 +26,25 @@ a particular change needs it: ``columnMapping`` to drop or rename a column,
 carry real cost, and each is reached through a managed property — so they are
 declared, and validation refuses the change when they are not
 (``ColumnMappingRequiredForDrop``, ``TypeWideningRequiredForTypeChange`` in
-``application/validation.py``). They never appear in ``ImpliedFeature``.
+``application/validation.py``). They never appear below.
 
 Platform-managed features (``deletionVectors``, ``rowTracking``, ``invariants``)
 are neither kind: the engine leaves them alone entirely.
 
 Admission therefore reduces to one question — can the declared shape exist
-without this feature? If yes, it is not ours. Everything a feature needs lives
-in its definition below: what implies it, the name the engine writes to enable
-it, and every name the catalog may record it under. Databricks spells features
-as ordinary table properties (``delta.feature.<name> = 'supported'``), so the
-adapters read and compile through this policy and hold no feature knowledge of
-their own.
-
-``ImpliedFeature`` is the single source of the managed feature names, and its
-values — plain strings — are what a desired table records as implied and an
-observed table records as supported. The domain compares those two sets and
+without this feature? If yes, it is not ours. The definitions below are the
+whole vocabulary: each names a feature, the declared type that implies it, the
+name the engine writes to enable it, and every name the catalog may record it
+under. Databricks spells features as ordinary table properties
+(``delta.feature.<name> = 'supported'``), so the adapters read and compile
+through this policy and hold no feature knowledge of their own. A feature's
+name — a plain string — is what a desired table records as implied and an
+observed table records as supported; the domain compares those two sets and
 plans the difference without holding the vocabulary itself.
 """
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Final
 
 from delta_engine.domain.model.column import DesiredColumn
@@ -66,26 +63,22 @@ _FEATURE_PROPERTY_PREFIX: Final = "delta.feature."
 _SUPPORTED: Final = "supported"
 
 
-class ImpliedFeature(StrEnum):
-    """A Delta table feature a declared schema cannot exist without."""
-
-    TIMESTAMP_NTZ = "timestampNtz"
-    VARIANT = "variantType"
-
-
 @dataclass(frozen=True, slots=True)
 class FeatureDefinition:
     """
-    One implied feature, and the judgments the engine needs about it.
+    One managed feature, and the judgments the engine needs about it.
 
-    ``implied_by`` is the declared type whose storage needs the feature, found
-    at any depth of a column's type tree. ``enable_name`` is the name the engine
-    writes to enable it, and ``observed_names`` every name the catalog may
-    record it under — a feature that outlives a preview keeps its old spelling
-    on existing tables, so the two differ.
+    ``name`` is the Delta protocol name, and the identity the rest of the
+    engine carries: a desired table records it as implied, an observed table
+    as supported, and an enablement action names it. ``implied_by`` is the
+    declared type whose storage needs the feature, found at any depth of a
+    column's type tree. ``enable_name`` is the name the engine writes to
+    enable it, and ``observed_names`` every name the catalog may record it
+    under — a feature that outlives a preview keeps its old spelling on
+    existing tables, so the two can differ.
     """
 
-    feature: ImpliedFeature
+    name: str
     implied_by: type[DataType]
     enable_name: str
     observed_names: frozenset[str]
@@ -103,44 +96,31 @@ class FeaturePolicy:
 
         The lookups built here are validation scaffolding, not state: with a
         handful of definitions the accessors below scan them directly, so
-        nothing is cached and the policy stays an ordinary frozen value.
+        nothing is cached and the policy stays an ordinary frozen value. They
+        are also built by hand rather than by comprehension, because a
+        duplicate key would otherwise be dropped in silence, leaving a type or
+        a catalog name resolving to the wrong feature.
         """
-        definitions_by_feature = {
-            definition.feature: definition for definition in self.definitions
-        }
-
-        if len(definitions_by_feature) != len(self.definitions):
+        names = [definition.name for definition in self.definitions]
+        if len(set(names)) != len(names):
             raise ValueError("Feature policy contains duplicate feature definitions")
 
-        # ImpliedFeature is the vocabulary; every member needs an encoding, or
-        # planning its enablement would fail at compile time.
-        undefined = sorted(
-            feature.value for feature in ImpliedFeature if feature not in definitions_by_feature
-        )
-        if undefined:
-            raise ValueError(f"Feature policy defines no encoding for: {', '.join(undefined)}")
-
-        # Both lookups below are built by hand rather than by comprehension:
-        # a duplicate key would otherwise be dropped in silence, leaving a
-        # type or a catalog name resolving to the wrong feature.
-        features_by_type: dict[type[DataType], ImpliedFeature] = {}
+        features_by_type: dict[type[DataType], str] = {}
+        features_by_observed_name: dict[str, str] = {}
         for definition in self.definitions:
-            claimed = features_by_type.setdefault(definition.implied_by, definition.feature)
-            if claimed is not definition.feature:
+            claimed = features_by_type.setdefault(definition.implied_by, definition.name)
+            if claimed != definition.name:
                 raise ValueError(
-                    f"Feature policy implies both {claimed.value} and"
-                    f" {definition.feature.value} from {definition.implied_by.__name__};"
-                    " a declared type resolves to one feature"
+                    f"Feature policy implies both {claimed} and {definition.name} from"
+                    f" {definition.implied_by.__name__}; a declared type resolves to"
+                    " one feature"
                 )
-
-        features_by_observed_name: dict[str, ImpliedFeature] = {}
-        for definition in self.definitions:
-            for name in sorted(definition.observed_names):
-                claimed = features_by_observed_name.setdefault(name, definition.feature)
-                if claimed is not definition.feature:
+            for observed in sorted(definition.observed_names):
+                claimed = features_by_observed_name.setdefault(observed, definition.name)
+                if claimed != definition.name:
                     raise ValueError(
-                        f"Feature policy observes {name!r} as both {claimed.value} and"
-                        f" {definition.feature.value}; a catalog name resolves to one feature"
+                        f"Feature policy observes {observed!r} as both {claimed} and"
+                        f" {definition.name}; a catalog name resolves to one feature"
                     )
 
         # Enabling a feature must observe back as that same feature, or every
@@ -148,9 +128,9 @@ class FeaturePolicy:
         # resolved name rather than mere membership also catches an enable
         # name that another definition claims.
         misrouted = sorted(
-            definition.feature.value
+            definition.name
             for definition in self.definitions
-            if features_by_observed_name.get(definition.enable_name) is not definition.feature
+            if features_by_observed_name.get(definition.enable_name) != definition.name
         )
         if misrouted:
             raise ValueError(
@@ -160,10 +140,10 @@ class FeaturePolicy:
 
     def implied_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
         """Return the names of every managed feature these columns' types imply."""
-        implied: set[ImpliedFeature] = set()
+        implied: set[str] = set()
         for column in columns:
             implied |= self._features_implied_by(column.data_type)
-        return frozenset(feature.value for feature in implied)
+        return frozenset(implied)
 
     def supported_features(self, properties: Mapping[str, str]) -> frozenset[str]:
         """
@@ -178,37 +158,37 @@ class FeaturePolicy:
         string, and misreading a feature fabricates neither drift nor a blocked
         change.
         """
-        supported: set[ImpliedFeature] = set()
+        supported: set[str] = set()
         for key, value in properties.items():
             if value != _SUPPORTED or not key.startswith(_FEATURE_PROPERTY_PREFIX):
                 continue
-            feature = self._feature_observed_as(key.removeprefix(_FEATURE_PROPERTY_PREFIX))
-            if feature is not None:
-                supported.add(feature)
-        return frozenset(feature.value for feature in supported)
+            name = self._feature_observed_as(key.removeprefix(_FEATURE_PROPERTY_PREFIX))
+            if name is not None:
+                supported.add(name)
+        return frozenset(supported)
 
     def enable_property(self, feature: str) -> tuple[str, str]:
         """Return the ``(key, value)`` table property that enables ``feature``."""
         for definition in self.definitions:
-            if definition.feature == feature:
+            if definition.name == feature:
                 return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
         raise ValueError(f"No managed table feature named {feature!r}")
 
-    def _feature_observed_as(self, name: str) -> ImpliedFeature | None:
+    def _feature_observed_as(self, name: str) -> str | None:
         """Return the feature the catalog records under ``name``, if it is managed."""
         for definition in self.definitions:
             if name in definition.observed_names:
-                return definition.feature
+                return definition.name
         return None
 
-    def _feature_implied_by(self, data_type: DataType) -> ImpliedFeature | None:
+    def _feature_implied_by(self, data_type: DataType) -> str | None:
         """Return the feature this exact declared type implies, if any."""
         for definition in self.definitions:
             if type(data_type) is definition.implied_by:
-                return definition.feature
+                return definition.name
         return None
 
-    def _features_implied_by(self, data_type: DataType) -> frozenset[ImpliedFeature]:
+    def _features_implied_by(self, data_type: DataType) -> frozenset[str]:
         """Walk a type tree, collecting the features its leaves imply."""
         match data_type:
             case Array(element=element):
@@ -216,24 +196,24 @@ class FeaturePolicy:
             case Map(key=key, value=value):
                 return self._features_implied_by(key) | self._features_implied_by(value)
             case Struct(fields=fields):
-                empty: frozenset[ImpliedFeature] = frozenset()
+                empty: frozenset[str] = frozenset()
                 return empty.union(
                     *(self._features_implied_by(field.data_type) for field in fields)
                 )
             case _:
-                feature = self._feature_implied_by(data_type)
-                return frozenset() if feature is None else frozenset({feature})
+                name = self._feature_implied_by(data_type)
+                return frozenset() if name is None else frozenset({name})
 
 
 _DEFINITIONS: Final[tuple[FeatureDefinition, ...]] = (
     FeatureDefinition(
-        feature=ImpliedFeature.TIMESTAMP_NTZ,
+        name="timestampNtz",
         implied_by=TimestampNtz,
         enable_name="timestampNtz",
         observed_names=frozenset({"timestampNtz"}),
     ),
     FeatureDefinition(
-        feature=ImpliedFeature.VARIANT,
+        name="variantType",
         implied_by=Variant,
         # Databricks documents 'variantType-preview' as the enable key. If a
         # live run shows the platform rejecting it, or recording the GA name

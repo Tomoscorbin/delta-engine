@@ -6,7 +6,6 @@ from delta_engine.application.features import (
     DELTA_FEATURE_POLICY,
     FeatureDefinition,
     FeaturePolicy,
-    ImpliedFeature,
 )
 from delta_engine.domain.model import (
     Array,
@@ -29,9 +28,10 @@ def _implied(*data_types) -> frozenset[str]:
     return DELTA_FEATURE_POLICY.implied_features(columns)
 
 
-def test_feature_values_are_delta_protocol_names():
-    assert ImpliedFeature.TIMESTAMP_NTZ.value == "timestampNtz"
-    assert ImpliedFeature.VARIANT.value == "variantType"
+def test_the_managed_vocabulary_is_the_two_type_implied_features():
+    names = {definition.name for definition in DELTA_FEATURE_POLICY.definitions}
+
+    assert names == {"timestampNtz", "variantType"}
 
 
 def test_feature_free_types_imply_nothing():
@@ -118,15 +118,17 @@ def test_enable_property_is_a_supported_feature_key():
 def test_every_feature_enables_under_a_name_it_observes():
     # Round-tripping through observation is what keeps a sync idempotent: an
     # enablement the engine cannot then see would be re-planned forever.
-    for feature in ImpliedFeature:
-        key, value = DELTA_FEATURE_POLICY.enable_property(feature)
+    for definition in DELTA_FEATURE_POLICY.definitions:
+        key, value = DELTA_FEATURE_POLICY.enable_property(definition.name)
 
-        assert DELTA_FEATURE_POLICY.supported_features({key: value}) == frozenset({feature.value})
+        assert DELTA_FEATURE_POLICY.supported_features({key: value}) == frozenset(
+            {definition.name}
+        )
 
 
-def _definition(feature, implied_by, enable_name, *observed_names) -> FeatureDefinition:
+def _definition(name, implied_by, enable_name, *observed_names) -> FeatureDefinition:
     return FeatureDefinition(
-        feature=feature,
+        name=name,
         implied_by=implied_by,
         enable_name=enable_name,
         observed_names=frozenset(observed_names or {enable_name}),
@@ -136,8 +138,8 @@ def _definition(feature, implied_by, enable_name, *observed_names) -> FeatureDef
 def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
     # Given a full vocabulary whose one enable name is observed by nobody
     definitions = (
-        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtzV2", "timestampNtz"),
-        _definition(ImpliedFeature.VARIANT, Variant, "variantType"),
+        _definition("timestampNtz", TimestampNtz, "timestampNtzV2", "timestampNtz"),
+        _definition("variantType", Variant, "variantType"),
     )
 
     # When building a policy from them, construction fails rather than yielding
@@ -150,8 +152,8 @@ def test_policy_rejects_an_enable_name_another_feature_observes():
     # The name is observable, but as the wrong feature: enabling timestampNtz
     # would read back as variantType, so the enable is re-planned forever.
     definitions = (
-        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "variantType", "timestampNtz"),
-        _definition(ImpliedFeature.VARIANT, Variant, "variantType"),
+        _definition("timestampNtz", TimestampNtz, "variantType", "timestampNtz"),
+        _definition("variantType", Variant, "variantType"),
     )
 
     with pytest.raises(ValueError, match="observe back as the same feature: timestampNtz"):
@@ -160,8 +162,8 @@ def test_policy_rejects_an_enable_name_another_feature_observes():
 
 def test_policy_rejects_two_features_sharing_an_observed_name():
     definitions = (
-        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtz", "shared"),
-        _definition(ImpliedFeature.VARIANT, Variant, "variantType", "shared"),
+        _definition("timestampNtz", TimestampNtz, "timestampNtz", "shared"),
+        _definition("variantType", Variant, "variantType", "shared"),
     )
 
     with pytest.raises(ValueError, match="observes 'shared' as both"):
@@ -170,21 +172,10 @@ def test_policy_rejects_two_features_sharing_an_observed_name():
 
 def test_policy_rejects_two_features_implied_by_the_same_type():
     definitions = (
-        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtz"),
-        _definition(ImpliedFeature.VARIANT, TimestampNtz, "variantType"),
+        _definition("timestampNtz", TimestampNtz, "timestampNtz"),
+        _definition("variantType", TimestampNtz, "variantType"),
     )
 
     with pytest.raises(ValueError, match=r"implies both .* from TimestampNtz"):
         FeaturePolicy(definitions)
 
-
-def test_policy_rejects_a_vocabulary_member_without_an_encoding():
-    definition = FeatureDefinition(
-        feature=ImpliedFeature.TIMESTAMP_NTZ,
-        implied_by=TimestampNtz,
-        enable_name="timestampNtz",
-        observed_names=frozenset({"timestampNtz"}),
-    )
-
-    with pytest.raises(ValueError, match="no encoding for: variantType"):
-        FeaturePolicy((definition,))
