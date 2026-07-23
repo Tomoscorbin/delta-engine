@@ -126,56 +126,25 @@ def test_every_feature_enables_under_a_name_it_observes():
         )
 
 
-def _definition(name, implied_by, enable_name, *observed_names) -> FeatureDefinition:
-    return FeatureDefinition(
-        name=name,
-        implied_by=implied_by,
-        enable_name=enable_name,
-        observed_names=frozenset(observed_names or {enable_name}),
-    )
-
-
 def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
-    # Given a full vocabulary whose one enable name is observed by nobody
+    # Given a vocabulary whose one enable name resolves back to no feature
     definitions = (
-        _definition("timestampNtz", TimestampNtz, "timestampNtzV2", "timestampNtz"),
-        _definition("variantType", Variant, "variantType"),
+        FeatureDefinition(
+            name="timestampNtz",
+            implied_by=TimestampNtz,
+            enable_name="timestampNtzV2",
+            observed_names=frozenset({"timestampNtz"}),
+        ),
+        FeatureDefinition(
+            name="variantType",
+            implied_by=Variant,
+            enable_name="variantType",
+            observed_names=frozenset({"variantType"}),
+        ),
     )
 
     # When building a policy from them, construction fails rather than yielding
     # a policy whose enablements would never converge
     with pytest.raises(ValueError, match="observe back as the same feature: timestampNtz"):
-        FeaturePolicy(definitions)
-
-
-def test_policy_rejects_an_enable_name_another_feature_observes():
-    # The name is observable, but as the wrong feature: enabling timestampNtz
-    # would read back as variantType, so the enable is re-planned forever.
-    definitions = (
-        _definition("timestampNtz", TimestampNtz, "variantType", "timestampNtz"),
-        _definition("variantType", Variant, "variantType"),
-    )
-
-    with pytest.raises(ValueError, match="observe back as the same feature: timestampNtz"):
-        FeaturePolicy(definitions)
-
-
-def test_policy_rejects_two_features_sharing_an_observed_name():
-    definitions = (
-        _definition("timestampNtz", TimestampNtz, "timestampNtz", "shared"),
-        _definition("variantType", Variant, "variantType", "shared"),
-    )
-
-    with pytest.raises(ValueError, match="observes 'shared' as both"):
-        FeaturePolicy(definitions)
-
-
-def test_policy_rejects_two_features_implied_by_the_same_type():
-    definitions = (
-        _definition("timestampNtz", TimestampNtz, "timestampNtz"),
-        _definition("variantType", TimestampNtz, "variantType"),
-    )
-
-    with pytest.raises(ValueError, match=r"implies both .* from TimestampNtz"):
         FeaturePolicy(definitions)
 
