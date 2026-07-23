@@ -227,7 +227,11 @@ are encoded as ordinary Python in the application layer:
   read and compile feature state through the policy. A declaration's implied
   features are resolved when it is lowered, so the domain records feature
   names as data and plans the difference against the supported set without
-  knowing what any of them mean.
+  knowing what any of them mean. Resolution sits at that seam rather than in
+  the domain because implication is format knowledge, not type knowledge: a
+  `TIMESTAMP_NTZ` column needs `timestampNtz` on a Delta table, while Iceberg
+  stores the same type natively. A future Iceberg lowering therefore supplies
+  its own resolution, and the domain goes on comparing opaque names.
 
   Feature requirements come in two kinds, and the split between these two
   modules is where that shows. A feature is _implied_ when the desired shape
@@ -237,9 +241,7 @@ are encoded as ordinary Python in the application layer:
   happily without it and one change needs it: `columnMapping` to drop or
   rename a column, `typeWidening` to widen in place. Those are the user's
   decision, reached through a managed property, so validation rejects the
-  change until it is declared rather than enabling anything. Conflating the
-  two is what makes the placement of this logic look arbitrary; keeping them
-  apart is why auto-enablement here is not a house rule.
+  change until it is declared rather than enabling anything.
 - Several rules in `application/validation.py` encode Delta behaviour directly.
   `ColumnMappingRequiredForDrop` exists only because Delta permits
   `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;
