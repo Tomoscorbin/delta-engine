@@ -127,3 +127,19 @@ from Databricks Runtime 13.3 (GA 15.2) — below the AS JSON read floor — any
 runtime new enough to read a table can also observe its keys. As with every
 other runtime feature, delta-engine documents this floor rather than
 preflighting it — an unsupported runtime surfaces as a read failure.
+
+## Delta table features
+
+Declaring a type that needs a Delta table feature — `TimestampNtz` or
+`Variant` anywhere in a column's type tree — makes the engine plan the
+enablement itself when the table exists without it: an explicit
+`SET TBLPROPERTIES ('delta.feature.…' = 'supported')` statement, ordered
+before the dependent column change and always visible in a dry run. Creating
+a table needs no planned enablement; Databricks enables required features
+from the created schema.
+
+Feature enablement is a permanent protocol upgrade — older Delta clients may
+lose access to the table. The engine never plans `DROP FEATURE`, and features
+it does not model — deletion vectors, row tracking, and every other
+platform-managed or property-gated feature — are left entirely to the
+platform and its properties.
