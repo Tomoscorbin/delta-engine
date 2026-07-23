@@ -118,27 +118,57 @@ def test_every_feature_enables_under_a_name_it_observes():
         assert DELTA_FEATURE_POLICY.supported_features({key: value}) == frozenset({feature.value})
 
 
+def _definition(feature, implied_by, enable_name, *observed_names) -> FeatureDefinition:
+    return FeatureDefinition(
+        feature=feature,
+        implied_by=implied_by,
+        enable_name=enable_name,
+        observed_names=frozenset(observed_names or {enable_name}),
+    )
+
+
 def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
-    # Given a full vocabulary whose one enable name is absent from the names
-    # that same feature is observed under
+    # Given a full vocabulary whose one enable name is observed by nobody
     definitions = (
-        FeatureDefinition(
-            feature=ImpliedFeature.TIMESTAMP_NTZ,
-            implied_by=TimestampNtz,
-            enable_name="timestampNtzV2",
-            observed_names=frozenset({"timestampNtz"}),
-        ),
-        FeatureDefinition(
-            feature=ImpliedFeature.VARIANT,
-            implied_by=Variant,
-            enable_name="variantType",
-            observed_names=frozenset({"variantType"}),
-        ),
+        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtzV2", "timestampNtz"),
+        _definition(ImpliedFeature.VARIANT, Variant, "variantType"),
     )
 
     # When building a policy from them, construction fails rather than yielding
     # a policy whose enablements would never converge
-    with pytest.raises(ValueError, match="timestampNtz"):
+    with pytest.raises(ValueError, match="observe back as the same feature: timestampNtz"):
+        FeaturePolicy(definitions)
+
+
+def test_policy_rejects_an_enable_name_another_feature_observes():
+    # The name is observable, but as the wrong feature: enabling timestampNtz
+    # would read back as variantType, so the enable is re-planned forever.
+    definitions = (
+        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "variantType", "timestampNtz"),
+        _definition(ImpliedFeature.VARIANT, Variant, "variantType"),
+    )
+
+    with pytest.raises(ValueError, match="observe back as the same feature: timestampNtz"):
+        FeaturePolicy(definitions)
+
+
+def test_policy_rejects_two_features_sharing_an_observed_name():
+    definitions = (
+        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtz", "shared"),
+        _definition(ImpliedFeature.VARIANT, Variant, "variantType", "shared"),
+    )
+
+    with pytest.raises(ValueError, match="observes 'shared' as both"):
+        FeaturePolicy(definitions)
+
+
+def test_policy_rejects_two_features_implied_by_the_same_type():
+    definitions = (
+        _definition(ImpliedFeature.TIMESTAMP_NTZ, TimestampNtz, "timestampNtz"),
+        _definition(ImpliedFeature.VARIANT, TimestampNtz, "variantType"),
+    )
+
+    with pytest.raises(ValueError, match=r"implies both .* from TimestampNtz"):
         FeaturePolicy(definitions)
 
 

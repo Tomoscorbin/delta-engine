@@ -116,39 +116,50 @@ class FeaturePolicy:
         if undefined:
             raise ValueError(f"Feature policy defines no encoding for: {', '.join(undefined)}")
 
-        # A feature must be observable under the name the engine writes, or
-        # every later sync would re-plan an enablement already applied.
-        unobservable = sorted(
+        # Both lookups below are built by hand rather than by comprehension:
+        # a duplicate key would otherwise let the last definition win in
+        # silence, resolving a type or a catalog name to the wrong feature.
+        features_by_type: dict[type[DataType], ImpliedFeature] = {}
+        for definition in self.definitions:
+            claimed = features_by_type.setdefault(definition.implied_by, definition.feature)
+            if claimed is not definition.feature:
+                raise ValueError(
+                    f"Feature policy implies both {claimed.value} and"
+                    f" {definition.feature.value} from {definition.implied_by.__name__};"
+                    " a declared type resolves to one feature"
+                )
+
+        features_by_observed_name: dict[str, ImpliedFeature] = {}
+        for definition in self.definitions:
+            for name in sorted(definition.observed_names):
+                claimed = features_by_observed_name.setdefault(name, definition.feature)
+                if claimed is not definition.feature:
+                    raise ValueError(
+                        f"Feature policy observes {name!r} as both {claimed.value} and"
+                        f" {definition.feature.value}; a catalog name resolves to one feature"
+                    )
+
+        # Enabling a feature must observe back as that same feature, or every
+        # later sync would re-plan an enablement already applied. Checking the
+        # resolved name rather than mere membership also catches an enable
+        # name that another definition claims.
+        misrouted = sorted(
             definition.feature.value
             for definition in self.definitions
-            if definition.enable_name not in definition.observed_names
+            if features_by_observed_name.get(definition.enable_name) is not definition.feature
         )
-        if unobservable:
+        if misrouted:
             raise ValueError(
-                "Feature policy enables these features under a name it does not"
-                f" observe: {', '.join(unobservable)}"
+                "Feature policy enables these features under a name that does not"
+                f" observe back as the same feature: {', '.join(misrouted)}"
             )
 
         object.__setattr__(
             self, "_definitions_by_feature", MappingProxyType(definitions_by_feature)
         )
+        object.__setattr__(self, "_features_by_type", MappingProxyType(features_by_type))
         object.__setattr__(
-            self,
-            "_features_by_type",
-            MappingProxyType(
-                {definition.implied_by: definition.feature for definition in self.definitions}
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_features_by_observed_name",
-            MappingProxyType(
-                {
-                    name: definition.feature
-                    for definition in self.definitions
-                    for name in definition.observed_names
-                }
-            ),
+            self, "_features_by_observed_name", MappingProxyType(features_by_observed_name)
         )
 
     def implied_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
