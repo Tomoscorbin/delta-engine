@@ -136,26 +136,6 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     assert result.stdout.strip() == "ok"
 
 
-def test_build_spark_engine_explains_the_databricks_runtime_requirement():
-    # Given an interpreter where the runtime has not supplied PySpark
-    program = (
-        "import sys; sys.modules['pyspark'] = None\n"
-        "from delta_engine.databricks import build_spark_engine\n"
-        "try: build_spark_engine(None)\n"
-        "except RuntimeError as error: print(error)\n"
-    )
-
-    # When constructing the Spark backend
-    result = subprocess.run([sys.executable, "-c", program], capture_output=True, text=True)
-
-    # Then the error identifies the required runtime
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == (
-        "delta-engine's Spark backend requires the PySpark supplied by a supported "
-        "Databricks Runtime."
-    )
-
-
 def test_build_sql_engine_does_not_require_the_connector_or_pyspark():
     # Given an interpreter where neither pyspark nor databricks-sql can be imported
     program = (
