@@ -163,8 +163,7 @@ A clean environment resolving the declared `typer==0.12` minimum with a current 
 release did not provide a working CLI: `--version` failed and `--help` crashed. Resolving
 Typer 0.26 succeeded. The verified boundary is Typer 0.15.4: 0.15.3 fails `--help`,
 while 0.15.4 passes both `--help` and `--version`. The declared floor is now 0.15.4,
-and CI exercises both the exact minimum direct CLI dependency set and a fresh
-unconstrained resolution from an installed wheel.
+and CI exercises the exact minimum direct CLI dependency set from an installed wheel.
 
 ### Upper bounds
 

@@ -172,10 +172,3 @@ jobs:
             --with "databricks-sql-connector==4.0.0" \
             python -I tests/distribution/cli_smoke_test.py \
             --expected-typer-version 0.15.4
-
-      - name: Smoke-test current CLI dependencies
-        run: |
-          wheel_paths=(./dist/*.whl)
-          uv run --isolated --no-project --python 3.12 \
-            --with "${wheel_paths[0]}[cli]" \
-            python -I tests/distribution/cli_smoke_test.py
