@@ -16,6 +16,8 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
     TableAspect,
+    TableFeature,
+    required_features,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -26,6 +28,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -119,6 +122,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
 
     renames = _resolve_column_renames(desired, observed)
 
+    feature_actions = _diff_table_features(desired, observed)
     column_actions = _diff_columns(desired.columns, renames.columns)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
     constraint_actions = _diff_constraints(desired, observed)
@@ -128,6 +132,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         desired=desired,
         observed=observed,
         actions=(
+            *feature_actions,
             *renames.actions,
             *column_actions,
             *layout_actions,
@@ -369,6 +374,27 @@ def _diff_column_tags(
         if name not in desired.tags
     )
     return tuple(actions)
+
+
+def _diff_table_features(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[EnableTableFeature, ...]:
+    """
+    Return an enablement action per missing required table feature.
+
+    A feature is required when any desired column's type tree needs it, and
+    missing when the observed table does not have it enabled. Drift-arm only:
+    CREATE TABLE establishes required features from the created schema, so a
+    missing table never plans enablement. Enabled features the declaration
+    does not require are never drift — features are append-only on a table
+    and the engine plans no disable.
+    """
+    empty: frozenset[TableFeature] = frozenset()
+    required = empty.union(
+        *(required_features(column.data_type) for column in desired.columns)
+    )
+    missing = required - observed.enabled_features
+    return tuple(EnableTableFeature(feature=feature) for feature in sorted(missing))
 
 
 def _diff_layout(

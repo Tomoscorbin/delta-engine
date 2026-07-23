@@ -5,6 +5,7 @@ from delta_engine.application.planning import (
     PlanningSucceeded,
     plan_diff,
 )
+from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -19,6 +20,7 @@ from delta_engine.domain.model import (
     String,
     TableAspect,
     TableKind,
+    TimestampNtz,
 )
 from delta_engine.domain.plan import (
     AddColumn,
@@ -26,6 +28,7 @@ from delta_engine.domain.plan import (
     CreateTable,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnTag,
     SetForeignKey,
@@ -375,3 +378,28 @@ def test_creation_plan_carries_the_ordinary_table_kind():
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
     assert result.plan.kind is TableKind.TABLE
+
+
+def test_feature_enablement_is_accepted_at_the_planning_boundary():
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz()))
+    )
+    observed = _observed()
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningSucceeded)
+    assert any(isinstance(action, EnableTableFeature) for action in result.plan)
+
+
+def test_feature_enablement_outside_column_structure_scope_is_rejected():
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz())),
+        managed_aspects=METADATA_ASPECTS,
+    )
+    observed = _observed()
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningFailed)
+    assert any("column structure" in failure.message for failure in result.failures)
