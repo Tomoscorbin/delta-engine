@@ -220,10 +220,8 @@ class TypeWideningRequiredForTypeChange:
     the declaration alone is sufficient input; declaring it 'true' in the same
     sync as the widen is safe (SET_PROPERTY phases before ALTER_COLUMN_TYPE).
 
-    Type widening is an operation-permitted feature: the table exists happily
-    without it and only this change needs it, so it is the user's decision to
-    declare. The other kind — features a declared schema cannot exist without,
-    which the engine enables itself — lives in ``application/features.py``.
+    Type widening is an operation-permitted feature, not an implied one — see
+    ``application/features.py`` for the distinction.
     """
 
     name: ClassVar[str] = "TypeWideningRequiredForTypeChange"
@@ -372,10 +370,8 @@ class ColumnMappingRequiredForDrop:
     declaration alone is sufficient; declaring the mode in the same sync as
     the drop is safe (SET_PROPERTY phases before DROP_COLUMN).
 
-    Column mapping is an operation-permitted feature: the table exists happily
-    without it and only this change needs it, so it is the user's decision to
-    declare. The other kind — features a declared schema cannot exist without,
-    which the engine enables itself — lives in ``application/features.py``.
+    Column mapping is an operation-permitted feature, not an implied one — see
+    ``application/features.py`` for the distinction.
     """
 
     name: ClassVar[str] = "ColumnMappingRequiredForDrop"

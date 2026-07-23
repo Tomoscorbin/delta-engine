@@ -94,8 +94,9 @@ class EnableTableFeature(Action):
     Enable a Delta table feature the desired schema requires.
 
     ``feature`` is the feature's canonical name, as the desired table records
-    it; the vocabulary it comes from and the admission rule that governs it
-    live in ``delta_engine.application.features``. Enablement is a permanent
+    it; the vocabulary it comes from, and the rule for which features are
+    enabled this way, belong to the lowering path that resolves declarations,
+    not to the domain. Enablement is a permanent
     protocol upgrade, so it is always its own visible action, phased before
     the column changes that depend on it. Features are append-only on a table:
     there is no disable counterpart.

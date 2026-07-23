@@ -127,16 +127,16 @@ class DesiredTable:
         foreign_keys: Foreign key constraints owned by this table.
         properties: Table properties; a ``None`` value asserts the key must be
             absent from the table.
-        implied_features: Names of the Delta table features this schema cannot
-            exist without, as ``delta_engine.application.features`` spells them.
+        implied_features: Names of the table features this schema cannot
+            exist without, resolved when the declaration was lowered.
         managed_aspects: The table aspects this declaration manages.
 
     A desired table's key constraints arrive already named, and its implied
     features arrive already resolved: both are computed by the API layer when a
     ``DeltaTable`` is lowered. The differ and compiler read them off the
-    desired table rather than deriving them themselves — which is why feature
-    names are opaque strings here; the vocabulary that produced them, and the
-    knowledge of which types imply which feature, live above the domain.
+    desired table rather than deriving them themselves — feature names are
+    opaque strings here, and which declared types imply which feature is the
+    lowering path's knowledge, not the domain's.
 
     """
 
