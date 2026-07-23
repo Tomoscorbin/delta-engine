@@ -396,10 +396,14 @@ def test_supported_features_are_observed_and_kept_out_of_properties():
     assert state.table.properties["delta.enableChangeDataFeed"] == "true"
 
 
-def test_unrecognized_feature_state_fails_the_read():
+def test_unrecognized_feature_state_reads_as_unsupported():
+    # The table stays readable: a sync then plans an enablement, which is
+    # idempotent and normalizes the value. Failing the read would make the
+    # whole table unmanageable over one unrecognized string.
     document = _describe_doc(table_properties={"delta.feature.timestampNtz": "enabled"})
     responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
 
-    error = _read_error(responses)
+    state = read_catalog_state(_router(responses), QN)
 
-    assert "delta.feature.timestampNtz" in str(error)
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset()

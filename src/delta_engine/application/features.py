@@ -1,17 +1,24 @@
 """
 The Delta table features a declared schema implies, and how the engine enables them.
 
-Reference: https://docs.delta.io/latest/versioning.html
+Delta protocol reference: https://docs.delta.io/latest/versioning.html
+Databricks feature compatibility:
+https://docs.databricks.com/aws/en/tables/features/feature-compatibility
 
 Two kinds of feature requirement run through this engine, and only one of them
 lives here.
 
 A feature is *implied* when the desired shape cannot exist without it: a column
 of type TIMESTAMP_NTZ needs ``timestampNtz``, and a table carrying such a column
-always has it. Nothing is declared and nothing is chosen. Databricks enables an
-implied feature as part of creating a table — this module exists because it does
-not do the same when altering one, so the engine closes the gap itself and shows
-the upgrade in the plan.
+always has it. Nothing is declared and nothing is chosen. Databricks enables
+most implied features from the syntax that needs them, on ALTER as readily as on
+CREATE — ``CLUSTER BY`` enables liquid clustering on an existing table, and
+``GENERATED ALWAYS AS`` enables generated columns. The features below are the
+exception: established by a CREATE, never by an ALTER, which is the whole reason
+this module exists. It is also why liquid clustering is none of the engine's
+business despite being implied by ``clustered_by`` and just as permanent — the
+``ALTER TABLE ... CLUSTER BY`` the engine already plans upgrades the protocol on
+its own.
 
 A feature is *operation-permitted* when the table exists happily without it and
 a particular change needs it: ``columnMapping`` to drop or rename a column,
@@ -39,9 +46,8 @@ plans the difference without holding the vocabulary itself.
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Final
 
 from delta_engine.domain.model.column import DesiredColumn
@@ -90,17 +96,15 @@ class FeaturePolicy:
     """Resolve which features a declaration implies, a table supports, and how to enable one."""
 
     definitions: tuple[FeatureDefinition, ...]
-    _definitions_by_feature: Mapping[ImpliedFeature, FeatureDefinition] = field(
-        init=False, repr=False, compare=False
-    )
-    _features_by_type: Mapping[type[DataType], ImpliedFeature] = field(
-        init=False, repr=False, compare=False
-    )
-    _features_by_observed_name: Mapping[str, ImpliedFeature] = field(
-        init=False, repr=False, compare=False
-    )
 
     def __post_init__(self) -> None:
+        """
+        Reject a definition set that could resolve a name or a type ambiguously.
+
+        The lookups built here are validation scaffolding, not state: with a
+        handful of definitions the accessors below scan them directly, so
+        nothing is cached and the policy stays an ordinary frozen value.
+        """
         definitions_by_feature = {
             definition.feature: definition for definition in self.definitions
         }
@@ -117,8 +121,8 @@ class FeaturePolicy:
             raise ValueError(f"Feature policy defines no encoding for: {', '.join(undefined)}")
 
         # Both lookups below are built by hand rather than by comprehension:
-        # a duplicate key would otherwise let the last definition win in
-        # silence, resolving a type or a catalog name to the wrong feature.
+        # a duplicate key would otherwise be dropped in silence, leaving a
+        # type or a catalog name resolving to the wrong feature.
         features_by_type: dict[type[DataType], ImpliedFeature] = {}
         for definition in self.definitions:
             claimed = features_by_type.setdefault(definition.implied_by, definition.feature)
@@ -154,14 +158,6 @@ class FeaturePolicy:
                 f" observe back as the same feature: {', '.join(misrouted)}"
             )
 
-        object.__setattr__(
-            self, "_definitions_by_feature", MappingProxyType(definitions_by_feature)
-        )
-        object.__setattr__(self, "_features_by_type", MappingProxyType(features_by_type))
-        object.__setattr__(
-            self, "_features_by_observed_name", MappingProxyType(features_by_observed_name)
-        )
-
     def implied_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
         """Return the names of every managed feature these columns' types imply."""
         implied: set[ImpliedFeature] = set()
@@ -174,34 +170,43 @@ class FeaturePolicy:
         Return the names of the managed features these table properties record as supported.
 
         Feature keys outside the managed vocabulary are ignored: the engine
-        neither implies nor disables them, so they are not its state.
-
-        Raises:
-            ValueError: A managed feature key carries a value other than
-                ``'supported'`` — state the engine cannot interpret must fail
-                the read rather than shrink it.
-
+        neither implies nor disables them, so they are not its state. A managed
+        key carrying anything other than ``'supported'`` reads as unsupported
+        rather than failing the read. Being wrong that way costs one enablement
+        statement, which is idempotent and normalizes the value; refusing the
+        read would leave the whole table unmanageable over one unrecognized
+        string, and misreading a feature fabricates neither drift nor a blocked
+        change.
         """
         supported: set[ImpliedFeature] = set()
         for key, value in properties.items():
-            if not key.startswith(_FEATURE_PROPERTY_PREFIX):
+            if value != _SUPPORTED or not key.startswith(_FEATURE_PROPERTY_PREFIX):
                 continue
-            name = key.removeprefix(_FEATURE_PROPERTY_PREFIX)
-            feature = self._features_by_observed_name.get(name)
-            if feature is None:
-                continue
-            if value != _SUPPORTED:
-                raise ValueError(
-                    f"table feature property {key} has unrecognized value {value!r};"
-                    f" expected {_SUPPORTED!r}"
-                )
-            supported.add(feature)
+            feature = self._feature_observed_as(key.removeprefix(_FEATURE_PROPERTY_PREFIX))
+            if feature is not None:
+                supported.add(feature)
         return frozenset(feature.value for feature in supported)
 
     def enable_property(self, feature: str) -> tuple[str, str]:
         """Return the ``(key, value)`` table property that enables ``feature``."""
-        definition = self._definitions_by_feature[ImpliedFeature(feature)]
-        return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
+        for definition in self.definitions:
+            if definition.feature == feature:
+                return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
+        raise ValueError(f"No managed table feature named {feature!r}")
+
+    def _feature_observed_as(self, name: str) -> ImpliedFeature | None:
+        """Return the feature the catalog records under ``name``, if it is managed."""
+        for definition in self.definitions:
+            if name in definition.observed_names:
+                return definition.feature
+        return None
+
+    def _feature_implied_by(self, data_type: DataType) -> ImpliedFeature | None:
+        """Return the feature this exact declared type implies, if any."""
+        for definition in self.definitions:
+            if type(data_type) is definition.implied_by:
+                return definition.feature
+        return None
 
     def _features_implied_by(self, data_type: DataType) -> frozenset[ImpliedFeature]:
         """Walk a type tree, collecting the features its leaves imply."""
@@ -216,7 +221,7 @@ class FeaturePolicy:
                     *(self._features_implied_by(field.data_type) for field in fields)
                 )
             case _:
-                feature = self._features_by_type.get(type(data_type))
+                feature = self._feature_implied_by(data_type)
                 return frozenset() if feature is None else frozenset({feature})
 
 

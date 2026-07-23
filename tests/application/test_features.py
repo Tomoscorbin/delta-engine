@@ -95,11 +95,17 @@ def test_ordinary_properties_are_ignored():
     assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset()
 
 
-def test_managed_feature_with_unexpected_value_fails_closed():
+def test_managed_feature_with_unexpected_value_reads_as_unsupported():
+    # Being wrong this way costs one idempotent enablement, which normalizes
+    # the value; the alternative was failing every read of the table.
     properties = {"delta.feature.timestampNtz": "enabled"}
 
-    with pytest.raises(ValueError, match=r"delta\.feature\.timestampNtz"):
-        DELTA_FEATURE_POLICY.supported_features(properties)
+    assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset()
+
+
+def test_enable_property_rejects_a_feature_the_policy_does_not_manage():
+    with pytest.raises(ValueError, match="No managed table feature"):
+        DELTA_FEATURE_POLICY.enable_property("deletionVectors")
 
 
 def test_enable_property_is_a_supported_feature_key():
