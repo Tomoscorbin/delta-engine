@@ -11,14 +11,20 @@ PySpark and `delta-spark` remain development dependencies for the repository's
 credential-free local integration suite; that suite substitutes a test-only reader and
 is not a supported consumer installation path.
 
+**Dependency decision, 2026-07-23:** Published optional dependencies now have
+upper-major review gates. Dependency validation remains lean: the normal suite uses the
+lock, the existing focused CLI smoke verifies its minimum direct dependencies, and
+periodic lock refreshes reuse the normal suite instead of introducing a version matrix.
+
 ## Conclusions
 
 The distribution design is sound: the base wheel is pure Python, has no runtime
 dependencies, and can expose the declaration and planning APIs without importing a
 backend. The main risks are narrower:
 
-1. The published optional-dependency ranges are open-ended and therefore promise more
-   compatibility than is tested.
+1. The published optional dependencies are limited to reviewed major lines. Releases
+   within those lines can still introduce incompatibilities, so bounds and periodic lock
+   refreshes have complementary roles.
 2. The original `typer>=0.12` floor was too low for the current Click ecosystem. It has
    since been raised to the first version verified by the installed-wheel compatibility
    test.
@@ -62,8 +68,8 @@ users an exact, documented version combination they can keep running.
 
   | Extra | Current requirements | Intended environment |
   | --- | --- | --- |
-  | `sql` | `databricks-sql-connector>=4.0.0` | Plain Python process using a SQL warehouse |
-  | `cli` | `typer>=0.15.4`, `databricks-sdk>=0.70.0`, `databricks-sql-connector>=4.0.0` | Read-only CLI using a SQL warehouse |
+  | `sql` | `databricks-sql-connector>=4.0.0,<5` | Plain Python process using a SQL warehouse |
+  | `cli` | `typer>=0.15.4,<1`, `databricks-sdk>=0.70.0,<1`, `databricks-sql-connector>=4.0.0,<5` | Read-only CLI using a SQL warehouse |
 
 - PySpark and `delta-spark` are development dependencies only. They support the local
   integration suite and are not part of the published consumer contract.
@@ -181,15 +187,15 @@ An upper bound would prevent installation on a new Databricks Runtime even when 
 Python package works. Add a Python upper bound only for a demonstrated incompatibility,
 and expand the CI matrix as supported versions appear.
 
-Published backend and CLI dependencies should describe tested compatible major lines
-rather than accepting every future major. Candidate boundaries to verify are:
+Published backend and CLI dependencies describe reviewed major lines rather than
+accepting every future major:
 
 ```toml
-sql = ["databricks-sql-connector>=4,<5"]
+sql = ["databricks-sql-connector>=4.0.0,<5"]
 cli = [
   "typer>=0.15.4,<1",
-  "databricks-sdk>=0.70,<1",
-  "databricks-sql-connector>=4,<5",
+  "databricks-sdk>=0.70.0,<1",
+  "databricks-sql-connector>=4.0.0,<5",
 ]
 ```
 
@@ -202,13 +208,16 @@ PySpark and `delta-spark` do not need published bounds because they are not cons
 dependencies. Their compatible pair is owned by the development lock and local
 integration suite.
 
-CI should cover:
+Dependency validation is deliberately not a Cartesian compatibility matrix:
 
-- Python 3.12 and 3.13;
-- the lowest supported direct dependency set;
-- the normal locked set;
-- a separately resolved newest-compatible set;
-- installation and smoke tests from the built wheel, not only the editable source tree.
+- the normal pull-request suite exercises the reproducible locked environment;
+- the focused installed-wheel CLI smoke verifies the declared minimum direct CLI set;
+- periodic lock refreshes bring in the newest versions inside the declared ranges and
+  use the existing suite rather than a separate newest-version job;
+- there is no maximum-version job: the exclusive upper bounds are metadata review gates.
+
+Python 3.12 and 3.13 coverage and live Databricks Runtime coverage remain separate
+environment-compatibility concerns.
 
 ## Databricks Runtime compatibility
 
@@ -438,7 +447,7 @@ Strengthen the runtime guard by:
 ### Before the next release
 
 - [x] Correct the Typer floor and add minimum-version CLI smoke tests.
-- [ ] Add tested upper-major boundaries to the published optional dependencies.
+- [x] Add tested upper-major boundaries to the published optional dependencies.
 - [x] Remove the unsupported consumer `spark` extra while retaining the locked local
       Spark/Delta integration environment for repository tests.
 - [x] Add a concise installation chooser for base, SQL, CLI, and Databricks compute to
@@ -457,8 +466,8 @@ Strengthen the runtime guard by:
 ### Compatibility infrastructure
 
 - [ ] Test Python 3.12 and 3.13 in CI.
-- [ ] Add minimum, locked, and newest-compatible dependency jobs, including installed
-      CLI and SQL smoke tests.
+- [ ] Refresh the dependency lock periodically and validate updates with the normal
+      suite; do not add separate minimum, maximum, or newest-compatible matrices.
 - [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than
       a published compatibility promise.
 - [ ] Add live Spark-backend smoke tests for the documented Databricks Runtime matrix.

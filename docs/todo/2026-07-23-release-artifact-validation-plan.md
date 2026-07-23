@@ -69,13 +69,14 @@ exact-version download and base smoke test.
 ## Checks kept outside this gate
 
 Optional dependencies are compatibility concerns, not archive-format concerns. Test
-them independently so an upstream release does not make the basic artifact job
-non-deterministic:
+them without turning the basic artifact job into a version matrix:
 
-- CLI and SQL minimum supported versions;
-- newest versions inside the declared ranges;
-- Python 3.12 and 3.13;
-- supported Databricks Runtime versions through live scheduled tests.
+- the normal suite exercises the locked environment;
+- the existing installed-wheel CLI smoke verifies the minimum direct CLI set;
+- periodic lock refreshes exercise newer versions inside the declared ranges through
+  the normal suite;
+- Python 3.12 and 3.13, and supported Databricks Runtime versions, remain separate
+  environment-compatibility checks.
 
 The repository's local Spark/Delta suite is an internal locked test
 environment, not a published optional-dependency compatibility promise.
