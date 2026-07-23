@@ -33,7 +33,7 @@ dependencies = []
 [project.optional-dependencies]
 spark = ["pyspark>=4.0.0", "delta-spark>=4.0.0"]
 sql = ["databricks-sql-connector>=4.0.0"]
-cli = ["typer>=0.12", "databricks-sdk>=0.70.0", "databricks-sql-connector>=4.0.0"]
+cli = ["typer>=0.15.4", "databricks-sdk>=0.70.0", "databricks-sql-connector>=4.0.0"]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
@@ -58,7 +58,7 @@ dev = [
   "pre-commit>=3.7",
   "databricks-sql-connector>=4.0.0",
   "databricks-sdk>=0.70.0",
-  "typer>=0.12",
+  "typer>=0.15.4",
   # tests/test_packaging.py imports it directly; do not rely on pytest's
   # transitive dependency.
   "packaging>=24.0",
