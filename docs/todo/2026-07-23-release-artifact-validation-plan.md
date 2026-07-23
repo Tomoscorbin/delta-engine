@@ -72,10 +72,13 @@ Optional dependencies are compatibility concerns, not archive-format concerns. T
 them independently so an upstream release does not make the basic artifact job
 non-deterministic:
 
-- CLI, SQL, and local Spark minimum supported versions;
+- CLI and SQL minimum supported versions;
 - newest versions inside the declared ranges;
 - Python 3.12 and 3.13;
 - supported Databricks Runtime versions through live scheduled tests.
+
+The repository's local Spark/Delta suite is an internal locked test
+environment, not a published optional-dependency compatibility promise.
 
 The source-level test in `tests/test_packaging.py` remains the fast regression check for
 the lazy-loading rule. Import Linter continues to enforce dependency direction; it does

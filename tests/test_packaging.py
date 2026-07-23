@@ -1,6 +1,6 @@
 """Distribution metadata and optional-dependency import boundaries."""
 
-from importlib.metadata import entry_points, requires
+from importlib.metadata import entry_points, metadata, requires
 import subprocess
 import sys
 
@@ -12,6 +12,12 @@ def test_base_distribution_has_no_unconditional_runtime_dependencies():
 
     assert requirements
     assert all("extra ==" in requirement for requirement in requirements)
+
+
+def test_distribution_exposes_only_supported_extras():
+    extras = metadata("delta-engine").get_all("Provides-Extra") or []
+
+    assert set(extras) == {"cli", "sql"}
 
 
 def test_cli_extra_contains_the_sdk_connector_and_typer():

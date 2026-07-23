@@ -34,7 +34,8 @@ pip install delta-engine
 
 Declaring schemas is pure Python. A sync can use either a Databricks Spark
 session or a Databricks SQL warehouse connection; the latter needs no PySpark.
-See [Installation](installation.md) for the `[spark]` and `[sql]` paths.
+See [Installation](installation.md) for the Databricks compute and `[sql]`
+paths.
 
 ## What a sync does
 

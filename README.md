@@ -27,13 +27,13 @@ pip install delta-engine
 
 The base package is pure Python with no runtime dependencies: declaring and
 planning schemas needs no PySpark. Running a sync needs either a Spark
-session or a Databricks SQL warehouse connection. Inside a Databricks
-notebook, Spark is already provided; elsewhere, install the `[spark]` extra
-for local development against a Spark session, or the `[sql]` extra to sync
-through a SQL warehouse instead — schema sync from CI without a Spark session
-or cluster. See the
+session supplied by Databricks Runtime or a Databricks SQL warehouse
+connection. On Databricks compute, install only a pinned version of the base
+package and use the runtime's Spark and Delta libraries. Outside Databricks
+compute, install the `[sql]` extra to sync through a SQL warehouse — for
+example, schema sync from CI without a Spark session or cluster. See the
 [installation guide](https://tomoscorbin.github.io/delta-engine/installation.html)
-for both extras and their requirements.
+for the supported installation paths and their requirements.
 
 Install `delta-engine[cli]` to run
 `delta-engine plan MODULE:ATTRIBUTE` through any standard Databricks
