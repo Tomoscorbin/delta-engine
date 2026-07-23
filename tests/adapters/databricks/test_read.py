@@ -21,6 +21,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    TableFeature,
     TableKind,
 )
 
@@ -374,3 +375,31 @@ def test_a_non_delta_streaming_table_reads_as_failed():
     error = _read_error(responses)
 
     assert error.exception_type == "UnsupportedRelationError"
+
+
+def test_enabled_features_are_observed_and_kept_out_of_properties():
+    document = _describe_doc(
+        table_properties={
+            "delta.feature.timestampNtz": "supported",
+            "delta.feature.deletionVectors": "supported",
+            "delta.enableChangeDataFeed": "true",
+        }
+    )
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.enabled_features == frozenset({TableFeature.TIMESTAMP_NTZ})
+    # feature keys are protocol state, not managed properties
+    assert "delta.feature.timestampNtz" not in state.table.properties
+    assert state.table.properties["delta.enableChangeDataFeed"] == "true"
+
+
+def test_unrecognized_feature_state_fails_the_read():
+    document = _describe_doc(table_properties={"delta.feature.timestampNtz": "enabled"})
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    error = _read_error(responses)
+
+    assert "delta.feature.timestampNtz" in str(error)

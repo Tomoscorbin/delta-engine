@@ -28,6 +28,7 @@ from delta_engine.adapters.databricks.exception_inspection import (
 from delta_engine.adapters.databricks.sql import (
     RunQuery,
     describe_json_query,
+    enabled_features_from_properties,
     read_column_tags,
     read_foreign_keys,
     read_primary_key,
@@ -161,6 +162,7 @@ def _read_observed_table(
         columns=tagged_columns,
         comment=description.comment,
         properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties),
+        enabled_features=enabled_features_from_properties(description.table_properties),
         tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,
