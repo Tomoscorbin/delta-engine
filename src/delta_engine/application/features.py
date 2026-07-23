@@ -44,8 +44,7 @@ plans the difference without holding the vocabulary itself.
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
+from dataclasses import dataclass
 from typing import Final
 
 from delta_engine.domain.model.column import DesiredColumn
@@ -90,18 +89,9 @@ class FeaturePolicy:
     """Resolve which features a declaration implies, a table supports, and how to enable one."""
 
     definitions: tuple[FeatureDefinition, ...]
-    _definitions_by_name: Mapping[str, FeatureDefinition] = field(
-        init=False, repr=False, compare=False
-    )
-    _features_by_type: Mapping[type[DataType], str] = field(
-        init=False, repr=False, compare=False
-    )
-    _features_by_observed_name: Mapping[str, str] = field(
-        init=False, repr=False, compare=False
-    )
 
     def __post_init__(self) -> None:
-        definitions_by_name = {definition.name: definition for definition in self.definitions}
+        names = {definition.name for definition in self.definitions}
         features_by_type = {
             definition.implied_by: definition.name for definition in self.definitions
         }
@@ -111,12 +101,14 @@ class FeaturePolicy:
             for observed in definition.observed_names
         }
 
-        if len(definitions_by_name) != len(self.definitions):
+        if len(names) != len(self.definitions):
             raise ValueError("Feature policy contains duplicate feature definitions")
         if len(features_by_type) != len(self.definitions):
             raise ValueError("Feature policy implies two features from one declared type")
-        observed_names = sum(len(definition.observed_names) for definition in self.definitions)
-        if len(features_by_observed_name) != observed_names:
+        observed_name_count = sum(
+            len(definition.observed_names) for definition in self.definitions
+        )
+        if len(features_by_observed_name) != observed_name_count:
             raise ValueError("Feature policy observes one catalog name as two features")
 
         # Enabling a feature must observe back as that same feature, or every
@@ -133,12 +125,6 @@ class FeaturePolicy:
                 "Feature policy enables these features under a name that does not"
                 f" observe back as the same feature: {', '.join(misrouted)}"
             )
-
-        object.__setattr__(self, "_definitions_by_name", MappingProxyType(definitions_by_name))
-        object.__setattr__(self, "_features_by_type", MappingProxyType(features_by_type))
-        object.__setattr__(
-            self, "_features_by_observed_name", MappingProxyType(features_by_observed_name)
-        )
 
     def implied_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
         """Return the names of every managed feature these columns' types imply."""
@@ -164,19 +150,31 @@ class FeaturePolicy:
         for key, value in properties.items():
             if value != _SUPPORTED or not key.startswith(_FEATURE_PROPERTY_PREFIX):
                 continue
-            name = self._features_by_observed_name.get(
-                key.removeprefix(_FEATURE_PROPERTY_PREFIX)
-            )
+            name = self._feature_observed_as(key.removeprefix(_FEATURE_PROPERTY_PREFIX))
             if name is not None:
                 supported.add(name)
         return frozenset(supported)
 
     def enable_property(self, feature: str) -> tuple[str, str]:
         """Return the ``(key, value)`` table property that enables ``feature``."""
-        definition = self._definitions_by_name.get(feature)
-        if definition is None:
-            raise ValueError(f"No managed table feature named {feature!r}")
-        return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
+        for definition in self.definitions:
+            if definition.name == feature:
+                return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
+        raise ValueError(f"No managed table feature named {feature!r}")
+
+    def _feature_observed_as(self, name: str) -> str | None:
+        """Return the feature the catalog records under ``name``, if it is managed."""
+        for definition in self.definitions:
+            if name in definition.observed_names:
+                return definition.name
+        return None
+
+    def _feature_implied_by(self, data_type: DataType) -> str | None:
+        """Return the feature this exact declared type implies, if any."""
+        for definition in self.definitions:
+            if type(data_type) is definition.implied_by:
+                return definition.name
+        return None
 
     def _features_implied_by(self, data_type: DataType) -> frozenset[str]:
         """Walk a type tree, collecting the features its leaves imply."""
@@ -191,7 +189,7 @@ class FeaturePolicy:
                     *(self._features_implied_by(struct_field.data_type) for struct_field in fields)
                 )
             case _:
-                name = self._features_by_type.get(type(data_type))
+                name = self._feature_implied_by(data_type)
                 return frozenset() if name is None else frozenset({name})
 
 
