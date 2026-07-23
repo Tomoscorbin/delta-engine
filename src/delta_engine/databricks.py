@@ -20,10 +20,26 @@ if TYPE_CHECKING:
 
 __all__ = ["build_spark_engine", "build_sql_engine", "configure_logging"]
 
+_SPARK_RUNTIME_HINT = (
+    "delta-engine's Spark backend requires the PySpark supplied by a supported "
+    "Databricks Runtime."
+)
+
+
+def _is_pyspark_import_error(error: ModuleNotFoundError) -> bool:
+    """Return whether an import failed while resolving the PySpark namespace."""
+    module_name = error.name or ""
+    return module_name == "pyspark" or module_name.startswith("pyspark.")
+
 
 def build_spark_engine(spark: SparkSession) -> Engine:
     """Create an engine that syncs through an active Spark session."""
-    from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
+    try:
+        from delta_engine.adapters.databricks.spark.factory import build_engine as _build_engine
+    except ModuleNotFoundError as error:
+        if _is_pyspark_import_error(error):
+            raise RuntimeError(_SPARK_RUNTIME_HINT) from error
+        raise
 
     return _build_engine(spark)
 

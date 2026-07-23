@@ -454,8 +454,10 @@ Strengthen the runtime guard by:
       the README/PyPI description and installation documentation.
 - [x] State prominently that Databricks users install a pinned base wheel and use the
       runtime's Spark and Delta libraries.
-- [ ] Make missing optional-dependency errors identify the correct extra without
-      recommending Spark installation on Databricks compute.
+- [x] Keep missing CLI dependencies pointed at `[cli]`; make missing PySpark at the
+      Spark factory explain the supported Databricks Runtime requirement. The SQL
+      factory accepts a caller-owned connector connection and therefore does not import
+      or diagnose `[sql]` itself.
 - [x] Add `delta` and `py4j` to the lazy-import regression test.
 - [x] Build the sdist and wheel once, with the wheel built from the sdist; metadata-check
       both and smoke-test the exact wheel before publishing the artifacts unchanged.
