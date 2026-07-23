@@ -49,7 +49,7 @@ import delta_engine
 import delta_engine.cli
 import delta_engine.databricks
 
-optional_modules = ("typer", "databricks.sdk", "databricks.sql", "pyspark")
+optional_modules = ("typer", "databricks.sdk", "databricks.sql", "pyspark", "delta", "py4j")
 loaded = [name for name in optional_modules if name in sys.modules]
 if loaded:
     raise AssertionError(f"optional modules loaded eagerly: {loaded}")

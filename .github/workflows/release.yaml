@@ -28,12 +28,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    environment: pypi # OIDC binding for Trusted Publishing (approval optional)
     permissions:
-      contents: write # push the bump commit + tag
-      id-token: write # OIDC for Trusted Publishing
+      contents: write # push the bump commit + tag after validation
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
+      version: ${{ steps.notes.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -65,9 +66,17 @@ jobs:
             echo "bump=true"     >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require main for a new release
+        if: steps.mode.outputs.bump == 'true'
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "New releases must be dispatched from main, not $GITHUB_REF."
+            exit 1
+          fi
+
       - name: Check out the tag to publish
-        # Detach onto the exact tag so hatch-vcs builds that clean version rather
-        # than a dev version derived from later commits on main.
+        # Use the validation supplied by the tag rather than applying current
+        # package expectations retrospectively to an older release.
         if: inputs.tag != ''
         run: git checkout "refs/tags/${{ inputs.tag }}"
 
@@ -77,17 +86,12 @@ jobs:
           uv run cz bump --yes --dry-run
           echo "Dry run only — nothing was published."
 
-      - name: Bump version, changelog, tag, and push
+      - name: Create version commit and tag locally
         if: steps.mode.outputs.bump == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run cz bump --yes --changelog
-          # Push the branch, then the new tag explicitly. `--follow-tags` only
-          # pushes annotated tags and silently drops lightweight ones, which
-          # previously left the tag off the remote.
-          git push origin HEAD:main
-          git push origin "v$(uv run cz version --project)"
 
       - name: Resolve version and release notes
         if: steps.mode.outputs.publish == 'true'
@@ -106,14 +110,67 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         run: uv build
 
-      - name: Publish to PyPI
+      - name: Check distribution metadata
         if: steps.mode.outputs.publish == 'true'
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test wheel
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py \
+            --expected-version "${{ steps.notes.outputs.version }}"
+
+      - name: Push version commit and tag
+        if: steps.mode.outputs.bump == 'true'
+        run: |
+          # Keep the release commit and its tag all-or-nothing on the remote.
+          git push --atomic origin HEAD:main "v${{ steps.notes.outputs.version }}"
+
+      - name: Store validated distributions
+        if: steps.mode.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-distributions
+          path: |
+            dist/
+            body.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/delta-engine/${{ needs.build.outputs.version }}/
+    permissions:
+      contents: read
+      id-token: write # OIDC for Trusted Publishing
+    steps:
+      - name: Retrieve validated distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: release-distributions
+
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  github-release:
+    needs: [build, publish]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Retrieve release notes
+        uses: actions/download-artifact@v5
+        with:
+          name: release-distributions
+
       - name: Create GitHub Release
-        if: steps.mode.outputs.publish == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ steps.notes.outputs.version }}
+          tag: v${{ needs.build.outputs.version }}
           bodyFile: body.md
           skipIfReleaseExists: true
