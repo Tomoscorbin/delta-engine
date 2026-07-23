@@ -65,6 +65,22 @@ jobs:
             echo "bump=true"     >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require main for a new release
+        if: steps.mode.outputs.bump == 'true'
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "New releases must be dispatched from main, not $GITHUB_REF."
+            exit 1
+          fi
+
+      - name: Stage distribution validation tooling
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          VALIDATOR_ROOT="$RUNNER_TEMP/delta-engine-distribution-validation"
+          mkdir -p "$VALIDATOR_ROOT/scripts" "$VALIDATOR_ROOT/tests/distribution"
+          cp scripts/validate_distribution.py "$VALIDATOR_ROOT/scripts/"
+          cp tests/distribution/probe_*.py "$VALIDATOR_ROOT/tests/distribution/"
+
       - name: Check out the tag to publish
         # Detach onto the exact tag so hatch-vcs builds that clean version rather
         # than a dev version derived from later commits on main.
@@ -77,17 +93,12 @@ jobs:
           uv run cz bump --yes --dry-run
           echo "Dry run only — nothing was published."
 
-      - name: Bump version, changelog, tag, and push
+      - name: Create version commit and tag locally
         if: steps.mode.outputs.bump == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run cz bump --yes --changelog
-          # Push the branch, then the new tag explicitly. `--follow-tags` only
-          # pushes annotated tags and silently drops lightweight ones, which
-          # previously left the tag off the remote.
-          git push origin HEAD:main
-          git push origin "v$(uv run cz version --project)"
 
       - name: Resolve version and release notes
         if: steps.mode.outputs.publish == 'true'
@@ -105,6 +116,24 @@ jobs:
       - name: Build sdist and wheel
         if: steps.mode.outputs.publish == 'true'
         run: uv build
+
+      - name: Validate distributions
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          uv run --no-project --python 3.12 python \
+            "$RUNNER_TEMP/delta-engine-distribution-validation/scripts/validate_distribution.py" \
+            --dist-dir dist \
+            --expected-version "${{ steps.notes.outputs.version }}"
+
+      - name: Push version commit and tag
+        if: steps.mode.outputs.bump == 'true'
+        run: |
+          # Keep the release commit and its tag all-or-nothing on the remote.
+          git push --atomic origin HEAD:main "v${{ steps.notes.outputs.version }}"
+
+      - name: Verify distributions are unchanged
+        if: steps.mode.outputs.publish == 'true'
+        run: sha256sum --check build/distribution.sha256
 
       - name: Publish to PyPI
         if: steps.mode.outputs.publish == 'true'

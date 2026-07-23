@@ -27,7 +27,37 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
+      - name: Validate distributions
+        run: |
+          uv run --no-project --python 3.12 python scripts/validate_distribution.py \
+            --dist-dir dist
+
+      - name: Verify distributions are unchanged
+        run: sha256sum --check build/distribution.sha256
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+      - name: Verify the TestPyPI download
+        run: |
+          VERSION="$(<build/distribution.version)"
+          uv venv --python 3.12 build/testpypi-environment
+          for attempt in 1 2 3 4 5; do
+            if uv pip install \
+              --python build/testpypi-environment/bin/python \
+              --no-cache \
+              --no-deps \
+              --index-url https://test.pypi.org/simple/ \
+              "delta-engine==$VERSION"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          build/testpypi-environment/bin/python -I \
+            tests/distribution/probe_base.py \
+            --expected-version "$VERSION"

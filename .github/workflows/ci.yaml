@@ -139,6 +139,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
@@ -149,5 +151,21 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Build wheel
+      - name: Build sdist and wheel
         run: uv build
+
+      - name: Validate distributions
+        run: |
+          uv run --no-project --python 3.12 python scripts/validate_distribution.py \
+            --dist-dir dist
+
+      - name: Upload failed distributions
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-distributions
+          path: |
+            dist/
+            build/distribution.sha256
+            build/distribution.version
+          if-no-files-found: ignore
