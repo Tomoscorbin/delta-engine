@@ -34,6 +34,7 @@ from delta_engine.domain.model.table import (
     TableAspect,
     TableKind,
 )
+from delta_engine.domain.model.table_feature import TableFeature, required_features
 
 __all__ = [
     "ALL_ASPECTS",
@@ -62,9 +63,11 @@ __all__ = [
     "Struct",
     "StructField",
     "TableAspect",
+    "TableFeature",
     "TableKind",
     "Timestamp",
     "TimestampNtz",
     "Variant",
     "key_signature",
+    "required_features",
 ]

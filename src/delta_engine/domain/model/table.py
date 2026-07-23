@@ -13,6 +13,7 @@ from delta_engine.domain.model.constraints import (
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.model.table_feature import TableFeature
 
 
 def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
@@ -274,6 +275,9 @@ class ObservedTable:
         properties: Observed values of the engine-managed property keys only;
             the other keys a table carries are not engine state (values only —
             a catalog has no absence assertions, unlike a desired table's).
+        enabled_features: Delta table features observed enabled on the table,
+            restricted to the features the domain models; other enabled
+            features are not engine state.
         referencing_foreign_keys: Inbound foreign keys owned by other tables.
         kind: The relation kind this table resolved to; ``TableKind.TABLE``
             unless the reader observed otherwise.
@@ -294,6 +298,7 @@ class ObservedTable:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
+    enabled_features: frozenset[TableFeature] = frozenset()
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
     kind: TableKind = TableKind.TABLE
 
