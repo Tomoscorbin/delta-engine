@@ -569,10 +569,10 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "databricks-sdk", marker = "extra == 'cli'", specifier = ">=0.70.0" },
-    { name = "databricks-sql-connector", marker = "extra == 'cli'", specifier = ">=4.0.0" },
-    { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.0.0" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15.4" },
+    { name = "databricks-sdk", marker = "extra == 'cli'", specifier = ">=0.70.0,<1" },
+    { name = "databricks-sql-connector", marker = "extra == 'cli'", specifier = ">=4.0.0,<5" },
+    { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.0.0,<5" },
+    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15.4,<1" },
 ]
 provides-extras = ["cli", "sql"]
 

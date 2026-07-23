@@ -25,6 +25,12 @@ needs no PySpark at all.
 pip install delta-engine
 ```
 
+The unpinned commands in this guide are convenient for evaluation. For a
+repeatable job or application deployment, pin the Delta Engine release (for
+example, `delta-engine[cli]==X.Y.Z`) and commit the complete environment to
+your application's lock file. Delta Engine's dependency ranges select
+supported major lines; they are not a replacement for an application lock.
+
 In a Databricks notebook:
 
 ```python

@@ -31,8 +31,12 @@ dynamic = ["version"]
 dependencies = []
 
 [project.optional-dependencies]
-sql = ["databricks-sql-connector>=4.0.0"]
-cli = ["typer>=0.15.4", "databricks-sdk>=0.70.0", "databricks-sql-connector>=4.0.0"]
+sql = ["databricks-sql-connector>=4.0.0,<5"]
+cli = [
+  "typer>=0.15.4,<1",
+  "databricks-sdk>=0.70.0,<1",
+  "databricks-sql-connector>=4.0.0,<5",
+]
 
 [project.urls]
 Homepage = "https://github.com/Tomoscorbin/delta-engine"
