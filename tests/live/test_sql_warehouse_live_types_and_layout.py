@@ -431,9 +431,9 @@ def test_variant_feature_enablement_round_trips(live_connection, live_tables):
     VARIANT: create-time enablement resyncs clean; add-column plans the enable.
 
     Also resolves the enable-key question: if the SET TBLPROPERTIES with
-    'delta.feature.variantType-preview' is rejected here, flip _ENABLE_NAMES
-    in adapters/databricks/sql/features.py to the GA name 'variantType'
-    (observation already accepts both names).
+    'delta.feature.variantType-preview' is rejected here, change the VARIANT
+    definition's enable_name in application/features.py to the GA name
+    'variantType' (it is already among that feature's observed names).
     """
     created = live_tables("variant_create")
     engine = build_sql_engine(live_connection)

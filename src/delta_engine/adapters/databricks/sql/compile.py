@@ -16,8 +16,8 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
-from delta_engine.adapters.databricks.sql.features import enable_feature_property_key
 from delta_engine.adapters.databricks.sql.types import render_data_type
+from delta_engine.application.features import DELTA_FEATURE_POLICY
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
     Action,
@@ -175,8 +175,8 @@ def _(action: RenameColumn, target: _Target) -> str:
 @_compile_action.register
 def _(action: EnableTableFeature, target: _Target) -> str:
     """Compile a table-feature enablement to its documented SET TBLPROPERTIES form."""
-    key = enable_feature_property_key(action.feature)
-    pair = f"{quote_literal(key)}={quote_literal('supported')}"
+    key, value = DELTA_FEATURE_POLICY.enable_property(action.feature)
+    pair = f"{quote_literal(key)}={quote_literal(value)}"
     return f"{target.alter_clause} SET TBLPROPERTIES ({pair})"
 
 

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, NamedTuple
 
-from delta_engine.application.features import required_features
+from delta_engine.application.features import DELTA_FEATURE_POLICY
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
 from delta_engine.application.scopes import ScopeName, managed_aspects_for
 from delta_engine.domain.model import (
@@ -564,23 +564,17 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         for foreign_key in declaration.foreign_key_declarations
     )
 
-    # Table features are derived here rather than in the differ: the feature
-    # vocabulary is platform knowledge, so the domain receives the resulting
-    # names as data, the way it receives generated constraint names.
-    feature_names = frozenset(
-        feature.value
-        for column in declaration.columns
-        for feature in required_features(column.data_type)
-    )
-
     # DesiredTable enforces domain invariants (non-empty and unique columns,
     # existing layout/key columns, and coherent constraints) at construction.
+    # Required features are resolved here, not in the differ: the feature
+    # vocabulary is platform knowledge, so the domain receives the resulting
+    # names as data, the way it receives generated constraint names.
     return DesiredTable(
         qualified_name=declaration.qualified_name,
         columns=declaration.columns,
         comment=declaration.comment,
         properties=declaration.properties,
-        required_features=feature_names,
+        required_features=DELTA_FEATURE_POLICY.required_features(declaration.columns),
         tags=declaration.tags,
         partitioned_by=declaration.partitioned_by,
         clustered_by=declaration.clustered_by,

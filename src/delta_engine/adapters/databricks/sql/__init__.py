@@ -14,7 +14,6 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
-from delta_engine.adapters.databricks.sql.features import enabled_features_from_properties
 from delta_engine.adapters.databricks.sql.queries import (
     column_tags_query,
     describe_json_query,
@@ -44,7 +43,6 @@ __all__ = [
     "column_tags_query",
     "compile_plan",
     "describe_json_query",
-    "enabled_features_from_properties",
     "foreign_keys_query",
     "primary_key_query",
     "quote_literal",
