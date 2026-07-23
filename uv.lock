@@ -578,7 +578,7 @@ requires-dist = [
     { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.0.0" },
     { name = "delta-spark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
     { name = "pyspark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.12" },
+    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15.4" },
 ]
 provides-extras = ["cli", "spark", "sql"]
 
@@ -598,7 +598,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.12.9" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "typer", specifier = ">=0.15.4" },
 ]
 docs = [
     { name = "furo", specifier = ">=2024.1.29" },

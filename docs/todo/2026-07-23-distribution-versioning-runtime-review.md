@@ -12,7 +12,9 @@ backend. The main risks are narrower:
 
 1. The published optional-dependency ranges are open-ended and therefore promise more
    compatibility than is tested.
-2. The declared `typer>=0.12` floor is already too low for the current Click ecosystem.
+2. The original `typer>=0.12` floor was too low for the current Click ecosystem. It has
+   since been raised to the first version verified by the installed-wheel compatibility
+   test.
 3. Installing the `spark` extra on Databricks can replace the Spark and Delta packages
    supplied and tested by the selected Databricks Runtime.
 4. Current live coverage exercises a SQL warehouse, not the Spark backend on a matrix of
@@ -53,7 +55,7 @@ users an exact, documented version combination they can keep running.
   | --- | --- | --- |
   | `spark` | `pyspark>=4.0.0`, `delta-spark>=4.0.0` | Local Spark development, not Databricks compute |
   | `sql` | `databricks-sql-connector>=4.0.0` | Plain Python process using a SQL warehouse |
-  | `cli` | `typer>=0.12`, `databricks-sdk>=0.70.0`, `databricks-sql-connector>=4.0.0` | Read-only CLI using a SQL warehouse |
+  | `cli` | `typer>=0.15.4`, `databricks-sdk>=0.70.0`, `databricks-sql-connector>=4.0.0` | Read-only CLI using a SQL warehouse |
 
 - Hatch obtains the package version from a `vMAJOR.MINOR.PATCH` VCS tag. Commitizen owns
   the conventional-commit bump and changelog workflow.
@@ -155,19 +157,14 @@ Release documentation should include:
 
 ## Dependency range findings
 
-### Broken CLI minimum
+### CLI minimum
 
 A clean environment resolving the declared `typer==0.12` minimum with a current Click
 release did not provide a working CLI: `--version` failed and `--help` crashed. Resolving
-Typer 0.26 succeeded. Tests using only the locked development environment cannot detect
-an invalid published minimum.
-
-Before the next release:
-
-- raise the Typer floor to the first version verified by the compatibility tests;
-- test the minimum dependency set, not only the lockfile;
-- exercise both `delta-engine --help` and `delta-engine --version` from an installed
-  wheel.
+Typer 0.26 succeeded. The verified boundary is Typer 0.15.4: 0.15.3 fails `--help`,
+while 0.15.4 passes both `--help` and `--version`. The declared floor is now 0.15.4,
+and CI exercises both the exact minimum direct CLI dependency set and a fresh
+unconstrained resolution from an installed wheel.
 
 ### Upper bounds
 
@@ -183,7 +180,7 @@ rather than accepting every future major. Candidate boundaries to verify are:
 spark = ["pyspark>=4,<5", "delta-spark>=4,<5"]
 sql = ["databricks-sql-connector>=4,<5"]
 cli = [
-  "typer>=<verified-floor>,<1",
+  "typer>=0.15.4,<1",
   "databricks-sdk>=0.70,<1",
   "databricks-sql-connector>=4,<5",
 ]
