@@ -1,4 +1,4 @@
-"""Smoke-test the installed base wheel without optional dependencies."""
+"""Smoke-test an installed base distribution as an isolated consumer."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--expected-version", required=True)
+    parser.add_argument("--expected-version")
     return parser.parse_args()
 
 
@@ -25,10 +25,11 @@ def _assert_distribution_absent(name: str) -> None:
         distribution(name)
     except PackageNotFoundError:
         return
-    raise AssertionError(f"base wheel unexpectedly installed {name}")
+    raise AssertionError(f"base distribution unexpectedly installed {name}")
 
 
 def main() -> None:
+    """Exercise the dependency-free public surface and lazy-import contract."""
     arguments = _parse_args()
 
     import delta_engine
@@ -37,9 +38,12 @@ def main() -> None:
     import delta_engine.databricks
     from delta_engine.schema import Column, DeltaTable, Integer, String
 
-    assert version("delta-engine") == arguments.expected_version
-    assert delta_engine.__version__ == arguments.expected_version
-    assert Path(delta_engine.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+    installed_version = version("delta-engine")
+    assert delta_engine.__version__ == installed_version
+    if arguments.expected_version is not None:
+        assert installed_version == arguments.expected_version
+    source_root = Path(__file__).resolve().parents[2] / "src"
+    assert not Path(delta_engine.__file__).resolve().is_relative_to(source_root)
 
     table = DeltaTable(
         catalog="dev",
@@ -63,10 +67,17 @@ def main() -> None:
     ):
         _assert_distribution_absent(distribution_name)
 
-    forbidden = ("databricks.sdk", "databricks.sql", "delta", "py4j", "pyspark", "typer")
+    optional_modules = (
+        "databricks.sdk",
+        "databricks.sql",
+        "delta",
+        "py4j",
+        "pyspark",
+        "typer",
+    )
     loaded = [
         name
-        for name in forbidden
+        for name in optional_modules
         if name in sys.modules or any(module.startswith(f"{name}.") for module in sys.modules)
     ]
     assert not loaded, f"optional modules loaded eagerly: {loaded}"
@@ -80,6 +91,8 @@ def main() -> None:
     assert result.returncode == 1
     assert 'pip install "delta-engine[cli]"' in result.stderr
     assert "Traceback" not in result.stderr
+
+    print(f"smoke-tested delta-engine {installed_version}")
 
 
 if __name__ == "__main__":

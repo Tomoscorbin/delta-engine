@@ -121,28 +121,26 @@ backend boundary so importing the base package continues to work without any ext
 Repository tests and `uv.lock` do not prove that an ordinary pip consumer can use the
 published distribution. A release candidate should be exercised as built artifacts:
 
-The agreed implementation sequence is recorded in the
+The implemented release gate is recorded in the
 [release artifact validation plan](2026-07-23-release-artifact-validation-plan.md).
 
 1. Build both the wheel and sdist once.
-2. Inspect their filenames, version, metadata, licence, package contents, `py.typed`
-   marker, and console-script entry point.
-3. Install the base wheel into a blank environment with no project development
-   dependencies and run public-import and lazy-import checks.
-4. Install each extra separately into appropriate clean environments and run a small
-   user-facing smoke test.
-5. Exercise `delta-engine --help` and `delta-engine --version`.
-6. Build a wheel back from the sdist and repeat a minimal import/version check.
-7. Publish only the already-validated artifacts rather than rebuilding different files
-   for the final publish step.
+2. Use Twine's standard metadata and README validation.
+3. Install both artifacts into blank environments and run the dependency-free public API,
+   lazy-import, version, and base console-shim smoke tests.
+4. Pass those files through a CI artifact boundary to a separate OIDC publishing job.
+5. Publish only the already-validated artifacts rather than rebuilding them.
 
-The current release workflow installs development dependencies and builds and publishes,
-but does not itself run linting, typing, tests, metadata inspection, or installed-wheel
-smoke tests. It may benefit from checks already run on `main`, but the release operation
-should either require the successful CI result for the exact commit/tag or run a focused
-release gate itself. TestPyPI is useful for checking rendering and downloadability, but
-its separately rebuilt files are not proof that a later, separately built PyPI artifact
-is identical.
+Do not duplicate the build backend and publisher with a custom archive parser. Checks for
+CLI, SQL, Spark, dependency minima, and newest compatible versions belong in a separate
+compatibility matrix: an upstream optional-dependency release should not make basic
+archive validation non-deterministic. Local Spark installation also does not prove
+Databricks Runtime compatibility.
+
+The release workflow now runs this focused gate before pushing a new release commit/tag,
+then transfers the exact files to an isolated Trusted Publishing job. TestPyPI remains
+useful for checking downloadability, but its separately built files are not proof that a
+later PyPI build is identical.
 
 Release documentation should include:
 
@@ -439,17 +437,17 @@ Strengthen the runtime guard by:
 - [ ] Make missing optional-dependency errors identify the correct extra without
       recommending Spark installation on Databricks compute.
 - [x] Add `delta` and `py4j` to the lazy-import regression test.
-- [x] Build the wheel and sdist once; inspect and smoke-test those exact artifacts in
-      clean environments before publishing them unchanged.
-- [x] Exercise base, SQL, CLI, and local-Spark installations independently; include the
-      console script's `--help` and `--version`.
+- [x] Build the wheel and sdist once; metadata-check and smoke-test those exact artifacts
+      in clean environments before publishing them unchanged.
+- [x] Separate artifact construction from the OIDC publishing job.
 - [x] Require successful checks for the exact release commit/tag, or add a focused
       validation gate to the release workflow before PyPI publication.
 
 ### Compatibility infrastructure
 
 - [ ] Test Python 3.12 and 3.13 in CI.
-- [ ] Add minimum, locked, and newest-compatible dependency jobs.
+- [ ] Add minimum, locked, and newest-compatible dependency jobs, including installed
+      CLI, SQL, and local-Spark smoke tests.
 - [ ] Add live Spark-backend smoke tests for the documented Databricks Runtime matrix.
 - [ ] Publish supported, tested, and experimental runtime statuses in user-facing docs.
 - [ ] Define the supported-LTS window, deprecation notice, and maintenance period for the

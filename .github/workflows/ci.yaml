@@ -154,18 +154,15 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
-      - name: Validate distributions
-        run: |
-          uv run --no-project --python 3.12 python scripts/validate_distribution.py \
-            --dist-dir dist
+      - name: Check distribution metadata
+        run: uvx twine check --strict dist/*
 
-      - name: Upload failed distributions
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: failed-distributions
-          path: |
-            dist/
-            build/distribution.sha256
-            build/distribution.version
-          if-no-files-found: ignore
+      - name: Smoke-test wheel
+        run: |
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py
+
+      - name: Smoke-test source distribution
+        run: |
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.tar.gz \
+            python -I tests/distribution/smoke_test.py

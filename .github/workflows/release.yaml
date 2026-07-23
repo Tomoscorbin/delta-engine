@@ -28,12 +28,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    environment: pypi # OIDC binding for Trusted Publishing (approval optional)
     permissions:
-      contents: write # push the bump commit + tag
-      id-token: write # OIDC for Trusted Publishing
+      contents: write # push the bump commit + tag after validation
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
+      version: ${{ steps.notes.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -73,17 +74,9 @@ jobs:
             exit 1
           fi
 
-      - name: Stage distribution validation tooling
-        if: steps.mode.outputs.publish == 'true'
-        run: |
-          VALIDATOR_ROOT="$RUNNER_TEMP/delta-engine-distribution-validation"
-          mkdir -p "$VALIDATOR_ROOT/scripts" "$VALIDATOR_ROOT/tests/distribution"
-          cp scripts/validate_distribution.py "$VALIDATOR_ROOT/scripts/"
-          cp tests/distribution/probe_*.py "$VALIDATOR_ROOT/tests/distribution/"
-
       - name: Check out the tag to publish
-        # Detach onto the exact tag so hatch-vcs builds that clean version rather
-        # than a dev version derived from later commits on main.
+        # Use the validation supplied by the tag rather than applying current
+        # package expectations retrospectively to an older release.
         if: inputs.tag != ''
         run: git checkout "refs/tags/${{ inputs.tag }}"
 
@@ -117,12 +110,22 @@ jobs:
         if: steps.mode.outputs.publish == 'true'
         run: uv build
 
-      - name: Validate distributions
+      - name: Check distribution metadata
+        if: steps.mode.outputs.publish == 'true'
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test wheel
         if: steps.mode.outputs.publish == 'true'
         run: |
-          uv run --no-project --python 3.12 python \
-            "$RUNNER_TEMP/delta-engine-distribution-validation/scripts/validate_distribution.py" \
-            --dist-dir dist \
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py \
+            --expected-version "${{ steps.notes.outputs.version }}"
+
+      - name: Smoke-test source distribution
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.tar.gz \
+            python -I tests/distribution/smoke_test.py \
             --expected-version "${{ steps.notes.outputs.version }}"
 
       - name: Push version commit and tag
@@ -131,18 +134,50 @@ jobs:
           # Keep the release commit and its tag all-or-nothing on the remote.
           git push --atomic origin HEAD:main "v${{ steps.notes.outputs.version }}"
 
-      - name: Verify distributions are unchanged
+      - name: Store validated distributions
         if: steps.mode.outputs.publish == 'true'
-        run: sha256sum --check build/distribution.sha256
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-distributions
+          path: |
+            dist/
+            body.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/delta-engine/${{ needs.build.outputs.version }}/
+    permissions:
+      contents: read
+      id-token: write # OIDC for Trusted Publishing
+    steps:
+      - name: Retrieve validated distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: release-distributions
 
       - name: Publish to PyPI
-        if: steps.mode.outputs.publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  github-release:
+    needs: [build, publish]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Retrieve release notes
+        uses: actions/download-artifact@v5
+        with:
+          name: release-distributions
+
       - name: Create GitHub Release
-        if: steps.mode.outputs.publish == 'true'
         uses: ncipollo/release-action@v1
         with:
-          tag: v${{ steps.notes.outputs.version }}
+          tag: v${{ needs.build.outputs.version }}
           bodyFile: body.md
           skipIfReleaseExists: true
