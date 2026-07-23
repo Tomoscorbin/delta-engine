@@ -31,8 +31,8 @@ Treat distribution, compatibility, and usability as one product contract:
 1. Keep the base package small, pure Python, and dependency-free.
 2. Put integrations behind explicit extras and lazy backend construction.
 3. Document a distinct installation path for each kind of user.
-4. Validate the exact wheel and sdist that consumers download, not only the editable
-   development checkout.
+4. Validate the built wheel and sdist, and exercise the exact wheel that consumers
+   install rather than only the editable development checkout.
 5. Advertise compatibility only where there is test evidence, while allowing newer,
    unknown environments to run unless a concrete incompatibility is known.
 6. Make dependency, Python, and Databricks Runtime changes visible in the changelog and
@@ -126,8 +126,9 @@ The implemented release gate is recorded in the
 
 1. Build both the wheel and sdist once.
 2. Use Twine's standard metadata and README validation.
-3. Install both artifacts into blank environments and run the dependency-free public API,
-   lazy-import, version, and base console-shim smoke tests.
+3. Build the wheel from the sdist, then install that wheel into a blank environment and
+   run the dependency-free public API, lazy-import, version, and base console-shim smoke
+   tests.
 4. Pass those files through a CI artifact boundary to a separate OIDC publishing job.
 5. Publish only the already-validated artifacts rather than rebuilding them.
 
@@ -437,8 +438,8 @@ Strengthen the runtime guard by:
 - [ ] Make missing optional-dependency errors identify the correct extra without
       recommending Spark installation on Databricks compute.
 - [x] Add `delta` and `py4j` to the lazy-import regression test.
-- [x] Build the wheel and sdist once; metadata-check and smoke-test those exact artifacts
-      in clean environments before publishing them unchanged.
+- [x] Build the sdist and wheel once, with the wheel built from the sdist; metadata-check
+      both and smoke-test the exact wheel before publishing the artifacts unchanged.
 - [x] Separate artifact construction from the OIDC publishing job.
 - [x] Require successful checks for the exact release commit/tag, or add a focused
       validation gate to the release workflow before PyPI publication.

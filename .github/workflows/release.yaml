@@ -121,13 +121,6 @@ jobs:
             python -I tests/distribution/smoke_test.py \
             --expected-version "${{ steps.notes.outputs.version }}"
 
-      - name: Smoke-test source distribution
-        if: steps.mode.outputs.publish == 'true'
-        run: |
-          uv run --isolated --no-project --python 3.12 --with ./dist/*.tar.gz \
-            python -I tests/distribution/smoke_test.py \
-            --expected-version "${{ steps.notes.outputs.version }}"
-
       - name: Push version commit and tag
         if: steps.mode.outputs.bump == 'true'
         run: |

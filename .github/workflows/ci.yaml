@@ -161,8 +161,3 @@ jobs:
         run: |
           uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
             python -I tests/distribution/smoke_test.py
-
-      - name: Smoke-test source distribution
-        run: |
-          uv run --isolated --no-project --python 3.12 --with ./dist/*.tar.gz \
-            python -I tests/distribution/smoke_test.py

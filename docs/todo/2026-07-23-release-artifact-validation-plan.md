@@ -9,7 +9,7 @@ publication remains an optional end-to-end rehearsal.
 - Use `uv build` as the frontend. It builds both the sdist and wheel, with the wheel
   built from the sdist by default.
 - Publish both artifacts.
-- Test artifacts as an isolated consumer, without importing the repository checkout.
+- Test the wheel as an isolated consumer, without importing the repository checkout.
 - Publish the exact files that passed validation; do not rebuild in the publishing job.
 - Keep dependency compatibility and Databricks Runtime coverage separate from artifact
   validation.
@@ -20,7 +20,7 @@ The release gate proves the small set of behaviours that matter to consumers:
 
 1. `uv build` produces an sdist and a pure-Python wheel.
 2. `twine check --strict` accepts both artifacts and their rendered metadata.
-3. Both the wheel and sdist install in clean Python 3.12 environments.
+3. The wheel is built from the sdist and installs in a clean Python 3.12 environment.
 4. The installed version matches the release version.
 5. The dependency-free public API works.
 6. Importing the base package, CLI shim, and Databricks facade does not eagerly load
@@ -44,7 +44,6 @@ Pull-request CI:
 uv build
     -> twine check wheel + sdist
     -> isolated wheel smoke test
-    -> isolated sdist smoke test
 ```
 
 Release:
@@ -89,8 +88,6 @@ uv build
 uvx twine check --strict dist/*
 uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
   python -I tests/distribution/smoke_test.py
-uv run --isolated --no-project --python 3.12 --with ./dist/*.tar.gz \
-  python -I tests/distribution/smoke_test.py
 uv run pytest tests/test_packaging.py -q --no-cov
 uv run ruff check .
 uv run mypy .
@@ -99,6 +96,6 @@ uv run lint-imports
 git diff --check
 ```
 
-Completion means both artifacts pass the same consumer smoke test, the release version
-is enforced before publication, and only the validated artifacts cross into the
-privileged publishing job.
+Completion means both artifacts pass standard metadata validation, the exact wheel passes
+the consumer smoke test with its release version enforced, and only the validated
+artifacts cross into the privileged publishing job.
