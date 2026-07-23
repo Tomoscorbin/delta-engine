@@ -328,12 +328,6 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
             ),
         )
     )
-    execute_sql(
-        live_connection,
-        f"ALTER TABLE {qualified_table(table_name)} "
-        "SET TBLPROPERTIES ('delta.feature.timestampNtz'='supported')",
-    )
-
     engine.sync(
         DeltaTable(
             live_catalog(),
@@ -363,3 +357,116 @@ def test_sync_widens_supported_column_types_in_live_catalog(live_connection, liv
         "amount": "decimal(12,3)",
         "identifier": "decimal(22,2)",
     }
+
+
+def test_create_with_timestamp_ntz_enables_feature_and_resyncs_clean(
+    live_connection, live_tables
+):
+    """
+    Create-time feature enablement is visible to observation: the resync plans nothing.
+
+    This is the pin carrying the AS JSON observation choice: if it fails, the
+    platform does not surface create-time-enabled features as delta.feature.*
+    properties, and the reader must switch to DESCRIBE DETAIL.tableFeatures
+    (see the 2026-07-23 table-feature design spec).
+    """
+    table_name = live_tables("ntz_create")
+    engine = build_sql_engine(live_connection)
+    table = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer()), Column("seen_at", TimestampNtz())),
+    )
+    engine.sync(table)
+    assert "timestampNtz" in read_live_table(live_connection, table_name)["features"]
+
+    report = engine.sync(table)
+
+    [table_report] = report.table_reports
+    assert not table_report.planned_sql_statements
+
+
+def test_adding_timestamp_ntz_column_plans_feature_enable_before_add(
+    live_connection, live_tables
+):
+    """Adding TIMESTAMP_NTZ to an existing table converges without out-of-band steps."""
+    table_name = live_tables("ntz_add")
+    engine = build_sql_engine(live_connection)
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(Column("id", Integer()),),
+        )
+    )
+    assert "timestampNtz" not in read_live_table(live_connection, table_name)["features"]
+
+    extended = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer()), Column("seen_at", TimestampNtz())),
+    )
+    report = engine.sync(extended)
+
+    [table_report] = report.table_reports
+    statements = table_report.planned_sql_statements
+    enable_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "delta.feature.timestampNtz" in statement
+    )
+    add_index = next(
+        index for index, statement in enumerate(statements) if "ADD COLUMN" in statement
+    )
+    assert enable_index < add_index
+    assert "timestampNtz" in read_live_table(live_connection, table_name)["features"]
+    assert not engine.sync(extended).table_reports[0].planned_sql_statements
+
+
+def test_variant_feature_enablement_round_trips(live_connection, live_tables):
+    """
+    VARIANT: create-time enablement resyncs clean; add-column plans the enable.
+
+    Also resolves the enable-key question: if the SET TBLPROPERTIES with
+    'delta.feature.variantType-preview' is rejected here, flip _ENABLE_NAMES
+    in adapters/databricks/sql/features.py to the GA name 'variantType'
+    (observation already accepts both names).
+    """
+    created = live_tables("variant_create")
+    engine = build_sql_engine(live_connection)
+    table = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        created,
+        columns=(Column("id", Integer()), Column("payload", Variant())),
+    )
+    engine.sync(table)
+    features = read_live_table(live_connection, created)["features"]
+    assert {"variantType", "variantType-preview"} & set(features)
+    assert not engine.sync(table).table_reports[0].planned_sql_statements
+
+    extended_name = live_tables("variant_add")
+    engine.sync(
+        DeltaTable(
+            live_catalog(),
+            live_schema(),
+            extended_name,
+            columns=(Column("id", Integer()),),
+        )
+    )
+    extended = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        extended_name,
+        columns=(Column("id", Integer()), Column("payload", Variant())),
+    )
+    report = engine.sync(extended)
+    [table_report] = report.table_reports
+    assert any(
+        "delta.feature.variantType" in statement
+        for statement in table_report.planned_sql_statements
+    )
+    assert not engine.sync(extended).table_reports[0].planned_sql_statements
