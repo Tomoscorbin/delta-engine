@@ -4,6 +4,13 @@
 **Status:** Review record. Recommendations below are not implemented unless described as
 existing behaviour.
 
+**Distribution decision, 2026-07-23:** The published `spark` extra was removed. Shipped
+code never imports `delta-spark`, and the production Spark reader requires Databricks
+Runtime and Unity Catalog features that local open-source Spark does not provide.
+PySpark and `delta-spark` remain development dependencies for the repository's
+credential-free local integration suite; that suite substitutes a test-only reader and
+is not a supported consumer installation path.
+
 ## Conclusions
 
 The distribution design is sound: the base wheel is pure Python, has no runtime
@@ -15,8 +22,9 @@ backend. The main risks are narrower:
 2. The original `typer>=0.12` floor was too low for the current Click ecosystem. It has
    since been raised to the first version verified by the installed-wheel compatibility
    test.
-3. Installing the `spark` extra on Databricks can replace the Spark and Delta packages
-   supplied and tested by the selected Databricks Runtime.
+3. The former `spark` extra described an unsupported local consumer workflow and could
+   replace the Spark and Delta packages supplied by Databricks Runtime. It has been
+   removed; those packages are now development-only.
 4. Current live coverage exercises a SQL warehouse, not the Spark backend on a matrix of
    Databricks Runtimes.
 5. Import Linter enforces architectural dependency direction, but it cannot distinguish a
@@ -24,14 +32,15 @@ backend. The main risks are narrower:
 6. The project has good PyPI metadata and release machinery, but the release job does not
    itself validate the artifacts from a clean consumer environment before publishing them.
 7. The supported installation paths and their intended environments need to be prominent:
-   especially the difference between local Spark, a SQL warehouse, and Databricks compute.
+   especially the difference between a SQL warehouse and Databricks compute.
 
 ## Overall product policy
 
 Treat distribution, compatibility, and usability as one product contract:
 
 1. Keep the base package small, pure Python, and dependency-free.
-2. Put integrations behind explicit extras and lazy backend construction.
+2. Put client integrations behind explicit extras and lazy backend construction; use
+   platform-supplied libraries for the Databricks Runtime backend.
 3. Document a distinct installation path for each kind of user.
 4. Validate the built wheel and sdist, and exercise the exact wheel that consumers
    install rather than only the editable development checkout.
@@ -53,10 +62,11 @@ users an exact, documented version combination they can keep running.
 
   | Extra | Current requirements | Intended environment |
   | --- | --- | --- |
-  | `spark` | `pyspark>=4.0.0`, `delta-spark>=4.0.0` | Local Spark development, not Databricks compute |
   | `sql` | `databricks-sql-connector>=4.0.0` | Plain Python process using a SQL warehouse |
   | `cli` | `typer>=0.15.4`, `databricks-sdk>=0.70.0`, `databricks-sql-connector>=4.0.0` | Read-only CLI using a SQL warehouse |
 
+- PySpark and `delta-spark` are development dependencies only. They support the local
+  integration suite and are not part of the published consumer contract.
 - Hatch obtains the package version from a `vMAJOR.MINOR.PATCH` VCS tag. Commitizen owns
   the conventional-commit bump and changelog workflow.
 - The release workflow builds both an sdist and wheel, publishes through PyPI trusted
@@ -104,19 +114,18 @@ environment instead of showing the extras as interchangeable:
 | Pure declaration/planning library | `pip install delta-engine` | No Spark or Databricks client dependencies |
 | SQL warehouse integration | `pip install "delta-engine[sql]"` | Installs the Databricks SQL connector |
 | Command-line interface | `pip install "delta-engine[cli]"` | Installs the CLI, SDK, and SQL connector |
-| Local open-source Spark development | `pip install "delta-engine[spark]"` | Not for Databricks compute |
 | Databricks compute | `%pip install "delta-engine==X.Y.Z"` | Use the runtime's Spark and Delta packages, then restart Python |
 
 The first screen of the README/PyPI description should say what Delta Engine does, show
 the simplest successful example, state the supported Python versions, and lead each user
-to the correct installation path. The local-only purpose of the `spark` extra and the
-base-only Databricks instruction should be difficult to miss.
+to the correct installation path. The base-only Databricks instruction and the absence of
+a consumer Spark extra should be difficult to miss.
 
 Backend construction should fail with an actionable optional-dependency message when the
-relevant extra is absent. For example, local Spark construction can recommend
-`delta-engine[spark]`, while the message for a detected Databricks environment must not
-tell the user to replace runtime-supplied PySpark. These checks must remain inside the
-backend boundary so importing the base package continues to work without any extra.
+relevant SQL or CLI extra is absent. Spark construction should identify a missing
+Databricks Runtime environment without telling the user to install or replace
+runtime-supplied PySpark. These checks must remain inside the backend boundary so
+importing the base package continues to work without any extra.
 
 ### Validate what is actually downloaded
 
@@ -135,9 +144,9 @@ The implemented release gate is recorded in the
 5. Publish only the already-validated artifacts rather than rebuilding them.
 
 Do not duplicate the build backend and publisher with a custom archive parser. Checks for
-CLI, SQL, Spark, dependency minima, and newest compatible versions belong in a separate
+CLI, SQL, dependency minima, and newest compatible versions belong in a separate
 compatibility matrix: an upstream optional-dependency release should not make basic
-archive validation non-deterministic. Local Spark installation also does not prove
+archive validation non-deterministic. The internal local Spark suite also does not prove
 Databricks Runtime compatibility.
 
 The release workflow now runs this focused gate before pushing a new release commit/tag,
@@ -176,7 +185,6 @@ Published backend and CLI dependencies should describe tested compatible major l
 rather than accepting every future major. Candidate boundaries to verify are:
 
 ```toml
-spark = ["pyspark>=4,<5", "delta-spark>=4,<5"]
 sql = ["databricks-sql-connector>=4,<5"]
 cli = [
   "typer>=0.15.4,<1",
@@ -189,6 +197,10 @@ These are compatibility boundaries, not substitutes for testing. The Databricks 
 still pre-1.0, so `<1` cannot guarantee that every intermediate release is
 backwards-compatible. Applications and deployments should pin or lock a complete
 environment even when the library metadata uses ranges.
+
+PySpark and `delta-spark` do not need published bounds because they are not consumer
+dependencies. Their compatible pair is owned by the development lock and local
+integration suite.
 
 CI should cover:
 
@@ -243,14 +255,14 @@ them. See Databricks'
 Do **not** install any of these on Databricks compute:
 
 ```text
-delta-engine[spark]
 pyspark
 delta-spark
 ```
 
 Databricks supplies mutually tested Spark and Delta versions. Notebook-installed packages
-take precedence over runtime libraries, so installing the `spark` extra can shadow,
-upgrade, or downgrade the runtime's packages. See the documented
+take precedence over runtime libraries, so notebook-installing `pyspark` or `delta-spark`
+can shadow, upgrade, or downgrade the runtime's packages. The current package therefore
+does not publish a `spark` extra. See the documented
 [library precedence](https://docs.databricks.com/aws/en/libraries/) and
 [Spark migration guidance](https://docs.databricks.com/aws/en/migration/spark).
 
@@ -258,9 +270,9 @@ Pip environment markers cannot select packages based on a Databricks Runtime num
 Leaving Spark and Delta out of the on-cluster installation is therefore more reliable
 than attempting to encode every runtime combination in the wheel metadata.
 
-The `spark` extra remains useful off Databricks, but it should be documented explicitly
-as local-only. Local open-source Spark/Delta tests are useful adapter tests; they do not
-replace tests on Databricks Runtime.
+Local open-source Spark/Delta tests remain useful internal adapter tests, but their
+test-only reader means they are neither a supported installation path nor a replacement
+for tests on Databricks Runtime.
 
 ### Runtime assurance
 
@@ -334,11 +346,11 @@ When a feature is optional, prefer a feature-level requirement such as “liquid
 conversion requires DBR 18.1+” over “delta-engine requires DBR 18.1+”. Users on 16.4 can
 then continue using every operation that 16.4 supports.
 
-If a new dependency is needed only to develop or test a new feature, raising the local
-`spark` extra does not need to raise the Databricks Runtime floor. On-cluster users install
-the dependency-free base wheel and continue using the runtime's own PySpark. A global
-runtime-floor increase is warranted only when the production code path genuinely cannot
-operate on the older runtime.
+If a new dependency is needed only to develop or test a new feature, updating the
+internal local Spark environment does not raise the Databricks Runtime floor. On-cluster
+users install the dependency-free base wheel and continue using the runtime's own
+PySpark. A global runtime-floor increase is warranted only when the production code path
+genuinely cannot operate on the older runtime.
 
 If the global floor must rise, make the package boundary explicit:
 
@@ -425,12 +437,14 @@ Strengthen the runtime guard by:
 
 ### Before the next release
 
-- [ ] Correct the Typer floor and add minimum-version CLI smoke tests.
+- [x] Correct the Typer floor and add minimum-version CLI smoke tests.
 - [ ] Add tested upper-major boundaries to the published optional dependencies.
-- [ ] Add a concise installation chooser for base, SQL, CLI, local Spark, and Databricks
-      compute to the README/PyPI description and installation documentation.
-- [ ] State prominently that Databricks users install a pinned base wheel and never the
-      `spark` extra.
+- [x] Remove the unsupported consumer `spark` extra while retaining the locked local
+      Spark/Delta integration environment for repository tests.
+- [x] Add a concise installation chooser for base, SQL, CLI, and Databricks compute to
+      the README/PyPI description and installation documentation.
+- [x] State prominently that Databricks users install a pinned base wheel and use the
+      runtime's Spark and Delta libraries.
 - [ ] Make missing optional-dependency errors identify the correct extra without
       recommending Spark installation on Databricks compute.
 - [x] Add `delta` and `py4j` to the lazy-import regression test.
@@ -444,7 +458,9 @@ Strengthen the runtime guard by:
 
 - [ ] Test Python 3.12 and 3.13 in CI.
 - [ ] Add minimum, locked, and newest-compatible dependency jobs, including installed
-      CLI, SQL, and local-Spark smoke tests.
+      CLI and SQL smoke tests.
+- [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than
+      a published compatibility promise.
 - [ ] Add live Spark-backend smoke tests for the documented Databricks Runtime matrix.
 - [ ] Publish supported, tested, and experimental runtime statuses in user-facing docs.
 - [ ] Define the supported-LTS window, deprecation notice, and maintenance period for the

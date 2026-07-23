@@ -535,10 +535,6 @@ cli = [
     { name = "databricks-sql-connector" },
     { name = "typer" },
 ]
-spark = [
-    { name = "delta-spark" },
-    { name = "pyspark" },
-]
 sql = [
     { name = "databricks-sql-connector" },
 ]
@@ -576,11 +572,9 @@ requires-dist = [
     { name = "databricks-sdk", marker = "extra == 'cli'", specifier = ">=0.70.0" },
     { name = "databricks-sql-connector", marker = "extra == 'cli'", specifier = ">=4.0.0" },
     { name = "databricks-sql-connector", marker = "extra == 'sql'", specifier = ">=4.0.0" },
-    { name = "delta-spark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
-    { name = "pyspark", marker = "extra == 'spark'", specifier = ">=4.0.0" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15.4" },
 ]
-provides-extras = ["cli", "spark", "sql"]
+provides-extras = ["cli", "sql"]
 
 [package.metadata.requires-dev]
 dev = [
