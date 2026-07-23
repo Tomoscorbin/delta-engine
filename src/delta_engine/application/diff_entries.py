@@ -210,7 +210,7 @@ def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: EnableTableFeature) -> tuple[DiffEntry, ...]:
-    text = f"table feature {action.feature.value} — permanent protocol upgrade"
+    text = f"table feature {action.feature} — permanent protocol upgrade"
     return (DiffEntry(DiffCategory.FEATURES, "+", (text,)),)
 
 

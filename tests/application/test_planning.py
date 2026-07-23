@@ -20,7 +20,6 @@ from delta_engine.domain.model import (
     String,
     TableAspect,
     TableKind,
-    TimestampNtz,
 )
 from delta_engine.domain.plan import (
     AddColumn,
@@ -381,9 +380,7 @@ def test_creation_plan_carries_the_ordinary_table_kind():
 
 
 def test_feature_enablement_is_accepted_at_the_planning_boundary():
-    desired = _desired(
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz()))
-    )
+    desired = _desired(required_features=frozenset({"timestampNtz"}))
     observed = _observed()
 
     result = plan_diff(diff_table(desired, observed))
@@ -393,8 +390,10 @@ def test_feature_enablement_is_accepted_at_the_planning_boundary():
 
 
 def test_feature_enablement_outside_column_structure_scope_is_rejected():
+    # Columns agree, so the enable is the only action: the rejection can only
+    # come from its aspect, which a metadata-scoped declaration excludes.
     desired = _desired(
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz())),
+        required_features=frozenset({"timestampNtz"}),
         managed_aspects=METADATA_ASPECTS,
     )
     observed = _observed()

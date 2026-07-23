@@ -4,15 +4,16 @@ The Databricks encoding of Delta table features.
 Enabled features surface as ``delta.feature.<name> = 'supported'`` entries in
 the describe document's table properties; enabling one is a SET TBLPROPERTIES
 of the same shape. This module owns the name tables for both directions so
-the read side and the compiler cannot diverge. The domain speaks
-``TableFeature`` only.
+the read side and the compiler cannot diverge. It pivots on ``TableFeature``,
+the engine's vocabulary, and exchanges canonical feature names with the plan
+either way.
 """
 
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Final
 
-from delta_engine.domain.model import TableFeature
+from delta_engine.application.features import TableFeature
 
 _FEATURE_PROPERTY_PREFIX: Final = "delta.feature."
 _SUPPORTED: Final = "supported"
@@ -40,14 +41,14 @@ _ENABLE_NAMES: Final[Mapping[TableFeature, str]] = MappingProxyType(
 )
 
 
-def enable_feature_property_key(feature: TableFeature) -> str:
+def enable_feature_property_key(feature: str) -> str:
     """Return the ``delta.feature.*`` property key that enables ``feature``."""
-    return f"{_FEATURE_PROPERTY_PREFIX}{_ENABLE_NAMES[feature]}"
+    return f"{_FEATURE_PROPERTY_PREFIX}{_ENABLE_NAMES[TableFeature(feature)]}"
 
 
 def enabled_features_from_properties(
     properties: Mapping[str, str],
-) -> frozenset[TableFeature]:
+) -> frozenset[str]:
     """
     Return the modeled features an observed property mapping records as enabled.
 
@@ -70,4 +71,4 @@ def enabled_features_from_properties(
                 f" expected {_SUPPORTED!r}"
             )
         enabled.add(feature)
-    return frozenset(enabled)
+    return frozenset(feature.value for feature in enabled)

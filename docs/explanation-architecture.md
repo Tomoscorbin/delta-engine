@@ -220,6 +220,11 @@ are encoded as ordinary Python in the application layer:
 - `application/properties.py` defines the Delta table-property policy
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
   durations, …), with Delta-specific value formats and transition rules.
+- `application/features.py` defines the Delta table features the engine
+  enables (`timestampNtz`, `variantType`) and which declared types require
+  them. A declaration's required features are derived when it is lowered, so
+  the domain records feature names as data and plans the difference against
+  the observed set without knowing what any of them mean.
 - Several rules in `application/validation.py` encode Delta behaviour directly.
   `ColumnMappingRequiredForDrop` exists only because Delta permits
   `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;

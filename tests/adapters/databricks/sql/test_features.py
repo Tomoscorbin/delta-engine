@@ -6,7 +6,7 @@ from delta_engine.adapters.databricks.sql.features import (
     enable_feature_property_key,
     enabled_features_from_properties,
 )
-from delta_engine.domain.model import TableFeature
+from delta_engine.application.features import TableFeature
 
 
 def test_supported_modeled_features_are_observed():

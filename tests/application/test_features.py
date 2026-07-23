@@ -1,5 +1,6 @@
 """Tests for the table-feature vocabulary and the required-features walker."""
 
+from delta_engine.application.features import TableFeature, required_features
 from delta_engine.domain.model import (
     Array,
     Date,
@@ -8,10 +9,8 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
-    TableFeature,
     TimestampNtz,
     Variant,
-    required_features,
 )
 
 

@@ -1,19 +1,28 @@
 """
-Delta table features the domain models, and which declared types require them.
+The Delta table features this engine enables, and the types that require them.
 
-Values are the Delta protocol feature names — protocol vocabulary, not a
-platform encoding. How Databricks spells them in table properties
+Reference: https://docs.delta.io/latest/versioning.html
+
+Features share their namespace with the platform, as properties do: Databricks
+enables features like ``deletionVectors`` and ``rowTracking`` on its own. The
+engine manages the features below and no others; a table's remaining features
+are invisible to it.
+
+``TableFeature`` is the single source of the canonical feature names. Its
+values are the Delta protocol names, and those values — plain strings — are
+what a desired table records as required and an observed table records as
+enabled. The domain compares those sets and plans the difference; it never
+needs the vocabulary itself. How Databricks spells a feature on the wire
 (``delta.feature.*`` keys, the ``'supported'`` value, preview aliases) is the
 adapter's concern.
 
-Admission rule: a feature belongs here only when it is a prerequisite of an
+Admission policy: a feature belongs here only when it is a prerequisite of an
 engine-planned action that the platform does not enable automatically as part
-of executing that action. Property-gated features (appendOnly,
-changeDataFeed, columnMapping, typeWidening) ride along with their enabling
-property or DDL; platform-managed features (deletionVectors, rowTracking,
-invariants) are not the engine's to manage. That leaves exactly the features
-required by declared types, which Databricks enables on CREATE but not on
-ALTER.
+of executing that action. Property-gated features (appendOnly, changeDataFeed,
+columnMapping, typeWidening) ride along with their enabling property or DDL;
+platform-managed features (deletionVectors, rowTracking, invariants) are not
+the engine's to manage. That leaves exactly the features required by declared
+types, which Databricks enables on CREATE but not on ALTER.
 """
 
 from enum import StrEnum

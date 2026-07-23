@@ -14,6 +14,7 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_query,
 )
 from delta_engine.application.errors import ReadError
+from delta_engine.application.features import TableFeature
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
@@ -21,7 +22,6 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
-    TableFeature,
     TableKind,
 )
 

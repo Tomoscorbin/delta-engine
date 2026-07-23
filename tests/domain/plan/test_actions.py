@@ -13,7 +13,6 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
-    TableFeature,
 )
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -364,7 +363,7 @@ def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
 
 
 def test_enable_table_feature_declares_aspect_phase_and_subject():
-    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
+    action = EnableTableFeature(feature="timestampNtz")
 
     assert action.aspect is TableAspect.COLUMN_STRUCTURE
     assert action.phase is ActionPhase.ENABLE_TABLE_FEATURE
@@ -384,7 +383,7 @@ def test_action_plan_orders_feature_enable_before_column_actions():
         target=_TARGET,
         actions=(
             AddColumn(column=_column("seen_at")),
-            EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
+            EnableTableFeature(feature="timestampNtz"),
         ),
     )
 

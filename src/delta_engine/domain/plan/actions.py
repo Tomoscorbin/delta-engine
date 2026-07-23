@@ -16,7 +16,6 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
-    TableFeature,
     TableKind,
 )
 
@@ -94,21 +93,22 @@ class EnableTableFeature(Action):
     """
     Enable a Delta table feature the desired schema requires.
 
-    Emitted only for features Databricks does not enable automatically as
-    part of a planned statement (see domain.model.table_feature). Enablement
-    is a permanent protocol upgrade, so it is always its own visible action,
-    phased before the column changes that depend on it. Features are
-    append-only on a table: there is no disable counterpart.
+    ``feature`` is the feature's canonical name, as the desired table records
+    it; the vocabulary it comes from and the admission rule that governs it
+    live in ``delta_engine.application.features``. Enablement is a permanent
+    protocol upgrade, so it is always its own visible action, phased before
+    the column changes that depend on it. Features are append-only on a table:
+    there is no disable counterpart.
     """
 
-    feature: TableFeature
+    feature: str
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ENABLE_TABLE_FEATURE
 
     @property
     def subject(self) -> str:
-        return self.feature.value
+        return self.feature
 
 
 @dataclass(frozen=True, slots=True)
