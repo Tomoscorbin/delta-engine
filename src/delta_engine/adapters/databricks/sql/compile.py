@@ -16,6 +16,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
+from delta_engine.adapters.databricks.sql.features import enable_feature_property_key
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
@@ -28,6 +29,7 @@ from delta_engine.domain.plan import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -168,6 +170,14 @@ def _(action: RenameColumn, target: _Target) -> str:
     old = backtick(action.old_name)
     new = backtick(action.new_name)
     return f"{target.alter_clause} RENAME COLUMN {old} TO {new}"
+
+
+@_compile_action.register
+def _(action: EnableTableFeature, target: _Target) -> str:
+    """Compile a table-feature enablement to its documented SET TBLPROPERTIES form."""
+    key = enable_feature_property_key(action.feature)
+    pair = f"{quote_literal(key)}={quote_literal('supported')}"
+    return f"{target.alter_clause} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register

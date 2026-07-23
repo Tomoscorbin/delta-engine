@@ -13,6 +13,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
+    TableFeature,
 )
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -26,6 +27,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -359,3 +361,31 @@ def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
     }
 
     assert tag_actions == {"SetTableTag", "UnsetTableTag", "SetColumnTag", "UnsetColumnTag"}
+
+
+def test_enable_table_feature_declares_aspect_phase_and_subject():
+    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
+
+    assert action.aspect is TableAspect.COLUMN_STRUCTURE
+    assert action.phase is ActionPhase.ENABLE_TABLE_FEATURE
+    assert action.subject == "timestampNtz"
+
+
+def test_enable_table_feature_phases_before_every_dependent_column_phase():
+    assert ActionPhase.CREATE_TABLE < ActionPhase.ENABLE_TABLE_FEATURE
+    assert ActionPhase.ENABLE_TABLE_FEATURE < ActionPhase.SET_PROPERTY
+    assert ActionPhase.ENABLE_TABLE_FEATURE < ActionPhase.RENAME_COLUMN
+    assert ActionPhase.ENABLE_TABLE_FEATURE < ActionPhase.ADD_COLUMN
+    assert ActionPhase.ENABLE_TABLE_FEATURE < ActionPhase.ALTER_COLUMN_TYPE
+
+
+def test_action_plan_orders_feature_enable_before_column_actions():
+    plan = ActionPlan(
+        target=_TARGET,
+        actions=(
+            AddColumn(column=_column("seen_at")),
+            EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
+        ),
+    )
+
+    assert [type(action) for action in plan.actions] == [EnableTableFeature, AddColumn]

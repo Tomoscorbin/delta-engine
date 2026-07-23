@@ -24,6 +24,7 @@ from delta_engine.domain.plan import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -58,9 +59,10 @@ class DiffCategory(IntEnum):
     KEYS = 2
     CLUSTERING = 3
     PARTITIONING = 4
-    PROPERTIES = 5
-    TAGS = 6
-    COMMENTS = 7
+    FEATURES = 5
+    PROPERTIES = 6
+    TAGS = 7
+    COMMENTS = 8
 
 
 # (singular, plural) nouns per category: the plural names the diff group heading;
@@ -71,6 +73,7 @@ CATEGORY_NOUN: Final[Mapping[DiffCategory, tuple[str, str]]] = MappingProxyType(
         DiffCategory.KEYS: ("key", "keys"),
         DiffCategory.CLUSTERING: ("clustering", "clustering"),
         DiffCategory.PARTITIONING: ("partitioning", "partitioning"),
+        DiffCategory.FEATURES: ("table feature", "table features"),
         DiffCategory.PROPERTIES: ("property", "properties"),
         DiffCategory.TAGS: ("tag", "tags"),
         DiffCategory.COMMENTS: ("comment", "comments"),
@@ -203,6 +206,12 @@ def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
         f"table: '{action.desired_comment}'" if action.desired_comment else "table comment (unset)"
     )
     return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
+
+
+@action_entries.register
+def _(action: EnableTableFeature) -> tuple[DiffEntry, ...]:
+    text = f"table feature {action.feature.value} — permanent protocol upgrade"
+    return (DiffEntry(DiffCategory.FEATURES, "+", (text,)),)
 
 
 @action_entries.register
