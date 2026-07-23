@@ -6,7 +6,7 @@ from delta_engine.application.features import (
     DELTA_FEATURE_POLICY,
     FeatureDefinition,
     FeaturePolicy,
-    TableFeature,
+    ImpliedFeature,
 )
 from delta_engine.domain.model import (
     Array,
@@ -22,42 +22,42 @@ from delta_engine.domain.model import (
 )
 
 
-def _required(*data_types) -> frozenset[str]:
+def _implied(*data_types) -> frozenset[str]:
     columns = tuple(
         DesiredColumn(f"c{index}", data_type) for index, data_type in enumerate(data_types)
     )
-    return DELTA_FEATURE_POLICY.required_features(columns)
+    return DELTA_FEATURE_POLICY.implied_features(columns)
 
 
 def test_feature_values_are_delta_protocol_names():
-    assert TableFeature.TIMESTAMP_NTZ.value == "timestampNtz"
-    assert TableFeature.VARIANT.value == "variantType"
+    assert ImpliedFeature.TIMESTAMP_NTZ.value == "timestampNtz"
+    assert ImpliedFeature.VARIANT.value == "variantType"
 
 
-def test_feature_free_types_require_nothing():
-    assert _required(Integer(), Date(), Array(String())) == frozenset()
+def test_feature_free_types_imply_nothing():
+    assert _implied(Integer(), Date(), Array(String())) == frozenset()
 
 
-def test_scalar_requirements():
-    assert _required(TimestampNtz()) == frozenset({"timestampNtz"})
-    assert _required(Variant()) == frozenset({"variantType"})
+def test_scalar_types_imply_their_feature():
+    assert _implied(TimestampNtz()) == frozenset({"timestampNtz"})
+    assert _implied(Variant()) == frozenset({"variantType"})
 
 
-def test_requirements_are_found_at_every_depth():
-    assert _required(Array(TimestampNtz())) == frozenset({"timestampNtz"})
-    assert _required(Map(String(), Variant())) == frozenset({"variantType"})
-    assert _required(Map(TimestampNtz(), Integer())) == frozenset({"timestampNtz"})
+def test_implications_are_found_at_every_depth():
+    assert _implied(Array(TimestampNtz())) == frozenset({"timestampNtz"})
+    assert _implied(Map(String(), Variant())) == frozenset({"variantType"})
+    assert _implied(Map(TimestampNtz(), Integer())) == frozenset({"timestampNtz"})
     nested = Struct(
         fields=(
             StructField("seen_at", TimestampNtz()),
             StructField("payload", Array(Struct(fields=(StructField("v", Variant()),)))),
         )
     )
-    assert _required(nested) == frozenset({"timestampNtz", "variantType"})
+    assert _implied(nested) == frozenset({"timestampNtz", "variantType"})
 
 
-def test_requirements_combine_across_columns():
-    assert _required(Integer(), TimestampNtz(), Map(String(), Variant())) == frozenset(
+def test_implications_combine_across_columns():
+    assert _implied(Integer(), TimestampNtz(), Map(String(), Variant())) == frozenset(
         {"timestampNtz", "variantType"}
     )
 
@@ -68,7 +68,7 @@ def test_supported_managed_features_are_observed():
         "delta.feature.variantType": "supported",
     }
 
-    assert DELTA_FEATURE_POLICY.enabled_features(properties) == frozenset(
+    assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset(
         {"timestampNtz", "variantType"}
     )
 
@@ -76,7 +76,7 @@ def test_supported_managed_features_are_observed():
 def test_preview_variant_name_is_observed_as_the_variant_feature():
     properties = {"delta.feature.variantType-preview": "supported"}
 
-    assert DELTA_FEATURE_POLICY.enabled_features(properties) == frozenset({"variantType"})
+    assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset({"variantType"})
 
 
 def test_unmanaged_feature_names_are_ignored():
@@ -86,20 +86,20 @@ def test_unmanaged_feature_names_are_ignored():
         "delta.feature.rowTracking": "supported",
     }
 
-    assert DELTA_FEATURE_POLICY.enabled_features(properties) == frozenset()
+    assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset()
 
 
 def test_ordinary_properties_are_ignored():
     properties = {"delta.enableChangeDataFeed": "true", "delta.columnMapping.mode": "name"}
 
-    assert DELTA_FEATURE_POLICY.enabled_features(properties) == frozenset()
+    assert DELTA_FEATURE_POLICY.supported_features(properties) == frozenset()
 
 
 def test_managed_feature_with_unexpected_value_fails_closed():
     properties = {"delta.feature.timestampNtz": "enabled"}
 
     with pytest.raises(ValueError, match=r"delta\.feature\.timestampNtz"):
-        DELTA_FEATURE_POLICY.enabled_features(properties)
+        DELTA_FEATURE_POLICY.supported_features(properties)
 
 
 def test_enable_property_is_a_supported_feature_key():
@@ -112,10 +112,10 @@ def test_enable_property_is_a_supported_feature_key():
 def test_every_feature_enables_under_a_name_it_observes():
     # Round-tripping through observation is what keeps a sync idempotent: an
     # enablement the engine cannot then see would be re-planned forever.
-    for feature in TableFeature:
+    for feature in ImpliedFeature:
         key, value = DELTA_FEATURE_POLICY.enable_property(feature)
 
-        assert DELTA_FEATURE_POLICY.enabled_features({key: value}) == frozenset({feature.value})
+        assert DELTA_FEATURE_POLICY.supported_features({key: value}) == frozenset({feature.value})
 
 
 def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
@@ -123,14 +123,14 @@ def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
     # that same feature is observed under
     definitions = (
         FeatureDefinition(
-            feature=TableFeature.TIMESTAMP_NTZ,
-            required_by=TimestampNtz,
+            feature=ImpliedFeature.TIMESTAMP_NTZ,
+            implied_by=TimestampNtz,
             enable_name="timestampNtzV2",
             observed_names=frozenset({"timestampNtz"}),
         ),
         FeatureDefinition(
-            feature=TableFeature.VARIANT,
-            required_by=Variant,
+            feature=ImpliedFeature.VARIANT,
+            implied_by=Variant,
             enable_name="variantType",
             observed_names=frozenset({"variantType"}),
         ),
@@ -144,8 +144,8 @@ def test_policy_rejects_a_feature_it_could_not_observe_after_enabling():
 
 def test_policy_rejects_a_vocabulary_member_without_an_encoding():
     definition = FeatureDefinition(
-        feature=TableFeature.TIMESTAMP_NTZ,
-        required_by=TimestampNtz,
+        feature=ImpliedFeature.TIMESTAMP_NTZ,
+        implied_by=TimestampNtz,
         enable_name="timestampNtz",
         observed_names=frozenset({"timestampNtz"}),
     )

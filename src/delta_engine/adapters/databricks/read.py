@@ -162,7 +162,7 @@ def _read_observed_table(
         columns=tagged_columns,
         comment=description.comment,
         properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties),
-        enabled_features=DELTA_FEATURE_POLICY.enabled_features(description.table_properties),
+        supported_features=DELTA_FEATURE_POLICY.supported_features(description.table_properties),
         tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,

@@ -465,7 +465,7 @@ def test_to_desired_table_defaults_partitioning_to_empty_tuple():
     assert desired.partitioned_by == ()
 
 
-def test_to_desired_table_derives_the_table_features_its_types_require():
+def test_to_desired_table_resolves_the_table_features_its_types_imply():
     # Given a declaration whose types need Delta table features, nested and not
     table = DeltaTable(
         catalog="cat",
@@ -481,12 +481,12 @@ def test_to_desired_table_derives_the_table_features_its_types_require():
     # When converting to the domain table
     desired = table.to_desired_table()
 
-    # Then the required feature names travel with the declaration, so nothing
+    # Then the implied feature names travel with the declaration, so nothing
     # downstream has to inspect types to plan their enablement
-    assert desired.required_features == frozenset({"timestampNtz", "variantType"})
+    assert desired.implied_features == frozenset({"timestampNtz", "variantType"})
 
 
-def test_to_desired_table_requires_no_features_for_ordinary_types():
+def test_to_desired_table_implies_no_features_for_ordinary_types():
     table = DeltaTable(
         catalog="cat",
         schema="core",
@@ -494,7 +494,7 @@ def test_to_desired_table_requires_no_features_for_ordinary_types():
         columns=[Column("id", Integer()), Column("label", String())],
     )
 
-    assert table.to_desired_table().required_features == frozenset()
+    assert table.to_desired_table().implied_features == frozenset()
 
 
 def test_primary_key_parameter_lowers_into_table_level_constraint():

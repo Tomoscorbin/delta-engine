@@ -566,7 +566,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
 
     # DesiredTable enforces domain invariants (non-empty and unique columns,
     # existing layout/key columns, and coherent constraints) at construction.
-    # Required features are resolved here, not in the differ: the feature
+    # Implied features are resolved here, not in the differ: the feature
     # vocabulary is platform knowledge, so the domain receives the resulting
     # names as data, the way it receives generated constraint names.
     return DesiredTable(
@@ -574,7 +574,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         columns=declaration.columns,
         comment=declaration.comment,
         properties=declaration.properties,
-        required_features=DELTA_FEATURE_POLICY.required_features(declaration.columns),
+        implied_features=DELTA_FEATURE_POLICY.implied_features(declaration.columns),
         tags=declaration.tags,
         partitioned_by=declaration.partitioned_by,
         clustered_by=declaration.clustered_by,

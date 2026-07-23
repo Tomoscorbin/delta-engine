@@ -1,36 +1,41 @@
 """
-The Delta table features this engine enables, and their restrictions.
+The Delta table features a declared schema implies, and how the engine enables them.
 
 Reference: https://docs.delta.io/latest/versioning.html
 
-Features share their namespace with the platform, as properties do: Databricks
-enables features like ``deletionVectors`` and ``rowTracking`` on its own, and
-enables a declared type's feature as part of creating a table. The engine
-enables the features below, on tables that already exist, and no others; the
-rest of a table's features are invisible to it.
+Two kinds of feature requirement run through this engine, and only one of them
+lives here.
 
-``TableFeature`` is the single source of the managed feature names: the policy
-definitions below reference its members, and the values — plain strings — are
-what a desired table records as required and an observed table records as
-enabled. The domain compares those two sets and plans the difference without
-holding the vocabulary itself.
+A feature is *implied* when the desired shape cannot exist without it: a column
+of type TIMESTAMP_NTZ needs ``timestampNtz``, and a table carrying such a column
+always has it. Nothing is declared and nothing is chosen. Databricks enables an
+implied feature as part of creating a table — this module exists because it does
+not do the same when altering one, so the engine closes the gap itself and shows
+the upgrade in the plan.
 
-Everything that governs a feature lives in one definition here: the declared
-type that requires it, the name the engine writes to enable it, and every name
-the catalog may record it under. Databricks spells features as ordinary table
-properties (``delta.feature.<name> = 'supported'``), so the adapters read and
-compile them through this policy and hold no feature knowledge of their own.
+A feature is *operation-permitted* when the table exists happily without it and
+a particular change needs it: ``columnMapping`` to drop or rename a column,
+``typeWidening`` to widen a type in place. Those are the user's decision, they
+carry real cost, and each is reached through a managed property — so they are
+declared, and validation refuses the change when they are not
+(``ColumnMappingRequiredForDrop``, ``TypeWideningRequiredForTypeChange`` in
+``application/validation.py``). They never appear in ``ImpliedFeature``.
 
-Admission policy: a feature joins ``TableFeature`` only when it is a
-prerequisite of an engine-planned action that the platform does not enable
-automatically as part of executing that action. Property-gated features
-(appendOnly, changeDataFeed, columnMapping, typeWidening) ride along with
-their enabling property or DDL, and leave a permanent but inert support marker
-whose behaviour follows a toggleable property; platform-managed features
-(deletionVectors, rowTracking, invariants) are not the engine's to manage. The
-features below are the other kind: no property, no off switch — support *is*
-activation, which is why they alone need a planned enable step and why the
-plan flags them as permanent.
+Platform-managed features (``deletionVectors``, ``rowTracking``, ``invariants``)
+are neither kind: the engine leaves them alone entirely.
+
+Admission therefore reduces to one question — can the declared shape exist
+without this feature? If yes, it is not ours. Everything a feature needs lives
+in its definition below: what implies it, the name the engine writes to enable
+it, and every name the catalog may record it under. Databricks spells features
+as ordinary table properties (``delta.feature.<name> = 'supported'``), so the
+adapters read and compile through this policy and hold no feature knowledge of
+their own.
+
+``ImpliedFeature`` is the single source of the managed feature names, and its
+values — plain strings — are what a desired table records as implied and an
+observed table records as supported. The domain compares those two sets and
+plans the difference without holding the vocabulary itself.
 """
 
 from collections.abc import Iterable, Mapping
@@ -49,14 +54,14 @@ from delta_engine.domain.model.data_type import (
     Variant,
 )
 
-# Databricks records and accepts feature enablement as table properties under
-# this prefix; 'supported' is the only value the protocol assigns meaning to.
+# Databricks records and accepts feature support as table properties under this
+# prefix; 'supported' is the only value the protocol assigns meaning to.
 _FEATURE_PROPERTY_PREFIX: Final = "delta.feature."
 _SUPPORTED: Final = "supported"
 
 
-class TableFeature(StrEnum):
-    """A Delta table feature the engine enables when a declared type requires it."""
+class ImpliedFeature(StrEnum):
+    """A Delta table feature a declared schema cannot exist without."""
 
     TIMESTAMP_NTZ = "timestampNtz"
     VARIANT = "variantType"
@@ -65,33 +70,33 @@ class TableFeature(StrEnum):
 @dataclass(frozen=True, slots=True)
 class FeatureDefinition:
     """
-    One manageable feature, and the judgments the engine needs about it.
+    One implied feature, and the judgments the engine needs about it.
 
-    ``required_by`` is the declared type whose storage needs the feature, found
-    at any depth of a column's type tree. ``enable_name`` is the name the
-    engine writes to enable it, and ``observed_names`` every name the catalog
-    may record it under — a feature that outlives a preview keeps its old
-    spelling on existing tables, so the two differ.
+    ``implied_by`` is the declared type whose storage needs the feature, found
+    at any depth of a column's type tree. ``enable_name`` is the name the engine
+    writes to enable it, and ``observed_names`` every name the catalog may
+    record it under — a feature that outlives a preview keeps its old spelling
+    on existing tables, so the two differ.
     """
 
-    feature: TableFeature
-    required_by: type[DataType]
+    feature: ImpliedFeature
+    implied_by: type[DataType]
     enable_name: str
     observed_names: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
 class FeaturePolicy:
-    """Resolve which features a declaration requires, a table has, and how to enable one."""
+    """Resolve which features a declaration implies, a table supports, and how to enable one."""
 
     definitions: tuple[FeatureDefinition, ...]
-    _definitions_by_feature: Mapping[TableFeature, FeatureDefinition] = field(
+    _definitions_by_feature: Mapping[ImpliedFeature, FeatureDefinition] = field(
         init=False, repr=False, compare=False
     )
-    _features_by_type: Mapping[type[DataType], TableFeature] = field(
+    _features_by_type: Mapping[type[DataType], ImpliedFeature] = field(
         init=False, repr=False, compare=False
     )
-    _features_by_observed_name: Mapping[str, TableFeature] = field(
+    _features_by_observed_name: Mapping[str, ImpliedFeature] = field(
         init=False, repr=False, compare=False
     )
 
@@ -103,10 +108,10 @@ class FeaturePolicy:
         if len(definitions_by_feature) != len(self.definitions):
             raise ValueError("Feature policy contains duplicate feature definitions")
 
-        # TableFeature is the vocabulary; every member needs an encoding, or
+        # ImpliedFeature is the vocabulary; every member needs an encoding, or
         # planning its enablement would fail at compile time.
         undefined = sorted(
-            feature.value for feature in TableFeature if feature not in definitions_by_feature
+            feature.value for feature in ImpliedFeature if feature not in definitions_by_feature
         )
         if undefined:
             raise ValueError(f"Feature policy defines no encoding for: {', '.join(undefined)}")
@@ -131,7 +136,7 @@ class FeaturePolicy:
             self,
             "_features_by_type",
             MappingProxyType(
-                {definition.required_by: definition.feature for definition in self.definitions}
+                {definition.implied_by: definition.feature for definition in self.definitions}
             ),
         )
         object.__setattr__(
@@ -146,19 +151,19 @@ class FeaturePolicy:
             ),
         )
 
-    def required_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
-        """Return the names of every managed feature these columns' types require."""
-        required: set[TableFeature] = set()
+    def implied_features(self, columns: Iterable[DesiredColumn]) -> frozenset[str]:
+        """Return the names of every managed feature these columns' types imply."""
+        implied: set[ImpliedFeature] = set()
         for column in columns:
-            required |= self._features_required_by(column.data_type)
-        return frozenset(feature.value for feature in required)
+            implied |= self._features_implied_by(column.data_type)
+        return frozenset(feature.value for feature in implied)
 
-    def enabled_features(self, properties: Mapping[str, str]) -> frozenset[str]:
+    def supported_features(self, properties: Mapping[str, str]) -> frozenset[str]:
         """
-        Return the names of the managed features these table properties record as enabled.
+        Return the names of the managed features these table properties record as supported.
 
         Feature keys outside the managed vocabulary are ignored: the engine
-        neither requires nor disables them, so they are not its state.
+        neither implies nor disables them, so they are not its state.
 
         Raises:
             ValueError: A managed feature key carries a value other than
@@ -166,7 +171,7 @@ class FeaturePolicy:
                 the read rather than shrink it.
 
         """
-        enabled: set[TableFeature] = set()
+        supported: set[ImpliedFeature] = set()
         for key, value in properties.items():
             if not key.startswith(_FEATURE_PROPERTY_PREFIX):
                 continue
@@ -179,25 +184,25 @@ class FeaturePolicy:
                     f"table feature property {key} has unrecognized value {value!r};"
                     f" expected {_SUPPORTED!r}"
                 )
-            enabled.add(feature)
-        return frozenset(feature.value for feature in enabled)
+            supported.add(feature)
+        return frozenset(feature.value for feature in supported)
 
     def enable_property(self, feature: str) -> tuple[str, str]:
         """Return the ``(key, value)`` table property that enables ``feature``."""
-        definition = self._definitions_by_feature[TableFeature(feature)]
+        definition = self._definitions_by_feature[ImpliedFeature(feature)]
         return f"{_FEATURE_PROPERTY_PREFIX}{definition.enable_name}", _SUPPORTED
 
-    def _features_required_by(self, data_type: DataType) -> frozenset[TableFeature]:
-        """Walk a type tree, collecting the features its leaves require."""
+    def _features_implied_by(self, data_type: DataType) -> frozenset[ImpliedFeature]:
+        """Walk a type tree, collecting the features its leaves imply."""
         match data_type:
             case Array(element=element):
-                return self._features_required_by(element)
+                return self._features_implied_by(element)
             case Map(key=key, value=value):
-                return self._features_required_by(key) | self._features_required_by(value)
+                return self._features_implied_by(key) | self._features_implied_by(value)
             case Struct(fields=fields):
-                empty: frozenset[TableFeature] = frozenset()
+                empty: frozenset[ImpliedFeature] = frozenset()
                 return empty.union(
-                    *(self._features_required_by(field.data_type) for field in fields)
+                    *(self._features_implied_by(field.data_type) for field in fields)
                 )
             case _:
                 feature = self._features_by_type.get(type(data_type))
@@ -206,14 +211,14 @@ class FeaturePolicy:
 
 _DEFINITIONS: Final[tuple[FeatureDefinition, ...]] = (
     FeatureDefinition(
-        feature=TableFeature.TIMESTAMP_NTZ,
-        required_by=TimestampNtz,
+        feature=ImpliedFeature.TIMESTAMP_NTZ,
+        implied_by=TimestampNtz,
         enable_name="timestampNtz",
         observed_names=frozenset({"timestampNtz"}),
     ),
     FeatureDefinition(
-        feature=TableFeature.VARIANT,
-        required_by=Variant,
+        feature=ImpliedFeature.VARIANT,
+        implied_by=Variant,
         # Databricks documents 'variantType-preview' as the enable key. If a
         # live run shows the platform rejecting it, or recording the GA name
         # instead, move that name here — both stay observable either way, so

@@ -378,16 +378,16 @@ def _diff_table_features(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[EnableTableFeature, ...]:
     """
-    Return an enablement action per required feature the table lacks.
+    Return an enablement action per implied feature the table does not support.
 
-    The desired table arrives with its required features already derived, so
+    The desired table arrives with its implied features already resolved, so
     this is set arithmetic over opaque names. Drift-arm only: CREATE TABLE
-    establishes required features from the created schema, so a missing table
-    never plans enablement. Enabled features the declaration does not require
-    are never drift — features are append-only on a table and the engine plans
-    no disable.
+    establishes a schema's implied features as it creates it, so a missing
+    table never plans enablement. Supported features the declaration does not
+    imply are never drift — features are append-only on a table and the engine
+    plans no disable.
     """
-    missing = desired.required_features - observed.enabled_features
+    missing = desired.implied_features - observed.supported_features
     return tuple(EnableTableFeature(feature=feature) for feature in sorted(missing))
 
 

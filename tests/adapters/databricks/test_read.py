@@ -14,7 +14,7 @@ from delta_engine.adapters.databricks.sql import (
     table_tags_query,
 )
 from delta_engine.application.errors import ReadError
-from delta_engine.application.features import TableFeature
+from delta_engine.application.features import ImpliedFeature
 from delta_engine.application.ports import TableAbsent, TablePresent
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
@@ -377,7 +377,7 @@ def test_a_non_delta_streaming_table_reads_as_failed():
     assert error.exception_type == "UnsupportedRelationError"
 
 
-def test_enabled_features_are_observed_and_kept_out_of_properties():
+def test_supported_features_are_observed_and_kept_out_of_properties():
     document = _describe_doc(
         table_properties={
             "delta.feature.timestampNtz": "supported",
@@ -390,7 +390,7 @@ def test_enabled_features_are_observed_and_kept_out_of_properties():
     state = read_catalog_state(_router(responses), QN)
 
     assert isinstance(state, TablePresent)
-    assert state.table.enabled_features == frozenset({TableFeature.TIMESTAMP_NTZ})
+    assert state.table.supported_features == frozenset({ImpliedFeature.TIMESTAMP_NTZ})
     # feature keys are protocol state, not managed properties
     assert "delta.feature.timestampNtz" not in state.table.properties
     assert state.table.properties["delta.enableChangeDataFeed"] == "true"

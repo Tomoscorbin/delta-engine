@@ -221,13 +221,25 @@ are encoded as ordinary Python in the application layer:
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
   durations, …), with Delta-specific value formats and transition rules.
 - `application/features.py` defines the Delta table-feature policy
-  (`timestampNtz`, `variantType`): which declared types require a feature,
-  the `delta.feature.*` property that enables it, and every name the catalog
-  may record it under. As with properties, the adapters hold none of this —
-  they read and compile feature state through the policy. A declaration's
-  required features are resolved when it is lowered, so the domain records
-  feature names as data and plans the difference against the observed set
-  without knowing what any of them mean.
+  (`timestampNtz`, `variantType`): which declared types imply a feature, the
+  `delta.feature.*` property that enables it, and every name the catalog may
+  record it under. As with properties, the adapters hold none of this — they
+  read and compile feature state through the policy. A declaration's implied
+  features are resolved when it is lowered, so the domain records feature
+  names as data and plans the difference against the supported set without
+  knowing what any of them mean.
+
+  Feature requirements come in two kinds, and the split between these two
+  modules is where that shows. A feature is _implied_ when the desired shape
+  cannot exist without it — a `TIMESTAMP_NTZ` column always has
+  `timestampNtz` — so nothing is declared, nothing is chosen, and the engine
+  enables it itself. A feature is _operation-permitted_ when the table exists
+  happily without it and one change needs it: `columnMapping` to drop or
+  rename a column, `typeWidening` to widen in place. Those are the user's
+  decision, reached through a managed property, so validation rejects the
+  change until it is declared rather than enabling anything. Conflating the
+  two is what makes the placement of this logic look arbitrary; keeping them
+  apart is why auto-enablement here is not a house rule.
 - Several rules in `application/validation.py` encode Delta behaviour directly.
   `ColumnMappingRequiredForDrop` exists only because Delta permits
   `DROP COLUMN` solely under `delta.columnMapping.mode='name'`;

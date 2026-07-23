@@ -748,10 +748,10 @@ def test_observed_table_carries_a_streaming_table_kind():
     assert table.kind is TableKind.STREAMING_TABLE
 
 
-def test_observed_table_enabled_features_default_to_empty():
+def test_observed_table_supported_features_default_to_empty():
     table = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         columns=(ObservedColumn("id", Integer()),),
     )
 
-    assert table.enabled_features == frozenset()
+    assert table.supported_features == frozenset()
