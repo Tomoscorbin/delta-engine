@@ -46,6 +46,12 @@ def _doc(**overrides):
     return json.dumps(base)
 
 
+def _doc_without(key: str) -> str:
+    document = json.loads(_doc())
+    document.pop(key)
+    return json.dumps(document)
+
+
 class DescribeCase(NamedTuple):
     """A generated valid document paired with the observed state it must parse to."""
 
@@ -192,17 +198,6 @@ def test_partitioning_and_clustering_carried_verbatim_in_order():
     assert description.clustered_by == ("ID",)
 
 
-def test_non_list_partition_columns_raises():
-    # A present-but-non-list layout field is drift, not "no partitioning".
-    with pytest.raises(MetadataParseError):
-        _parse(_doc(partition_columns="region"))
-
-
-def test_non_list_clustering_columns_raises():
-    with pytest.raises(MetadataParseError):
-        _parse(_doc(clustering_columns="id"))
-
-
 def test_table_properties_are_carried_verbatim():
     # Which property keys the engine manages is the reader's decision; the
     # parse carries every observed key, protocol internals included.
@@ -219,94 +214,87 @@ def test_absent_table_properties_carry_as_empty():
     assert dict(_parse(_doc()).table_properties) == {}
 
 
-def test_non_object_table_properties_raises():
-    with pytest.raises(MetadataParseError):
-        _parse(_doc(table_properties="delta.appendOnly=true"))
+def test_empty_describe_result_raises():
+    # Given no row from a statement that must return exactly one
+
+    # When parsing the result
+    with pytest.raises(MetadataParseError) as exc_info:
+        table_description_from_rows([], QN)
+
+    # Then absence is diagnosed as an invalid description, not a missing table
+    assert "returned no rows" in str(exc_info.value)
 
 
-def test_unsupported_column_type_fails_the_read():
-    # An unknown or future type name is a column the domain cannot model. The
-    # engine owns the full column set, so dropping it would read as "in sync";
-    # fail the read instead.
-    with pytest.raises(MetadataParseError):
-        _parse(
+@pytest.mark.parametrize(
+    ("json_text", "diagnostic"),
+    [
+        pytest.param(
+            _doc(partition_columns="region"),
+            "partition_columns is not a list",
+            id="partition-columns-not-list",
+        ),
+        pytest.param(
+            _doc(clustering_columns="id"),
+            "clustering_columns is not a list",
+            id="clustering-columns-not-list",
+        ),
+        pytest.param(
+            _doc(table_properties="delta.appendOnly=true"),
+            "table_properties is not an object",
+            id="properties-not-object",
+        ),
+        pytest.param(
             _doc(
                 columns=[
                     {"name": "ok", "type": {"name": "int"}, "nullable": True},
                     {"name": "weird", "type": {"name": "geography"}, "nullable": True},
                 ]
-            )
-        )
+            ),
+            "column 'weird' has an unsupported type",
+            id="unsupported-column-type",
+        ),
+        pytest.param(
+            _doc(columns=[{"name": "amount", "type": "decimal"}]),
+            "column 'amount' has a malformed type object",
+            id="type-not-object",
+        ),
+        pytest.param(
+            _doc(columns=[{"name": "amount", "type": {"precision": 10, "scale": 2}}]),
+            "column 'amount' has a malformed type object",
+            id="type-name-missing",
+        ),
+        pytest.param(
+            _doc(columns=[{"name": "tags", "type": {"name": "array"}, "nullable": True}]),
+            "column 'tags' has an unsupported type",
+            id="unsupported-nested-type",
+        ),
+        pytest.param(
+            _doc(columns=[{"name": "id", "type": {"name": "int"}, "nullable": "false"}]),
+            "column 'id' has a non-boolean nullable",
+            id="nullable-not-boolean",
+        ),
+        pytest.param("{not json", "was not valid JSON", id="invalid-json"),
+        pytest.param(_doc_without("columns"), "has no columns array", id="columns-missing"),
+        pytest.param("[1, 2, 3]", "expected a JSON object", id="document-not-object"),
+        pytest.param(
+            _doc(columns=[{"no_name": "x", "type": {"name": "int"}}]),
+            "malformed column entry",
+            id="column-name-missing",
+        ),
+    ],
+)
+def test_invalid_describe_documents_raise_with_diagnostic(
+    json_text: str,
+    diagnostic: str,
+) -> None:
+    # Given malformed catalog metadata
 
+    # When parsing the document
+    with pytest.raises(MetadataParseError) as exc_info:
+        _parse(json_text)
 
-def test_malformed_type_object_raises():
-    # A non-object type is a malformed shape, caught before type classification.
-    with pytest.raises(MetadataParseError):
-        _parse(
-            _doc(
-                columns=[
-                    {"name": "id", "type": {"name": "int"}, "nullable": False},
-                    {"name": "amount", "type": "decimal"},
-                ]
-            )
-        )
-
-
-def test_type_object_without_name_raises():
-    with pytest.raises(MetadataParseError):
-        _parse(
-            _doc(
-                columns=[
-                    {"name": "id", "type": {"name": "int"}, "nullable": False},
-                    {"name": "amount", "type": {"precision": 10, "scale": 2}},
-                ]
-            )
-        )
-
-
-def test_unsupported_nested_type_fails_the_read():
-    # A nested type the domain cannot represent (here an array with no element
-    # type) is unreadable just like an unknown top-level type: fail, don't drop.
-    with pytest.raises(MetadataParseError):
-        _parse(
-            _doc(
-                columns=[
-                    {"name": "id", "type": {"name": "int"}, "nullable": False},
-                    {"name": "tags", "type": {"name": "array"}, "nullable": True},
-                ]
-            )
-        )
-
-
-def test_non_boolean_nullable_fails_the_read():
-    with pytest.raises(MetadataParseError):
-        _parse(_doc(columns=[{"name": "id", "type": {"name": "int"}, "nullable": "false"}]))
-
-
-def test_empty_describe_result_raises():
-    # The statement returns exactly one row; no rows means the table could not
-    # be described, not that it is absent.
-    with pytest.raises(MetadataParseError):
-        table_description_from_rows([], QN)
-
-
-def test_malformed_json_and_missing_columns_raise():
-    with pytest.raises(MetadataParseError):
-        _parse("{not json")
-    doc = json.loads(_doc())
-    doc.pop("columns")
-    with pytest.raises(MetadataParseError):
-        _parse(json.dumps(doc))
-
-
-def test_non_object_document_raises():
-    with pytest.raises(MetadataParseError):
-        _parse("[1, 2, 3]")
-
-
-def test_malformed_column_entry_raises():
-    with pytest.raises(MetadataParseError):
-        _parse(_doc(columns=[{"no_name": "x", "type": {"name": "int"}}]))
+    # Then the diagnostic identifies the unsupported shape
+    assert diagnostic in str(exc_info.value)
 
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -344,18 +332,20 @@ def test_unknown_describe_fields_are_ignored() -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "malformed"),
+    ("field", "malformed", "diagnostic"),
     (
-        ("table_comment", False),
-        ("column_comment", 0),
-        ("layout_item", {"name": "region"}),
-        ("property_value", True),
+        ("table_comment", False, "table comment is not a string"),
+        ("column_comment", 0, "column 'id' comment is not a string"),
+        ("layout_item", {"name": "region"}, "partition_columns entries must be strings"),
+        ("property_value", True, "table_properties values must be strings"),
     ),
 )
 def test_non_string_describe_leaf_values_raise_metadata_parse_error(
     field: str,
     malformed: object,
+    diagnostic: str,
 ) -> None:
+    # Given an otherwise valid document with one malformed leaf value
     document = json.loads(_doc())
     if field == "table_comment":
         document["comment"] = malformed
@@ -366,5 +356,9 @@ def test_non_string_describe_leaf_values_raise_metadata_parse_error(
     else:
         document["table_properties"] = {"delta.appendOnly": malformed}
 
-    with pytest.raises(MetadataParseError):
+    # When parsing the document
+    with pytest.raises(MetadataParseError) as exc_info:
         _parse(json.dumps(document))
+
+    # Then the diagnostic identifies the malformed field
+    assert diagnostic in str(exc_info.value)

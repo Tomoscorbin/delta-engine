@@ -74,14 +74,6 @@ def _foreign_key(constraint_name: str = "test_id_fk") -> ForeignKeyConstraint:
 # ---------- top-level diff sum
 
 
-def test_table_missing_carries_the_desired_table():
-    # Given a desired table for a table absent from the catalog
-    desired = _desired()
-
-    # Then the missing-table variant is self-contained
-    assert TableMissing(desired=desired).desired is desired
-
-
 def test_missing_table_diffs_to_table_missing_carrying_desired():
     # Given no observed table
     desired = _desired()

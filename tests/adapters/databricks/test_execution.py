@@ -21,11 +21,13 @@ class RecordingRunner:
 
 
 def test_execute_statement_returns_normally_after_success():
+    # Given a runner that records successful statements
     runner = RecordingRunner()
 
-    result = execute_statement(runner, "SELECT 1")
+    # When executing a statement
+    execute_statement(runner, "SELECT 1")
 
-    assert result is None
+    # Then the statement reaches the runner unchanged
     assert runner.executed == ["SELECT 1"]
 
 

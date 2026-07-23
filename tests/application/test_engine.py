@@ -380,7 +380,6 @@ def test_syncing_no_tables_returns_empty_report_without_reading_or_executing():
     report = engine.sync()
 
     # Then an empty, non-failing report is returned
-    assert isinstance(report, SyncReport)
     assert report.has_failures is False
     assert tuple(report) == ()
     assert reader.fetched_names == []
@@ -405,7 +404,6 @@ def test_sync_returns_report_when_all_tables_succeed():
     )
 
     # Then both tables succeed in prepared name order
-    assert isinstance(report, SyncReport)
     assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
@@ -1210,7 +1208,6 @@ def test_dry_run_does_not_execute_and_reports_no_execution():
     )
 
     # Then plans are produced, but nothing is executed
-    assert isinstance(report, SyncReport)
     assert report.has_failures is False
     assert [table_report.status for table_report in report] == [
         TableRunStatus.SUCCESS,
