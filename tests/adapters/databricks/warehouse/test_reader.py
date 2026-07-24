@@ -1,11 +1,9 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
-    describe_detail_query,
     describe_json_query,
     foreign_keys_query,
     primary_key_query,
@@ -86,7 +84,6 @@ class ClosedConnection:
 def _responses(describe=_DOC, **overrides):
     responses = {
         describe_json_query(QN): [(describe,)] if describe is not None else describe,
-        describe_detail_query(QN): [SimpleNamespace(tableFeatures=[])],
         table_tags_query(QN): [],
         column_tags_query(QN): [],
         primary_key_query(QN): [],

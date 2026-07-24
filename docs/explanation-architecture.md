@@ -137,8 +137,10 @@ between the two backends through the `sql` core and the `read` assembly. Both
 backends read a table with `DESCRIBE TABLE EXTENDED … AS JSON`, and a shared
 parser turns that JSON document into a backend-neutral `TableDescription`:
 lowercasing catalog identifiers, mapping the structured column types, and reading
-the comment, partitioning, clustering, and table properties. A separate
-`DESCRIBE DETAIL` supplies the authoritative `tableFeatures` protocol state.
+the comment, partitioning, clustering, and table properties. During assembly,
+the reader extracts the document's synthesized `delta.feature.* = supported`
+properties into the observed table's typed feature set; those protocol keys
+remain outside the user-managed property set.
 `information_schema` supplies the constraint and tag metadata as structured rows
 — Unity Catalog tags, the table's own primary and foreign keys, and inbound
 foreign keys (the JSON document's embedded `table_constraints` string is left
@@ -216,27 +218,25 @@ That is the _hard_ form of the hexagonal boundary, and it holds.
 
 The _soft_ form — that the domain and application layers know nothing about any
 particular backend — does not fully hold today. Delta and Databricks semantics
-are encoded as ordinary Python in the application layer:
+are encoded as ordinary Python in the domain and application layers:
 
+- `domain/plan/diff.py` contains the small Delta type-to-feature mapping
+  (`TimestampNtz → timestampNtz`, `Variant → variantType`). Desired tables do
+  not store this derived state. For an existing table, `diff_table` derives the
+  required set from the desired column trees and subtracts the
+  `supported_features` observed by the reader. Each missing member becomes an
+  `EnableTableFeature` discrepancy. Missing tables skip this step because
+  CREATE establishes the schema-implied features.
 - `application/properties.py` defines the Delta table-property policy
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
   durations, …), with Delta-specific value formats and transition rules.
-- `application/features.py` contains the small Delta type-to-feature mapping
-  (`TimestampNtz → timestampNtz`, `Variant → variantType`). Desired tables do
-  not store this derived state. For an existing table, `plan_diff` derives the
-  required set from the desired column trees and subtracts the
-  `supported_features` observed by the reader. Each missing member becomes an
-  `EnableTableFeature` action before validation and before dependent column
-  actions. Missing tables skip this step because CREATE establishes the
-  schema-implied features.
 
-  Feature requirements come in two kinds, and the split between these two
-  modules is where that shows. A feature is _implied_ when the desired shape
-  cannot exist without it — a `TIMESTAMP_NTZ` column always has
-  `timestampNtz` — so nothing is declared, nothing is chosen, and the engine
-  enables it itself. A feature is _operation-permitted_ when the table exists
-  happily without it and one change needs it: `columnMapping` to drop or
-  rename a column, `typeWidening` to widen in place. Those are the user's
+  Feature requirements come in two kinds. A feature is _implied_ when the
+  desired shape cannot exist without it — a `TIMESTAMP_NTZ` column always has
+  `timestampNtz` — so nothing is declared, nothing is chosen, and the differ
+  emits the upgrade itself. A feature is _operation-permitted_ when the table
+  exists happily without it and one change needs it: `columnMapping` to drop
+  or rename a column, `typeWidening` to widen in place. Those are the user's
   decision, reached through a managed property, so validation rejects the
   change until it is declared rather than enabling anything.
 - Several rules in `application/validation.py` encode Delta behaviour directly.
@@ -410,10 +410,10 @@ over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview
 does not depend on which one ran it, and both read a table through the same
 shared path — `DESCRIBE … AS JSON` parsed into a `TableDescription`,
-`DESCRIBE DETAIL` for table features, then `information_schema` for tags,
-keys, and inbound foreign keys — differing only in the transport those
-statements run over (in-process Spark SQL versus the warehouse connection's
-cursor) and in how each classifies a backend exception. Because
+including its projected table features, then `information_schema` for tags,
+keys, and inbound foreign keys — differing only in the transport those statements
+run over (in-process Spark SQL versus the warehouse connection's cursor) and in
+how each classifies a backend exception. Because
 `DESCRIBE … AS JSON` is a Unity Catalog feature, both backends are
 Unity-Catalog-only for reads; a `hive_metastore` table is not readable through
 either.

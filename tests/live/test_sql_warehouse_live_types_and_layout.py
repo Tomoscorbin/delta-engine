@@ -363,8 +363,8 @@ def test_create_with_timestamp_ntz_enables_feature_and_resyncs_clean(live_connec
     """
     Create-time feature enablement is visible to observation: the resync plans nothing.
 
-    This pins the production reader's DESCRIBE DETAIL.tableFeatures
-    observation path.
+    This pins the production reader's AS JSON feature-property observation
+    path.
     """
     table_name = live_tables("ntz_create")
     engine = build_sql_engine(live_connection)

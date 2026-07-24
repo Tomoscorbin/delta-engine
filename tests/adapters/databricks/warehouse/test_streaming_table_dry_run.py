@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
-    describe_detail_query,
     describe_json_query,
     foreign_keys_query,
     primary_key_query,
@@ -70,7 +69,6 @@ def _streaming_table_connection() -> RoutedConnection:
     return RoutedConnection(
         {
             describe_json_query(QN): [(_STREAMING_DOC,)],
-            describe_detail_query(QN): [SimpleNamespace(tableFeatures=[])],
             table_tags_query(QN): [SimpleNamespace(tag_name="stale", tag_value="remove-me")],
             column_tags_query(QN): [],
             primary_key_query(QN): [],

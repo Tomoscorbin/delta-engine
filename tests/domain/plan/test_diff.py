@@ -2,26 +2,35 @@ import pytest
 
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Array,
     DesiredColumn,
     DesiredTable,
     ForeignKeyReference,
     Integer,
     Long,
+    Map,
     ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
+    Struct,
+    StructField,
     TableAspect,
+    TableFeature,
     TableKind,
+    TimestampNtz,
+    Variant,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     AddColumn,
     AlterClustering,
     AlterColumnType,
+    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -205,6 +214,110 @@ def test_nullability_drift_produces_column_nullability_changed():
     assert diff.actions == (
         SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
     )
+
+
+# ---------- schema-implied table features
+
+
+def test_existing_table_diff_enables_feature_required_by_added_column():
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
+
+    diff = diff_table(desired, _observed())
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (
+        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        AddColumn(DesiredColumn("seen_at", TimestampNtz())),
+    )
+
+
+def test_existing_table_diff_does_not_reenable_supported_feature():
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
+    observed = _observed(supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}))
+
+    diff = diff_table(desired, observed)
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (AddColumn(DesiredColumn("seen_at", TimestampNtz())),)
+
+
+def test_existing_table_diff_finds_features_in_nested_type_trees():
+    payload = Map(
+        String(),
+        Struct(
+            fields=(
+                StructField("seen_at", Array(TimestampNtz())),
+                StructField("value", Variant()),
+            )
+        ),
+    )
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("payload", payload),
+        )
+    )
+
+    diff = diff_table(desired, _observed())
+
+    assert isinstance(diff, TableDrift)
+    feature_actions = tuple(
+        action for action in diff.actions if isinstance(action, EnableTableFeature)
+    )
+    assert feature_actions == (
+        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        EnableTableFeature(TableFeature.VARIANT),
+    )
+
+
+def test_existing_table_diff_only_enables_missing_required_features():
+    desired = _desired(
+        columns=(
+            DesiredColumn("seen_at", TimestampNtz()),
+            DesiredColumn("payload", Map(String(), Variant())),
+        )
+    )
+    observed = _observed(
+        columns=(ObservedColumn("seen_at", TimestampNtz()),),
+        supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}),
+    )
+
+    diff = diff_table(desired, observed)
+
+    assert isinstance(diff, TableDrift)
+    feature_actions = tuple(
+        action for action in diff.actions if isinstance(action, EnableTableFeature)
+    )
+    assert feature_actions == (EnableTableFeature(TableFeature.VARIANT),)
+
+
+def test_existing_table_diff_reports_feature_gap_without_column_drift():
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+    observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
+
+    diff = diff_table(desired, observed)
+
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (EnableTableFeature(TableFeature.TIMESTAMP_NTZ),)
+
+
+def test_missing_table_relies_on_create_for_required_features():
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+
+    diff = diff_table(desired, None)
+
+    assert isinstance(diff, TableMissing)
+    assert diff.actions == (CreateTable(desired),)
 
 
 # ---------- column comment changes

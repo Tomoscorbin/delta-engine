@@ -221,7 +221,7 @@ class TypeWideningRequiredForTypeChange:
     sync as the widen is safe (SET_PROPERTY phases before ALTER_COLUMN_TYPE).
 
     Type widening is an operation-permitted feature, not an implied one — see
-    ``application/features.py`` for the distinction.
+    ``domain/plan/diff.py`` for the latter.
     """
 
     name: ClassVar[str] = "TypeWideningRequiredForTypeChange"
@@ -371,7 +371,7 @@ class ColumnMappingRequiredForDrop:
     the drop is safe (SET_PROPERTY phases before DROP_COLUMN).
 
     Column mapping is an operation-permitted feature, not an implied one — see
-    ``application/features.py`` for the distinction.
+    ``domain/plan/diff.py`` for the latter.
     """
 
     name: ClassVar[str] = "ColumnMappingRequiredForDrop"

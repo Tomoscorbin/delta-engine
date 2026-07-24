@@ -19,9 +19,9 @@ tags:
 
 When a declaration contains `TimestampNtz` or `Variant`, a new table needs no
 separate feature action: CREATE establishes the schema-implied feature. For an
-existing table, application planning derives the features required by the
-desired column trees, subtracts the features observed on the table, and emits
-one `EnableTableFeature` action for each missing member.
+existing table, the domain differ derives the features required by the desired
+column trees, subtracts the features observed on the table, and emits one
+`EnableTableFeature` action for each missing member.
 
 ```text
 required_features(desired.columns) - observed.supported_features
@@ -31,7 +31,8 @@ required_features(desired.columns) - observed.supported_features
 
 The engine remains an orchestration component. It receives no
 `DeltaTablePolicy` or feature policy; it continues to pass the raw domain diff
-to the application `plan_diff` boundary.
+to the application `plan_diff` boundary, which validates rather than rewriting
+the completed diff.
 
 ## Resolution of the review findings
 
@@ -43,16 +44,14 @@ another `DesiredTableSource` could return a `TimestampNtz` column without the
 matching feature name, and the accepted plan would omit the required upgrade.
 
 The resolved design removes `DesiredTable.implied_features`. Desired columns
-are the only source of truth. `application/features.py` contains one explicit
-mapping:
+are the only source of truth. The domain differ contains one explicit mapping:
 
 ```python
 TimestampNtz -> TableFeature.TIMESTAMP_NTZ
 Variant      -> TableFeature.VARIANT
 ```
 
-It walks complete nested type trees and derives requirements only while
-planning an existing-table change.
+It walks complete nested type trees while diffing an existing table.
 
 ### 2. Make observed feature support factual and authoritative
 
@@ -61,21 +60,24 @@ by the closed `TableFeature` enum rather than unconstrained strings. Unknown
 platform-managed features are ignored because the engine never enables or
 disables them.
 
-The production reader now obtains support from the documented
-`DESCRIBE DETAIL.tableFeatures` field. It no longer infers protocol state from
-`DESCRIBE ... AS JSON.table_properties`. The test-only native Spark reader also
-populates the feature set from its existing `DESCRIBE DETAIL` row.
+The production reader obtains support from the synthesized
+`delta.feature.* = supported` entries already present in
+`DESCRIBE ... AS JSON.table_properties`. It extracts them before the property
+policy projects user-managed properties, avoiding a separate `DESCRIBE DETAIL`
+round trip. The test-only native Spark reader still populates the feature set
+from its existing `DESCRIBE DETAIL` row because OSS Spark cannot run the AS JSON
+command.
 
 The reader recognizes the canonical enum values directly. The preview
 `variantType-preview` spelling is a narrow catalog compatibility alias; it is
 not a per-feature `observed_names` concept.
 
-### 3. Put reconciliation at the application planning boundary
+### 3. Put reconciliation in the domain differ
 
-The domain differ reports declared schema and metadata differences without
-knowing which Delta types imply protocol features. For `TableDrift`,
-`plan_diff` prepares the diff by adding missing feature enablements before
-scope and safety validation. For `TableMissing`, it adds nothing.
+For `TableDrift`, `diff_table` adds missing feature enablements alongside the
+other desired-versus-observed discrepancies. For `TableMissing`, it adds
+nothing because CREATE establishes the schema-implied features. `plan_diff`
+then validates the completed diff without rewriting it.
 
 This placement has three useful properties:
 
@@ -96,7 +98,7 @@ an unknown string from passing planning and failing later during compilation.
 The enum deliberately carries no type mapping, catalog aliases, or SQL
 properties:
 
-- the application mapping owns type-to-feature requirements;
+- the domain differ owns type-to-feature requirements;
 - the reader owns external catalog aliases; and
 - the Databricks compiler owns the exceptional VARIANT enable-key spelling.
 
@@ -130,7 +132,7 @@ policy and uses a small feature mapping plus a distinct action.
 
 ## Verification
 
-- Full configured suite: `1032 passed, 67 deselected` with 96.43% coverage.
+- Full configured suite: `1027 passed, 67 deselected` with 96.71% coverage.
 - Static typing: `uv run mypy src` passed.
 - Credentialed Databricks tests remain the final compatibility pin for
   create, enable, observe, and resync, including the VARIANT preview enable
