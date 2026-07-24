@@ -8,16 +8,22 @@ backend compilation live elsewhere.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
+from typing import Final
 
 from delta_engine.domain.model import (
+    Array,
+    DataType,
     DesiredColumn,
     DesiredTable,
+    Map,
     ObservedColumn,
     ObservedTable,
     QualifiedName,
+    Struct,
     TableAspect,
     TableFeature,
-    required_table_features,
+    TimestampNtz,
+    Variant,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -48,6 +54,11 @@ from delta_engine.domain.plan.unresolvable import (
     PropertyUndeclared,
     Unresolvable,
 )
+
+_REQUIRED_FEATURE_BY_TYPE: Final[Mapping[type[DataType], TableFeature]] = {
+    TimestampNtz: TableFeature.TIMESTAMP_NTZ,
+    Variant: TableFeature.VARIANT,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,11 +166,29 @@ def _diff_required_features(
     supported_features: frozenset[TableFeature],
 ) -> tuple[EnableTableFeature, ...]:
     """Return upgrades required by the desired column type trees."""
-    required_features = required_table_features(column.data_type for column in columns)
+    required_features = {
+        feature
+        for column in columns
+        for data_type in _walk_data_type(column.data_type)
+        if (feature := _REQUIRED_FEATURE_BY_TYPE.get(type(data_type))) is not None
+    }
     return tuple(
         EnableTableFeature(feature)
         for feature in sorted(required_features - supported_features, key=lambda item: item.value)
     )
+
+
+def _walk_data_type(data_type: DataType) -> Iterable[DataType]:
+    yield data_type
+    match data_type:
+        case Array(element=element):
+            yield from _walk_data_type(element)
+        case Map(key=key, value=value):
+            yield from _walk_data_type(key)
+            yield from _walk_data_type(value)
+        case Struct(fields=fields):
+            for field in fields:
+                yield from _walk_data_type(field.data_type)
 
 
 def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
