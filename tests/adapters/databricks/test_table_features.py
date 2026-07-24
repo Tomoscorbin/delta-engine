@@ -28,14 +28,21 @@ def test_feature_definitions_drive_recognition_and_enablement(
     canonical_name: str,
     enable_key: str,
 ):
+    # Given a feature's canonical and Databricks enablement spellings
     enable_name = enable_key.removeprefix("delta.feature.")
 
-    assert recognized_table_features([canonical_name, enable_name]) == frozenset({feature})
-    assert enable_property(feature).key == enable_key
-    assert enable_property(feature).value == "supported"
+    # When resolving observed names and its enablement property
+    recognized = recognized_table_features([canonical_name, enable_name])
+    property_ = enable_property(feature)
+
+    # Then both names resolve canonically and the complete property is returned
+    assert recognized == frozenset({feature})
+    assert property_.key == enable_key
+    assert property_.value == "supported"
 
 
 def test_supported_features_are_projected_from_catalog_properties():
+    # Given mixed supported, unsupported, unknown, and unrelated catalog properties
     properties = {
         "delta.feature.timestampNtz": "supported",
         "delta.feature.variantType-preview": "supported",
@@ -44,7 +51,11 @@ def test_supported_features_are_projected_from_catalog_properties():
         "delta.enableChangeDataFeed": "true",
     }
 
-    assert supported_features_from_properties(properties) == frozenset(
+    # When projecting the table features managed by the engine
+    features = supported_features_from_properties(properties)
+
+    # Then only supported, recognized features remain
+    assert features == frozenset(
         {
             TableFeature.TIMESTAMP_NTZ,
             TableFeature.VARIANT,

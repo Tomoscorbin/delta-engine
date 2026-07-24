@@ -785,8 +785,13 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
 
 
 def test_enable_table_feature_renders_a_permanent_features_entry():
-    [entry] = action_entries(EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ))
+    # Given a planned table-feature enablement
+    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
 
+    # When projecting the action into public diff entries
+    [entry] = action_entries(action)
+
+    # Then it is presented as a permanent feature addition
     assert entry.category is DiffCategory.FEATURES
     assert entry.symbol == "+"
     assert "timestampNtz" in entry.cells[0]
