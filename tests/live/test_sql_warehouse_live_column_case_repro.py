@@ -120,3 +120,34 @@ def test_column_identifier_case_repro_metadata_sync_matches_contract_schema(
     assert columns["modelId"]["comment"] == "Full Bedrock model identifier"
     assert state["comment"] == "Bedrock request invocations"
     assert engine.sync(declaration).has_changes is False
+
+
+def test_column_identifier_case_repro_real_name_mismatch_reports_structural_drift(
+    live_connection, live_tables
+):
+    """Metadata sync rejects request_id as structurally different from requestId."""
+    table_name = live_tables("column_case_real_mismatch")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`request_id` STRING) USING DELTA",
+    )
+    declaration = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=table_name,
+        columns=(Column("requestId", String()),),
+        scope="metadata",
+    )
+
+    report = build_sql_engine(live_connection).sync(declaration, dry_run=True)
+
+    [table_report] = tuple(report)
+    assert table_report.has_changes is False
+    assert table_report.planned_sql_statements == ()
+    [failure] = table_report.failures
+    assert failure.rule_name == "UnmanagedAspectDrift"
+    assert failure.message == (
+        "Operation not allowed: column structure has drifted but is not managed "
+        "by this definition. Sync the table fully or update the declaration to "
+        "match the live schema."
+    )
