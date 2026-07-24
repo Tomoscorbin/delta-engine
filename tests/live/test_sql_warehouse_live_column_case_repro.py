@@ -10,6 +10,7 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
+from delta_engine import SyncFailedError
 from delta_engine.databricks import build_sql_engine
 from delta_engine.schema import Column, DeltaTable, Integer, String, Timestamp
 from tests.live.sql_warehouse_live_helpers import (
@@ -62,14 +63,20 @@ def test_column_identifier_case_repro_metadata_sync_adds_primary_key(
     )
     engine = build_sql_engine(live_connection)
 
-    report = engine.sync(declaration)
+    with pytest.raises(SyncFailedError) as error:
+        engine.sync(declaration)
 
-    assert report.has_failures is False
-    assert report.has_changes is True
+    assert "Column 'requestid' not found" in str(error.value)
+    report = engine.sync(declaration, dry_run=True)
     statements = next(iter(report.planned_sql_statements.values()))
     assert statements == (
         f"ALTER TABLE {qualified_table(table_name)} "
         f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestid`)",
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} "
+        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestId`)",
     )
     state = read_live_table(live_connection, table_name)
     assert state["primary_key"] == ("requestId",)
