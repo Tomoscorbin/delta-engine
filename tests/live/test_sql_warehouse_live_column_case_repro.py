@@ -42,6 +42,41 @@ def test_column_identifier_case_repro_raw_alter_uses_lowercase_reference(
     assert column["comment"] == "resolved through lowercase"
 
 
+def test_column_identifier_case_repro_metadata_sync_adds_primary_key(
+    live_connection, live_tables
+):
+    """Metadata sync adds a primary key using a lowercase camelCase reference."""
+    table_name = live_tables("column_case_add_primary_key")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} "
+        "(`requestId` STRING NOT NULL) USING DELTA",
+    )
+    declaration = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=table_name,
+        columns=(Column("requestId", String(), nullable=False),),
+        primary_key=("requestId",),
+        scope="metadata",
+    )
+    engine = build_sql_engine(live_connection)
+
+    report = engine.sync(declaration)
+
+    assert report.has_failures is False
+    assert report.has_changes is True
+    statements = next(iter(report.planned_sql_statements.values()))
+    assert statements == (
+        f"ALTER TABLE {qualified_table(table_name)} "
+        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestid`)",
+    )
+    state = read_live_table(live_connection, table_name)
+    assert state["primary_key"] == ("requestId",)
+    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert engine.sync(declaration).has_changes is False
+
+
 def test_column_identifier_case_repro_metadata_sync_matches_contract_schema(
     live_connection, live_tables
 ):
