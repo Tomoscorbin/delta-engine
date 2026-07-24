@@ -1,7 +1,7 @@
 import pytest
 
 from delta_engine.adapters.databricks.table_features import (
-    enable_property_key,
+    enable_property,
     recognized_table_features,
     supported_features_from_properties,
 )
@@ -31,7 +31,8 @@ def test_feature_definitions_drive_recognition_and_enablement(
     enable_name = enable_key.removeprefix("delta.feature.")
 
     assert recognized_table_features([canonical_name, enable_name]) == frozenset({feature})
-    assert enable_property_key(feature) == enable_key
+    assert enable_property(feature).key == enable_key
+    assert enable_property(feature).value == "supported"
 
 
 def test_supported_features_are_projected_from_catalog_properties():

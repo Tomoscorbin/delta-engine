@@ -219,9 +219,6 @@ class TypeWideningRequiredForTypeChange:
     validated declaration states the property whenever the catalog has it, so
     the declaration alone is sufficient input; declaring it 'true' in the same
     sync as the widen is safe (SET_PROPERTY phases before ALTER_COLUMN_TYPE).
-
-    Type widening is an operation-permitted feature, not an implied one — see
-    ``domain/plan/diff.py`` for the latter.
     """
 
     name: ClassVar[str] = "TypeWideningRequiredForTypeChange"
@@ -369,9 +366,6 @@ class ColumnMappingRequiredForDrop:
     validated declaration states the mode whenever the catalog has it, so the
     declaration alone is sufficient; declaring the mode in the same sync as
     the drop is safe (SET_PROPERTY phases before DROP_COLUMN).
-
-    Column mapping is an operation-permitted feature, not an implied one — see
-    ``domain/plan/diff.py`` for the latter.
     """
 
     name: ClassVar[str] = "ColumnMappingRequiredForDrop"
