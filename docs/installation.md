@@ -11,7 +11,7 @@ tags:
 | ----------------------------------------- | --------------------------------------------------------------------------- |
 | Python 3.12 or later                      | Everything                                                                  |
 | A Databricks workspace with Unity Catalog | Running syncs against a real catalog                                        |
-| Databricks compute with a `SparkSession`  | Running syncs through the Spark backend                                     |
+| Databricks Runtime 16.2+ with a `SparkSession` | Running syncs through the Spark backend                                  |
 | A Databricks SQL warehouse connection     | Running syncs through the SQL warehouse backend instead — no PySpark needed |
 
 The base package has no runtime dependencies. Declaring schemas, planning, and

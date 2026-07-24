@@ -29,9 +29,10 @@ under [Unsupported types](#unsupported-types).
 | `Variant()`                              | `VARIANT`              | Creation enables the feature; existing tables need it enabled first  |
 | `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable  |
 
-`Map` declarations should use a non-`Map` key type. The current declaration
-gate does not reject `Map(Map(...), value_type)`, but Databricks does not accept
-a map as another map's key, so that shape fails at execution.
+`Map` declarations should use a non-`Map` key type. Databricks accepts any
+supported map key type except another `Map`; `Map(Map(...), value_type)` is
+rejected with `ValueError` when the type is constructed. A map remains valid as
+the value type.
 
 Any change to a struct's fields (adding, removing, renaming, or retyping a
 field) surfaces as a column type change on the owning column and is blocked
