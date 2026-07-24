@@ -86,8 +86,10 @@ If any table fails planning or execution, `sync` raises `SyncFailedError`. The e
 
 ## Walkthrough notebook
 
-For a full end-to-end demo, see `notebooks/delta_engine_walkthrough.py`. It is a
-Databricks notebook that walks the complete lifecycle — define, sync, evolve,
-validate — and proves every step with live assertions against Unity Catalog. It
-also doubles as a manual integration test suite: run it on a cluster to confirm
-the engine behaves correctly end-to-end.
+For a full end-to-end demo, see the
+[Databricks walkthrough notebook](https://github.com/Tomoscorbin/delta-engine/blob/main/notebooks/delta_engine_walkthrough.py)
+and its [run instructions](https://github.com/Tomoscorbin/delta-engine/blob/main/notebooks/README.md).
+It walks the complete lifecycle — define, sync, evolve, validate — and proves
+every step with live assertions against Unity Catalog. It also doubles as a
+manual integration test suite: run it on a supported cluster to confirm the
+engine behaves correctly end-to-end.

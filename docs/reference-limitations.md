@@ -14,8 +14,8 @@ the page with the detail.
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader reads managed and external Delta tables, plus Delta streaming tables for tag-only management, and any other relation a registered name resolves to (view, materialized view, foreign table, non-Delta format) fails its read ([architecture](explanation-architecture.md)) |
 | Python                | 3.12 or later                                                                                                                                                                                                                                                                                                                                                          |
-| PySpark               | Needed only for the Spark backend; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                                                                           |
-| Reads (both backends) | Unity Catalog only — every existing-table read uses `DESCRIBE TABLE EXTENDED … AS JSON` for table shape, properties, and supported features, plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both backends ([installation](installation.md)) |
+| PySpark               | Supplied by Databricks Runtime for the Spark backend and not installed by delta-engine; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                       |
+| Reads (both backends) | Unity Catalog only — every existing-table read uses one `DESCRIBE TABLE EXTENDED … AS JSON` for table shape, properties, and supported features, plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both backends ([installation](installation.md)) |
 
 ## Identifier handling
 
@@ -98,7 +98,7 @@ partitioning:
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Key count                | At most four `clustered_by` keys per table, rejected at declaration                                                                                            |
 | Mutual exclusivity       | A table cannot declare both `partitioned_by` and `clustered_by`, rejected at declaration                                                                       |
-| Unsupported key types    | `Array`, `Map`, `Struct`, and `Variant` columns cannot be clustering keys, rejected at declaration                                                             |
+| Unsupported key types    | `Array`, `Map`, `Struct`, `Variant`, `Boolean`, and `Binary` columns cannot be clustering keys, rejected at declaration; `Boolean` and `Binary` remain valid partition columns |
 | Nested struct-field keys | Clustering by a field inside a `Struct` column is not supported by the declaration — only top-level columns can be named in `clustered_by`                     |
 | Stats and column order   | Databricks only collects the file statistics clustering relies on for a table's first 32 columns; a clustering key outside that range gets no skipping benefit |
 | Runtime compatibility    | Liquid clustering requires Databricks Runtime 13.3 LTS or later; delta-engine does not preflight this — see [runtime features](#runtime-features)              |
@@ -127,6 +127,11 @@ from Databricks Runtime 13.3 (GA 15.2) — below the AS JSON read floor — any
 runtime new enough to read a table can also observe its keys. As with every
 other runtime feature, delta-engine documents this floor rather than
 preflighting it — an unsupported runtime surfaces as a read failure.
+
+This project does not yet publish a complete tested Spark-backend runtime
+matrix. The recurring live suite exercises the SQL warehouse backend; treat
+other Databricks Runtime versions as requiring validation in your own
+environment until Spark-runtime smoke coverage is published.
 
 ## Delta table features
 

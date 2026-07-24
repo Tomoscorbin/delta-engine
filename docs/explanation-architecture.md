@@ -503,7 +503,7 @@ and `"tags"` to table and column tags only. The `TableAspect` enum stays
 internal.
 
 `CLUSTERING` is not one of the metadata aspects: liquid clustering keys
-change how data files are laid out on storage, so a `metadata_only` sync
+change how data files are laid out on storage, so a `scope="metadata"` sync
 never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
 
 `diff_table(desired, observed)` produces a `TableDiff`:

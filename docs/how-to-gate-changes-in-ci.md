@@ -98,7 +98,8 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install "delta-engine[cli]"
+      # Pin the version used by this repository's schema gate.
+      - run: pip install "delta-engine[cli]==X.Y.Z"
       - name: Plan schemas
         shell: bash
         run: |

@@ -7,17 +7,17 @@ tags:
 
 ## Requirements
 
-| Requirement                               | Needed for                                                                              |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| Python 3.12 or later                      | Everything                                                                              |
-| A Databricks workspace with Unity Catalog | Running syncs against a real catalog                                                    |
-| An active `SparkSession`                  | Running syncs through the Spark backend (a Databricks notebook provides one as `spark`) |
-| A Databricks SQL warehouse connection     | Running syncs through the SQL warehouse backend instead — no PySpark needed             |
+| Requirement                               | Needed for                                                                  |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| Python 3.12 or later                      | Everything                                                                  |
+| A Databricks workspace with Unity Catalog | Running syncs against a real catalog                                        |
+| Databricks Runtime 16.2+ with a `SparkSession` | Running syncs through the Spark backend                                  |
+| A Databricks SQL warehouse connection     | Running syncs through the SQL warehouse backend instead — no PySpark needed |
 
 The base package has no runtime dependencies. Declaring schemas, planning, and
-inspecting reports are pure Python — PySpark is only needed if you sync
-through the Spark backend. The SQL warehouse backend below needs no PySpark
-at all.
+inspecting reports are pure Python. The Spark backend uses the PySpark and
+Delta libraries supplied by Databricks Runtime; the SQL warehouse backend
+needs no PySpark at all.
 
 ## Install
 
@@ -25,24 +25,24 @@ at all.
 pip install delta-engine
 ```
 
+The unpinned commands in this guide are convenient for evaluation. For a
+repeatable job or application deployment, pin the Delta Engine release (for
+example, `delta-engine[cli]==X.Y.Z`) and commit the complete environment to
+your application's lock file. Delta Engine's dependency ranges select
+supported major lines; they are not a replacement for an application lock.
+
 In a Databricks notebook:
 
 ```python
-%pip install delta-engine
+%pip install "delta-engine==X.Y.Z"  # replace X.Y.Z with the release you deploy
+dbutils.library.restartPython()
 ```
 
 Databricks provides Spark and Delta at runtime, so the base package is all you
-need there.
-
-## Local development against the Spark backend
-
-To use the Spark backend outside Databricks — for example, running local
-Spark in tests — install the `spark` extra, which adds PySpark and
-Delta:
-
-```bash
-pip install "delta-engine[spark]"
-```
+need there. Do not install `pyspark` or `delta-spark` over the runtime's
+mutually compatible versions. Delta Engine deliberately has no `spark` extra:
+its production Spark reader depends on Databricks Runtime and Unity Catalog
+features that local open-source Spark does not provide.
 
 ## Syncing through a SQL warehouse
 
