@@ -55,10 +55,13 @@ _ALTER_CLAUSES: Final[Mapping[TableKind, str]] = MappingProxyType(
     }
 )
 
-# VARIANT still uses the documented preview spelling when explicitly enabled.
-# All other feature keys derive directly from their canonical protocol name.
-_FEATURE_ENABLE_NAMES: Final[Mapping[TableFeature, str]] = MappingProxyType(
-    {TableFeature.VARIANT: "variantType-preview"}
+# Databricks still uses the preview property key when explicitly enabling
+# VARIANT, even though the canonical Delta feature identity is ``variantType``.
+_FEATURE_PROPERTY_KEYS: Final[Mapping[TableFeature, str]] = MappingProxyType(
+    {
+        TableFeature.TIMESTAMP_NTZ: "delta.feature.timestampNtz",
+        TableFeature.VARIANT: "delta.feature.variantType-preview",
+    }
 )
 
 
@@ -180,8 +183,7 @@ def _(action: RenameColumn, target: _Target) -> str:
 @_compile_action.register
 def _(action: EnableTableFeature, target: _Target) -> str:
     """Compile a table-feature enablement to its documented SET TBLPROPERTIES form."""
-    name = _FEATURE_ENABLE_NAMES.get(action.feature, action.feature.value)
-    key = f"delta.feature.{name}"
+    key = _FEATURE_PROPERTY_KEYS[action.feature]
     pair = f"{quote_literal(key)}={quote_literal('supported')}"
     return f"{target.alter_clause} SET TBLPROPERTIES ({pair})"
 

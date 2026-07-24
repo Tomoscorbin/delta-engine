@@ -642,10 +642,6 @@ def test_compile_enable_table_feature():
 def test_compile_enable_table_feature_uses_documented_variant_key():
     statement = _compile_single(EnableTableFeature(feature=TableFeature.VARIANT))
 
-    # 'variantType-preview' is the documented enable key. If the live run
-    # shows the platform records/accepts the GA name instead, change the
-    # VARIANT definition's enable_name in application/features.py and this
-    # expectation together.
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
         " ('delta.feature.variantType-preview'='supported')"
