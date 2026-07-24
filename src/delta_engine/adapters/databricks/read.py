@@ -13,7 +13,7 @@ kinds are read, which observed property keys become engine state), assembly,
 and the typed error boundary all live here. This module stays PySpark-free.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import replace
 import logging
 from types import MappingProxyType
@@ -38,10 +38,13 @@ from delta_engine.adapters.databricks.sql.describe import (
     TableDescription,
     table_description_from_rows,
 )
+from delta_engine.adapters.databricks.table_features import (
+    supported_features_from_properties,
+)
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
-from delta_engine.domain.model import ObservedTable, QualifiedName, TableFeature, TableKind
+from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind
 
 
 class UnsupportedRelationError(Exception):
@@ -69,10 +72,6 @@ _TABLE_KINDS_BY_RELATION_TYPE: Final[Mapping[str, TableKind]] = MappingProxyType
     }
 )
 _SUPPORTED_PROVIDERS: Final = {"delta"}
-_CATALOG_FEATURE_ALIASES: Final[Mapping[str, TableFeature]] = MappingProxyType(
-    {"variantType-preview": TableFeature.VARIANT}
-)
-_FEATURE_PROPERTY_PREFIX: Final = "delta.feature."
 
 
 def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> CatalogState:
@@ -164,7 +163,7 @@ def _read_observed_table(
         columns=tagged_columns,
         comment=description.comment,
         properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties),
-        supported_features=_supported_features_from_properties(description.table_properties),
+        supported_features=supported_features_from_properties(description.table_properties),
         tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,
@@ -173,28 +172,3 @@ def _read_observed_table(
         referencing_foreign_keys=read_referencing_foreign_keys(run_query, qualified_name),
         kind=kind,
     )
-
-
-def _supported_features_from_properties(
-    properties: Mapping[str, str],
-) -> frozenset[TableFeature]:
-    """Extract managed protocol features from the AS JSON property projection."""
-    names = tuple(
-        key.removeprefix(_FEATURE_PROPERTY_PREFIX)
-        for key, value in properties.items()
-        if key.startswith(_FEATURE_PROPERTY_PREFIX) and value == "supported"
-    )
-    return recognized_table_features(names)
-
-
-def recognized_table_features(names: Sequence[str]) -> frozenset[TableFeature]:
-    """Map catalog spellings onto the feature identities this engine manages."""
-    supported: set[TableFeature] = set()
-    for name in names:
-        try:
-            supported.add(TableFeature(name))
-        except ValueError:
-            alias = _CATALOG_FEATURE_ALIASES.get(name)
-            if alias is not None:
-                supported.add(alias)
-    return frozenset(supported)

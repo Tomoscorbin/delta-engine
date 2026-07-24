@@ -68,9 +68,10 @@ round trip. The test-only native Spark reader still populates the feature set
 from its existing `DESCRIBE DETAIL` row because OSS Spark cannot run the AS JSON
 command.
 
-The reader recognizes the canonical enum values directly. The preview
-`variantType-preview` spelling is a narrow catalog compatibility alias; it is
-not a per-feature `observed_names` concept.
+The Databricks adapter keeps catalog recognition and enablement spelling in one
+feature definition module. Both readers and the SQL compiler consume that
+module, so `variantType-preview` is declared once as the enablement spelling
+and is automatically accepted alongside the canonical `variantType` identity.
 
 ### 3. Put reconciliation in the domain differ
 

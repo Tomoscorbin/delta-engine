@@ -25,7 +25,7 @@ from delta_engine.adapters.databricks.exception_inspection import (
     exception_message,
     exception_type_name,
 )
-from delta_engine.adapters.databricks.read import recognized_table_features
+from delta_engine.adapters.databricks.table_features import recognized_table_features
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
