@@ -52,9 +52,6 @@ _DEFINITIONS: Final[Mapping[TableFeature, _FeatureDefinition]] = MappingProxyTyp
     }
 )
 
-if frozenset(_DEFINITIONS) != frozenset(TableFeature):
-    raise RuntimeError("Databricks table feature definitions do not match TableFeature")
-
 _FEATURES_BY_RECOGNIZED_NAME: Final[Mapping[str, TableFeature]] = MappingProxyType(
     {
         name: definition.feature

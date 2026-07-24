@@ -311,11 +311,6 @@ class ObservedTable:
         object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
-        object.__setattr__(
-            self,
-            "supported_features",
-            frozenset(TableFeature(feature) for feature in self.supported_features),
-        )
 
         _validate_table_structure(
             columns=self.columns,
