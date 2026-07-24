@@ -1,12 +1,14 @@
 """Validated boundary from raw table diffs to executable action plans."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import assert_never
 
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.features import required_features
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.plan import (
     ActionPlan,
+    EnableTableFeature,
     TableDiff,
     TableDrift,
     TableMissing,
@@ -42,10 +44,11 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     an absent table has no observed kind, and the engine only creates
     ordinary tables.
     """
-    validation = validate_diff(diff)
+    prepared_diff = _add_required_feature_enablements(diff)
+    validation = validate_diff(prepared_diff)
     if validation.failed:
         return PlanningFailed(failures=validation.failures)
-    match diff:
+    match prepared_diff:
         case TableDrift() as drift:
             plan = ActionPlan(
                 target=drift.target,
@@ -60,3 +63,19 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
         case _ as unreachable:
             assert_never(unreachable)
     return PlanningSucceeded(plan=plan)
+
+
+def _add_required_feature_enablements(diff: TableDiff) -> TableDiff:
+    """Add upgrades required by an existing table's desired column types."""
+    match diff:
+        case TableMissing():
+            return diff
+        case TableDrift() as drift:
+            missing = required_features(drift.desired.columns) - drift.observed.supported_features
+            enablements = tuple(
+                EnableTableFeature(feature)
+                for feature in sorted(missing, key=lambda item: item.value)
+            )
+            return replace(drift, actions=(*enablements, *drift.actions))
+        case _ as unreachable:
+            assert_never(unreachable)

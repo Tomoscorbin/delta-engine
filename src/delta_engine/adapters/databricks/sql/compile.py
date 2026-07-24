@@ -17,8 +17,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
     quote_literal,
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
-from delta_engine.application.features import DELTA_FEATURE_POLICY
-from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
+from delta_engine.domain.model import DesiredColumn, QualifiedName, TableFeature, TableKind
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -54,6 +53,12 @@ _ALTER_CLAUSES: Final[Mapping[TableKind, str]] = MappingProxyType(
         TableKind.TABLE: "ALTER TABLE",
         TableKind.STREAMING_TABLE: "ALTER STREAMING TABLE",
     }
+)
+
+# VARIANT still uses the documented preview spelling when explicitly enabled.
+# All other feature keys derive directly from their canonical protocol name.
+_FEATURE_ENABLE_NAMES: Final[Mapping[TableFeature, str]] = MappingProxyType(
+    {TableFeature.VARIANT: "variantType-preview"}
 )
 
 
@@ -175,8 +180,9 @@ def _(action: RenameColumn, target: _Target) -> str:
 @_compile_action.register
 def _(action: EnableTableFeature, target: _Target) -> str:
     """Compile a table-feature enablement to its documented SET TBLPROPERTIES form."""
-    key, value = DELTA_FEATURE_POLICY.enable_property(action.feature)
-    pair = f"{quote_literal(key)}={quote_literal(value)}"
+    name = _FEATURE_ENABLE_NAMES.get(action.feature, action.feature.value)
+    key = f"delta.feature.{name}"
+    pair = f"{quote_literal(key)}={quote_literal('supported')}"
     return f"{target.alter_clause} SET TBLPROPERTIES ({pair})"
 
 

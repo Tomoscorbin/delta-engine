@@ -7,15 +7,12 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
-    Map,
     ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
     TableAspect,
     TableKind,
-    TimestampNtz,
-    Variant,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
@@ -25,7 +22,6 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -1040,101 +1036,3 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
 
     assert isinstance(diff, TableDrift)
     assert diff.observed.kind is TableKind.TABLE
-
-
-_FEATURES_NAME = QualifiedName("cat", "sch", "features_tbl")
-
-
-def _features_desired(columns, implied_features=frozenset()) -> DesiredTable:
-    # A desired table arrives from lowering with its implied features already
-    # resolved from its column types. The differ compares that recorded set
-    # against the supported one, so these tests state it rather than relying
-    # on the column types to imply it.
-    return DesiredTable(
-        qualified_name=_FEATURES_NAME,
-        columns=columns,
-        implied_features=implied_features,
-    )
-
-
-def _features_observed(columns, supported_features=frozenset()) -> ObservedTable:
-    return ObservedTable(
-        qualified_name=_FEATURES_NAME,
-        columns=columns,
-        supported_features=supported_features,
-    )
-
-
-def test_missing_required_feature_is_planned_for_enablement():
-    desired = _features_desired(
-        (DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz())),
-        implied_features=frozenset({"timestampNtz"}),
-    )
-    observed = _features_observed((ObservedColumn("id", Integer()),))
-
-    drift = diff_table(desired, observed)
-
-    features = [a for a in drift.actions if isinstance(a, EnableTableFeature)]
-    assert [action.feature for action in features] == ["timestampNtz"]
-
-
-def test_already_enabled_feature_is_not_planned():
-    desired = _features_desired(
-        (DesiredColumn("id", Integer()), DesiredColumn("seen_at", TimestampNtz())),
-        implied_features=frozenset({"timestampNtz"}),
-    )
-    observed = _features_observed(
-        (ObservedColumn("id", Integer()),),
-        supported_features=frozenset({"timestampNtz"}),
-    )
-
-    drift = diff_table(desired, observed)
-
-    assert not [a for a in drift.actions if isinstance(a, EnableTableFeature)]
-
-
-def test_only_the_features_the_table_lacks_are_planned():
-    desired = _features_desired(
-        (
-            DesiredColumn("seen_at", TimestampNtz()),
-            DesiredColumn("payload", Map(String(), Variant())),
-        ),
-        implied_features=frozenset({"timestampNtz", "variantType"}),
-    )
-    observed = _features_observed(
-        (ObservedColumn("seen_at", TimestampNtz()),),
-        supported_features=frozenset({"timestampNtz"}),
-    )
-
-    drift = diff_table(desired, observed)
-
-    features = [a for a in drift.actions if isinstance(a, EnableTableFeature)]
-    assert [action.feature for action in features] == ["variantType"]
-
-
-def test_feature_gap_without_column_drift_still_plans_enablement():
-    # Self-healing: if observation reports the feature absent while the
-    # column already carries the type, the enable is planned on its own —
-    # SET TBLPROPERTIES ... 'supported' is idempotent on the platform.
-    desired = _features_desired(
-        (DesiredColumn("seen_at", TimestampNtz()),),
-        implied_features=frozenset({"timestampNtz"}),
-    )
-    observed = _features_observed((ObservedColumn("seen_at", TimestampNtz()),))
-
-    drift = diff_table(desired, observed)
-
-    [action] = drift.actions
-    assert isinstance(action, EnableTableFeature)
-    assert action.feature == "timestampNtz"
-
-
-def test_missing_table_plans_no_feature_enablement():
-    desired = _features_desired(
-        (DesiredColumn("seen_at", TimestampNtz()),),
-        implied_features=frozenset({"timestampNtz"}),
-    )
-
-    diff = diff_table(desired, None)
-
-    assert not [a for a in diff.actions if isinstance(a, EnableTableFeature)]

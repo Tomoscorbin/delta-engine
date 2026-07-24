@@ -134,10 +134,11 @@ local; an exception from it is likewise a programming error.
 
 The Databricks adapters also own backend normalization, most of it shared
 between the two backends through the `sql` core and the `read` assembly. Both
-backends read a table with one `DESCRIBE TABLE EXTENDED … AS JSON` call, and a
-shared parser turns that JSON document into a backend-neutral `TableDescription`:
+backends read a table with `DESCRIBE TABLE EXTENDED … AS JSON`, and a shared
+parser turns that JSON document into a backend-neutral `TableDescription`:
 lowercasing catalog identifiers, mapping the structured column types, and reading
-the comment, partitioning, clustering, and table properties.
+the comment, partitioning, clustering, and table properties. A separate
+`DESCRIBE DETAIL` supplies the authoritative `tableFeatures` protocol state.
 `information_schema` supplies the constraint and tag metadata as structured rows
 — Unity Catalog tags, the table's own primary and foreign keys, and inbound
 foreign keys (the JSON document's embedded `table_constraints` string is left
@@ -220,18 +221,14 @@ are encoded as ordinary Python in the application layer:
 - `application/properties.py` defines the Delta table-property policy
   (`delta.columnMapping.mode`, `delta.enableChangeDataFeed`, retention
   durations, …), with Delta-specific value formats and transition rules.
-- `application/features.py` defines the Delta table-feature policy
-  (`timestampNtz`, `variantType`): which declared types imply a feature, the
-  `delta.feature.*` property that enables it, and every name the catalog may
-  record it under. As with properties, the adapters hold none of this — they
-  read and compile feature state through the policy. A declaration's implied
-  features are resolved when it is lowered, so the domain records feature
-  names as data and plans the difference against the supported set without
-  knowing what any of them mean. Resolution sits at that seam rather than in
-  the domain because implication is format knowledge, not type knowledge: a
-  `TIMESTAMP_NTZ` column needs `timestampNtz` on a Delta table, while Iceberg
-  stores the same type natively. A future Iceberg lowering therefore supplies
-  its own resolution, and the domain goes on comparing opaque names.
+- `application/features.py` contains the small Delta type-to-feature mapping
+  (`TimestampNtz → timestampNtz`, `Variant → variantType`). Desired tables do
+  not store this derived state. For an existing table, `plan_diff` derives the
+  required set from the desired column trees and subtracts the
+  `supported_features` observed by the reader. Each missing member becomes an
+  `EnableTableFeature` action before validation and before dependent column
+  actions. Missing tables skip this step because CREATE establishes the
+  schema-implied features.
 
   Feature requirements come in two kinds, and the split between these two
   modules is where that shows. A feature is _implied_ when the desired shape
@@ -412,10 +409,11 @@ session (the reader and the executor), and the
 over `databricks-sql-connector`, with no PySpark import anywhere in it. Both
 compile to identical SQL through the shared compiler, so a dry-run preview
 does not depend on which one ran it, and both read a table through the same
-shared path — one `DESCRIBE … AS JSON` parsed into a `TableDescription`, then
-`information_schema` for tags, keys, and inbound foreign keys — differing only in the
-transport those statements run over (in-process Spark SQL versus the warehouse
-connection's cursor) and in how each classifies a backend exception. Because
+shared path — `DESCRIBE … AS JSON` parsed into a `TableDescription`,
+`DESCRIBE DETAIL` for table features, then `information_schema` for tags,
+keys, and inbound foreign keys — differing only in the transport those
+statements run over (in-process Spark SQL versus the warehouse connection's
+cursor) and in how each classifies a backend exception. Because
 `DESCRIBE … AS JSON` is a Unity Catalog feature, both backends are
 Unity-Catalog-only for reads; a `hive_metastore` table is not readable through
 either.
@@ -447,8 +445,9 @@ Both arms state the complete intended transition the same way: a
 foreign-key follow-ups — so accepted planning is uniformly "construct an
 `ActionPlan` from the diff's actions" for creation and drift alike.
 
-An accepted plan is the diff's actions verbatim; nothing sits between
-validation and plan construction. Constraint replacement around a column
+For existing tables, the application planning boundary first adds any
+schema-required feature enablements to the raw domain diff, then validates the
+prepared diff and constructs the plan. Constraint replacement around a column
 rename is stated explicitly and sequenced by `ActionPlan` phase ordering:
 PK/FK drops run before the rename, while each constraint still exists under
 its observed name, and declared keys are re-added afterwards. Databricks

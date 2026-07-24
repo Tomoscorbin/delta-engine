@@ -6,6 +6,7 @@ import pytest
 from delta_engine.adapters.databricks.read import read_catalog_state
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
+    describe_detail_query,
     describe_json_query,
     foreign_keys_query,
     primary_key_query,
@@ -21,6 +22,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    TableFeature,
     TableKind,
 )
 
@@ -45,6 +47,7 @@ def _describe_doc(**overrides):
 def _describe_responses(**overrides):
     responses = {
         describe_json_query(QN): [(_describe_doc(),)],
+        describe_detail_query(QN): [SimpleNamespace(tableFeatures=[])],
         table_tags_query(QN): [],
         column_tags_query(QN): [],
         primary_key_query(QN): [],
@@ -197,6 +200,7 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
 
     assert calls == [
         describe_json_query(QN),
+        describe_detail_query(QN),
         column_tags_query(QN),
         table_tags_query(QN),
         primary_key_query(QN),
@@ -380,29 +384,67 @@ def test_supported_features_are_observed_and_kept_out_of_properties():
     document = _describe_doc(
         table_properties={
             "delta.feature.timestampNtz": "supported",
-            "delta.feature.deletionVectors": "supported",
             "delta.enableChangeDataFeed": "true",
         }
     )
-    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+    responses = _describe_responses(
+        **{
+            describe_json_query(QN): [(document,)],
+            describe_detail_query(QN): [
+                SimpleNamespace(tableFeatures=["timestampNtz", "deletionVectors"])
+            ],
+        }
+    )
 
     state = read_catalog_state(_router(responses), QN)
 
     assert isinstance(state, TablePresent)
-    assert state.table.supported_features == frozenset({"timestampNtz"})
+    assert state.table.supported_features == frozenset({TableFeature.TIMESTAMP_NTZ})
     # feature keys are protocol state, not managed properties
     assert "delta.feature.timestampNtz" not in state.table.properties
     assert state.table.properties["delta.enableChangeDataFeed"] == "true"
 
 
-def test_unrecognized_feature_state_reads_as_unsupported():
-    # The table stays readable: a sync then plans an enablement, which is
-    # idempotent and normalizes the value. Failing the read would make the
-    # whole table unmanageable over one unrecognized string.
-    document = _describe_doc(table_properties={"delta.feature.timestampNtz": "enabled"})
-    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+def test_unmanaged_catalog_features_are_ignored():
+    responses = _describe_responses(
+        **{describe_detail_query(QN): [SimpleNamespace(tableFeatures=["deletionVectors"])]}
+    )
 
     state = read_catalog_state(_router(responses), QN)
 
     assert isinstance(state, TablePresent)
     assert state.table.supported_features == frozenset()
+
+
+def test_table_properties_do_not_stand_in_for_observed_feature_support():
+    document = _describe_doc(table_properties={"delta.feature.timestampNtz": "supported"})
+    responses = _describe_responses(
+        **{
+            describe_json_query(QN): [(document,)],
+            describe_detail_query(QN): [SimpleNamespace(tableFeatures=[])],
+        }
+    )
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset()
+
+
+def test_preview_catalog_name_maps_to_the_canonical_feature():
+    responses = _describe_responses(
+        **{describe_detail_query(QN): [SimpleNamespace(tableFeatures='["variantType-preview"]')]}
+    )
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset({TableFeature.VARIANT})
+
+
+def test_missing_table_features_field_fails_the_read():
+    responses = _describe_responses(**{describe_detail_query(QN): [SimpleNamespace()]})
+
+    error = _read_error(responses)
+
+    assert "tableFeatures" in str(error)

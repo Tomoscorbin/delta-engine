@@ -17,6 +17,7 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
+    TableFeature,
     TableKind,
     Variant,
 )
@@ -631,16 +632,15 @@ def test_non_alter_statements_ignore_the_dialect():
 
 
 def test_compile_enable_table_feature():
-    statement = _compile_single(EnableTableFeature(feature="timestampNtz"))
+    statement = _compile_single(EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ))
 
     assert statement == (
-        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
-        " ('delta.feature.timestampNtz'='supported')"
+        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.feature.timestampNtz'='supported')"
     )
 
 
 def test_compile_enable_table_feature_uses_documented_variant_key():
-    statement = _compile_single(EnableTableFeature(feature="variantType"))
+    statement = _compile_single(EnableTableFeature(feature=TableFeature.VARIANT))
 
     # 'variantType-preview' is the documented enable key. If the live run
     # shows the platform records/accepts the GA name instead, change the

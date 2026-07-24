@@ -2,6 +2,7 @@
 
 from delta_engine.adapters.databricks.sql import (
     column_tags_query,
+    describe_detail_query,
     describe_json_query,
     foreign_keys_query,
     primary_key_query,
@@ -16,6 +17,10 @@ QN = QualifiedName("cat", "sch", "tbl")
 
 def test_describe_json_query_is_extended_and_backticked():
     assert describe_json_query(QN) == "DESCRIBE TABLE EXTENDED `cat`.`sch`.`tbl` AS JSON"
+
+
+def test_describe_detail_query_is_backticked():
+    assert describe_detail_query(QN) == "DESCRIBE DETAIL `cat`.`sch`.`tbl`"
 
 
 def test_schema_exists_query_golden():

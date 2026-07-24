@@ -16,6 +16,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
+    TableFeature,
     TableKind,
 )
 
@@ -93,23 +94,22 @@ class EnableTableFeature(Action):
     """
     Enable a Delta table feature the desired schema requires.
 
-    ``feature`` is the feature's canonical name, as the desired table records
-    it; the vocabulary it comes from, and the rule for which features are
-    enabled this way, belong to the lowering path that resolves declarations,
-    not to the domain. Enablement is a permanent
-    protocol upgrade, so it is always its own visible action, phased before
-    the column changes that depend on it. Features are append-only on a table:
-    there is no disable counterpart.
+    Enablement is a permanent protocol upgrade, so it is always its own
+    visible action, phased before the column changes that depend on it.
+    Features are append-only on a table: there is no disable counterpart.
     """
 
-    feature: str
+    feature: TableFeature
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
     phase: ClassVar[ActionPhase] = ActionPhase.ENABLE_TABLE_FEATURE
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "feature", TableFeature(self.feature))
+
     @property
     def subject(self) -> str:
-        return self.feature
+        return self.feature.value
 
 
 @dataclass(frozen=True, slots=True)

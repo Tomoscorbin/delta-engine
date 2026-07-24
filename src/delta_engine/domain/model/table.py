@@ -13,6 +13,7 @@ from delta_engine.domain.model.constraints import (
     PrimaryKeyConstraint,
 )
 from delta_engine.domain.model.qualified_name import QualifiedName
+from delta_engine.domain.model.table_feature import TableFeature
 
 
 def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
@@ -127,16 +128,11 @@ class DesiredTable:
         foreign_keys: Foreign key constraints owned by this table.
         properties: Table properties; a ``None`` value asserts the key must be
             absent from the table.
-        implied_features: Names of the table features this schema cannot
-            exist without, resolved when the declaration was lowered.
         managed_aspects: The table aspects this declaration manages.
 
-    A desired table's key constraints arrive already named, and its implied
-    features arrive already resolved: both are computed by the API layer when a
-    ``DeltaTable`` is lowered. The differ and compiler read them off the
-    desired table rather than deriving them themselves — feature names are
-    opaque strings here, and which declared types imply which feature is the
-    lowering path's knowledge, not the domain's.
+    A desired table contains only declared state. Table features implied by
+    its column types are derived at the application planning boundary when an
+    existing table must be reconciled.
 
     """
 
@@ -149,7 +145,6 @@ class DesiredTable:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     properties: Mapping[str, str | None] = field(default_factory=dict)
-    implied_features: frozenset[str] = frozenset()
     managed_aspects: frozenset[TableAspect] = field(default_factory=lambda: ALL_ASPECTS)
 
     @property
@@ -279,10 +274,9 @@ class ObservedTable:
         properties: Observed values of the engine-managed property keys only;
             the other keys a table carries are not engine state (values only —
             a catalog has no absence assertions, unlike a desired table's).
-        supported_features: Names of the Delta table features the table's
-            protocol was observed to support, restricted to the features the
-            engine manages; the other features a table carries are not engine
-            state.
+        supported_features: Delta table features the table's protocol was
+            observed to support, restricted to the features the engine manages;
+            the other features a table carries are not engine state.
         referencing_foreign_keys: Inbound foreign keys owned by other tables.
         kind: The relation kind this table resolved to; ``TableKind.TABLE``
             unless the reader observed otherwise.
@@ -303,7 +297,7 @@ class ObservedTable:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
-    supported_features: frozenset[str] = frozenset()
+    supported_features: frozenset[TableFeature] = frozenset()
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
     kind: TableKind = TableKind.TABLE
 
@@ -317,6 +311,11 @@ class ObservedTable:
         object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(
+            self,
+            "supported_features",
+            frozenset(TableFeature(feature) for feature in self.supported_features),
+        )
 
         _validate_table_structure(
             columns=self.columns,

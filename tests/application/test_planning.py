@@ -13,13 +13,17 @@ from delta_engine.domain.model import (
     ForeignKeyReference,
     Integer,
     Long,
+    Map,
     ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
     String,
     TableAspect,
+    TableFeature,
     TableKind,
+    TimestampNtz,
+    Variant,
 )
 from delta_engine.domain.plan import (
     AddColumn,
@@ -379,24 +383,85 @@ def test_creation_plan_carries_the_ordinary_table_kind():
     assert result.plan.kind is TableKind.TABLE
 
 
-def test_feature_enablement_is_accepted_at_the_planning_boundary():
-    desired = _desired(implied_features=frozenset({"timestampNtz"}))
+def test_existing_table_enables_required_feature_before_adding_column():
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
     observed = _observed()
 
     result = plan_diff(diff_table(desired, observed))
 
     assert isinstance(result, PlanningSucceeded)
-    assert any(isinstance(action, EnableTableFeature) for action in result.plan)
+    assert result.plan.actions == (
+        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        AddColumn(DesiredColumn("seen_at", TimestampNtz())),
+    )
+
+
+def test_existing_table_does_not_reenable_a_supported_feature():
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
+    observed = _observed(supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}))
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.actions == (AddColumn(DesiredColumn("seen_at", TimestampNtz())),)
+
+
+def test_only_missing_required_features_are_enabled():
+    desired = _desired(
+        columns=(
+            DesiredColumn("seen_at", TimestampNtz()),
+            DesiredColumn("payload", Map(String(), Variant())),
+        )
+    )
+    observed = _observed(
+        columns=(ObservedColumn("seen_at", TimestampNtz()),),
+        supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}),
+    )
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningSucceeded)
+    feature_actions = [action for action in result.plan if isinstance(action, EnableTableFeature)]
+    assert feature_actions == [EnableTableFeature(TableFeature.VARIANT)]
+
+
+def test_feature_gap_without_column_drift_still_plans_enablement():
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+    observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
+
+    result = plan_diff(diff_table(desired, observed))
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.actions == (EnableTableFeature(TableFeature.TIMESTAMP_NTZ),)
+
+
+def test_missing_table_relies_on_create_for_required_features():
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+
+    result = plan_diff(diff_table(desired, None))
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.actions == (CreateTable(desired),)
 
 
 def test_feature_enablement_outside_column_structure_scope_is_rejected():
     # Columns agree, so the enable is the only action: the rejection can only
     # come from its aspect, which a metadata-scoped declaration excludes.
     desired = _desired(
-        implied_features=frozenset({"timestampNtz"}),
+        columns=(DesiredColumn("seen_at", TimestampNtz()),),
         managed_aspects=METADATA_ASPECTS,
     )
-    observed = _observed()
+    observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
 
     result = plan_diff(diff_table(desired, observed))
 

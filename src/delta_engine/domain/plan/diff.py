@@ -26,7 +26,6 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
-    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -120,7 +119,6 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
 
     renames = _resolve_column_renames(desired, observed)
 
-    feature_actions = _diff_table_features(desired, observed)
     column_actions = _diff_columns(desired.columns, renames.columns)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
     constraint_actions = _diff_constraints(desired, observed)
@@ -130,7 +128,6 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         desired=desired,
         observed=observed,
         actions=(
-            *feature_actions,
             *renames.actions,
             *column_actions,
             *layout_actions,
@@ -372,23 +369,6 @@ def _diff_column_tags(
         if name not in desired.tags
     )
     return tuple(actions)
-
-
-def _diff_table_features(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[EnableTableFeature, ...]:
-    """
-    Return an enablement action per implied feature the table does not support.
-
-    The desired table arrives with its implied features already resolved, so
-    this is set arithmetic over opaque names. Drift-arm only: CREATE TABLE
-    establishes a schema's implied features as it creates it, so a missing
-    table never plans enablement. Supported features the declaration does not
-    imply are never drift — features are append-only on a table and the engine
-    plans no disable.
-    """
-    missing = desired.implied_features - observed.supported_features
-    return tuple(EnableTableFeature(feature=feature) for feature in sorted(missing))
 
 
 def _diff_layout(

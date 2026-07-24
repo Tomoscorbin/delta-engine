@@ -26,8 +26,6 @@ from delta_engine.schema import (
     String,
     Struct,
     StructField,
-    TimestampNtz,
-    Variant,
 )
 
 # ---------- introspection accessors ----------
@@ -463,38 +461,6 @@ def test_to_desired_table_defaults_partitioning_to_empty_tuple():
 
     # Then partitioned_by is a stable empty tuple, never None
     assert desired.partitioned_by == ()
-
-
-def test_to_desired_table_resolves_the_table_features_its_types_imply():
-    # Given a declaration whose types need Delta table features, nested and not
-    table = DeltaTable(
-        catalog="cat",
-        schema="core",
-        name="events",
-        columns=[
-            Column("id", Integer()),
-            Column("seen_at", TimestampNtz()),
-            Column("payload", Map(String(), Variant())),
-        ],
-    )
-
-    # When converting to the domain table
-    desired = table.to_desired_table()
-
-    # Then the implied feature names travel with the declaration, so nothing
-    # downstream has to inspect types to plan their enablement
-    assert desired.implied_features == frozenset({"timestampNtz", "variantType"})
-
-
-def test_to_desired_table_implies_no_features_for_ordinary_types():
-    table = DeltaTable(
-        catalog="cat",
-        schema="core",
-        name="dim_date",
-        columns=[Column("id", Integer()), Column("label", String())],
-    )
-
-    assert table.to_desired_table().implied_features == frozenset()
 
 
 def test_primary_key_parameter_lowers_into_table_level_constraint():

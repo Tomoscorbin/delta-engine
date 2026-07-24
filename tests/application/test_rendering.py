@@ -35,6 +35,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    TableFeature,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -784,7 +785,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
 
 
 def test_enable_table_feature_renders_a_permanent_features_entry():
-    [entry] = action_entries(EnableTableFeature(feature="timestampNtz"))
+    [entry] = action_entries(EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ))
 
     assert entry.category is DiffCategory.FEATURES
     assert entry.symbol == "+"

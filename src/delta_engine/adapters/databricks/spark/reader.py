@@ -2,7 +2,7 @@
 Reader adapter for Databricks Unity Catalog over a SparkSession.
 
 Unity Catalog only. Reads one table's state through the shared
-``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus five
+``read_catalog_state`` (the table description, protocol features, and five
 information_schema queries). This backend supplies only how a query runs while
 parsing, assembly, and error translation are shared with the warehouse backend.
 Physical Spark invocation and session guards live in the backend-private SQL
