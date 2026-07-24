@@ -5,6 +5,7 @@ from delta_engine.application.planning import (
     PlanningSucceeded,
     plan_diff,
 )
+from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -19,6 +20,7 @@ from delta_engine.domain.model import (
     String,
     TableAspect,
     TableKind,
+    TimestampNtz,
 )
 from delta_engine.domain.plan import (
     AddColumn,
@@ -375,3 +377,21 @@ def test_creation_plan_carries_the_ordinary_table_kind():
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
     assert result.plan.kind is TableKind.TABLE
+
+
+def test_feature_enablement_outside_column_structure_scope_is_rejected():
+    # Given matching columns whose implied feature is absent, under metadata-only scope
+    # Columns agree, so enablement is the only action: rejection can only
+    # come from its aspect, which a metadata-scoped declaration excludes.
+    desired = _desired(
+        columns=(DesiredColumn("seen_at", TimestampNtz()),),
+        managed_aspects=METADATA_ASPECTS,
+    )
+    observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
+
+    # When planning the resulting feature drift
+    result = plan_diff(diff_table(desired, observed))
+
+    # Then the column-structure action is rejected as out of scope
+    assert isinstance(result, PlanningFailed)
+    assert any("column structure" in failure.message for failure in result.failures)

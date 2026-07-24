@@ -1,4 +1,4 @@
-"""Validated boundary from raw table diffs to executable action plans."""
+"""Validated boundary from complete table diffs to executable action plans."""
 
 from dataclasses import dataclass
 from typing import assert_never
@@ -35,7 +35,7 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     Validate ``diff`` with the default policy and return an accepted or rejected result.
 
     This is the only boundary that constructs an :class:`ActionPlan` from a
-    raw diff. A rejected result carries validation failures and deliberately
+    complete diff. A rejected result carries validation failures and deliberately
     has no plan, making execution of unvalidated drift unrepresentable.
     The plan carries the relation kind its actions lower against: the
     observed kind for drift, and the default ordinary kind for a creation —

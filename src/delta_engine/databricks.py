@@ -21,8 +21,7 @@ if TYPE_CHECKING:
 __all__ = ["build_spark_engine", "build_sql_engine", "configure_logging"]
 
 _SPARK_RUNTIME_HINT = (
-    "delta-engine's Spark backend requires the PySpark supplied by a supported "
-    "Databricks Runtime."
+    "delta-engine's Spark backend requires the PySpark supplied by a supported Databricks Runtime."
 )
 
 

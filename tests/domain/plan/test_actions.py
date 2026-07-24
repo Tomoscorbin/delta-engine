@@ -13,6 +13,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
+    TableFeature,
 )
 import delta_engine.domain.plan.actions as actions_module
 from delta_engine.domain.plan.actions import (
@@ -26,6 +27,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -359,3 +361,54 @@ def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
     }
 
     assert tag_actions == {"SetTableTag", "UnsetTableTag", "SetColumnTag", "UnsetColumnTag"}
+
+
+def test_enable_table_feature_declares_aspect_phase_and_subject():
+    # Given a table-feature enablement action
+    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
+
+    # When its planning metadata is inspected
+    metadata = (action.aspect, action.phase, action.subject)
+
+    # Then it belongs to column structure and has a dedicated execution phase
+    assert metadata == (
+        TableAspect.COLUMN_STRUCTURE,
+        ActionPhase.ENABLE_TABLE_FEATURE,
+        "timestampNtz",
+    )
+
+
+def test_enable_table_feature_phases_before_every_dependent_column_phase():
+    # Given the create, feature, property, and dependent column phases
+    dependent_phases = (
+        ActionPhase.SET_PROPERTY,
+        ActionPhase.RENAME_COLUMN,
+        ActionPhase.ADD_COLUMN,
+        ActionPhase.ALTER_COLUMN_TYPE,
+    )
+
+    # When comparing every dependent phase with feature enablement
+    feature_precedes_dependencies = all(
+        ActionPhase.ENABLE_TABLE_FEATURE < phase for phase in dependent_phases
+    )
+
+    # Then creation precedes feature enablement, which precedes every dependency
+    assert ActionPhase.CREATE_TABLE < ActionPhase.ENABLE_TABLE_FEATURE
+    assert feature_precedes_dependencies
+
+
+def test_action_plan_orders_feature_enable_before_column_actions():
+    # Given dependent actions supplied in the wrong execution order
+    actions = (
+        AddColumn(column=_column("seen_at")),
+        EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
+    )
+
+    # When constructing an action plan
+    plan = ActionPlan(
+        target=_TARGET,
+        actions=actions,
+    )
+
+    # Then feature enablement is ordered before the dependent column addition
+    assert [type(action) for action in plan.actions] == [EnableTableFeature, AddColumn]

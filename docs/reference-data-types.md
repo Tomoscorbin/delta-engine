@@ -59,8 +59,7 @@ Observed `CHAR(n)`/`VARCHAR(n)` columns are treated as `String`: the length boun
 
 For an existing Delta table, Databricks does not enable `TIMESTAMP_NTZ` or
 `VARIANT` support merely because an `ADD COLUMN` statement names the type.
-Enable the corresponding table feature out of band before asking delta-engine
-to add that column. New tables containing either type enable their required
-feature as part of creation. Delta-engine does not currently plan these feature
-upgrades for existing tables, so a missing feature surfaces as
-`EXECUTION_FAILED`.
+Delta-engine observes the table's supported features and enables a missing
+schema-required feature before adding the dependent column. New tables
+containing either type enable their required feature as part of creation, so
+they need no separate enablement action.

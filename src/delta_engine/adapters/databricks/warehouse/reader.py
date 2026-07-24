@@ -2,12 +2,12 @@
 Reader adapter for Databricks SQL warehouses.
 
 Unity Catalog only. Reads one table's state through the shared
-``read_catalog_state`` (one ``DESCRIBE TABLE EXTENDED … AS JSON`` plus five
-information_schema queries). The backend-private SQL runner owns physical
-invocation and cursor cleanup. It acquires one cursor lazily on the first query,
-reuses it for the describe and information_schema follow-ups, then closes it
-when the read finishes. Lazy acquisition keeps a dead connection inside the
-shared ``ReadError`` translation boundary.
+``read_catalog_state`` (one table description containing protocol features,
+then five information_schema queries). The backend-private SQL runner owns
+physical invocation and cursor cleanup. It acquires one cursor lazily on the
+first query, reuses it for the describe and information_schema follow-ups, then
+closes it when the read finishes. Lazy acquisition keeps a dead connection
+inside the shared ``ReadError`` translation boundary.
 """
 
 from delta_engine.adapters.databricks.read import read_catalog_state

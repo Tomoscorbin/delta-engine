@@ -2,26 +2,35 @@ import pytest
 
 from delta_engine.domain.model import (
     ALL_ASPECTS,
+    Array,
     DesiredColumn,
     DesiredTable,
     ForeignKeyReference,
     Integer,
     Long,
+    Map,
     ObservedColumn,
     ObservedTable,
     QualifiedName,
     String,
+    Struct,
+    StructField,
     TableAspect,
+    TableFeature,
     TableKind,
+    TimestampNtz,
+    Variant,
 )
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.plan.actions import (
     AddColumn,
     AlterClustering,
     AlterColumnType,
+    CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -205,6 +214,128 @@ def test_nullability_drift_produces_column_nullability_changed():
     assert diff.actions == (
         SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
     )
+
+
+# ---------- schema-implied table features
+
+
+def test_existing_table_diff_enables_feature_required_by_added_column():
+    # Given an existing table without the feature required by a desired new column
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
+
+    # When diffing the desired and observed schemas
+    diff = diff_table(desired, _observed())
+
+    # Then feature enablement is planned before the dependent column addition
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (
+        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        AddColumn(DesiredColumn("seen_at", TimestampNtz())),
+    )
+
+
+def test_existing_table_diff_does_not_reenable_supported_feature():
+    # Given an existing table that already supports the desired column's feature
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("seen_at", TimestampNtz()),
+        )
+    )
+    observed = _observed(supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}))
+
+    # When diffing the desired and observed schemas
+    diff = diff_table(desired, observed)
+
+    # Then only the new column is planned
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (AddColumn(DesiredColumn("seen_at", TimestampNtz())),)
+
+
+def test_existing_table_diff_finds_features_in_nested_type_trees():
+    # Given feature-requiring types nested inside a map, struct, and array
+    payload = Map(
+        String(),
+        Struct(
+            fields=(
+                StructField("seen_at", Array(TimestampNtz())),
+                StructField("value", Variant()),
+            )
+        ),
+    )
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("payload", payload),
+        )
+    )
+
+    # When diffing against a table without those features
+    diff = diff_table(desired, _observed())
+
+    # Then both canonical feature enablements are planned
+    assert isinstance(diff, TableDrift)
+    feature_actions = tuple(
+        action for action in diff.actions if isinstance(action, EnableTableFeature)
+    )
+    assert feature_actions == (
+        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        EnableTableFeature(TableFeature.VARIANT),
+    )
+
+
+def test_existing_table_diff_only_enables_missing_required_features():
+    # Given a schema requiring two features when the table already supports one
+    desired = _desired(
+        columns=(
+            DesiredColumn("seen_at", TimestampNtz()),
+            DesiredColumn("payload", Map(String(), Variant())),
+        )
+    )
+    observed = _observed(
+        columns=(ObservedColumn("seen_at", TimestampNtz()),),
+        supported_features=frozenset({TableFeature.TIMESTAMP_NTZ}),
+    )
+
+    # When diffing the desired and observed schemas
+    diff = diff_table(desired, observed)
+
+    # Then only the missing feature is enabled
+    assert isinstance(diff, TableDrift)
+    feature_actions = tuple(
+        action for action in diff.actions if isinstance(action, EnableTableFeature)
+    )
+    assert feature_actions == (EnableTableFeature(TableFeature.VARIANT),)
+
+
+def test_existing_table_diff_reports_feature_gap_without_column_drift():
+    # Given matching columns whose required table feature is absent
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+    observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
+
+    # When diffing the otherwise identical schemas
+    diff = diff_table(desired, observed)
+
+    # Then the feature gap remains actionable drift
+    assert isinstance(diff, TableDrift)
+    assert diff.actions == (EnableTableFeature(TableFeature.TIMESTAMP_NTZ),)
+
+
+def test_missing_table_relies_on_create_for_required_features():
+    # Given a missing table declaring a feature-requiring type
+    desired = _desired(columns=(DesiredColumn("seen_at", TimestampNtz()),))
+
+    # When diffing it against absence
+    diff = diff_table(desired, None)
+
+    # Then creation relies on Delta to enable the required feature
+    assert isinstance(diff, TableMissing)
+    assert diff.actions == (CreateTable(desired),)
 
 
 # ---------- column comment changes

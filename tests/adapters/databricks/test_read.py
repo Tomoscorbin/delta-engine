@@ -21,6 +21,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    TableFeature,
     TableKind,
 )
 
@@ -374,3 +375,64 @@ def test_a_non_delta_streaming_table_reads_as_failed():
     error = _read_error(responses)
 
     assert error.exception_type == "UnsupportedRelationError"
+
+
+def test_supported_features_are_observed_and_kept_out_of_properties():
+    # Given catalog properties containing managed, unmanaged, and ordinary properties
+    document = _describe_doc(
+        table_properties={
+            "delta.feature.timestampNtz": "supported",
+            "delta.feature.deletionVectors": "supported",
+            "delta.enableChangeDataFeed": "true",
+        }
+    )
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    # When reading the table's catalog state
+    state = read_catalog_state(_router(responses), QN)
+
+    # Then only the managed feature is projected as protocol state
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset({TableFeature.TIMESTAMP_NTZ})
+    # And feature keys remain separate from user-managed table properties
+    assert "delta.feature.timestampNtz" not in state.table.properties
+    assert state.table.properties["delta.enableChangeDataFeed"] == "true"
+
+
+def test_unmanaged_catalog_features_are_ignored():
+    # Given a supported catalog feature the engine does not manage
+    document = _describe_doc(table_properties={"delta.feature.deletionVectors": "supported"})
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    # When reading the table's catalog state
+    state = read_catalog_state(_router(responses), QN)
+
+    # Then the unknown feature does not enter observed engine state
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset()
+
+
+def test_feature_property_must_be_supported():
+    # Given a managed feature property whose catalog value is not supported
+    document = _describe_doc(table_properties={"delta.feature.timestampNtz": "unsupported"})
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    # When reading the table's catalog state
+    state = read_catalog_state(_router(responses), QN)
+
+    # Then the feature is not observed as supported
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset()
+
+
+def test_preview_catalog_name_maps_to_the_canonical_feature():
+    # Given a catalog exposing VARIANT through its preview property spelling
+    document = _describe_doc(table_properties={"delta.feature.variantType-preview": "supported"})
+    responses = _describe_responses(**{describe_json_query(QN): [(document,)]})
+
+    # When reading the table's catalog state
+    state = read_catalog_state(_router(responses), QN)
+
+    # Then observed state carries the canonical domain identity
+    assert isinstance(state, TablePresent)
+    assert state.table.supported_features == frozenset({TableFeature.VARIANT})

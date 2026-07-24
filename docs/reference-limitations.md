@@ -15,7 +15,7 @@ the page with the detail.
 | Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader reads managed and external Delta tables, plus Delta streaming tables for tag-only management, and any other relation a registered name resolves to (view, materialized view, foreign table, non-Delta format) fails its read ([architecture](explanation-architecture.md)) |
 | Python                | 3.12 or later                                                                                                                                                                                                                                                                                                                                                          |
 | PySpark               | Supplied by Databricks Runtime for the Spark backend and not installed by delta-engine; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                       |
-| Reads (both backends) | Unity Catalog only — every read is one `DESCRIBE TABLE EXTENDED … AS JSON` plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both the Spark and SQL warehouse backends ([installation](installation.md))                              |
+| Reads (both backends) | Unity Catalog only — every existing-table read uses one `DESCRIBE TABLE EXTENDED … AS JSON` for table shape, properties, and supported features, plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both backends ([installation](installation.md)) |
 
 ## Identifier handling
 
@@ -132,3 +132,19 @@ This project does not yet publish a complete tested Spark-backend runtime
 matrix. The recurring live suite exercises the SQL warehouse backend; treat
 other Databricks Runtime versions as requiring validation in your own
 environment until Spark-runtime smoke coverage is published.
+
+## Delta table features
+
+Declaring a type that needs a Delta table feature — `TimestampNtz` or
+`Variant` anywhere in a column's type tree — makes the engine plan the
+enablement itself when the table exists without it: an explicit
+`SET TBLPROPERTIES ('delta.feature.…' = 'supported')` statement, ordered
+before the dependent column change and always visible in a dry run. Creating
+a table needs no planned enablement; Databricks enables required features
+from the created schema.
+
+Feature enablement is a permanent protocol upgrade — older Delta clients may
+lose access to the table. The engine never plans `DROP FEATURE`, and features
+it does not model — deletion vectors, row tracking, and every other
+platform-managed or property-gated feature — are left entirely to the
+platform and its properties.

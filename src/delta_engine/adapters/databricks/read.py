@@ -1,11 +1,10 @@
 """
 Shared catalog-state read for the Databricks backends.
 
-Both backends read a table the same way: one ``DESCRIBE TABLE EXTENDED … AS
-JSON`` for the columns and layout, then the constraint and tag metadata read
-from information_schema as structured rows — Unity Catalog tags, this table's
-own primary and foreign keys, and inbound foreign keys. Only how a query is
-physically run differs per backend, so it is injected as a callable:
+Both backends read a table the same way: ``DESCRIBE TABLE EXTENDED … AS JSON``
+for columns, layout, properties, and protocol features, then the constraint
+and tag metadata from information_schema. Only how a query is physically run
+differs per backend, so it is injected as a callable:
 ``read_catalog_state`` is the one entry point both readers call, the
 read-side twin of the write side's ``execution.execute_statement``. Each
 backend supplies only how a query runs (returning its rows) and owns its own
@@ -38,6 +37,9 @@ from delta_engine.adapters.databricks.sql import (
 from delta_engine.adapters.databricks.sql.describe import (
     TableDescription,
     table_description_from_rows,
+)
+from delta_engine.adapters.databricks.table_features import (
+    supported_features_from_properties,
 )
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
@@ -161,6 +163,7 @@ def _read_observed_table(
         columns=tagged_columns,
         comment=description.comment,
         properties=DELTA_PROPERTY_POLICY.project_observed(description.table_properties),
+        supported_features=supported_features_from_properties(description.table_properties),
         tags=read_table_tags(run_query, qualified_name),
         partitioned_by=description.partitioned_by,
         clustered_by=description.clustered_by,

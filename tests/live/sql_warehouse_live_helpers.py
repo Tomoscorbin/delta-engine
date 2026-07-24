@@ -130,6 +130,7 @@ def read_live_table(connection, table_name: str) -> dict[str, Any]:
         "clustering": _decode_strings(detail.get("clusteringcolumns", [])),
         "partitioning": _decode_strings(detail["partitioncolumns"]),
         "properties": _decode_mapping(detail["properties"]),
+        "features": _decode_strings(detail.get("tablefeatures", ())),
         "table_tags": {row["tag_name"]: row["tag_value"] for row in table_tags},
         "column_tags": {
             (row["column_name"], row["tag_name"]): row["tag_value"] for row in column_tags

@@ -6,11 +6,9 @@ metadata query as text, with identifier quoting and literal escaping handled
 here so the reader never assembles SQL inline. Builders are pure — no
 SparkSession, no I/O — so query structure is pinned by golden tests.
 
-The primary read is ``DESCRIBE TABLE EXTENDED … AS JSON`` (``describe_json_query``);
-the information_schema queries here read the constraint and tag metadata as
-structured rows instead of parsing the describe document — Unity Catalog tags,
-this table's own primary and foreign keys, and inbound foreign keys — and are
-Unity Catalog only.
+The primary shape read is ``DESCRIBE TABLE EXTENDED … AS JSON``
+(``describe_json_query``); the information_schema queries read constraint and
+tag metadata as structured rows. All are Unity Catalog only.
 """
 
 from delta_engine.adapters.databricks.sql.dialect import (

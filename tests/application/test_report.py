@@ -36,8 +36,13 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedTable,
     QualifiedName,
+    TableFeature,
 )
-from delta_engine.domain.plan.actions import ActionPlan, SetTableComment
+from delta_engine.domain.plan.actions import (
+    ActionPlan,
+    EnableTableFeature,
+    SetTableComment,
+)
 
 # ---------- test builders
 
@@ -479,6 +484,32 @@ def test_table_to_dict_states_the_planned_change():
     ]
     assert payload["failures"] == []
     assert payload["execution"] is None
+
+
+def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
+    # Given a successful table report planning a permanent feature enablement
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan(
+            "orders",
+            EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
+        ),
+        planned_sql_statements=("ALTER TABLE ... SET TBLPROPERTIES (...)",),
+    )
+
+    # When serializing the public report
+    changes = report.to_dict()["changes"]
+
+    # Then the feature upgrade has its own public change kind
+    assert changes == [
+        {
+            "kind": "features",
+            "operation": "add",
+            "subject": "table feature timestampNtz — permanent protocol upgrade",
+            "detail": "",
+        }
+    ]
 
 
 def test_table_to_dict_reports_failures_with_phase_and_type():

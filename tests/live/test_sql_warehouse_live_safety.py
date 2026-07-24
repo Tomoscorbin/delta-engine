@@ -16,14 +16,12 @@ from delta_engine import (
 from delta_engine.databricks import build_sql_engine
 from delta_engine.schema import (
     Column,
-    Date,
     DeltaTable,
     ForeignKey,
     Integer,
     Long,
     Property,
     String,
-    TimestampNtz,
 )
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
@@ -348,6 +346,7 @@ def test_server_rejected_statement_surfaces_as_typed_execution_failure(
     live_connection, live_tables
 ):
     """A warehouse-rejected statement surfaces as a typed execution failure with its SQL."""
+    # Given an existing table whose catalog state will be compared after failure
     table_name = live_tables("reject_execution")
     engine = build_sql_engine(live_connection)
     engine.sync(
@@ -355,32 +354,34 @@ def test_server_rejected_statement_surfaces_as_typed_execution_failure(
             live_catalog(),
             live_schema(),
             table_name,
-            columns=(Column("event_date", Date()),),
-            properties={Property.TYPE_WIDENING: "true"},
+            columns=(Column("id", Integer()),),
         )
     )
     before = read_live_table(live_connection, table_name)
 
-    # Widening date -> timestamp_ntz passes client-side validation, but the
-    # live table lacks the timestampNtz table feature, so the warehouse
-    # rejects the ALTER. The report must carry that server rejection as a
-    # typed execution failure holding the failing statement.
+    # A dotted tag key passes client-side validation today (item 11 of the
+    # correctness review is not yet implemented) but Unity Catalog forbids
+    # '.' in tag keys, so SET TAGS is rejected server-side. When item 11
+    # lands, this vehicle must change again — any client-admitted,
+    # warehouse-rejected statement will do.
+    # When syncing a declaration that produces the server-rejected statement
     with pytest.raises(SyncFailedError) as error:
         engine.sync(
             DeltaTable(
                 live_catalog(),
                 live_schema(),
                 table_name,
-                columns=(Column("event_date", TimestampNtz()),),
-                properties={Property.TYPE_WIDENING: "true"},
+                columns=(Column("id", Integer()),),
+                tags={"invalid.key": "value"},
             )
         )
 
+    # Then the failure is typed, carries its SQL, and leaves catalog state unchanged
     [table_report] = error.value.report.table_reports
     assert table_report.status is TableRunStatus.EXECUTION_FAILED
     [failure] = table_report.failures
     assert isinstance(failure, ExecutionFailure)
-    assert "ALTER COLUMN" in failure.statement
+    assert "SET TAGS" in failure.statement
     assert failure.message
     assert read_live_table(live_connection, table_name) == before
 

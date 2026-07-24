@@ -17,6 +17,7 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
+    TableFeature,
     TableKind,
     Variant,
 )
@@ -32,6 +33,7 @@ from delta_engine.domain.plan.actions import (
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
+    EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -627,3 +629,30 @@ def test_non_alter_statements_ignore_the_dialect():
 
     assert create.startswith("CREATE TABLE `cat`.`sch`.`tbl`")
     assert comment == "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'c'"
+
+
+def test_compile_enable_table_feature():
+    # Given a canonical table-feature enablement action
+    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
+
+    # When compiling it for Databricks
+    statement = _compile_single(action)
+
+    # Then the feature is enabled through its complete table-property assignment
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.feature.timestampNtz'='supported')"
+    )
+
+
+def test_compile_enable_table_feature_uses_documented_variant_key():
+    # Given a canonical VARIANT enablement action
+    action = EnableTableFeature(feature=TableFeature.VARIANT)
+
+    # When compiling it for Databricks
+    statement = _compile_single(action)
+
+    # Then the adapter uses the currently documented preview property spelling
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
+        " ('delta.feature.variantType-preview'='supported')"
+    )

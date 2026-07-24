@@ -16,6 +16,7 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     TableAspect,
+    TableFeature,
     TableKind,
 )
 
@@ -33,6 +34,7 @@ class ActionPhase(IntEnum):
     """
 
     CREATE_TABLE = auto()
+    ENABLE_TABLE_FEATURE = auto()
     SET_PROPERTY = auto()
     UNSET_PROPERTY = auto()
     SET_TABLE_TAG = auto()
@@ -85,6 +87,29 @@ class CreateTable(Action):
     @property
     def subject(self) -> str:
         return ""
+
+
+@dataclass(frozen=True, slots=True)
+class EnableTableFeature(Action):
+    """
+    Enable a Delta table feature the desired schema requires.
+
+    Enablement is a permanent protocol upgrade, so it is always its own
+    visible action, phased before the column changes that depend on it.
+    Features are append-only on a table: there is no disable counterpart.
+    """
+
+    feature: TableFeature
+
+    aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
+    phase: ClassVar[ActionPhase] = ActionPhase.ENABLE_TABLE_FEATURE
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "feature", TableFeature(self.feature))
+
+    @property
+    def subject(self) -> str:
+        return self.feature.value
 
 
 @dataclass(frozen=True, slots=True)

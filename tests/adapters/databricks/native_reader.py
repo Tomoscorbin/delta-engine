@@ -9,9 +9,9 @@ and the domain ``ObservedTable`` is constructed directly. Unity Catalog tags,
 inbound foreign keys, and primary/foreign key constraints have no OSS Spark
 equivalent, so they stay empty; no local e2e test declares them.
 
-This reader parses the ``DESCRIBE DETAIL`` row inline. The shipped readers get
-layout and properties from AS JSON, so the shared ``sql`` core carries no
-DESCRIBE DETAIL mappers for it to reuse.
+This reader parses layout and properties from the ``DESCRIBE DETAIL`` row
+inline and reuses the production catalog-name normalization for table
+features.
 
 Used only by the local engine e2e tests, to keep a real
 read -> diff -> plan -> execute round trip credential-free. Production reads
@@ -25,6 +25,7 @@ from delta_engine.adapters.databricks.exception_inspection import (
     exception_message,
     exception_type_name,
 )
+from delta_engine.adapters.databricks.table_features import recognized_table_features
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
@@ -152,5 +153,6 @@ class NativeSparkReader:
             partitioned_by=tuple(c.casefold() for c in (detail["partitionColumns"] or [])),
             clustered_by=tuple(c.casefold() for c in (detail["clusteringColumns"] or [])),
             properties=DELTA_PROPERTY_POLICY.project_observed(detail["properties"] or {}),
+            supported_features=recognized_table_features(detail["tableFeatures"] or ()),
         )
         return TablePresent(table=observed)
