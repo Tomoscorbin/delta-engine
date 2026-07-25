@@ -1149,3 +1149,40 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
 
     assert isinstance(diff, TableDrift)
     assert diff.observed.kind is TableKind.TABLE
+
+
+def test_matched_column_actions_carry_the_observed_column_name():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("amount", Integer(), comment="net"),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("amount", Integer(), comment=""),),
+    )
+
+    diff = diff_table(desired, observed)
+
+    [action] = diff.actions
+    assert isinstance(action, SetColumnComment)
+    assert action.column_name == observed.columns[0].name
+
+
+def test_rename_action_carries_the_observed_source_name():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("customer_nm", String()),),
+    )
+
+    diff = diff_table(desired, observed)
+
+    [action] = diff.actions
+    assert isinstance(action, RenameColumn)
+    assert action.old_name == observed.columns[0].name
+    assert action.new_name == "customer_name"

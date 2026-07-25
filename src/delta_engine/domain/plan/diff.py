@@ -24,6 +24,9 @@ from delta_engine.domain.model import (
     TableFeature,
     TimestampNtz,
     Variant,
+    canonical_data_type,
+    identifier_key,
+    index_by_identifier,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -243,48 +246,54 @@ class _RenameResolution:
 
 def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameResolution:
     """Resolve applicable rename hints and project rename-preserved observed state."""
-    declared_renames = {
-        column.renamed_from: column.name
+    rename_targets_by_source_key = {
+        identifier_key(column.renamed_from): column
         for column in desired.columns
         if column.renamed_from is not None
     }
-    observed_names = {column.name for column in observed.columns}
-    applied_renames: dict[str, str] = {}
-    conflicted_sources: set[str] = set()
+    observed_by_key = index_by_identifier(observed.columns, lambda column: column.name)
+    new_spelling_by_old_key: dict[str, str] = {}
+    conflicted_source_keys: set[str] = set()
     actions: list[RenameColumn] = []
     conflicts: list[ColumnRenameConflict] = []
 
-    for old_name, new_name in declared_renames.items():
-        if old_name not in observed_names:
+    for old_key, target in rename_targets_by_source_key.items():
+        observed_column = observed_by_key.get(old_key)
+        if observed_column is None:
             continue
 
-        if new_name in observed_names:
-            conflicted_sources.add(old_name)
-            conflicts.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
+        if identifier_key(target.name) in observed_by_key:
+            conflicted_source_keys.add(old_key)
+            conflicts.append(
+                ColumnRenameConflict(old_name=observed_column.name, new_name=target.name)
+            )
             continue
 
-        applied_renames[old_name] = new_name
-        actions.append(RenameColumn(old_name=old_name, new_name=new_name))
+        new_spelling_by_old_key[old_key] = target.name
+        actions.append(RenameColumn(old_name=observed_column.name, new_name=target.name))
 
-    projected_columns = tuple(
-        replace(column, name=applied_renames[column.name])
-        if column.name in applied_renames
-        else column
-        for column in observed.columns
-        if column.name not in conflicted_sources
-    )
+    projected_columns: list[ObservedColumn] = []
+    for column in observed.columns:
+        key = identifier_key(column.name)
+        if key in conflicted_source_keys:
+            continue
+        new_spelling = new_spelling_by_old_key.get(key)
+        projected_columns.append(
+            replace(column, name=new_spelling) if new_spelling is not None else column
+        )
+
     return _RenameResolution(
-        columns=projected_columns,
-        partitioned_by=_project_names(observed.partitioned_by, applied_renames),
-        clustered_by=_project_names(observed.clustered_by, applied_renames),
+        columns=tuple(projected_columns),
+        partitioned_by=_project_names(observed.partitioned_by, new_spelling_by_old_key),
+        clustered_by=_project_names(observed.clustered_by, new_spelling_by_old_key),
         actions=tuple(actions),
         conflicts=tuple(conflicts),
     )
 
 
 def _project_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[str, ...]:
-    """Project column names through the applied rename mapping."""
-    return tuple(renames.get(name, name) for name in names)
+    """Project column names through the applied rename mapping, keyed by identity."""
+    return tuple(renames.get(identifier_key(name), name) for name in names)
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,15 +330,23 @@ def _align_columns(
     observed_columns: tuple[ObservedColumn, ...],
 ) -> _ColumnAlignment:
     """Classify columns in stable desired and observed order."""
-    desired_by_name = {column.name: column for column in desired_columns}
-    observed_by_name = {column.name: column for column in observed_columns}
+    desired_by_key = index_by_identifier(desired_columns, lambda column: column.name)
+    observed_by_key = index_by_identifier(observed_columns, lambda column: column.name)
 
-    added = tuple(column for column in desired_columns if column.name not in observed_by_name)
-    removed = tuple(column for column in observed_columns if column.name not in desired_by_name)
-    matched = tuple(
-        (column, observed_by_name[column.name])
+    added = tuple(
+        column
         for column in desired_columns
-        if column.name in observed_by_name
+        if identifier_key(column.name) not in observed_by_key
+    )
+    removed = tuple(
+        column
+        for column in observed_columns
+        if identifier_key(column.name) not in desired_by_key
+    )
+    matched = tuple(
+        (column, observed_by_key[identifier_key(column.name)])
+        for column in desired_columns
+        if identifier_key(column.name) in observed_by_key
     )
 
     return _ColumnAlignment(
@@ -367,10 +384,10 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     """Return every field and tag action for a matched column."""
     actions: list[Action] = []
 
-    if desired.data_type != observed.data_type:
+    if canonical_data_type(desired.data_type) != canonical_data_type(observed.data_type):
         actions.append(
             AlterColumnType(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_type=desired.data_type,
                 observed_type=observed.data_type,
             )
@@ -378,7 +395,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     if desired.nullable != observed.nullable:
         actions.append(
             SetColumnNullability(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_nullable=desired.nullable,
                 observed_nullable=observed.nullable,
             )
@@ -386,7 +403,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     if desired.comment != observed.comment:
         actions.append(
             SetColumnComment(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_comment=desired.comment,
                 observed_comment=observed.comment,
             )
@@ -406,7 +423,7 @@ def _diff_column_tags(
         if observed_value != desired_value:
             actions.append(
                 SetColumnTag(
-                    column_name=desired.name,
+                    column_name=observed.name,
                     name=name,
                     desired_value=desired_value,
                     observed_value=observed_value,
@@ -414,7 +431,7 @@ def _diff_column_tags(
             )
 
     actions.extend(
-        UnsetColumnTag(column_name=desired.name, name=name)
+        UnsetColumnTag(column_name=observed.name, name=name)
         for name in observed.tags
         if name not in desired.tags
     )
@@ -427,7 +444,9 @@ def _diff_layout(
 ) -> tuple[tuple[AlterClustering, ...], tuple[PartitioningChanged, ...]]:
     """Return resolvable and unresolvable physical-layout differences."""
     actions: tuple[AlterClustering, ...] = ()
-    if set(desired.clustered_by) != set(observed.clustered_by):
+    desired_cluster_keys = {identifier_key(name) for name in desired.clustered_by}
+    observed_cluster_keys = {identifier_key(name) for name in observed.clustered_by}
+    if desired_cluster_keys != observed_cluster_keys:
         actions = (
             AlterClustering(
                 desired_clustering=desired.clustered_by,
@@ -436,7 +455,9 @@ def _diff_layout(
         )
 
     unresolvable: tuple[PartitioningChanged, ...] = ()
-    if desired.partitioned_by != observed.partitioned_by:
+    desired_partition_keys = tuple(identifier_key(name) for name in desired.partitioned_by)
+    observed_partition_keys = tuple(identifier_key(name) for name in observed.partitioned_by)
+    if desired_partition_keys != observed_partition_keys:
         unresolvable = (
             PartitioningChanged(
                 desired_partitioning=desired.partitioned_by,

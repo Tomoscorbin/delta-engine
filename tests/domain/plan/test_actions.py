@@ -389,3 +389,15 @@ def test_action_plan_orders_feature_enable_before_column_actions():
     )
 
     assert [type(action) for action in plan.actions] == [EnableTableFeature, AddColumn]
+
+
+def test_plan_orders_subjects_by_identity_key_with_exact_subject_tiebreak():
+    plan = ActionPlan(
+        target=QualifiedName("cat", "sch", "t"),
+        actions=(
+            SetColumnComment(column_name="Beta", desired_comment="x", observed_comment=""),
+            SetColumnComment(column_name="alpha", desired_comment="x", observed_comment=""),
+        ),
+    )
+
+    assert [action.subject for action in plan] == ["alpha", "Beta"]

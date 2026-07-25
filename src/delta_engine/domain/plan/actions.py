@@ -18,6 +18,8 @@ from delta_engine.domain.model import (
     TableAspect,
     TableFeature,
     TableKind,
+    canonical_data_type,
+    identifier_key,
 )
 
 
@@ -151,7 +153,7 @@ class RenameColumn(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.RENAME_COLUMN
 
     def __post_init__(self) -> None:
-        if self.old_name == self.new_name:
+        if identifier_key(self.old_name) == identifier_key(self.new_name):
             raise ValueError(f"RenameColumn carries no difference: {self.old_name!r}")
 
     @property
@@ -393,7 +395,9 @@ class AlterClustering(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
 
     def __post_init__(self) -> None:
-        if set(self.desired_clustering) == set(self.observed_clustering):
+        desired_keys = {identifier_key(name) for name in self.desired_clustering}
+        observed_keys = {identifier_key(name) for name in self.observed_clustering}
+        if desired_keys == observed_keys:
             raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
 
     @property
@@ -413,7 +417,7 @@ class AlterColumnType(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.ALTER_COLUMN_TYPE
 
     def __post_init__(self) -> None:
-        if self.desired_type == self.observed_type:
+        if canonical_data_type(self.desired_type) == canonical_data_type(self.observed_type):
             raise ValueError(f"AlterColumnType carries no difference: {self.desired_type!r}")
 
     @property
@@ -421,9 +425,9 @@ class AlterColumnType(Action):
         return self.column_name
 
 
-def _execution_order(action: Action) -> tuple[int, str]:
-    """Deterministic ordering key for an action: execution phase, then subject name."""
-    return (action.phase, action.subject)
+def _execution_order(action: Action) -> tuple[int, str, str]:
+    """Deterministic ordering key: phase, identity-keyed subject, then exact subject."""
+    return (action.phase, identifier_key(action.subject), action.subject)
 
 
 @dataclass(frozen=True, slots=True)
