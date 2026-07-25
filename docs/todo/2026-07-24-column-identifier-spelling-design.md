@@ -477,10 +477,19 @@ spelling in place, desired spelling after an applied rename), and add, drop,
 and rename actions already carry their true side. The planning binder
 resolves only symbolic references — `SetPrimaryKey`, `SetForeignKey` (both
 sides, cross-table), `AlterClustering`, and `CreateTable`'s internal
-primary-key and layout references — through the resulting-schema index, and
-fails loudly on any reference that does not resolve. Removed columns
-therefore never appear in the index, and no bound action needs to look one
-up.
+primary-key and layout references — through the resulting-schema index.
+Failure scoping follows who guarantees resolution. Own-table references
+(primary-key columns, clustering references, `CreateTable`-internal
+references, and a foreign key's local columns) are guaranteed resolvable by
+domain validation, so a miss there is an engine invariant violation and
+fails loudly. The foreign key's referenced side is not guaranteed: an
+unregistered, read-failed, or divergent parent legitimately cannot bind, so
+any referenced-side miss — a missing parent entry, or a missing column
+within a present entry — falls back to the declared spelling. That keeps
+compilation-before-resolution intact: the child still compiles preview SQL,
+and dependency resolution retains sole ownership of classifying the
+foreign-key failure and blocking execution. Removed columns never appear in
+the index, and no bound action needs to look one up.
 
 ### Action binding rules
 
@@ -498,10 +507,14 @@ up.
 | `SetForeignKey` referenced columns | Parent table's resulting spelling |
 | `DropForeignKey` | Preserve observed constraint name |
 
-The binding operation should fail loudly if an accepted action references no
-resulting column. Declaration and dependency validation should normally make
-that impossible; silently retaining an unresolved spelling would recreate
-the current class of execution failure.
+The binding operation should fail loudly if an accepted action's own-table
+reference names no resulting column. Declaration validation makes that
+impossible short of an engine defect; silently retaining an unresolved
+own-table spelling would recreate the current class of execution failure.
+A foreign key's referenced side is the deliberate exception: it falls back
+to declared spelling when the parent cannot bind, and dependency
+resolution — which runs after compilation by design — owns classifying that
+failure and blocking execution.
 
 ## Compiler
 
