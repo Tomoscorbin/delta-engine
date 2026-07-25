@@ -46,9 +46,9 @@ def test_delta_table_exposes_declared_name_parts():
     assert table.name == "orders"
 
 
-def test_mixed_case_declaration_normalizes_to_lowercase():
-    # Identifiers are case-insensitive on Databricks and Unity Catalog stores
-    # object names lowercase, so the declaration canonicalizes rather than rejects
+def test_mixed_case_declaration_preserves_columns_and_lowercases_object_names():
+    # Unity Catalog stores catalog/schema/table names lowercase (live-pinned);
+    # column spelling is catalog display state and is preserved.
     table = DeltaTable(
         catalog="Main",
         schema="Sales",
@@ -57,7 +57,21 @@ def test_mixed_case_declaration_normalizes_to_lowercase():
     )
 
     assert (table.catalog, table.schema, table.name) == ("main", "sales", "orders")
-    assert [column.name for column in table.columns] == ["id"]
+    assert [column.name for column in table.columns] == ["Id"]
+
+
+def test_public_accessors_return_declared_spelling():
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("OrderId", Integer(), nullable=False), Column("Region", String())],
+        clustered_by=["Region"],
+        primary_key=["OrderId"],
+    )
+
+    assert table.primary_key == ("OrderId",)
+    assert table.clustered_by == ("Region",)
 
 
 @pytest.mark.parametrize(
@@ -1244,7 +1258,7 @@ def test_delta_table_accepts_rename_hint_with_column_mapping_declared():
     assert table.columns[1].renamed_from == "customer_nm"
 
 
-def test_single_column_string_foreign_key_infers_and_normalizes_parent_column():
+def test_single_column_string_foreign_key_infers_and_preserves_spelling():
     customers = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1264,12 +1278,12 @@ def test_single_column_string_foreign_key_infers_and_normalizes_parent_column():
 
     [foreign_key] = orders.to_desired_table().foreign_keys
 
-    assert declaration.columns == ("customer_id",)
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_columns == ("id",)
+    assert declaration.columns == ("Customer_ID",)
+    assert foreign_key.local_columns == ("Customer_ID",)
+    assert foreign_key.referenced_columns == ("ID",)
 
 
-def test_single_column_sequence_infers_and_normalizes_parent_column():
+def test_single_column_sequence_infers_and_preserves_spelling():
     customers = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1289,12 +1303,12 @@ def test_single_column_sequence_infers_and_normalizes_parent_column():
 
     [foreign_key] = orders.to_desired_table().foreign_keys
 
-    assert declaration.columns == ("customer_id",)
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_columns == ("id",)
+    assert declaration.columns == ("Customer_ID",)
+    assert foreign_key.local_columns == ("Customer_ID",)
+    assert foreign_key.referenced_columns == ("ID",)
 
 
-def test_same_name_composite_foreign_key_is_inferred_by_normalized_name():
+def test_same_name_composite_foreign_key_is_inferred_by_identifier_key():
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1325,8 +1339,8 @@ def test_same_name_composite_foreign_key_is_inferred_by_normalized_name():
 
     [foreign_key] = entries.to_desired_table().foreign_keys
 
-    assert foreign_key.local_columns == ("account_id", "tenant_id")
-    assert foreign_key.referenced_columns == ("account_id", "tenant_id")
+    assert foreign_key.local_columns == ("Account_ID", "Tenant_ID")
+    assert foreign_key.referenced_columns == ("Account_ID", "Tenant_ID")
 
 
 def test_ambiguous_composite_foreign_key_requires_mapping():
@@ -1657,10 +1671,10 @@ def test_foreign_key_accepts_columns_as_any_mapping():
         foreign_keys=[declaration],
     )
 
-    # Then the declaration copies the mapping and the lowered constraint holds an immutable tuple
-    assert dict(declaration.columns) == {"customer_id": "id"}
+    # Then the declaration copies the mapping and the lowered constraint preserves spelling.
+    assert dict(declaration.columns) == {"Customer_ID": "ID"}
     [constraint] = orders.to_desired_table().foreign_keys
-    assert constraint.local_columns == ("customer_id",)
+    assert constraint.local_columns == ("Customer_ID",)
 
 
 def test_mapping_lowers_single_column_foreign_key():

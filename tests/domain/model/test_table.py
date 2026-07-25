@@ -70,15 +70,10 @@ def test_fails_when_partition_references_undefined_column(table_type, column_typ
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_mixed_case_partition_reference_normalizes_to_lowercase(table_type, column_type):
-    # Given: a column 'visit_date' and a partition spec naming it in upper case
+def test_mixed_case_partition_reference_is_preserved_and_resolves(table_type, column_type):
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
-
-    # When: constructing the table with a mixed-case partition reference
     table = table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
-
-    # Then: the reference normalizes and resolves to the declared column
-    assert table.partitioned_by == ("visit_date",)
+    assert table.partitioned_by == ("VISIT_DATE",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -602,10 +597,10 @@ def test_table_rejects_clustering_column_not_in_columns(table_type, column_type)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_mixed_case_clustering_reference_normalizes_to_lowercase(table_type, column_type):
+def test_mixed_case_clustering_reference_is_preserved_and_resolves(table_type, column_type):
     columns = (column_type("id", Integer()), column_type("region", String()))
     table = table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
-    assert table.clustered_by == ("region",)
+    assert table.clustered_by == ("REGION",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE

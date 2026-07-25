@@ -187,8 +187,8 @@ class DesiredTable:
 
         """
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
 
         _validate_table_structure(
@@ -320,8 +320,8 @@ class ObservedTable:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(
             self,

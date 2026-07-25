@@ -160,16 +160,15 @@ def test_signature_ignores_declared_pair_order():
     assert one.signature == two.signature
 
 
-def test_mixed_case_columns_and_name_normalize_to_lowercase():
-    fk = ForeignKeyConstraint(
-        local_columns=("CustomerId",),
-        referenced_table=QualifiedName("cat", "sales", "customers"),
-        referenced_columns=("Id",),
-        constraint_name="Orders_CustomerId_FK",
+def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
+    constraint = ForeignKeyConstraint(
+        local_columns=("Zebra", "Apple"),
+        referenced_table=QualifiedName("cat", "sch", "parent"),
+        referenced_columns=("z_id", "a_id"),
+        constraint_name="t_fk",
     )
-    assert fk.local_columns == ("customerid",)
-    assert fk.referenced_columns == ("id",)
-    assert fk.constraint_name == "orders_customerid_fk"
+    assert constraint.local_columns == ("Apple", "Zebra")
+    assert constraint.referenced_columns == ("a_id", "z_id")
 
 
 def test_signature_is_identical_across_declaration_casing():

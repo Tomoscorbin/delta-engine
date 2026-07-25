@@ -88,7 +88,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         columns.append(column_document)
         expected_columns.append(
             ObservedColumn(
-                name=raw_name.lower(),
+                name=raw_name,
                 data_type=data_type,
                 nullable=nullable,
                 comment=comment,
@@ -123,8 +123,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         document=document,
         columns=tuple(expected_columns),
         comment=comment,
-        # Layout lists are carried verbatim by the description; the domain
-        # table canonicalizes them on construction.
+        # Layout lists are catalog spelling and stay verbatim.
         partitioned_by=tuple(partitioned_by),
         clustered_by=tuple(clustered_by),
         properties=properties,
@@ -311,7 +310,7 @@ def test_real_order_fact_fixture():
 
 
 @given(_valid_describe_documents())
-def test_valid_describe_documents_preserve_values_and_normalize_identifiers(
+def test_valid_describe_documents_preserve_values_and_identifier_spelling(
     case: DescribeCase,
 ) -> None:
     description = _parse(json.dumps(case.document))

@@ -20,16 +20,16 @@ def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
 @dataclass(frozen=True, slots=True)
 class DesiredColumn:
     """
-    Immutable column declaration with a canonical-lowercase name.
+    Immutable column declaration preserving its authored identifier spelling.
 
     Exposed to users as ``Column`` through ``delta_engine.schema``; the
     domain name states the desired/observed side explicitly, mirroring
     :class:`ObservedColumn`.
 
     Attributes:
-        name: Column name, lowercased on construction. Identifiers are
-            case-insensitive on the platform, so two names differing only in
-            case are the same column.
+        name: Column name, stored verbatim. Identifiers differing only in
+            case are the same column on the platform; identity is judged
+            through explicit identifier keys, never by rewriting spelling.
         data_type: Logical data type of the column.
         nullable: Whether the column accepts ``NULL`` values.
         comment: Optional column comment.
@@ -51,13 +51,11 @@ class DesiredColumn:
     renamed_from: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "name", self.name.lower())
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         _validate_column_fields(self.name, self.tags)
         if self.renamed_from is not None:
             if not self.renamed_from.strip():
                 raise ValueError(f"renamed_from must not be blank: {self.renamed_from!r}")
-            object.__setattr__(self, "renamed_from", self.renamed_from.lower())
             if identifier_key(self.renamed_from) == identifier_key(self.name):
                 raise ValueError(f"Column {self.name!r} cannot be renamed_from itself")
 
@@ -79,6 +77,5 @@ class ObservedColumn:
     tags: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "name", self.name.lower())
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         _validate_column_fields(self.name, self.tags)

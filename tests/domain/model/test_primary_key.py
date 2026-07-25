@@ -30,10 +30,10 @@ def test_equal_by_value():
     )
 
 
-def test_mixed_case_columns_and_name_normalize_to_lowercase():
+def test_mixed_case_columns_and_name_are_preserved():
     pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
-    assert pk.columns == ("orderid",)
-    assert pk.constraint_name == "orders_pk"
+    assert pk.columns == ("OrderId",)
+    assert pk.constraint_name == "Orders_PK"
 
 
 def test_signature_is_identical_across_declaration_casing():

@@ -105,7 +105,7 @@ def test_array_map_struct_nested():
                 {"name": "label", "type": {"name": "string"}, "nullable": True},
             ],
         }
-    ) == Struct((StructField("age", Integer()), StructField("label", String())))
+    ) == Struct((StructField("Age", Integer()), StructField("label", String())))
 
 
 def test_unmappable_returns_none():
@@ -121,7 +121,7 @@ def test_unmappable_returns_none():
             }
         )
         is None
-    )  # duplicate field name after casefold
+    )  # duplicate field identifier
     assert data_type_from_json({"not": "a type"}) is None
     assert data_type_from_json("string") is None
 

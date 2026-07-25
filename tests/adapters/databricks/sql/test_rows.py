@@ -64,7 +64,7 @@ def test_schema_does_not_exist_when_the_probe_returns_no_rows() -> None:
 # ---------- primary key ----------
 
 
-def test_primary_key_rows_map_to_ordered_casefolded_columns() -> None:
+def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
     rows = [
         SimpleNamespace(constraint_name="Orders_PK", column_name="Order_Id"),
         SimpleNamespace(constraint_name="Orders_PK", column_name="Line_No"),
@@ -73,7 +73,7 @@ def test_primary_key_rows_map_to_ordered_casefolded_columns() -> None:
     result = read_primary_key(_runner(primary_key_query(QN), rows), QN)
 
     assert result == PrimaryKeyConstraint(
-        columns=("order_id", "line_no"), constraint_name="orders_pk"
+        columns=("Order_Id", "Line_No"), constraint_name="Orders_PK"
     )
 
 
@@ -84,7 +84,7 @@ def test_primary_key_empty_rows_map_to_none() -> None:
 # ---------- owned foreign keys ----------
 
 
-def test_foreign_key_rows_map_to_casefolded_constraint() -> None:
+def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -100,10 +100,10 @@ def test_foreign_key_rows_map_to_casefolded_constraint() -> None:
 
     assert result == (
         ForeignKeyConstraint(
-            local_columns=("customer_id",),
+            local_columns=("Customer_Id",),
             referenced_table=QualifiedName("dev", "silver", "customer"),
-            referenced_columns=("id",),
-            constraint_name="orders_customer_fk",
+            referenced_columns=("Id",),
+            constraint_name="Orders_Customer_FK",
         ),
     )
 
@@ -170,7 +170,7 @@ def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 # ---------- referencing foreign keys ----------
 
 
-def test_referencing_foreign_keys_rows_map_to_casefolded_references() -> None:
+def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -184,7 +184,7 @@ def test_referencing_foreign_keys_rows_map_to_casefolded_references() -> None:
 
     assert result == (
         ForeignKeyReference(
-            constraint_name="orders_customer_fk",
+            constraint_name="Orders_Customer_FK",
             referencing_table=QualifiedName("dev", "silver", "orders"),
         ),
     )
