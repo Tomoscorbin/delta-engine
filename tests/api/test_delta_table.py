@@ -1850,3 +1850,16 @@ def test_generated_foreign_key_name_is_identical_across_declaration_casing():
     lower = declare("customerid").to_desired_table().foreign_keys[0].constraint_name
 
     assert camel == lower == "orders_customerid_fk"
+
+
+def test_layout_and_key_references_resolve_across_casing():
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("region", String()), Column("order_id", Integer(), nullable=False)],
+        clustered_by=["REGION"],
+        primary_key=["ORDER_ID"],
+    )
+
+    assert table.to_desired_table().primary_key is not None
