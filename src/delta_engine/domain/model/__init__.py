@@ -25,6 +25,7 @@ from delta_engine.domain.model.data_type import (
     Timestamp,
     TimestampNtz,
     Variant,
+    canonical_data_type,
 )
 from delta_engine.domain.model.identifier import identifier_key, index_by_identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
@@ -69,6 +70,7 @@ __all__ = [
     "Timestamp",
     "TimestampNtz",
     "Variant",
+    "canonical_data_type",
     "identifier_key",
     "index_by_identifier",
     "key_signature",

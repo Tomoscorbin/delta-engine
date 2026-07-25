@@ -1,6 +1,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
+from delta_engine.domain.model import canonical_data_type
 from delta_engine.domain.model.data_type import (
     Array,
     Decimal,
@@ -79,3 +80,33 @@ def test_map_allows_a_map_value_type() -> None:
     # Only the key is restricted; a MAP value may itself be a MAP.
     nested = Map(String(), Map(String(), Integer()))
     assert nested.value == Map(String(), Integer())
+
+
+def test_struct_types_differing_only_in_field_case_share_canonical_identity() -> None:
+    camel = Struct((StructField("requestId", String()),))
+    lower = Struct((StructField("requestid", String()),))
+
+    assert canonical_data_type(camel) == canonical_data_type(lower)
+
+
+def test_canonical_identity_recurses_through_arrays_and_maps() -> None:
+    nested_camel = Map(String(), Array(Struct((StructField("Amount", Integer()),))))
+    nested_lower = Map(String(), Array(Struct((StructField("amount", Integer()),))))
+
+    assert canonical_data_type(nested_camel) == canonical_data_type(nested_lower)
+
+
+def test_genuinely_different_field_names_stay_semantically_different() -> None:
+    underscore = Struct((StructField("request_id", String()),))
+    camel = Struct((StructField("requestId", String()),))
+
+    assert canonical_data_type(underscore) != canonical_data_type(camel)
+
+
+def test_primitive_types_are_their_own_canonical_identity() -> None:
+    assert canonical_data_type(Integer()) == Integer()
+
+
+def test_struct_rejects_fields_differing_only_by_case() -> None:
+    with pytest.raises(ValueError, match=r"[Dd]uplicate struct field"):
+        Struct((StructField("id", Integer()), StructField("ID", Integer())))
