@@ -49,7 +49,7 @@ LIVE_AREAS: dict[str, tuple[str, str]] = {
     ),
     "test_sql_warehouse_live_column_case_repro.py": (
         "Column identifier case",
-        "case-only references match while genuinely different names produce structural drift",
+        "case-only references converge; constraints bind the catalog's exact spelling",
     ),
 }
 

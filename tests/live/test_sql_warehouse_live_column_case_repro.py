@@ -1,18 +1,19 @@
 """
-Throwaway live reproductions for camelCase column identifier handling.
+Live pins for camelCase column identifier handling.
 
-These tests isolate the case-sensitivity theory behind a metadata-scoped sync
-that reported ``UnmanagedAspectDrift`` for an otherwise matching live schema.
-Remove this module once the live run has established the platform behaviour.
+The platform facts: Unity Catalog preserves a column's display spelling,
+ordinary ALTER COLUMN resolves lowercase references against camelCase
+columns, but the managed-constraint path does not. The engine therefore
+binds constraint references to the catalog's exact spelling; these tests
+pin both the platform behaviour and the engine's convergence.
 """
 
 import pytest
 
 pytest.importorskip("databricks.sql")
 
-from delta_engine import SyncFailedError
 from delta_engine.databricks import build_sql_engine
-from delta_engine.schema import Column, DeltaTable, Integer, String, Timestamp
+from delta_engine.schema import Column, DeltaTable, ForeignKey, Integer, String, Timestamp
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
     live_catalog,
@@ -43,38 +44,30 @@ def test_column_identifier_case_repro_raw_alter_uses_lowercase_reference(
     assert column["comment"] == "resolved through lowercase"
 
 
-def test_column_identifier_case_repro_metadata_sync_adds_primary_key(
+def test_column_identifier_case_metadata_sync_adds_primary_key_with_exact_spelling(
     live_connection, live_tables
 ):
-    """Metadata sync adds a primary key using a lowercase camelCase reference."""
+    """Metadata sync adds a primary key using the catalog's camelCase spelling."""
     table_name = live_tables("column_case_add_primary_key")
     execute_sql(
         live_connection,
-        f"CREATE TABLE {qualified_table(table_name)} "
-        "(`requestId` STRING NOT NULL) USING DELTA",
+        f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
     )
     declaration = DeltaTable(
         catalog=live_catalog(),
         schema=live_schema(),
         name=table_name,
-        columns=(Column("requestId", String(), nullable=False),),
-        primary_key=("requestId",),
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
         scope="metadata",
     )
     engine = build_sql_engine(live_connection)
 
-    with pytest.raises(SyncFailedError) as error:
-        engine.sync(declaration)
+    report = engine.sync(declaration)
 
-    assert "Column 'requestid' not found" in str(error.value)
-    report = engine.sync(declaration, dry_run=True)
+    assert report.has_failures is False
     statements = next(iter(report.planned_sql_statements.values()))
     assert statements == (
-        f"ALTER TABLE {qualified_table(table_name)} "
-        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestid`)",
-    )
-    execute_sql(
-        live_connection,
         f"ALTER TABLE {qualified_table(table_name)} "
         f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestId`)",
     )
@@ -153,8 +146,8 @@ def test_column_identifier_case_repro_metadata_sync_matches_contract_schema(
     assert report.has_failures is False
     assert report.has_changes is True
     statements = next(iter(report.planned_sql_statements.values()))
-    assert any("ALTER COLUMN `requestid` COMMENT" in statement for statement in statements)
-    assert any("ALTER COLUMN `modelid` COMMENT" in statement for statement in statements)
+    assert any("ALTER COLUMN `requestId` COMMENT" in statement for statement in statements)
+    assert any("ALTER COLUMN `modelId` COMMENT" in statement for statement in statements)
 
     state = read_live_table(live_connection, table_name)
     columns = {column["column_name"]: column for column in state["columns"]}
@@ -193,3 +186,54 @@ def test_column_identifier_case_repro_real_name_mismatch_reports_structural_drif
         "by this definition. Sync the table fully or update the declaration to "
         "match the live schema."
     )
+
+
+def test_column_identifier_case_foreign_key_binds_exact_spelling_on_both_sides(
+    live_connection, live_tables
+):
+    """A foreign key compiles with each table's exact catalog spelling and converges."""
+    parent_name = live_tables("column_case_fk_parent")
+    child_name = live_tables("column_case_fk_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} (`OrderId` STRING NOT NULL) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(parent_name)} "
+        f"ADD CONSTRAINT `{parent_name}_pk` PRIMARY KEY (`OrderId`)",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (`orderRef` STRING) USING DELTA",
+    )
+
+    parent = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=parent_name,
+        columns=(Column("orderid", String(), nullable=False),),
+        primary_key=("orderid",),
+        scope="metadata",
+    )
+    child = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=child_name,
+        columns=(Column("orderref", String()),),
+        foreign_keys=(ForeignKey(columns={"orderref": "orderid"}, references=parent),),
+        scope="metadata",
+    )
+    engine = build_sql_engine(live_connection)
+
+    report = engine.sync(parent, child)
+
+    assert report.has_failures is False
+    child_statements = report.planned_sql_statements[
+        f"{live_catalog()}.{live_schema()}.{child_name}"
+    ]
+    assert any(
+        "FOREIGN KEY (`orderRef`)" in statement and "(`OrderId`)" in statement
+        for statement in child_statements
+    )
+    assert engine.sync(parent, child).has_changes is False
