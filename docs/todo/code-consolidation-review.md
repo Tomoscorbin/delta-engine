@@ -476,11 +476,12 @@ one module:
   reason to distribute the graph algorithm.
 - **API and domain validation.** Deployment policy belongs at declaration
   admission, while structural invariants belong on domain constructors. The
-  explicit normalization/lowering boundary now makes that separation visible.
-- **Identifier normalization in constructors.** Repeating a one-line lowercase
-  normalization at the values that own identifiers is preferable to a generic
-  string wrapper unless identifier behavior grows further. The important
-  ordering rule—normalize before declaration validation—is already explicit.
+  explicit declaration-freezing and lowering boundary makes that separation
+  visible.
+- **Identifier policy.** Constructors preserve identifier spelling and derive
+  identity through the shared `identifier_key` helper for validation and
+  lookup. Keeping that policy in one deep helper is preferable to a generic
+  string wrapper or repeated normalization.
 
 ## Recommended implementation order
 

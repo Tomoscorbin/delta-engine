@@ -334,42 +334,22 @@ DEL. See the
 Add Unicode regression tests that prove normalization never changes a valid
 lowercase identifier into a different spelling.
 
-### Resolved (2026-07-17)
+### Resolved (2026-07-25)
 
-Resolved with one agreed policy change beyond the proposed solution: the
-engine no longer _rejects_ mixed-case declarations at all. The principle —
-reject what Databricks rejects, normalize what Databricks normalizes, no
-house rules beyond that. Identifiers are case-insensitive on the platform
-(backticked or not; backticks only widen the character set), Unity Catalog
-stores object names lowercase, and column display case is preserved but
-meaningless, so case is never identity and the engine canonicalizes rather
-than polices it.
+The 2026-07-17 fix first replaced `casefold()` with `lower()` and normalized
+all identifiers in constructors. The completed policy now separates identity
+from spelling: qualified catalog, schema, and table parts still normalize with
+`str.lower()` because Unity Catalog stores them that way, while column-like
+identifiers preserve their declared or observed spelling.
 
-Identifier-carrying domain constructors now normalize with `str.lower()` in
-`__post_init__` instead of raising — `QualifiedName` parts, desired and
-observed column names, `renamed_from`, struct field names, constraint columns
-and names, and the partition/clustering lists. This is the normalization seam
-because the public `Column`/`StructField` are the domain classes re-exported;
-non-canonical names are now unrepresentable by construction. Reader adapters
-switched `casefold()` to `lower()`, fixing the defect where an
-already-lowercase name like `straße` was rejected on declaration and rewritten
-to `strasse` on observation. Declared catalog/schema/table parts are validated
-against the Unity Catalog object-name rules (at most 255 characters; no
-period, space, forward slash, control characters, or DEL — verified against
-the UC requirements page, uniform across the three parts) in the API layer,
-keeping the domain backend-free; column names stay governed by the
-column-mapping rules only. A case-only `renamed_from` collapses into the
-existing "cannot be renamed_from itself" rejection.
-
-Coverage: rejection tests flipped to normalization assertions; `straße`
-round-trip pins at the domain and the describe reader; a property-based test
-that normalization is identity on already-canonical names; a UC-rule
-rejection matrix (six rule classes across all three parts) plus a
-column-exemption test. Two live pins added for the next workflow run: Unity
-Catalog lowercases object names the way Python `lower()` does (and not the
-casefold), and the platform preserves column display case.
-`docs/reference-limitations.md` § Identifier handling rewritten from
-"known gap" to the new policy.
+All case-insensitive comparisons, duplicate checks, and lookups derive an
+explicit `identifier_key`; nested data types use a recursive semantic identity.
+Executable plans bind column references to the exact post-sync physical
+spelling before SQL compilation. This fixes both the Unicode rewrite and the
+managed-constraint paths that require exact camelCase spelling. The behavior is
+covered from domain constructors through API, diff, planning, adapters, and
+the live Databricks primary-key and foreign-key cases. See
+`2026-07-24-column-identifier-spelling-design.md`.
 
 ## 7. Separate partition and clustering type rules, and validate map keys
 
@@ -584,11 +564,11 @@ their domain-level fixes.
 Two validation paths inspect raw API input before the normalized domain objects
 are constructed:
 
-1. `_validate_layout` checks raw `partitioned_by` and `clustered_by` names, then
-   `DesiredTable` lowercases them. A mixed-case spelling can bypass a type
-   restriction or the partition-all-columns check. For example, a Binary column
-   named `flag` with `clustered_by=["FLAG"]` is accepted and stored as
-   `("flag",)` even though Binary is not a supported liquid-clustering type.
+1. `_validate_layout` checked raw `partitioned_by` and `clustered_by` names,
+   then `DesiredTable` lowercased them. A mixed-case spelling could bypass a
+   type restriction or the partition-all-columns check. For example, a Binary
+   column named `flag` with `clustered_by=["FLAG"]` could be accepted even
+   though Binary is not a supported liquid-clustering type.
 2. `ForeignKey._to_constraint` compares raw mapping names with normalized parent
    key columns and performs raw local-column lookups. A valid mapping such as
    `{"parent_id": "ID"}` can therefore be rejected even though Databricks
@@ -616,6 +596,13 @@ the clustering type restriction is documented in
    and storage must not see different spellings.
 4. Add mixed-case positive and negative tests, including the Binary clustering
    bypass and a mixed-case referenced primary-key column.
+
+### Resolved (2026-07-25)
+
+Declaration validation, domain structure checks, and foreign-key resolution now
+index columns by `identifier_key` while preserving the input spelling. The
+mixed-case layout and foreign-key matrices cover the former bypasses, and
+planning binds accepted references to the resulting physical schema.
 
 ## 13. Stop synthesizing unsafe physical constraint names
 

@@ -636,12 +636,12 @@ order_lines = DeltaTable(
 )
 ```
 
-String, sequence, and mapping identifiers are normalized once when the
-`ForeignKey` declaration is constructed. Sequence and mapping order never
-matters. A composite sequence is accepted only when its normalized names match
-the parent key exactly; otherwise an explicit mapping is required. A mapping
-that does not cover the referenced table's primary key exactly fails when the
-owning `DeltaTable` is constructed.
+String, sequence, and mapping identifier spelling is preserved when the
+`ForeignKey` declaration is constructed. Identity is case-insensitive, and
+sequence and mapping order never matters. A composite sequence is accepted
+only when its identifier keys match the parent key exactly; otherwise an
+explicit mapping is required. A mapping that does not cover the referenced
+table's primary key exactly fails when the owning `DeltaTable` is constructed.
 
 ### Dependency ordering
 

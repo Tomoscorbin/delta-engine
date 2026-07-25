@@ -811,8 +811,10 @@ dependency cost.
   mapping later does not alter the declaration.
 - Put orchestration, safety policy, dependency resolution, and failure
   propagation in the application layer.
-- Put backend normalization at adapter boundaries, such as lowercasing catalog
-  identifiers, parsing Spark types, and quoting SQL.
+- Put backend normalization at adapter boundaries, such as lowercasing catalog,
+  schema, and table-name parts, parsing Spark types, and quoting SQL. Preserve
+  column-like identifier spelling and derive explicit identity keys when
+  comparing it.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

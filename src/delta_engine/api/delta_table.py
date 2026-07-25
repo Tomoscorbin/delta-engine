@@ -213,8 +213,10 @@ def _validate_layout(
             )
 
     partition_keys = {identifier_key(name) for name in partitioned_by}
-    if partitioned_by and partition_keys <= columns_by_key.keys() and len(partition_keys) == len(
-        columns
+    if (
+        partitioned_by
+        and partition_keys <= columns_by_key.keys()
+        and len(partition_keys) == len(columns)
     ):
         raise ValueError(
             "Cannot partition by every column: at least one non-partition column is required"
@@ -389,9 +391,7 @@ class ForeignKey:
                 f" {'; '.join(details)}"
             )
 
-        local_types = {
-            identifier_key(column.name): column.data_type for column in owner_columns
-        }
+        local_types = {identifier_key(column.name): column.data_type for column in owner_columns}
         for local_name, referenced_name in pairs:
             local_type = local_types.get(identifier_key(local_name))
             if local_type is None:
@@ -432,9 +432,7 @@ class ForeignKey:
         """
         match self.references:
             case _SelfReference():
-                types = {
-                    identifier_key(column.name): column.data_type for column in owner_columns
-                }
+                types = {identifier_key(column.name): column.data_type for column in owner_columns}
                 return _ReferencedSide(owner_name, owner_primary_key, types)
             case DeltaTable() as target:
                 desired = target.to_desired_table()
@@ -477,7 +475,7 @@ class ForeignKey:
 
 @dataclass(frozen=True, slots=True)
 class _NormalizedDeclaration:
-    """One frozen, canonical representation of public ``DeltaTable`` input."""
+    """One frozen representation of public ``DeltaTable`` input."""
 
     qualified_name: QualifiedName
     columns: tuple[Column, ...]
@@ -531,7 +529,7 @@ def _normalize_declaration(
 
 
 def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """Reject normalized declarations that the public API cannot deploy."""
+    """Reject frozen declarations that the public API cannot deploy."""
     DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
     _validate_layout(
         declaration.columns,

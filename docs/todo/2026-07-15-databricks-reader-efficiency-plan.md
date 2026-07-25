@@ -328,7 +328,8 @@ literal backtick; the referenced table is always a 3-part backticked name.
 
 Assumption: a constraint name does not contain an unbackticked top-level comma
 or the literal keyword boundary — true for the catalog-generated names this
-reads. Names are returned casefolded, matching the domain's lowercase identity.
+reads. Names retain catalog spelling; consumers derive explicit identity keys
+for case-insensitive comparison.
 """
 
 from dataclasses import dataclass, field
