@@ -220,7 +220,7 @@ def test_column_tags_read_returns_empty_mapping_for_no_rows():
     assert dict(read_column_tags(_runner(column_tags_query(QN), []), QN)) == {}
 
 
-def test_column_tags_read_lowercases_column_names_but_preserves_tag_case():
+def test_column_tags_read_keys_by_identifier_identity_and_preserves_tag_case():
     rows = [
         SimpleNamespace(column_name="EMAIL", tag_name="PII", tag_value="Email"),
         SimpleNamespace(column_name="email", tag_name="mask", tag_value="hash"),

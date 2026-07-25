@@ -40,6 +40,8 @@ from delta_engine.domain.model import (
     ForeignKeyConstraint,
     QualifiedName,
     TableAspect,
+    canonical_data_type,
+    identifier_key,
 )
 
 # TODO: Replace the recursive SCC traversal with an iterative implementation.
@@ -171,7 +173,8 @@ def _foreign_key_types_match(
 ) -> bool:
     """Return True if every local column's type equals its referenced column's type."""
     return all(
-        local_types[local_column] == referenced_types[referenced_column]
+        canonical_data_type(local_types[identifier_key(local_column)])
+        == canonical_data_type(referenced_types[identifier_key(referenced_column)])
         for local_column, referenced_column in zip(
             foreign_key.local_columns, foreign_key.referenced_columns, strict=True
         )
@@ -391,7 +394,9 @@ def _classify_failures(
     # referenced column's type. The two declarations can differ, so the types
     # are re-checked here against the registered parent.
     column_types_by_name = {
-        table.qualified_name: {column.name: column.data_type for column in table.columns}
+        table.qualified_name: {
+            identifier_key(column.name): column.data_type for column in table.columns
+        }
         for table in tables
     }
 

@@ -44,7 +44,7 @@ from delta_engine.adapters.databricks.table_features import (
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import CatalogState, TableAbsent, TablePresent
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY
-from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind
+from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind, identifier_key
 
 
 class UnsupportedRelationError(Exception):
@@ -155,7 +155,10 @@ def _read_observed_table(
     qualified_name = description.qualified_name
     column_tags = read_column_tags(run_query, qualified_name)
     tagged_columns = tuple(
-        replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
+        replace(
+            column,
+            tags=column_tags.get(identifier_key(column.name), MappingProxyType({})),
+        )
         for column in description.columns
     )
     return ObservedTable(
