@@ -35,8 +35,7 @@ def index_by_identifier[T](items: Iterable[T], name_of: Callable[[T], str]) -> d
         key = identifier_key(name_of(item))
         if key in index:
             raise ValueError(
-                f"Duplicate identifier: {name_of(item)!r} collides with"
-                f" {name_of(index[key])!r}"
+                f"Duplicate identifier: {name_of(item)!r} collides with {name_of(index[key])!r}"
             )
         index[key] = item
     return index

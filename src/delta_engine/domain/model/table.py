@@ -69,9 +69,7 @@ def _validate_table_structure(
 
     for foreign_key in foreign_keys:
         missing_fk_columns = [
-            name
-            for name in foreign_key.local_columns
-            if identifier_key(name) not in column_keys
+            name for name in foreign_key.local_columns if identifier_key(name) not in column_keys
         ]
         if missing_fk_columns:
             raise ValueError(

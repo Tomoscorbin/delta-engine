@@ -116,8 +116,7 @@ def _bind_action(
                         _own_spelling(own, name) for name in constraint.local_columns
                     ),
                     referenced_columns=tuple(
-                        _parent_spelling(parent, name)
-                        for name in constraint.referenced_columns
+                        _parent_spelling(parent, name) for name in constraint.referenced_columns
                     ),
                 )
             )

@@ -529,9 +529,7 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
     parent_name = QualifiedName("dev", "silver", "parent")
     parent_desired = DesiredTable(
         qualified_name=parent_name,
-        columns=(
-            DesiredColumn("orderNumber", Integer(), nullable=False, renamed_from="orderid"),
-        ),
+        columns=(DesiredColumn("orderNumber", Integer(), nullable=False, renamed_from="orderid"),),
         primary_key=PrimaryKeyConstraint(columns=("orderNumber",), constraint_name="parent_pk"),
     )
     parent_observed = ObservedTable(

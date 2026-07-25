@@ -334,14 +334,10 @@ def _align_columns(
     observed_by_key = index_by_identifier(observed_columns, lambda column: column.name)
 
     added = tuple(
-        column
-        for column in desired_columns
-        if identifier_key(column.name) not in observed_by_key
+        column for column in desired_columns if identifier_key(column.name) not in observed_by_key
     )
     removed = tuple(
-        column
-        for column in observed_columns
-        if identifier_key(column.name) not in desired_by_key
+        column for column in observed_columns if identifier_key(column.name) not in desired_by_key
     )
     matched = tuple(
         (column, observed_by_key[identifier_key(column.name)])
