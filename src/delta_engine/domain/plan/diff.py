@@ -79,6 +79,21 @@ class TableMissing:
 
 
 @dataclass(frozen=True, slots=True)
+class TableInSync:
+    """An existing table for which the comparison found no differences."""
+
+    desired: DesiredTable
+    observed: ObservedTable
+
+    def __post_init__(self) -> None:
+        _require_same_table(self.desired, self.observed)
+
+    @property
+    def target(self) -> QualifiedName:
+        return self.desired.qualified_name
+
+
+@dataclass(frozen=True, slots=True)
 class TableDrift:
     """
     Differences separating an observed table from its declaration.
@@ -101,13 +116,15 @@ class TableDrift:
 
     def __post_init__(self) -> None:
         _require_same_table(self.desired, self.observed)
+        if not self.actions and not self.unresolvable:
+            raise ValueError("TableDrift must contain at least one difference")
 
     @property
     def target(self) -> QualifiedName:
         return self.desired.qualified_name
 
 
-type TableDiff = TableMissing | TableDrift
+type TableDiff = TableMissing | TableInSync | TableDrift
 
 
 def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
@@ -127,7 +144,10 @@ def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDi
     return _diff_existing_table(desired, observed)
 
 
-def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> TableDrift:
+def _diff_existing_table(
+    desired: DesiredTable,
+    observed: ObservedTable,
+) -> TableInSync | TableDrift:
     """Describe every difference between two states of the same existing table."""
     _require_same_table(desired, observed)
 
@@ -142,22 +162,26 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
     constraint_actions = _diff_constraints(desired, observed)
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
+    actions: tuple[Action, ...] = (
+        *feature_actions,
+        *renames.actions,
+        *column_actions,
+        *layout_actions,
+        *constraint_actions,
+        *metadata_actions,
+    )
+    unresolvable: tuple[Unresolvable, ...] = (
+        *renames.conflicts,
+        *metadata_unresolvable,
+        *layout_unresolvable,
+    )
+    if not actions and not unresolvable:
+        return TableInSync(desired=desired, observed=observed)
     return TableDrift(
         desired=desired,
         observed=observed,
-        actions=(
-            *feature_actions,
-            *renames.actions,
-            *column_actions,
-            *layout_actions,
-            *constraint_actions,
-            *metadata_actions,
-        ),
-        unresolvable=(
-            *renames.conflicts,
-            *metadata_unresolvable,
-            *layout_unresolvable,
-        ),
+        actions=actions,
+        unresolvable=unresolvable,
     )
 
 

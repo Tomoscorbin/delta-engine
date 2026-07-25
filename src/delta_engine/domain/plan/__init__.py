@@ -26,6 +26,7 @@ from delta_engine.domain.plan.actions import (
 from delta_engine.domain.plan.diff import (
     TableDiff,
     TableDrift,
+    TableInSync,
     TableMissing,
     diff_table,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "SetTableTag",
     "TableDiff",
     "TableDrift",
+    "TableInSync",
     "TableMissing",
     "Unresolvable",
     "UnsetColumnTag",

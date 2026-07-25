@@ -39,6 +39,7 @@ from delta_engine.domain.plan import (
     SetProperty,
     TableDiff,
     TableDrift,
+    TableInSync,
     TableMissing,
     UnsetProperty,
 )
@@ -489,7 +490,7 @@ class UnmanagedAspectDrift:
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag every drifted aspect the declaration does not manage."""
         match diff:
-            case TableMissing():
+            case TableMissing() | TableInSync():
                 return ()
 
             case TableDrift() as drift:
@@ -529,7 +530,7 @@ class MissingTableUnmanaged:
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag a missing table that this declaration cannot create."""
         match diff:
-            case TableDrift():
+            case TableInSync() | TableDrift():
                 return ()
 
             case TableMissing() as missing:
@@ -574,10 +575,13 @@ class StreamingTableTagsOnly:
             case TableMissing():
                 return ()
 
-            case TableDrift() as drift:
-                if drift.observed.kind is not TableKind.STREAMING_TABLE:
+            case (
+                TableInSync(desired=desired, observed=observed)
+                | TableDrift(desired=desired, observed=observed)
+            ):
+                if observed.kind is not TableKind.STREAMING_TABLE:
                     return ()
-                if drift.desired.managed_aspects <= TAG_ASPECTS:
+                if desired.managed_aspects <= TAG_ASPECTS:
                     return ()
                 return (
                     ValidationFailure(
@@ -630,8 +634,8 @@ def validate_diff(
     user never requested. The gate cannot be suppressed via ``rules``.
 
     Past the gate every difference is in scope, so the safety rules judge
-    the managed drift. A missing table that clears the gate is a
-    fully-managed create and needs no safety judgement.
+    the managed drift. A missing or in-sync table that clears the gate needs
+    no safety judgement.
     """
     gate_failures = tuple(
         failure for gate in MANDATORY_SCOPE_GATES for failure in gate.evaluate(diff)
@@ -641,7 +645,7 @@ def validate_diff(
         return ValidationResult(failures=gate_failures)
 
     match diff:
-        case TableMissing():
+        case TableMissing() | TableInSync():
             return ValidationResult()
         case TableDrift() as drift:
             return ValidationResult(

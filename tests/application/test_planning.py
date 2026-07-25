@@ -33,6 +33,7 @@ from delta_engine.domain.plan import (
     SetForeignKey,
     SetPrimaryKey,
     SetTableTag,
+    TableInSync,
     diff_table,
 )
 
@@ -149,10 +150,37 @@ def test_plan_diff_rejects_each_non_action_difference(desired, observed, expecte
 
 
 def test_plan_diff_accepts_no_op_as_an_empty_plan():
-    result = plan_diff(diff_table(_desired(), _observed()))
+    diff = diff_table(_desired(), _observed())
+    result = plan_diff(diff)
 
+    assert isinstance(diff, TableInSync)
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
+    assert result.plan.actions == ()
+
+
+def test_plan_diff_rejects_in_sync_streaming_table_with_full_scope():
+    diff = diff_table(_desired(), _observed(kind=TableKind.STREAMING_TABLE))
+
+    result = plan_diff(diff)
+
+    assert isinstance(diff, TableInSync)
+    assert isinstance(result, PlanningFailed)
+    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+
+
+def test_plan_diff_accepts_in_sync_streaming_table_with_tags_scope():
+    desired = _desired(
+        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+    )
+    diff = diff_table(desired, _observed(kind=TableKind.STREAMING_TABLE))
+
+    result = plan_diff(diff)
+
+    assert isinstance(diff, TableInSync)
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.target == _NAME
+    assert result.plan.kind is TableKind.STREAMING_TABLE
     assert result.plan.actions == ()
 
 

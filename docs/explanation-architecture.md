@@ -64,7 +64,7 @@ through a sync.
 | `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                     |
 | `CatalogState`     | A known catalog answer: `TablePresent` or `TableAbsent`. An unreadable state crosses the port as `ReadError`.                                               |
 | `ReadResult`       | The persistent read outcome retained by a table run: a `CatalogState` or the engine-created `ReadFailure`.                                                  |
-| `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
+| `TableDiff`        | Typed comparison state: `TableMissing`, `TableInSync`, or non-empty `TableDrift`. Missing and drift variants state remedies as `actions`; drift may also carry `unresolvable`. |
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                      |
@@ -422,8 +422,9 @@ either.
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
 observed)` produces a `TableDiff` — `TableMissing` when the table does not
-exist, else a `TableDrift` holding executable `actions` and non-action
-`unresolvable` differences as two typed tuples. Actions carry their `TableAspect` plus the
+exist, `TableInSync` when an existing table has no differences, or a non-empty
+`TableDrift` holding executable `actions` and non-action `unresolvable`
+differences as two typed tuples. Actions carry their `TableAspect` plus the
 complete desired/observed state needed by validation and reporting;
 `CreateTable` uses the table-existence aspect because it realizes a missing
 table's complete desired state rather than belonging to one schema dimension.
@@ -440,10 +441,13 @@ alternative remedies — say, a type change resolvable by an in-place widen
 or by an add-and-backfill — the difference and its remedy stop being the
 same thing, and the vocabularies must separate again for that aspect.
 
-Both arms state the complete intended transition the same way: a
+The difference-bearing variants state the complete intended transition:
 `TableMissing` exposes its creation actions — CREATE TABLE plus tag and
-foreign-key follow-ups — so accepted planning is uniformly "construct an
-`ActionPlan` from the diff's actions" for creation and drift alike.
+foreign-key follow-ups — while `TableDrift` carries the actions for an
+existing table. `TableInSync` carries the desired and observed endpoints but
+cannot carry actions or unresolvable differences. If its mandatory declaration
+and scope gates pass, planning represents the accepted no-op as an empty,
+target-bearing `ActionPlan`.
 
 For existing tables, the application planning boundary first adds any
 schema-required feature enablements to the raw domain diff, then validates the
@@ -484,15 +488,15 @@ Every `DesiredTable` carries a `managed_aspects` field: a `frozenset[TableAspect
 naming the aspects the engine reconciles for that table. The differ
 (`diff_table`) is scope-blind for every aspect except properties — the
 properties diff runs only when the declaration manages `PROPERTIES` (see
-Diff-first planning). The `TableDrift` it produces carries the `desired`
-table itself (symmetric with `TableMissing`), so the diff is self-contained
-and `validate_diff` takes only the diff. Scope awareness lives in
-validation, as a gate rather than an optional rule. Before any safety rule
-runs, `validate_diff` fails the sync once per unmanaged aspect that has
-drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
-difference produces exactly the scope failure rather than also tripping
-safety rules for differences the user never requested. Because the gate runs
-first, the safety rules only ever see a fully in-scope diff and read
+Diff-first planning). Both existing-table variants carry `desired` and
+`observed` endpoints, so the diff is self-contained and `validate_diff` takes
+only the diff. Scope awareness lives in validation, as a gate rather than an
+optional rule. Before any safety rule runs, `validate_diff` checks declaration
+scope even for `TableInSync` and fails once per unmanaged aspect that has
+drifted (`UnmanagedAspectDrift`). Gate failures short-circuit safety rules, so
+an unmanaged difference produces exactly the scope failure rather than also
+tripping rules for work the user never requested. Because the gate runs first,
+the safety rules only ever see a fully in-scope `TableDrift` and read
 `drift.actions` and `drift.unresolvable` directly. If planning succeeds, every
 difference belongs to a managed aspect and the plan holds executable actions
 only.
@@ -509,7 +513,9 @@ never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
 `diff_table(desired, observed)` produces a `TableDiff`:
 
 - `TableMissing` means the catalog has no table at that name.
-- `TableDrift` means the table exists and carries its actions and unresolvable differences.
+- `TableInSync` means the table exists and the comparison found no differences.
+- `TableDrift` means the table exists and carries at least one action or
+  unresolvable difference.
 
 The diff produces backend-neutral commands but does not decide whether they are
 safe, and it does not talk to the backend. For an existing table, differences span
@@ -534,7 +540,9 @@ unresolvable difference types, which the current default policy rejects.
 checks that always run, and `DEFAULT_SAFETY_RULES` lists the configurable
 safety checks that run only after those gates pass. A missing table passes when
 the declaration manages table existence because creating it from the full
-declaration is safe. An eligible drift is evaluated by every default safety rule.
+declaration is safe. An in-sync table passes when its declaration and observed
+relation kind satisfy the mandatory gates. An eligible drift is evaluated by
+every default safety rule.
 The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
@@ -542,7 +550,8 @@ one place prevents this architecture overview from drifting when policy grows.
 The engine calls `plan_diff` once. A `PlanningFailed` leaves the run without a
 plan and records its validation failures; a `PlanningSucceeded` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
-an empty plan with a real target and relation kind.
+a `TableInSync` comparison followed by an empty plan with a real target and
+relation kind.
 
 ## Deterministic action plans
 
@@ -618,7 +627,7 @@ connected components to produce a dependency-first order. It reports:
 
 Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid and no unmanaged aspect has drifted. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default composition in place and turns the verdict into the accepted/rejected planning sum.
+`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table. `TableInSync` and `TableDrift` both pass through declaration and relation-kind gates; only drift can produce unmanaged-aspect failures. Once a drift clears the gates, `validate_diff` calls every rule in `DEFAULT_SAFETY_RULES` and aggregates their failures into a `ValidationResult`; an in-sync comparison needs no safety-rule evaluation. `plan_diff` fixes that default composition in place and turns the verdict into the accepted/rejected planning sum.
 
 Execution walks the dependency-first order produced by the resolver and keeps a
 set of every table that has failed so far. Before each table executes, the engine

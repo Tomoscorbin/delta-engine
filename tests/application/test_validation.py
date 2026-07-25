@@ -45,6 +45,7 @@ from delta_engine.domain.plan import (
 )
 from delta_engine.domain.plan.diff import (
     TableDrift,
+    TableInSync,
     TableMissing,
     diff_table,
 )
@@ -106,6 +107,17 @@ def _drift(
         observed=_observed_table(kind=kind),
         actions=actions,
         unresolvable=unresolvable,
+    )
+
+
+def _in_sync(
+    *,
+    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    kind: TableKind = TableKind.TABLE,
+) -> TableInSync:
+    return TableInSync(
+        desired=_desired_table(managed_aspects=managed_aspects),
+        observed=_observed_table(kind=kind),
     )
 
 
@@ -219,8 +231,11 @@ def test_validate_diff_applies_supplied_rules_to_drift():
                 ),
             )
 
-    # When validating a harmless drift with that rule
-    result = validate_diff(_drift(), rules=(AlwaysFail(),))
+    # When validating a harmless non-empty drift with that rule
+    result = validate_diff(
+        _drift(SetTableComment(desired_comment="new", observed_comment="old")),
+        rules=(AlwaysFail(),),
+    )
 
     # Then the custom rule contributes its failure
     assert result.failed is True
@@ -250,9 +265,9 @@ def test_validation_passes_when_no_rule_is_broken():
     assert result.failures == ()
 
 
-def test_empty_drift_produces_no_failures():
-    # Given an empty drift
-    result = validate_diff(_drift())
+def test_in_sync_comparison_produces_no_failures():
+    # Given an in-sync comparison
+    result = validate_diff(_in_sync())
 
     # Then validation passes
     assert result.failed is False
@@ -1046,7 +1061,7 @@ def test_streaming_table_passes_when_the_declaration_manages_only_tags():
 
 def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
     # Given a fully-managed declaration over an in-sync streaming table
-    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+    diff = _in_sync(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
 
     # When validating
     result = validate_diff(diff)
@@ -1060,7 +1075,7 @@ def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
 
 def test_streaming_table_fails_a_metadata_scope_declaration():
     # Given a declaration managing comments as well as tags
-    diff = _drift(
+    diff = _in_sync(
         managed_aspects=frozenset(
             {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
         ),
@@ -1073,7 +1088,7 @@ def test_streaming_table_fails_a_metadata_scope_declaration():
 
 
 def test_streaming_table_gate_cannot_be_suppressed_by_empty_rules():
-    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+    diff = _in_sync(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
 
     result = validate_diff(diff, rules=())
 

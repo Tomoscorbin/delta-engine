@@ -46,6 +46,7 @@ from delta_engine.domain.plan.actions import (
 )
 from delta_engine.domain.plan.diff import (
     TableDrift,
+    TableInSync,
     TableMissing,
     diff_table,
 )
@@ -103,19 +104,23 @@ def test_missing_table_derives_target_from_desired_table():
     assert diff.target == _QUALIFIED_NAME
 
 
-def test_equal_tables_diff_to_empty_drift():
+def test_equal_tables_diff_to_table_in_sync():
     # Given identical desired and observed definitions
-    diff = diff_table(_desired(), _observed())
+    desired = _desired()
+    observed = _observed()
 
-    # Then no changes are produced — the natural zero
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    # When diffing
+    diff = diff_table(desired, observed)
+
+    # Then the comparison has an explicit no-differences variant
+    assert diff == TableInSync(desired=desired, observed=observed)
 
 
 def test_drift_carries_the_desired_table():
-    # Given a desired table
-    desired = _desired()
+    # Given a desired table with a difference
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))
+    )
 
     # When diffing
     diff = diff_table(desired, _observed())
@@ -128,22 +133,49 @@ def test_drift_carries_the_desired_table():
 
 
 def test_drift_derives_target_from_the_shared_table_identity():
-    # Given matching desired and observed table identities
-    diff = diff_table(_desired(), _observed())
+    # Given matching desired and observed table identities with a difference
+    diff = diff_table(
+        _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
+        _observed(),
+    )
 
     # Then the comparison exposes their one shared target
     assert isinstance(diff, TableDrift)
     assert diff.target == _QUALIFIED_NAME
 
 
-def test_drift_rejects_different_desired_and_observed_tables():
+def test_in_sync_derives_target_from_the_shared_table_identity():
+    diff = diff_table(_desired(), _observed())
+
+    assert isinstance(diff, TableInSync)
+    assert diff.target == _QUALIFIED_NAME
+
+
+def test_in_sync_rejects_different_desired_and_observed_tables():
     # Given a desired and observed referencing different tables
     desired = _desired(qualified_name=QualifiedName("cat", "sch", "customers"))
     observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
 
     # When / Then constructing their comparison is rejected
     with pytest.raises(ValueError, match="Cannot compare different tables"):
-        TableDrift(desired=desired, observed=observed)
+        TableInSync(desired=desired, observed=observed)
+
+
+def test_drift_rejects_different_desired_and_observed_tables():
+    desired = _desired(qualified_name=QualifiedName("cat", "sch", "customers"))
+    observed = _observed(qualified_name=QualifiedName("cat", "sch", "orders"))
+
+    with pytest.raises(ValueError, match="Cannot compare different tables"):
+        TableDrift(
+            desired=desired,
+            observed=observed,
+            actions=(AddColumn(DesiredColumn("age", Integer())),),
+        )
+
+
+def test_empty_table_drift_cannot_be_constructed():
+    with pytest.raises(ValueError, match="must contain at least one difference"):
+        TableDrift(desired=_desired(), observed=_observed())
 
 
 # ---------- column structure changes
@@ -410,9 +442,7 @@ def test_identical_column_tags_produce_no_changes():
     diff = diff_table(_desired(columns=columns), _observed(columns=columns))
 
     # Then no tag changes are produced
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 # ---------- table comment change
@@ -462,9 +492,7 @@ def test_declared_property_matching_catalog_produces_no_change():
     )
 
     # Then no change is produced — the property sync is idempotent
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 def test_none_declaration_on_present_key_produces_unset():
@@ -487,9 +515,7 @@ def test_none_declaration_on_absent_key_produces_no_change():
         _observed(properties={}),
     )
 
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 def test_undeclared_managed_key_produces_an_undeclared_property_finding():
@@ -530,9 +556,7 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
     )
 
     # Then no property change of any kind — no assertion was made
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 def test_declared_properties_are_not_compared_when_properties_unmanaged():
@@ -545,9 +569,7 @@ def test_declared_properties_are_not_compared_when_properties_unmanaged():
     )
 
     # Then the carried property makes no assertion and produces no change
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 def test_property_set_rejects_equal_values():
@@ -632,8 +654,7 @@ def test_reordered_clustering_keys_are_not_a_change():
         _observed(columns=columns, clustered_by=("id", "region")),
     )
     # Then no clustering change is produced — key order is immaterial
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 def test_clustering_removal_produces_cluster_by_none_action():
@@ -682,9 +703,7 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     )
 
     # Then identity is column-set equality — no change
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 # ---------- foreign key changes
@@ -706,9 +725,7 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
     )
 
     # Then identity is the content signature — no change, sync stays idempotent
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert isinstance(diff, TableInSync)
 
 
 # ---------- no-difference changes are unrepresentable
@@ -927,9 +944,8 @@ def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
         columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),)
     )
     applied = _observed(columns=(DesiredColumn("customer_name", String()),))
-    drift = diff_table(desired, applied)
-    assert drift.actions == ()
-    assert drift.unresolvable == ()
+    comparison = diff_table(desired, applied)
+    assert isinstance(comparison, TableInSync)
 
 
 def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
@@ -1131,8 +1147,8 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
     )
 
 
-def test_drift_carries_the_observed_table_it_was_computed_against():
-    # The drift's endpoints are judging context: validation's scope gate reads
+def test_in_sync_carries_the_observed_table_it_was_computed_against():
+    # The comparison's endpoints are judging context: validation's scope gate reads
     # observed facts (the relation kind) off the observed side.
     qualified_name = QualifiedName("cat", "sch", "clicks")
     desired = DesiredTable(
@@ -1147,12 +1163,12 @@ def test_drift_carries_the_observed_table_it_was_computed_against():
 
     diff = diff_table(desired, observed)
 
-    assert isinstance(diff, TableDrift)
+    assert isinstance(diff, TableInSync)
     assert diff.observed is observed
     assert diff.observed.kind is TableKind.STREAMING_TABLE
 
 
-def test_drift_against_an_ordinary_table_carries_the_table_kind():
+def test_in_sync_against_an_ordinary_table_carries_the_table_kind():
     qualified_name = QualifiedName("cat", "sch", "orders")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1165,5 +1181,5 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
 
     diff = diff_table(desired, observed)
 
-    assert isinstance(diff, TableDrift)
+    assert isinstance(diff, TableInSync)
     assert diff.observed.kind is TableKind.TABLE

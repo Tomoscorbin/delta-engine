@@ -1785,7 +1785,7 @@ def test_two_locals_mapped_to_the_same_key_column_are_rejected():
 def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     # Regression for the parent-reorder trap: the child's mapping is explicit,
     # so a parent primary_key list reorder must be a no-op end to end.
-    from delta_engine.domain.plan.diff import TableDrift, diff_table
+    from delta_engine.domain.plan.diff import TableInSync, diff_table
 
     def child_of(parent_key_order):
         accounts = DeltaTable(
@@ -1824,6 +1824,5 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
         foreign_keys=before.foreign_keys,
     )
     diff = diff_table(after, observed)
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
-    assert diff.unresolvable == ()
+
+    assert isinstance(diff, TableInSync)

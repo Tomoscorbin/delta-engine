@@ -9,6 +9,7 @@ from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
     TableDrift,
+    TableInSync,
     TableMissing,
 )
 
@@ -38,9 +39,9 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     complete diff. A rejected result carries validation failures and deliberately
     has no plan, making execution of unvalidated drift unrepresentable.
     The plan carries the relation kind its actions lower against: the
-    observed kind for drift, and the default ordinary kind for a creation —
-    an absent table has no observed kind, and the engine only creates
-    ordinary tables.
+    observed kind for an existing-table comparison, and the default ordinary
+    kind for a creation — an absent table has no observed kind, and the engine
+    only creates ordinary tables.
     """
     validation = validate_diff(diff)
     if validation.failed:
@@ -51,6 +52,12 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
                 target=drift.target,
                 actions=drift.actions,
                 kind=drift.observed.kind,
+            )
+        case TableInSync() as in_sync:
+            plan = ActionPlan(
+                target=in_sync.target,
+                actions=(),
+                kind=in_sync.observed.kind,
             )
         case TableMissing() as missing:
             plan = ActionPlan(
