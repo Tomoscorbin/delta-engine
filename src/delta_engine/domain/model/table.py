@@ -12,21 +12,23 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
+from delta_engine.domain.model.identifier import identifier_key
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
 
 
-def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
+def _validate_key_column_list(kind: str, names: tuple[str, ...], column_keys: set[str]) -> None:
     """Rules shared by partition and clustering key lists: existing and unique."""
-    missing = [name for name in names if name not in column_names]
+    missing = [name for name in names if identifier_key(name) not in column_keys]
     if missing:
         raise ValueError(f"{kind} column not found: {', '.join(missing)}")
 
     seen: set[str] = set()
     for name in names:
-        if name in seen:
+        key = identifier_key(name)
+        if key in seen:
             raise ValueError(f"Duplicate {kind.lower()} column: {name}")
-        seen.add(name)
+        seen.add(key)
 
 
 def _validate_table_structure(
@@ -48,22 +50,29 @@ def _validate_table_structure(
     if not columns:
         raise ValueError("Table requires at least one column")
 
-    seen_names: set[str] = set()
+    column_keys: set[str] = set()
     for column in columns:
-        if column.name in seen_names:
+        key = identifier_key(column.name)
+        if key in column_keys:
             raise ValueError(f"Duplicate column name: {column.name}")
-        seen_names.add(column.name)
+        column_keys.add(key)
 
-    _validate_key_column_list("Partition", partitioned_by, seen_names)
-    _validate_key_column_list("Clustering", clustered_by, seen_names)
+    _validate_key_column_list("Partition", partitioned_by, column_keys)
+    _validate_key_column_list("Clustering", clustered_by, column_keys)
 
     if primary_key is not None:
-        missing_pk = [name for name in primary_key.columns if name not in seen_names]
+        missing_pk = [
+            name for name in primary_key.columns if identifier_key(name) not in column_keys
+        ]
         if missing_pk:
             raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
     for foreign_key in foreign_keys:
-        missing_fk_columns = [name for name in foreign_key.local_columns if name not in seen_names]
+        missing_fk_columns = [
+            name
+            for name in foreign_key.local_columns
+            if identifier_key(name) not in column_keys
+        ]
         if missing_fk_columns:
             raise ValueError(
                 f"Foreign key local column not found in columns: {missing_fk_columns[0]}"
@@ -199,7 +208,9 @@ class DesiredTable:
         seen: set[frozenset[str]] = set()
         local_columns_by_constraint_name: dict[str, tuple[str, ...]] = {}
         for foreign_key in self.foreign_keys:
-            local_column_set = frozenset(foreign_key.local_columns)
+            local_column_set = frozenset(
+                identifier_key(column) for column in foreign_key.local_columns
+            )
             if local_column_set in seen:
                 raise ValueError(
                     "Two foreign keys declared over the same local columns:"
@@ -219,11 +230,11 @@ class DesiredTable:
             )
 
         if self.primary_key is not None:
-            key_columns = set(self.primary_key.columns)
+            key_columns = {identifier_key(column) for column in self.primary_key.columns}
             nullable_key_columns = [
                 column.name
                 for column in self.columns
-                if column.name in key_columns and column.nullable
+                if identifier_key(column.name) in key_columns and column.nullable
             ]
             if nullable_key_columns:
                 raise ValueError(
@@ -232,8 +243,8 @@ class DesiredTable:
                     " primary key column."
                 )
 
-        declared_names = {column.name for column in self.columns}
-        rename_sources: set[str] = set()
+        declared_keys = {identifier_key(column.name) for column in self.columns}
+        rename_source_keys: set[str] = set()
         for column in self.columns:
             source = column.renamed_from
             if source is None:
@@ -243,18 +254,19 @@ class DesiredTable:
                     f"Column {column.name!r} declares renamed_from, but this"
                     " declaration does not manage column structure"
                 )
-            if source in declared_names:
+            source_key = identifier_key(source)
+            if source_key in declared_keys:
                 raise ValueError(
                     f"Column {column.name!r} declares renamed_from {source!r},"
                     f" but {source!r} is still declared. Remove the old column,"
                     " or apply the rename and the reuse of the name in separate"
                     " syncs."
                 )
-            if source in rename_sources:
+            if source_key in rename_source_keys:
                 raise ValueError(
                     f"Two columns declare renamed_from {source!r}; a rename source must be unique"
                 )
-            rename_sources.add(source)
+            rename_source_keys.add(source_key)
 
 
 @dataclass(frozen=True, slots=True)

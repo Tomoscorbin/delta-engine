@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from delta_engine.domain.model.data_type import DataType
+from delta_engine.domain.model.identifier import identifier_key
 
 
 def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
@@ -57,7 +58,7 @@ class DesiredColumn:
             if not self.renamed_from.strip():
                 raise ValueError(f"renamed_from must not be blank: {self.renamed_from!r}")
             object.__setattr__(self, "renamed_from", self.renamed_from.lower())
-            if self.renamed_from == self.name:
+            if identifier_key(self.renamed_from) == identifier_key(self.name):
                 raise ValueError(f"Column {self.name!r} cannot be renamed_from itself")
 
 

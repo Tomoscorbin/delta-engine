@@ -52,6 +52,14 @@ def test_fails_when_column_names_duplicate(table_type, column_type):
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
+def test_rejects_columns_differing_only_by_case_as_duplicates(table_type, column_type):
+    cols = (column_type("Id", Integer()), column_type("ID", Integer()))
+
+    with pytest.raises(ValueError, match="Duplicate column name"):
+        table_type(_QUALIFIED_NAME, cols)
+
+
+@_EACH_TABLE_AND_COLUMN_TYPE
 def test_fails_when_partition_references_undefined_column(table_type, column_type):
     # Given: columns 'visit_date' and 'id'
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
@@ -143,6 +151,25 @@ def test_desired_table_rejects_nullable_primary_key_column():
             qualified_name=_QN,
             columns=(DesiredColumn("id", Integer(), nullable=True),),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        )
+
+
+def test_primary_key_reference_resolves_across_casing():
+    table = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(DesiredColumn("request_id", Integer(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("REQUEST_ID",), constraint_name="t_pk"),
+    )
+
+    assert table.primary_key is not None
+
+
+def test_nullable_primary_key_column_is_rejected_across_casing():
+    with pytest.raises(ValueError, match="NOT NULL"):
+        DesiredTable(
+            qualified_name=_QUALIFIED_NAME,
+            columns=(DesiredColumn("request_id", Integer(), nullable=True),),
+            primary_key=PrimaryKeyConstraint(columns=("REQUEST_ID",), constraint_name="t_pk"),
         )
 
 
