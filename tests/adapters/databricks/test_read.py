@@ -206,6 +206,36 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
     ]
 
 
+def test_tags_attach_by_identity_without_rewriting_the_observed_name():
+    responses = _describe_responses(
+        **{
+            describe_json_query(QN): [
+                (
+                    _describe_doc(
+                        columns=[
+                            {
+                                "name": "requestId",
+                                "type": {"name": "string"},
+                                "nullable": True,
+                            }
+                        ]
+                    ),
+                )
+            ],
+            column_tags_query(QN): [
+                SimpleNamespace(column_name="requestid", tag_name="pii", tag_value="low"),
+            ],
+        }
+    )
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    [column] = state.table.columns
+    assert column.name == "requestId"
+    assert dict(column.tags) == {"pii": "low"}
+
+
 def test_missing_table_in_an_existing_schema_reads_as_absent():
     responses = {
         describe_json_query(QN): RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] nope"),

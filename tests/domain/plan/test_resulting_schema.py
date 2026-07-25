@@ -61,3 +61,12 @@ def test_a_removed_column_does_not_appear():
     )
 
     assert "drop_me" not in resulting_column_spellings(diff)
+
+
+def test_mixed_case_matched_column_resolves_to_the_observed_spelling():
+    diff = diff_table(
+        _desired(DesiredColumn("requestid", String())),
+        _observed(ObservedColumn("requestId", String())),
+    )
+
+    assert resulting_column_spellings(diff) == {"requestid": "requestId"}

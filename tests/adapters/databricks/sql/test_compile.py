@@ -646,3 +646,59 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
         "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
         " ('delta.feature.variantType-preview'='supported')"
     )
+
+
+def test_set_primary_key_emits_the_exact_bound_spelling():
+    action = SetPrimaryKey(
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk")
+    )
+    plan = ActionPlan(target=_TARGET, actions=(action,))
+
+    [statement] = compile_plan(plan)
+
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`requestId`)"
+    )
+
+
+def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
+    table = DesiredTable(
+        qualified_name=_TARGET,
+        columns=(DesiredColumn("requestId", String(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+    )
+    plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
+
+    [statement] = compile_plan(plan)
+
+    assert "`requestId` STRING NOT NULL" in statement
+    assert "PRIMARY KEY (`requestId`)" in statement
+
+
+def test_foreign_key_emits_exact_spelling_on_both_sides():
+    constraint = ForeignKeyConstraint(
+        local_columns=("orderRef",),
+        referenced_table=_REFERENCED_TABLE,
+        referenced_columns=("OrderId",),
+        constraint_name="tbl_orderref_fk",
+    )
+    plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
+
+    [statement] = compile_plan(plan)
+
+    assert "FOREIGN KEY (`orderRef`)" in statement
+    assert "(`OrderId`)" in statement
+
+
+def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
+    constraint = ForeignKeyConstraint(
+        local_columns=("a",),
+        referenced_table=_REFERENCED_TABLE,
+        referenced_columns=("b",),
+        constraint_name="Legacy_FK_Name",
+    )
+    plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(constraint=constraint),))
+
+    [statement] = compile_plan(plan)
+
+    assert "DROP CONSTRAINT IF EXISTS `Legacy_FK_Name`" in statement

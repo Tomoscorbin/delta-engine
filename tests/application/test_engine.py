@@ -1,6 +1,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
+from delta_engine.adapters.databricks.sql.compile import compile_plan
 import delta_engine.application.engine as engine_module
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import (
@@ -1501,4 +1502,46 @@ def test_created_tables_compile_as_ordinary_tables():
     assert table_report.planned_sql_statements != ()
     assert all(
         f"AS TABLE FOR {fqn}" in statement for statement in table_report.planned_sql_statements
+    )
+
+
+def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
+    class _SqlRecordingExecutor:
+        def __init__(self) -> None:
+            self.executed_statements: list[str] = []
+
+        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+            return compile_plan(plan)
+
+        def execute(self, statement: str) -> None:
+            self.executed_statements.append(statement)
+
+    fqn = "c.s.mixed_case"
+    catalog, schema, table_name = _split_fqn(fqn)
+    observed = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, table_name),
+            columns=(ObservedColumn("requestId", String(), nullable=False),),
+        )
+    )
+    spec = DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
+    )
+
+    dry_report = Engine(
+        reader=_RecordingReader({fqn: observed}),
+        executor=_SqlRecordingExecutor(),
+    ).sync(spec, dry_run=True)
+
+    executor = _SqlRecordingExecutor()
+    Engine(reader=_RecordingReader({fqn: observed}), executor=executor).sync(spec)
+
+    [table_report] = list(dry_report)
+    assert tuple(executor.executed_statements) == table_report.planned_sql_statements
+    assert any(
+        "PRIMARY KEY (`requestId`)" in statement for statement in executor.executed_statements
     )

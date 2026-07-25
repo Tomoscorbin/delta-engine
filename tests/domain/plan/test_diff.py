@@ -1186,3 +1186,106 @@ def test_rename_action_carries_the_observed_source_name():
     assert isinstance(action, RenameColumn)
     assert action.old_name == observed.columns[0].name
     assert action.new_name == "customer_name"
+
+
+def test_case_only_column_difference_is_not_drift():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("requestid", String()),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("requestId", String()),),
+    )
+
+    diff = diff_table(desired, observed)
+
+    assert diff.actions == ()
+    assert diff.unresolvable == ()
+
+
+def test_case_only_layout_and_key_differences_are_not_drift():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("requestId", String(), nullable=False),),
+        clustered_by=("requestId",),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="t_pk"),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("requestid", String(), nullable=False),),
+        clustered_by=("requestid",),
+        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="t_pk"),
+    )
+
+    diff = diff_table(desired, observed)
+
+    assert diff.actions == ()
+
+
+def test_case_only_struct_field_difference_is_not_drift():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("payload", Struct((StructField("requestId", String()),))),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("payload", Struct((StructField("requestid", String()),))),),
+    )
+
+    assert diff_table(desired, observed).actions == ()
+
+
+def test_genuinely_different_name_still_reports_structural_drift():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("requestId", String()),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("request_id", String()),),
+    )
+
+    diff = diff_table(desired, observed)
+
+    action_types = {type(action) for action in diff.actions}
+    assert action_types == {AddColumn, DropColumn}
+
+
+def test_matched_column_action_uses_observed_spelling_across_casing():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("requestid", String(), comment="AWS request id"),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("requestId", String(), comment=""),),
+    )
+
+    [action] = diff_table(desired, observed).actions
+
+    assert isinstance(action, SetColumnComment)
+    assert action.column_name == "requestId"
+
+
+def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
+    qualified_name = QualifiedName("cat", "sch", "t")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("newName", String(), renamed_from="oldname"),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("OldName", String()),),
+    )
+
+    [action] = diff_table(desired, observed).actions
+
+    assert isinstance(action, RenameColumn)
+    assert action.old_name == "OldName"
+    assert action.new_name == "newName"
