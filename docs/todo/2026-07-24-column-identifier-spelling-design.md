@@ -1,7 +1,7 @@
 # Preserve column identifier spelling — design
 
 Date: 2026-07-24
-Status: proposed, ready for implementation review
+Status: accepted for implementation (2026-07-25); dated decision notes below
 Branch: `fix/preserve-column-identifier-case`
 
 ## Summary
@@ -382,6 +382,14 @@ rendering and reporting. The semantic type identity must be used by:
 Primitive types, decimal parameters, array element types, and map key/value
 types retain their existing structural identity.
 
+**Decision (2026-07-25, implementation review):** semantic type identity is
+realized as `canonical_data_type(data_type) -> DataType`, which returns the
+same type shape with identity-keyed struct-field names, so semantic
+comparison remains plain equality on canonical forms. `key_signature`
+likewise canonicalizes through `identifier_key` at its single definition
+site, making every primary- and foreign-key signature case-insensitive at
+one stroke.
+
 ## Binding plans to physical names
 
 ### Why binding is required
@@ -460,6 +468,19 @@ If implementation review finds that a separate binding operation reads more
 clearly, it may remain a distinct internal step, but compilation must accept
 only a fully bound, self-contained plan. There must not be two plan variants
 that the compiler can accidentally confuse.
+
+**Decision (2026-07-25, implementation review):** the conversion is split by
+where the information lives. Column-addressing actions are born with their
+physical column's spelling at diff time: the rename-projected observed frame
+already carries the resulting spelling for every matched column (observed
+spelling in place, desired spelling after an applied rename), and add, drop,
+and rename actions already carry their true side. The planning binder
+resolves only symbolic references — `SetPrimaryKey`, `SetForeignKey` (both
+sides, cross-table), `AlterClustering`, and `CreateTable`'s internal
+primary-key and layout references — through the resulting-schema index, and
+fails loudly on any reference that does not resolve. Removed columns
+therefore never appear in the index, and no bound action needs to look one
+up.
 
 ### Action binding rules
 
@@ -558,6 +579,8 @@ the need to choose desired versus observed execution spelling.
 
 - align and compare identifiers by key;
 - retain both desired and observed spelling in matched pairs;
+- emit matched-column actions with the projected observed (resulting)
+  spelling;
 - use semantic data-type identity;
 - ensure rename projection retains the correct exact spelling.
 
