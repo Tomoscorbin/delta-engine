@@ -1,5 +1,6 @@
 import pytest
 
+from delta_engine.domain.model import key_signature
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 
 
@@ -33,3 +34,16 @@ def test_mixed_case_columns_and_name_normalize_to_lowercase():
     pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
     assert pk.columns == ("orderid",)
     assert pk.constraint_name == "orders_pk"
+
+
+def test_signature_is_identical_across_declaration_casing():
+    camel = PrimaryKeyConstraint(columns=("RequestId",), constraint_name="t_pk")
+    lower = PrimaryKeyConstraint(columns=("requestid",), constraint_name="t_pk")
+
+    assert camel.signature == lower.signature
+    assert key_signature(("RequestId",)) == key_signature(("requestid",))
+
+
+def test_rejects_columns_differing_only_by_case_as_duplicates():
+    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
+        PrimaryKeyConstraint(columns=("id", "ID"), constraint_name="t_pk")

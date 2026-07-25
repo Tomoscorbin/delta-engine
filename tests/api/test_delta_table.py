@@ -1827,3 +1827,26 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()
+
+
+def test_generated_foreign_key_name_is_identical_across_declaration_casing():
+    def declare(local_spelling: str) -> DeltaTable:
+        parent = DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="customers",
+            columns=[Column("id", Integer(), nullable=False)],
+            primary_key=["id"],
+        )
+        return DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column(local_spelling, Integer())],
+            foreign_keys=[ForeignKey(columns={local_spelling: "id"}, references=parent)],
+        )
+
+    camel = declare("CustomerId").to_desired_table().foreign_keys[0].constraint_name
+    lower = declare("customerid").to_desired_table().foreign_keys[0].constraint_name
+
+    assert camel == lower == "orders_customerid_fk"

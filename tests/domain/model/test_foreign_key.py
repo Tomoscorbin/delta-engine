@@ -170,3 +170,31 @@ def test_mixed_case_columns_and_name_normalize_to_lowercase():
     assert fk.local_columns == ("customerid",)
     assert fk.referenced_columns == ("id",)
     assert fk.constraint_name == "orders_customerid_fk"
+
+
+def test_signature_is_identical_across_declaration_casing():
+    referenced = QualifiedName("cat", "sch", "parent")
+    camel = ForeignKeyConstraint(
+        local_columns=("OrderId",),
+        referenced_table=referenced,
+        referenced_columns=("Id",),
+        constraint_name="t_orderid_fk",
+    )
+    lower = ForeignKeyConstraint(
+        local_columns=("orderid",),
+        referenced_table=referenced,
+        referenced_columns=("id",),
+        constraint_name="t_orderid_fk",
+    )
+
+    assert camel.signature == lower.signature
+
+
+def test_rejects_local_columns_differing_only_by_case_as_duplicates():
+    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
+        ForeignKeyConstraint(
+            local_columns=("id", "ID"),
+            referenced_table=QualifiedName("cat", "sch", "parent"),
+            referenced_columns=("a", "b"),
+            constraint_name="t_fk",
+        )

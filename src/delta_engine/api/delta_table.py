@@ -32,6 +32,7 @@ from delta_engine.domain.model import (
     Struct,
     TableAspect,
     Variant,
+    identifier_key,
     key_signature,
 )
 
@@ -92,8 +93,13 @@ def _foreign_key_constraint_name(
     owner_table_name: str,
     local_columns: tuple[str, ...],
 ) -> str:
-    """Return the physical name used for a generated foreign key."""
-    columns = "_".join(sorted(local_columns))
+    """
+    Return the physical name used for a generated foreign key.
+
+    Joins the sorted identity keys of the local columns so the generated
+    name is identical across declaration casing and column order.
+    """
+    columns = "_".join(sorted(identifier_key(column) for column in local_columns))
     return f"{owner_table_name}_{columns}_fk"
 
 

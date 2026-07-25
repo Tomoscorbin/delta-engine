@@ -3,14 +3,15 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from delta_engine.domain.model.identifier import identifier_key
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 KeySignature = frozenset[str]
 
 
 def key_signature(columns: Iterable[str]) -> KeySignature:
-    """Return the order-independent identity of a key's columns."""
-    return frozenset(columns)
+    """Return the order-independent, case-insensitive identity of a key's columns."""
+    return frozenset(identifier_key(column) for column in columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +46,10 @@ class PrimaryKeyConstraint:
 
         seen: set[str] = set()
         for column in self.columns:
-            if column in seen:
+            key = identifier_key(column)
+            if key in seen:
                 raise ValueError(f"Duplicate primary key column: {column}")
-            seen.add(column)
+            seen.add(key)
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
@@ -113,15 +115,17 @@ class ForeignKeyConstraint:
 
         seen_local: set[str] = set()
         for column in self.local_columns:
-            if column in seen_local:
+            key = identifier_key(column)
+            if key in seen_local:
                 raise ValueError(f"Duplicate foreign key local column: {column}")
-            seen_local.add(column)
+            seen_local.add(key)
 
         seen_referenced: set[str] = set()
         for column in self.referenced_columns:
-            if column in seen_referenced:
+            key = identifier_key(column)
+            if key in seen_referenced:
                 raise ValueError(f"Duplicate foreign key referenced column: {column}")
-            seen_referenced.add(column)
+            seen_referenced.add(key)
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
@@ -132,11 +136,16 @@ class ForeignKeyConstraint:
         """
         Content identity: local columns, referenced table, referenced columns.
 
-        Excludes ``constraint_name``, so a desired foreign key (whose name the
-        engine generates) and a catalog-observed one (which carries the
-        catalog's name) compare equal when they describe the same relationship.
+        Column entries are identity keys, so a desired constraint and a
+        catalog-observed one compare equal across display casing. Excludes
+        ``constraint_name`` so generated and catalog names still match by
+        content.
         """
-        return (self.local_columns, self.referenced_table, self.referenced_columns)
+        return (
+            tuple(identifier_key(column) for column in self.local_columns),
+            self.referenced_table,
+            tuple(identifier_key(column) for column in self.referenced_columns),
+        )
 
     @property
     def referenced_key_signature(self) -> KeySignature:
