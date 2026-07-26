@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from delta_engine.domain.model.identifier import identifier_key
+from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
 KeySignature = frozenset[str]
@@ -11,7 +11,7 @@ KeySignature = frozenset[str]
 
 def key_signature(columns: Iterable[str]) -> KeySignature:
     """Return the order-independent, case-insensitive identity of a key's columns."""
-    return frozenset(identifier_key(column) for column in columns)
+    return frozenset(Identifier(column) for column in columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,16 +43,17 @@ class PrimaryKeyConstraint:
     def __post_init__(self) -> None:
         if not self.columns:
             raise ValueError("columns must not be empty")
+        object.__setattr__(self, "columns", tuple(Identifier(column) for column in self.columns))
 
         seen: set[str] = set()
         for column in self.columns:
-            key = identifier_key(column)
-            if key in seen:
+            if column in seen:
                 raise ValueError(f"Duplicate primary key column: {column}")
-            seen.add(key)
+            seen.add(column)
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,44 +106,43 @@ class ForeignKeyConstraint:
         # generated names, and rendered DDL independent of declaration order
         # and case — while both original spellings are retained.
         pairs = sorted(
-            zip(self.local_columns, self.referenced_columns, strict=True),
-            key=lambda pair: identifier_key(pair[0]),
+            zip(
+                (Identifier(column) for column in self.local_columns),
+                (Identifier(column) for column in self.referenced_columns),
+                strict=True,
+            ),
+            key=lambda pair: pair[0].key,
         )
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))
 
         seen_local: set[str] = set()
         for column in self.local_columns:
-            key = identifier_key(column)
-            if key in seen_local:
+            if column in seen_local:
                 raise ValueError(f"Duplicate foreign key local column: {column}")
-            seen_local.add(key)
+            seen_local.add(column)
 
         seen_referenced: set[str] = set()
         for column in self.referenced_columns:
-            key = identifier_key(column)
-            if key in seen_referenced:
+            if column in seen_referenced:
                 raise ValueError(f"Duplicate foreign key referenced column: {column}")
-            seen_referenced.add(key)
+            seen_referenced.add(column)
 
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))
 
     @property
     def signature(self) -> tuple[tuple[str, ...], QualifiedName, tuple[str, ...]]:
         """
         Content identity: local columns, referenced table, referenced columns.
 
-        Column entries are identity keys, so a desired constraint and a
+        Column entries are Identifiers, so a desired constraint and a
         catalog-observed one compare equal across display casing. Excludes
         ``constraint_name`` so generated and catalog names still match by
         content.
         """
-        return (
-            tuple(identifier_key(column) for column in self.local_columns),
-            self.referenced_table,
-            tuple(identifier_key(column) for column in self.referenced_columns),
-        )
+        return (self.local_columns, self.referenced_table, self.referenced_columns)
 
     @property
     def referenced_key_signature(self) -> KeySignature:
@@ -173,3 +173,4 @@ class ForeignKeyReference:
     def __post_init__(self) -> None:
         if not self.constraint_name.strip():
             raise ValueError("constraint_name must not be blank")
+        object.__setattr__(self, "constraint_name", Identifier(self.constraint_name))

@@ -197,3 +197,21 @@ def test_rejects_local_columns_differing_only_by_case_as_duplicates():
             referenced_columns=("a", "b"),
             constraint_name="t_fk",
         )
+
+
+def test_signatures_match_across_case_variant_spellings() -> None:
+    declared = ForeignKeyConstraint(
+        local_columns=("orderref",),
+        referenced_table=QualifiedName("cat", "sch", "parent"),
+        referenced_columns=("orderid",),
+        constraint_name="child_orderref_fk",
+    )
+    observed = ForeignKeyConstraint(
+        local_columns=("OrderRef",),
+        referenced_table=QualifiedName("cat", "sch", "parent"),
+        referenced_columns=("OrderId",),
+        constraint_name="fk_from_catalog",
+    )
+    assert declared.signature == observed.signature
+    assert declared.local_columns[0].spelling == "orderref"
+    assert observed.local_columns[0].spelling == "OrderRef"
