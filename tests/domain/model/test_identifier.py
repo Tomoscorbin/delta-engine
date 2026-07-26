@@ -1,6 +1,6 @@
 import pytest
 
-from delta_engine.domain.model import identifier_key, index_by_identifier
+from delta_engine.domain.model import Identifier, identifier_key, index_by_identifier
 
 
 def test_identifier_key_lowercases_ascii():
@@ -28,11 +28,6 @@ def test_index_by_identifier_keys_items_by_identity_and_keeps_them():
 def test_index_by_identifier_rejects_case_insensitive_duplicates():
     with pytest.raises(ValueError, match="Duplicate identifier"):
         index_by_identifier(["requestId", "REQUESTID"], name_of=lambda item: item)
-
-
-import pytest
-
-from delta_engine.domain.model import Identifier
 
 
 class TestIdentifierIdentity:

@@ -30,6 +30,7 @@ class Identifier(str):
     __slots__ = ()
 
     def __new__(cls, spelling: str) -> "Identifier":
+        """Validate and intern the spelling; blank identifiers are invalid."""
         if not spelling.strip():
             raise ValueError(f"Identifier must not be blank: {spelling!r}")
         return super().__new__(cls, spelling)
