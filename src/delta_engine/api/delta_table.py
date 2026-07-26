@@ -26,14 +26,13 @@ from delta_engine.domain.model import (
     DesiredColumn as Column,
     DesiredTable,
     ForeignKeyConstraint,
+    Identifier,
     Map,
     PrimaryKeyConstraint,
     QualifiedName,
     Struct,
     TableAspect,
     Variant,
-    identifier_key,
-    index_by_identifier,
     key_signature,
 )
 
@@ -50,8 +49,8 @@ _OBJECT_NAME_FORBIDDEN_CHARACTERS: Final[frozenset[str]] = frozenset(
 )
 
 # Column names change data feed reserves for its own output columns.
-_CDF_RESERVED_COLUMN_NAMES: Final[frozenset[str]] = frozenset(
-    {"_change_type", "_commit_version", "_commit_timestamp"}
+_CDF_RESERVED_COLUMN_NAMES: Final[frozenset[Identifier]] = frozenset(
+    Identifier(name) for name in ("_change_type", "_commit_version", "_commit_timestamp")
 )
 
 # Partitioning and clustering are distinct backend rules with distinct type
@@ -100,7 +99,7 @@ def _foreign_key_constraint_name(
     Joins the sorted identity keys of the local columns so the generated
     name is identical across declaration casing and column order.
     """
-    columns = "_".join(sorted(identifier_key(column) for column in local_columns))
+    columns = "_".join(sorted(column.lower() for column in local_columns))
     return f"{owner_table_name}_{columns}_fk"
 
 
@@ -195,27 +194,27 @@ def _validate_layout(
             f"A table may declare at most four clustering keys; got {len(clustered_by)}."
         )
 
-    columns_by_key = index_by_identifier(columns, lambda column: column.name)
+    columns_by_name = {column.name: column for column in columns}
     for name in partitioned_by:
-        column = columns_by_key.get(identifier_key(name))
+        column = columns_by_name.get(Identifier(name))
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_PARTITION_KEYS):
             raise ValueError(
                 f"Partition column {name!r} has type"
                 f" {type(column.data_type).__name__}, which Delta cannot partition by"
             )
     for name in clustered_by:
-        column = columns_by_key.get(identifier_key(name))
+        column = columns_by_name.get(Identifier(name))
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_CLUSTERING_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
                 f" {type(column.data_type).__name__}, which cannot be a clustering key"
             )
 
-    partition_keys = {identifier_key(name) for name in partitioned_by}
+    partition_names = {Identifier(name) for name in partitioned_by}
     if (
         partitioned_by
-        and partition_keys <= columns_by_key.keys()
-        and len(partition_keys) == len(columns)
+        and partition_names <= columns_by_name.keys()
+        and len(partition_names) == len(columns)
     ):
         raise ValueError(
             "Cannot partition by every column: at least one non-partition column is required"
@@ -273,11 +272,7 @@ def _validate_column_names(
             )
 
     if properties.get(Property.CHANGE_DATA_FEED) == "true":
-        reserved = [
-            column.name
-            for column in columns
-            if identifier_key(column.name) in _CDF_RESERVED_COLUMN_NAMES
-        ]
+        reserved = [column.name for column in columns if column.name in _CDF_RESERVED_COLUMN_NAMES]
         if reserved:
             raise ValueError(
                 f"Column names {reserved} are reserved by change data feed."
@@ -390,12 +385,12 @@ class ForeignKey:
                 f" {'; '.join(details)}"
             )
 
-        local_types = {identifier_key(column.name): column.data_type for column in owner_columns}
+        local_types = {column.name: column.data_type for column in owner_columns}
         for local_name, referenced_name in pairs:
-            local_type = local_types.get(identifier_key(local_name))
+            local_type = local_types.get(Identifier(local_name))
             if local_type is None:
                 continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = referenced.column_types[identifier_key(referenced_name)]
+            referenced_type = referenced.column_types[Identifier(referenced_name)]
             if local_type != referenced_type:
                 raise ValueError(
                     f"foreign key column type mismatch: {owner_name}.{local_name}"
@@ -431,13 +426,11 @@ class ForeignKey:
         """
         match self.references:
             case _SelfReference():
-                types = {identifier_key(column.name): column.data_type for column in owner_columns}
+                types = {column.name: column.data_type for column in owner_columns}
                 return _ReferencedSide(owner_name, owner_primary_key, types)
             case DeltaTable() as target:
                 desired = target.to_desired_table()
-                types = {
-                    identifier_key(column.name): column.data_type for column in desired.columns
-                }
+                types = {column.name: column.data_type for column in desired.columns}
                 return _ReferencedSide(desired.qualified_name, desired.primary_key_columns, types)
             case _:
                 raise TypeError(
@@ -459,8 +452,8 @@ class ForeignKey:
         if len(local_columns) == 1 and len(parent_columns) == 1:
             return ((local_columns[0], parent_columns[0]),)
 
-        if {identifier_key(column) for column in local_columns} == {
-            identifier_key(column) for column in parent_columns
+        if {Identifier(column) for column in local_columns} == {
+            Identifier(column) for column in parent_columns
         }:
             return tuple((column, column) for column in local_columns)
 
