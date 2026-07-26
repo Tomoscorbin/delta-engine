@@ -11,38 +11,33 @@ carry their observed column verbatim and never resolve through this index.
 
 from typing import assert_never
 
-from delta_engine.domain.model import identifier_key
+from delta_engine.domain.model import Identifier
 from delta_engine.domain.plan.actions import RenameColumn
 from delta_engine.domain.plan.diff import TableDiff, TableDrift, TableMissing
 
 
-def resulting_column_spellings(diff: TableDiff) -> dict[str, str]:
-    """Map each column's identity key to its exact post-sync spelling."""
+def resulting_column_spellings(diff: TableDiff) -> dict[Identifier, Identifier]:
+    """Map each column's identity to its exact post-sync spelling."""
     match diff:
         case TableMissing(desired=desired):
-            return {identifier_key(column.name): column.name for column in desired.columns}
+            return {Identifier(column.name): Identifier(column.name) for column in desired.columns}
         case TableDrift() as drift:
             return _drift_spellings(drift)
         case _ as unreachable:
             assert_never(unreachable)
 
 
-def _drift_spellings(drift: TableDrift) -> dict[str, str]:
+def _drift_spellings(drift: TableDrift) -> dict[Identifier, Identifier]:
     """Resolve matched columns to observed spelling, renames and adds to desired."""
-    observed_by_key = {
-        identifier_key(column.name): column.name for column in drift.observed.columns
-    }
-    rename_target_keys = {
-        identifier_key(action.new_name)
-        for action in drift.actions
-        if isinstance(action, RenameColumn)
+    observed_by_name = {column.name: column.name for column in drift.observed.columns}
+    rename_targets = {
+        action.new_name for action in drift.actions if isinstance(action, RenameColumn)
     }
 
-    spellings: dict[str, str] = {}
+    spellings: dict[Identifier, Identifier] = {}
     for column in drift.desired.columns:
-        key = identifier_key(column.name)
-        if key in rename_target_keys or key not in observed_by_key:
-            spellings[key] = column.name
+        if column.name in rename_targets or column.name not in observed_by_name:
+            spellings[Identifier(column.name)] = Identifier(column.name)
         else:
-            spellings[key] = observed_by_key[key]
+            spellings[Identifier(column.name)] = Identifier(observed_by_name[column.name])
     return spellings

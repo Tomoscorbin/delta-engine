@@ -6,7 +6,7 @@ from typing import assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import validate_diff
-from delta_engine.domain.model import DesiredTable, QualifiedName, identifier_key
+from delta_engine.domain.model import DesiredTable, Identifier, QualifiedName
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -36,7 +36,7 @@ class PlanningFailed:
 
 type PlanningResult = PlanningSucceeded | PlanningFailed
 
-type ResultingSchemas = Mapping[QualifiedName, Mapping[str, str]]
+type ResultingSchemas = Mapping[QualifiedName, Mapping[Identifier, Identifier]]
 
 
 def plan_diff(diff: TableDiff, resulting_schemas: ResultingSchemas) -> PlanningResult:
@@ -88,7 +88,7 @@ def _bind_actions(diff: TableDiff, resulting_schemas: ResultingSchemas) -> tuple
 
 def _bind_action(
     action: Action,
-    own: Mapping[str, str],
+    own: Mapping[Identifier, Identifier],
     resulting_schemas: ResultingSchemas,
 ) -> Action:
     """Return ``action`` with symbolic column references bound, or unchanged."""
@@ -126,7 +126,7 @@ def _bind_action(
             return action
 
 
-def _bind_created_table(table: DesiredTable, own: Mapping[str, str]) -> DesiredTable:
+def _bind_created_table(table: DesiredTable, own: Mapping[Identifier, Identifier]) -> DesiredTable:
     """
     Bind a created table's internal primary-key and layout references.
 
@@ -150,9 +150,9 @@ def _bind_created_table(table: DesiredTable, own: Mapping[str, str]) -> DesiredT
     )
 
 
-def _own_spelling(own: Mapping[str, str], name: str) -> str:
+def _own_spelling(own: Mapping[Identifier, Identifier], name: str) -> Identifier:
     """Resolve an own-table reference; a miss is an engine invariant violation."""
-    spelling = own.get(identifier_key(name))
+    spelling = own.get(Identifier(name))
     if spelling is None:
         raise RuntimeError(
             f"Accepted action references no resulting column: {name!r}."
@@ -161,7 +161,7 @@ def _own_spelling(own: Mapping[str, str], name: str) -> str:
     return spelling
 
 
-def _parent_spelling(parent: Mapping[str, str] | None, name: str) -> str:
+def _parent_spelling(parent: Mapping[Identifier, Identifier] | None, name: str) -> str:
     """
     Resolve a foreign key's referenced column to the parent's post-sync spelling.
 
@@ -172,4 +172,4 @@ def _parent_spelling(parent: Mapping[str, str] | None, name: str) -> str:
     """
     if parent is None:
         return name
-    return parent.get(identifier_key(name), name)
+    return parent.get(Identifier(name), name)
