@@ -401,3 +401,13 @@ def test_plan_orders_subjects_by_identity_key_with_exact_subject_tiebreak():
     )
 
     assert [action.subject for action in plan] == ["alpha", "Beta"]
+
+
+def test_case_only_rename_carries_no_difference_even_from_raw_strings() -> None:
+    with pytest.raises(ValueError, match="carries no difference"):
+        RenameColumn(old_name="requestid", new_name="REQUESTID")
+
+
+def test_case_variant_clustering_carries_no_difference_even_from_raw_strings() -> None:
+    with pytest.raises(ValueError, match="carries no difference"):
+        AlterClustering(desired_clustering=("A", "b"), observed_clustering=("a", "B"))
