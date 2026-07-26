@@ -777,3 +777,12 @@ def test_observed_table_supported_features_default_to_empty():
     )
 
     assert table.supported_features == frozenset()
+
+
+def test_layout_references_preserve_spelling_and_resolve_case_insensitively() -> None:
+    table = DesiredTable(
+        qualified_name=QualifiedName("cat", "sch", "tbl"),
+        columns=(DesiredColumn(name="RequestId", data_type=String()),),
+        clustered_by=("REQUESTID",),
+    )
+    assert table.clustered_by[0].spelling == "REQUESTID"

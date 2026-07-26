@@ -12,23 +12,22 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
-from delta_engine.domain.model.identifier import identifier_key
+from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
 
 
-def _validate_key_column_list(kind: str, names: tuple[str, ...], column_keys: set[str]) -> None:
+def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
     """Rules shared by partition and clustering key lists: existing and unique."""
-    missing = [name for name in names if identifier_key(name) not in column_keys]
+    missing = [name for name in names if name not in column_names]
     if missing:
         raise ValueError(f"{kind} column not found: {', '.join(missing)}")
 
     seen: set[str] = set()
     for name in names:
-        key = identifier_key(name)
-        if key in seen:
+        if name in seen:
             raise ValueError(f"Duplicate {kind.lower()} column: {name}")
-        seen.add(key)
+        seen.add(name)
 
 
 def _validate_table_structure(
@@ -50,27 +49,22 @@ def _validate_table_structure(
     if not columns:
         raise ValueError("Table requires at least one column")
 
-    column_keys: set[str] = set()
+    seen_names: set[str] = set()
     for column in columns:
-        key = identifier_key(column.name)
-        if key in column_keys:
+        if column.name in seen_names:
             raise ValueError(f"Duplicate column name: {column.name}")
-        column_keys.add(key)
+        seen_names.add(column.name)
 
-    _validate_key_column_list("Partition", partitioned_by, column_keys)
-    _validate_key_column_list("Clustering", clustered_by, column_keys)
+    _validate_key_column_list("Partition", partitioned_by, seen_names)
+    _validate_key_column_list("Clustering", clustered_by, seen_names)
 
     if primary_key is not None:
-        missing_pk = [
-            name for name in primary_key.columns if identifier_key(name) not in column_keys
-        ]
+        missing_pk = [name for name in primary_key.columns if name not in seen_names]
         if missing_pk:
             raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
     for foreign_key in foreign_keys:
-        missing_fk_columns = [
-            name for name in foreign_key.local_columns if identifier_key(name) not in column_keys
-        ]
+        missing_fk_columns = [name for name in foreign_key.local_columns if name not in seen_names]
         if missing_fk_columns:
             raise ValueError(
                 f"Foreign key local column not found in columns: {missing_fk_columns[0]}"
@@ -185,8 +179,10 @@ class DesiredTable:
 
         """
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
+        object.__setattr__(
+            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
+        )
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
 
         _validate_table_structure(
@@ -206,9 +202,7 @@ class DesiredTable:
         seen: set[frozenset[str]] = set()
         local_columns_by_constraint_name: dict[str, tuple[str, ...]] = {}
         for foreign_key in self.foreign_keys:
-            local_column_set = frozenset(
-                identifier_key(column) for column in foreign_key.local_columns
-            )
+            local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
                 raise ValueError(
                     "Two foreign keys declared over the same local columns:"
@@ -228,11 +222,11 @@ class DesiredTable:
             )
 
         if self.primary_key is not None:
-            key_columns = {identifier_key(column) for column in self.primary_key.columns}
+            key_columns = set(self.primary_key.columns)
             nullable_key_columns = [
                 column.name
                 for column in self.columns
-                if identifier_key(column.name) in key_columns and column.nullable
+                if column.name in key_columns and column.nullable
             ]
             if nullable_key_columns:
                 raise ValueError(
@@ -241,8 +235,8 @@ class DesiredTable:
                     " primary key column."
                 )
 
-        declared_keys = {identifier_key(column.name) for column in self.columns}
-        rename_source_keys: set[str] = set()
+        declared_names = {column.name for column in self.columns}
+        rename_sources: set[str] = set()
         for column in self.columns:
             source = column.renamed_from
             if source is None:
@@ -252,19 +246,18 @@ class DesiredTable:
                     f"Column {column.name!r} declares renamed_from, but this"
                     " declaration does not manage column structure"
                 )
-            source_key = identifier_key(source)
-            if source_key in declared_keys:
+            if source in declared_names:
                 raise ValueError(
                     f"Column {column.name!r} declares renamed_from {source!r},"
                     f" but {source!r} is still declared. Remove the old column,"
                     " or apply the rename and the reuse of the name in separate"
                     " syncs."
                 )
-            if source_key in rename_source_keys:
+            if source in rename_sources:
                 raise ValueError(
                     f"Two columns declare renamed_from {source!r}; a rename source must be unique"
                 )
-            rename_source_keys.add(source_key)
+            rename_sources.add(source)
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,8 +311,10 @@ class ObservedTable:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
+        object.__setattr__(
+            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
+        )
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
         object.__setattr__(
             self,
