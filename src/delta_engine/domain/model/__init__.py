@@ -27,7 +27,7 @@ from delta_engine.domain.model.data_type import (
     Variant,
     canonical_data_type,
 )
-from delta_engine.domain.model.identifier import identifier_key, index_by_identifier
+from delta_engine.domain.model.identifier import Identifier, identifier_key, index_by_identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import (
     ALL_ASPECTS,
@@ -53,6 +53,7 @@ __all__ = [
     "Float",
     "ForeignKeyConstraint",
     "ForeignKeyReference",
+    "Identifier",
     "Integer",
     "Long",
     "Map",
