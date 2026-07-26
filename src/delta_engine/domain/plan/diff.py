@@ -24,7 +24,6 @@ from delta_engine.domain.model import (
     TableFeature,
     TimestampNtz,
     Variant,
-    canonical_data_type,
     identifier_key,
     index_by_identifier,
 )
@@ -380,7 +379,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     """Return every field and tag action for a matched column."""
     actions: list[Action] = []
 
-    if canonical_data_type(desired.data_type) != canonical_data_type(observed.data_type):
+    if desired.data_type != observed.data_type:
         actions.append(
             AlterColumnType(
                 column_name=observed.name,

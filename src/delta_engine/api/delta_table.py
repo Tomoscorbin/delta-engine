@@ -32,7 +32,6 @@ from delta_engine.domain.model import (
     Struct,
     TableAspect,
     Variant,
-    canonical_data_type,
     identifier_key,
     index_by_identifier,
     key_signature,
@@ -397,7 +396,7 @@ class ForeignKey:
             if local_type is None:
                 continue  # local column existence is enforced when the DesiredTable is built
             referenced_type = referenced.column_types[identifier_key(referenced_name)]
-            if canonical_data_type(local_type) != canonical_data_type(referenced_type):
+            if local_type != referenced_type:
                 raise ValueError(
                     f"foreign key column type mismatch: {owner_name}.{local_name}"
                     f" is {local_type} but {referenced.table}.{referenced_name}"

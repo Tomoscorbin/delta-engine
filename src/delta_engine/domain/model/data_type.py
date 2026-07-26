@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from delta_engine.domain.model.identifier import Identifier, identifier_key
+from delta_engine.domain.model.identifier import Identifier
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 
@@ -160,28 +160,3 @@ class Map(DataType):
         # Databricks accepts any MAP key type except MAP itself.
         if isinstance(self.key, Map):
             raise ValueError("Map key type must not be a Map")
-
-
-def canonical_data_type(data_type: DataType) -> DataType:
-    """
-    Return the semantic identity form of ``data_type``.
-
-    Struct field names are identifier-keyed so two types differing only in
-    field-name case are the same managed type. Every other variant is its
-    own identity. The original value's spelling is untouched: render and
-    report from the original, compare through this.
-    """
-    match data_type:
-        case Struct(fields=fields):
-            return Struct(
-                tuple(
-                    StructField(identifier_key(field.name), canonical_data_type(field.data_type))
-                    for field in fields
-                )
-            )
-        case Array(element=element):
-            return Array(canonical_data_type(element))
-        case Map(key=key, value=value):
-            return Map(canonical_data_type(key), canonical_data_type(value))
-        case _:
-            return data_type

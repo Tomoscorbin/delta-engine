@@ -18,7 +18,6 @@ from delta_engine.domain.model import (
     TableAspect,
     TableFeature,
     TableKind,
-    canonical_data_type,
     identifier_key,
 )
 
@@ -417,7 +416,7 @@ class AlterColumnType(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.ALTER_COLUMN_TYPE
 
     def __post_init__(self) -> None:
-        if canonical_data_type(self.desired_type) == canonical_data_type(self.observed_type):
+        if self.desired_type == self.observed_type:
             raise ValueError(f"AlterColumnType carries no difference: {self.desired_type!r}")
 
     @property

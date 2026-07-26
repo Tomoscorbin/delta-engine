@@ -40,7 +40,6 @@ from delta_engine.domain.model import (
     ForeignKeyConstraint,
     QualifiedName,
     TableAspect,
-    canonical_data_type,
     identifier_key,
 )
 
@@ -173,8 +172,8 @@ def _foreign_key_types_match(
 ) -> bool:
     """Return True if every local column's type equals its referenced column's type."""
     return all(
-        canonical_data_type(local_types[identifier_key(local_column)])
-        == canonical_data_type(referenced_types[identifier_key(referenced_column)])
+        local_types[identifier_key(local_column)]
+        == referenced_types[identifier_key(referenced_column)]
         for local_column, referenced_column in zip(
             foreign_key.local_columns, foreign_key.referenced_columns, strict=True
         )
