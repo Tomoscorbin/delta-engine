@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from delta_engine.domain.model.data_type import DataType
-from delta_engine.domain.model.identifier import identifier_key
+from delta_engine.domain.model.identifier import Identifier
 
 
 def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
@@ -27,9 +27,8 @@ class DesiredColumn:
     :class:`ObservedColumn`.
 
     Attributes:
-        name: Column name, stored verbatim. Identifiers differing only in
-            case are the same column on the platform; identity is judged
-            through explicit identifier keys, never by rewriting spelling.
+        name: Column name, stored verbatim as a case-insensitive
+            :class:`Identifier`.
         data_type: Logical data type of the column.
         nullable: Whether the column accepts ``NULL`` values.
         comment: Optional column comment.
@@ -53,10 +52,12 @@ class DesiredColumn:
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         _validate_column_fields(self.name, self.tags)
+        object.__setattr__(self, "name", Identifier(self.name))
         if self.renamed_from is not None:
             if not self.renamed_from.strip():
                 raise ValueError(f"renamed_from must not be blank: {self.renamed_from!r}")
-            if identifier_key(self.renamed_from) == identifier_key(self.name):
+            object.__setattr__(self, "renamed_from", Identifier(self.renamed_from))
+            if self.renamed_from == self.name:
                 raise ValueError(f"Column {self.name!r} cannot be renamed_from itself")
 
 
@@ -79,3 +80,4 @@ class ObservedColumn:
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         _validate_column_fields(self.name, self.tags)
+        object.__setattr__(self, "name", Identifier(self.name))

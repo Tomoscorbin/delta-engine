@@ -111,3 +111,20 @@ def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
 
 def test_observed_column_preserves_catalog_spelling() -> None:
     assert ObservedColumn("requestId", Integer()).name == "requestId"
+
+
+def test_column_names_compare_case_insensitively() -> None:
+    desired = DesiredColumn(name="RequestId", data_type=String())
+    observed = ObservedColumn(name="requestid", data_type=String())
+    assert desired.name == observed.name
+    assert desired.name in {observed.name}
+
+
+def test_column_name_spelling_is_preserved_verbatim() -> None:
+    column = DesiredColumn(name="RequestId", data_type=String())
+    assert column.name.spelling == "RequestId"
+
+
+def test_case_only_self_rename_is_rejected() -> None:
+    with pytest.raises(ValueError, match="cannot be renamed_from itself"):
+        DesiredColumn(name="RequestId", data_type=String(), renamed_from="requestid")

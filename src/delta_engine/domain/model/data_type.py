@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from delta_engine.domain.model.identifier import identifier_key
+from delta_engine.domain.model.identifier import Identifier, identifier_key
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 
@@ -120,6 +120,7 @@ class StructField:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
+        object.__setattr__(self, "name", Identifier(self.name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,10 +137,9 @@ class Struct(DataType):
             raise ValueError("Struct requires at least one field")
         seen: set[str] = set()
         for field in self.fields:
-            key = identifier_key(field.name)
-            if key in seen:
+            if field.name in seen:
                 raise ValueError(f"Duplicate struct field name: {field.name}")
-            seen.add(key)
+            seen.add(field.name)
 
 
 @dataclass(frozen=True, slots=True)
