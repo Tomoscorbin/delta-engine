@@ -215,3 +215,28 @@ def test_signatures_match_across_case_variant_spellings() -> None:
     assert declared.signature == observed.signature
     assert declared.local_columns[0].spelling == "orderref"
     assert observed.local_columns[0].spelling == "OrderRef"
+
+
+def test_signature_matches_when_case_flips_raw_pair_sort_order() -> None:
+    # Given the same two-pair relationship declared with a case pattern
+    # where raw (case-sensitive) ordering of the sort column disagrees with
+    # identity-key ordering: "Zeta" sorts before "alpha" by raw ASCII (Z <
+    # a), but "zeta" sorts after "alpha" by identity key. Sorting pairs by
+    # the bare Identifier instead of its `.key` would canonicalize the two
+    # declarations into different pair orders.
+    declared = ForeignKeyConstraint(
+        local_columns=("Zeta", "alpha"),
+        referenced_table=QualifiedName("cat", "sch", "parent"),
+        referenced_columns=("z_id", "a_id"),
+        constraint_name="t_fk",
+    )
+    observed = ForeignKeyConstraint(
+        local_columns=("ZETA", "ALPHA"),
+        referenced_table=QualifiedName("cat", "sch", "parent"),
+        referenced_columns=("Z_ID", "A_ID"),
+        constraint_name="t_fk_observed",
+    )
+
+    # Then they are recognized as the same constraint — canonicalization is
+    # identity-keyed, not raw-string sorted
+    assert declared.signature == observed.signature
