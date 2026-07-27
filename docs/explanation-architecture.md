@@ -816,7 +816,8 @@ dependency cost.
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
   subclass with case-insensitive equality and hash — at domain construction, so
   the domain interior compares, hashes, and indexes identifiers with plain
-  `==`/`in`/dict/set code. An adapter that probes a domain-keyed collection
+  `==`/`in`/dict/set code. Boundary code — the public API's declaration
+  validation and the catalog adapters — that probes a domain-keyed collection
   with a raw string that never passed a domain constructor (or the reverse)
   wraps the raw side in `Identifier(...)` first.
 - Return typed failures across ports instead of raising backend exceptions.
