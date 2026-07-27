@@ -47,10 +47,6 @@ LIVE_AREAS: dict[str, tuple[str, str]] = {
         "Platform assumptions",
         "Databricks behaviours the engine's safety gates rely on",
     ),
-    "test_sql_warehouse_live_column_case_repro.py": (
-        "Column identifier case",
-        "case-only references converge; constraints bind the catalog's exact spelling",
-    ),
 }
 
 # The user_property key under which a test's docstring rides its report from the
