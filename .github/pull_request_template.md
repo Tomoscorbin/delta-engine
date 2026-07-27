@@ -10,13 +10,9 @@ automatic version bump and changelog. It MUST be a Conventional Commit:
 Scope is optional, e.g. `feat(api): ...`.
 -->
 
-## What & why
+## What
 
-<!-- Describe the change and the motivation. -->
+<!-- Describe the change. -->
 
-## Checklist
-
-- [ ] PR title is a Conventional Commit (see comment above)
-- [ ] Tests added or updated for behaviour changes
-- [ ] Docs updated if public behaviour/architecture/validation changed
-- [ ] `uv run pytest`, `uv run ruff check .`, `uv run mypy .`, `uv run lint-imports` pass
+## Why
+<!-- Explain the motivation for the change. -->

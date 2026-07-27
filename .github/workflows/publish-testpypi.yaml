@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
-      id-token: write
       contents: read
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,7 +27,79 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
+      - name: Check distribution metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Smoke-test wheel
+        run: |
+          uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py
+
+      - name: Resolve distribution version
+        id: version
+        run: |
+          VERSION="$(
+            uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+              python -c 'from importlib.metadata import version; print(version("delta-engine"))'
+          )"
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Store validated distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: testpypi-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/delta-engine/${{ needs.build.outputs.version }}/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Retrieve validated distributions
+        uses: actions/download-artifact@v5
+        with:
+          name: testpypi-distributions
+          path: dist/
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Verify the TestPyPI download
+        run: |
+          uv venv --python 3.12 build/testpypi-environment
+          for attempt in 1 2 3 4 5; do
+            if uv pip install \
+              --python build/testpypi-environment/bin/python \
+              --no-cache \
+              --no-deps \
+              --index-url https://test.pypi.org/simple/ \
+              "delta-engine==${{ needs.build.outputs.version }}"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          build/testpypi-environment/bin/python -I \
+            tests/distribution/smoke_test.py \
+            --expected-version "${{ needs.build.outputs.version }}"

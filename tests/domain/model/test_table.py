@@ -748,9 +748,12 @@ def test_observed_table_carries_a_streaming_table_kind():
 
 
 def test_observed_table_supported_features_default_to_empty():
+    # Given catalog state with no managed table features
+    # When constructing the observed table without an explicit feature set
     table = ObservedTable(
         qualified_name=QualifiedName("cat", "sch", "tbl"),
         columns=(ObservedColumn("id", Integer()),),
     )
 
+    # Then its canonical supported-feature set is empty
     assert table.supported_features == frozenset()

@@ -656,16 +656,26 @@ def test_non_alter_statements_ignore_the_dialect():
 
 
 def test_compile_enable_table_feature():
-    statement = _compile_single(EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ))
+    # Given a canonical table-feature enablement action
+    action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)
 
+    # When compiling it for Databricks
+    statement = _compile_single(action)
+
+    # Then the feature is enabled through its complete table-property assignment
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES ('delta.feature.timestampNtz'='supported')"
     )
 
 
 def test_compile_enable_table_feature_uses_documented_variant_key():
-    statement = _compile_single(EnableTableFeature(feature=TableFeature.VARIANT))
+    # Given a canonical VARIANT enablement action
+    action = EnableTableFeature(feature=TableFeature.VARIANT)
 
+    # When compiling it for Databricks
+    statement = _compile_single(action)
+
+    # Then the adapter uses the currently documented preview property spelling
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
         " ('delta.feature.variantType-preview'='supported')"

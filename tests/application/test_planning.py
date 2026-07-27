@@ -407,7 +407,8 @@ def test_creation_plan_carries_the_ordinary_table_kind():
 
 
 def test_feature_enablement_outside_column_structure_scope_is_rejected():
-    # Columns agree, so the enable is the only action: the rejection can only
+    # Given matching columns whose implied feature is absent, under metadata-only scope
+    # Columns agree, so enablement is the only action: rejection can only
     # come from its aspect, which a metadata-scoped declaration excludes.
     desired = _desired(
         columns=(DesiredColumn("seen_at", TimestampNtz()),),
@@ -415,8 +416,10 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
     )
     observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
 
+    # When planning the resulting feature drift
     result = _plan(diff_table(desired, observed))
 
+    # Then the column-structure action is rejected as out of scope
     assert isinstance(result, PlanningFailed)
     assert any("column structure" in failure.message for failure in result.failures)
 

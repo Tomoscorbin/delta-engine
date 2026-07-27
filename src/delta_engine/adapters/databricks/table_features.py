@@ -12,6 +12,14 @@ _SUPPORTED_VALUE: Final = "supported"
 
 
 @dataclass(frozen=True, slots=True)
+class TableProperty:
+    """One Databricks table-property assignment."""
+
+    key: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
 class _FeatureDefinition:
     """Relate one canonical feature identity to its Databricks enablement spelling."""
 
@@ -19,16 +27,17 @@ class _FeatureDefinition:
     enable_name: str | None = None
 
     @property
-    def property_name(self) -> str:
-        return self.enable_name or self.feature.value
-
-    @property
-    def property_key(self) -> str:
-        return f"{_FEATURE_PROPERTY_PREFIX}{self.property_name}"
+    def enablement(self) -> TableProperty:
+        name = self.enable_name or self.feature.value
+        return TableProperty(
+            key=f"{_FEATURE_PROPERTY_PREFIX}{name}",
+            value=_SUPPORTED_VALUE,
+        )
 
     @property
     def recognized_names(self) -> frozenset[str]:
-        return frozenset({self.feature.value, self.property_name})
+        enable_name = self.enablement.key.removeprefix(_FEATURE_PROPERTY_PREFIX)
+        return frozenset({self.feature.value, enable_name})
 
 
 _DEFINITIONS: Final[Mapping[TableFeature, _FeatureDefinition]] = MappingProxyType(
@@ -42,9 +51,6 @@ _DEFINITIONS: Final[Mapping[TableFeature, _FeatureDefinition]] = MappingProxyTyp
         ),
     }
 )
-
-if frozenset(_DEFINITIONS) != frozenset(TableFeature):
-    raise RuntimeError("Databricks table feature definitions do not match TableFeature")
 
 _FEATURES_BY_RECOGNIZED_NAME: Final[Mapping[str, TableFeature]] = MappingProxyType(
     {
@@ -74,6 +80,6 @@ def recognized_table_features(names: Iterable[str]) -> frozenset[TableFeature]:
     )
 
 
-def enable_property_key(feature: TableFeature) -> str:
+def enable_property(feature: TableFeature) -> TableProperty:
     """Return the Databricks table property used to enable a feature."""
-    return _DEFINITIONS[feature].property_key
+    return _DEFINITIONS[feature].enablement

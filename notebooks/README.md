@@ -9,11 +9,14 @@ the test suite; running the notebook on a cluster is how you run them.
 
 ### Requirements
 
-- Databricks Runtime 13.3 LTS or later
+- Databricks Runtime 16.2 or later (the Spark reader uses `DESCRIBE TABLE EXTENDED ... AS JSON`)
 - Unity Catalog enabled (for primary keys, foreign keys, and tags)
 - `APPLY TAG` privilege on the target schema, plus permission to create and drop
   tables there
 - delta-engine installed on the cluster (`pip install delta-engine`)
+
+See the [runtime compatibility notes](../docs/reference-limitations.md#runtime-features)
+for the reader floor and feature-specific requirements.
 
 ### How to run
 

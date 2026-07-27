@@ -44,7 +44,7 @@ items 17 and 18 remain deliberately gated on evidence from real users.
 **Status.** Shipped 2026-07-10. The shape below was built as described; the
 widening matrix and runtime notes live in `reference-safe-change-rules.md`.
 
-**Why.** `ColumnDataTypeChangeNotSupported` blocks every type change with
+**Why.** `NonWideningColumnTypeChange` blocks every non-widening type change with
 "recreate the table", and type evolution is the most common real schema change
 users hit. Delta supports the safe subset natively via
 `delta.enableTypeWidening`. Every hard block is a moment a user considers
@@ -99,7 +99,7 @@ plan. The same mechanism can extend to table renames later.
 preview flows through a new `PlanExecutor.compile` port method onto
 `TableRunReport.planned_sql_statements` (no `databricks.py` helper — the
 engine compiles once and `execute` runs exactly the previewed statements);
-`to_dict()` only, under `schema_version: 1` (no `to_rows`, no Spark lift);
+`to_dict()` only, under `schema_version: 2` (no `to_rows`, no Spark lift);
 `has_changes` and the `any_failures` → `has_failures` rename shipped
 together. See `reference-run-report.md` and `how-to-gate-changes-in-ci.md`.
 The original motivation is retained below as historical context.

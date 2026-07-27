@@ -179,7 +179,6 @@ def _diff_required_features(
 
 
 def _walk_data_type(data_type: DataType) -> Iterable[DataType]:
-    """Yield a type and every nested child type."""
     yield data_type
     match data_type:
         case Array(element=element):
