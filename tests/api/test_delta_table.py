@@ -1308,7 +1308,7 @@ def test_single_column_sequence_infers_and_preserves_spelling():
     assert foreign_key.referenced_columns == ("ID",)
 
 
-def test_same_name_composite_foreign_key_is_inferred_by_identifier_key():
+def test_same_name_composite_foreign_key_is_paired_by_name_not_declared_order():
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",

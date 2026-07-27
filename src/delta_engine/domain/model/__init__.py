@@ -26,7 +26,7 @@ from delta_engine.domain.model.data_type import (
     TimestampNtz,
     Variant,
 )
-from delta_engine.domain.model.identifier import Identifier, identifier_key, index_by_identifier
+from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table import (
     ALL_ASPECTS,
@@ -70,7 +70,5 @@ __all__ = [
     "Timestamp",
     "TimestampNtz",
     "Variant",
-    "identifier_key",
-    "index_by_identifier",
     "key_signature",
 ]
