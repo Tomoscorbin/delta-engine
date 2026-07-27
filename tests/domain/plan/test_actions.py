@@ -391,7 +391,9 @@ def test_action_plan_orders_feature_enable_before_column_actions():
     assert [type(action) for action in plan.actions] == [EnableTableFeature, AddColumn]
 
 
-def test_plan_orders_subjects_by_identity_key_with_exact_subject_tiebreak():
+def test_plan_orders_subjects_by_lowercased_key_not_ascii_order():
+    # Deterministic ordering must not depend on subject casing: 'Beta' sorts
+    # after 'alpha' by lowercased key, not before it by raw ASCII ('B' < 'a').
     plan = ActionPlan(
         target=QualifiedName("cat", "sch", "t"),
         actions=(
@@ -400,7 +402,7 @@ def test_plan_orders_subjects_by_identity_key_with_exact_subject_tiebreak():
         ),
     )
 
-    assert [action.subject for action in plan] == ["alpha", "Beta"]
+    assert [action.subject.spelling for action in plan] == ["alpha", "Beta"]
 
 
 def test_case_only_rename_carries_no_difference_even_from_raw_strings() -> None:

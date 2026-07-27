@@ -453,7 +453,7 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert action.constraint.referenced_columns == ("parent_id",)
+    assert tuple(c.spelling for c in action.constraint.referenced_columns) == ("parent_id",)
 
 
 def test_primary_key_binds_to_the_observed_column_spelling():
@@ -467,7 +467,7 @@ def test_primary_key_binds_to_the_observed_column_spelling():
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetPrimaryKey)]
-    assert action.primary_key.columns == ("requestId",)
+    assert tuple(c.spelling for c in action.primary_key.columns) == ("requestId",)
 
 
 def test_created_table_binds_internal_references_to_declared_column_spelling():
@@ -482,8 +482,8 @@ def test_created_table_binds_internal_references_to_declared_column_spelling():
     assert isinstance(result, PlanningSucceeded)
     [create] = [action for action in result.plan if isinstance(action, CreateTable)]
     assert create.table.primary_key is not None
-    assert create.table.primary_key.columns == ("requestId",)
-    assert create.table.clustered_by == ("requestId",)
+    assert tuple(c.spelling for c in create.table.primary_key.columns) == ("requestId",)
+    assert tuple(c.spelling for c in create.table.clustered_by) == ("requestId",)
 
 
 def test_foreign_key_binds_both_sides_to_post_sync_spelling():
@@ -521,8 +521,8 @@ def test_foreign_key_binds_both_sides_to_post_sync_spelling():
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert action.constraint.local_columns == ("orderRef",)
-    assert action.constraint.referenced_columns == ("OrderId",)
+    assert tuple(c.spelling for c in action.constraint.local_columns) == ("orderRef",)
+    assert tuple(c.spelling for c in action.constraint.referenced_columns) == ("OrderId",)
 
 
 def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
@@ -562,7 +562,7 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert action.constraint.referenced_columns == ("orderNumber",)
+    assert tuple(c.spelling for c in action.constraint.referenced_columns) == ("orderNumber",)
 
 
 def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
@@ -593,5 +593,5 @@ def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert action.constraint.local_columns == ("ParentRef",)
-    assert action.constraint.referenced_columns == ("Id",)
+    assert tuple(c.spelling for c in action.constraint.local_columns) == ("ParentRef",)
+    assert tuple(c.spelling for c in action.constraint.referenced_columns) == ("Id",)

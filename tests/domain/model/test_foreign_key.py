@@ -167,8 +167,8 @@ def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
         referenced_columns=("z_id", "a_id"),
         constraint_name="t_fk",
     )
-    assert constraint.local_columns == ("Apple", "Zebra")
-    assert constraint.referenced_columns == ("a_id", "z_id")
+    assert tuple(column.spelling for column in constraint.local_columns) == ("Apple", "Zebra")
+    assert tuple(column.spelling for column in constraint.referenced_columns) == ("a_id", "z_id")
 
 
 def test_signature_is_identical_across_declaration_casing():

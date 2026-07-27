@@ -316,6 +316,9 @@ def test_valid_describe_documents_preserve_values_and_identifier_spelling(
     description = _parse(json.dumps(case.document))
 
     assert description.columns == case.columns
+    assert tuple(c.name.spelling for c in description.columns) == tuple(
+        c.name.spelling for c in case.columns
+    )
     assert description.comment == case.comment
     assert description.partitioned_by == case.partitioned_by
     assert description.clustered_by == case.clustered_by

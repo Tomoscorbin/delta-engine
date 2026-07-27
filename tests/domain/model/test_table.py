@@ -73,7 +73,7 @@ def test_fails_when_partition_references_undefined_column(table_type, column_typ
 def test_mixed_case_partition_reference_is_preserved_and_resolves(table_type, column_type):
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
     table = table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
-    assert table.partitioned_by == ("VISIT_DATE",)
+    assert tuple(column.spelling for column in table.partitioned_by) == ("VISIT_DATE",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -600,7 +600,7 @@ def test_table_rejects_clustering_column_not_in_columns(table_type, column_type)
 def test_mixed_case_clustering_reference_is_preserved_and_resolves(table_type, column_type):
     columns = (column_type("id", Integer()), column_type("region", String()))
     table = table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
-    assert table.clustered_by == ("REGION",)
+    assert tuple(column.spelling for column in table.clustered_by) == ("REGION",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE

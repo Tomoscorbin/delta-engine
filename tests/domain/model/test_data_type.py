@@ -44,7 +44,7 @@ def test_decimal_accepts_maximum_precision_and_scale() -> None:
 def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    assert StructField("Amount", Integer()).name == "Amount"
+    assert StructField("Amount", Integer()).name.spelling == "Amount"
     assert StructField("straße", Integer()).name == "straße"
 
 
