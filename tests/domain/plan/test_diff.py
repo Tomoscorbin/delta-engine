@@ -91,7 +91,9 @@ def test_missing_table_diffs_to_table_missing_carrying_desired():
     diff = diff_table(desired, observed=None)
 
     # Then the diff is the self-contained missing-table variant
-    assert diff == TableMissing(desired=desired)
+    assert isinstance(diff, TableMissing)
+    assert diff.desired is desired
+    assert diff.actions == (CreateTable(desired),)
 
 
 def test_missing_table_derives_target_from_desired_table():
@@ -101,6 +103,12 @@ def test_missing_table_derives_target_from_desired_table():
 
     assert isinstance(diff, TableMissing)
     assert diff.target == _QUALIFIED_NAME
+
+
+def test_direct_missing_table_construction_derives_its_creation_actions():
+    desired = _desired()
+
+    assert TableMissing(desired).actions == (CreateTable(desired),)
 
 
 def test_equal_tables_diff_to_empty_drift():

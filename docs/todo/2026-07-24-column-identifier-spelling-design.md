@@ -1,8 +1,15 @@
 # Preserve column identifier spelling — design
 
 Date: 2026-07-24
-Status: accepted for implementation (2026-07-25); dated decision notes below
+Status: identifier model retained; resulting-schema binding superseded (2026-07-27)
 Branch: `fix/preserve-column-identifier-case`
+
+> **2026-07-27 simplification:** The identity and spelling rules in this
+> document still apply. The resulting-schema index and planning binding pass
+> described below no longer do. Diff actions now take the observed column name
+> when they address an existing column and otherwise take the declared column
+> name. Cross-table FK diffing receives the desired and observed columns already
+> held by the engine. Planning only validates and constructs the `ActionPlan`.
 
 ## Summary
 

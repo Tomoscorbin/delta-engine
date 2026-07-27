@@ -272,9 +272,9 @@ def test_platform_resolves_column_references_case_insensitively(live_connection,
     """Ordinary ALTER COLUMN resolves a lowercase reference against a camelCase column."""
     # Case is never identity for column references: the engine diffs
     # case-variant spellings as the same column because ordinary DDL resolves
-    # them interchangeably. (The managed-constraint path is the exception —
-    # it needs the exact catalog spelling, which is why the planner binds
-    # constraint references; pinned in test_sql_warehouse_live_constraints.)
+    # them interchangeably. (The managed-constraint path is the exception: it
+    # needs the exact catalog spelling, so constraint actions use the observed
+    # column name; pinned in test_sql_warehouse_live_constraints.)
     table_name = live_tables("column_case_raw_alter")
     execute_sql(
         live_connection,

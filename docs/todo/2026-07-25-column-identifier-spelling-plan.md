@@ -1,5 +1,8 @@
 # Preserve column identifier spelling — implementation plan
 
+> Historical plan. Its resulting-schema index and planning-binder architecture
+> was removed by the 2026-07-27 simplification recorded in the design document.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Column-like identifiers keep their declared/catalog spelling end to end; lowercase survives only as an explicit identity key; executable plans carry exact post-sync physical spelling, so `ADD CONSTRAINT … PRIMARY KEY (\`requestId\`)` compiles with the catalog's spelling and the live PK reproduction passes without manual SQL.

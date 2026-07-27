@@ -75,13 +75,13 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.domain.model import DesiredTable, QualifiedName
-from delta_engine.domain.plan import (
-    ActionPlan,
-    TableDiff,
-    diff_table,
-    resulting_column_spellings,
+from delta_engine.domain.model import (
+    DesiredColumn,
+    DesiredTable,
+    ObservedColumn,
+    QualifiedName,
 )
+from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -289,14 +289,27 @@ class Engine:
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
         """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
+        # A child FK needs the parent columns too. Pass the snapshots already
+        # held by each run; the differ prefers an observed match and otherwise
+        # keeps the declared column name.
+        columns_by_table: dict[
+            QualifiedName,
+            tuple[DesiredColumn | ObservedColumn, ...],
+        ] = {}
+        for run in runs:
+            columns: tuple[DesiredColumn | ObservedColumn, ...] = run.desired.columns
+            if isinstance(run.read, TablePresent):
+                columns += run.read.table.columns
+            columns_by_table[run.qualified_name] = columns
+
         for run in runs:
             match run.read:
                 case ReadFailure():
                     continue
                 case TablePresent(table=observed):
-                    run.diff = diff_table(run.desired, observed)
+                    run.diff = diff_table(run.desired, observed, columns_by_table)
                 case TableAbsent():
-                    run.diff = diff_table(run.desired, None)
+                    run.diff = diff_table(run.desired, None, columns_by_table)
                 case _ as unreachable:
                     assert_never(unreachable)
 
@@ -304,22 +317,14 @@ class Engine:
         """
         Accept or reject each diff according to the default planning policy.
 
-        Builds the sync-wide resulting-schema index from every diffed run
-        first — planning binds symbolic references (including cross-table
-        foreign-key spellings) through it. Rejected runs retain
-        ``PlanningFailed``; accepted runs retain
-        ``PlanningSucceeded`` with the validated, bound action plan.
+        Rejected runs retain ``PlanningFailed``; accepted runs retain
+        ``PlanningSucceeded`` with the validated action plan.
         """
-        resulting_schemas = {
-            run.diff.target: resulting_column_spellings(run.diff)
-            for run in runs
-            if run.diff is not None
-        }
         for run in runs:
             if run.diff is None:
                 continue
 
-            planning = plan_diff(run.diff, resulting_schemas)
+            planning = plan_diff(run.diff)
             run.planning = planning
 
             match planning:

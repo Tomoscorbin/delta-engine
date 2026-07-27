@@ -34,7 +34,6 @@ from delta_engine.domain.plan import (
     SetPrimaryKey,
     SetTableTag,
     diff_table,
-    resulting_column_spellings,
 )
 
 _NAME = QualifiedName("dev", "silver", "test")
@@ -54,11 +53,6 @@ def _observed(**overrides) -> ObservedTable:
         "columns": (ObservedColumn("id", Integer()),),
     }
     return ObservedTable(**(values | overrides))
-
-
-def _plan(diff):
-    """Plan with the diff's own resulting schema, matching the engine contract."""
-    return plan_diff(diff, {diff.target: resulting_column_spellings(diff)})
 
 
 def _foreign_key(
@@ -82,7 +76,7 @@ def test_plan_diff_accepts_safe_actions():
         _observed(),
     )
 
-    result = _plan(diff)
+    result = plan_diff(diff)
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
@@ -100,7 +94,7 @@ def test_plan_diff_rejects_unsafe_actions_without_constructing_a_plan():
         _observed(),
     )
 
-    result = _plan(diff)
+    result = plan_diff(diff)
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["NonNullableColumnAdd"]
@@ -116,7 +110,7 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
         _observed(),
     )
 
-    result = _plan(diff)
+    result = plan_diff(diff)
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
@@ -147,7 +141,7 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
     ],
 )
 def test_plan_diff_rejects_each_non_action_difference(desired, observed, expected_rule):
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     assert isinstance(result, PlanningFailed)
     assert expected_rule in {failure.rule_name for failure in result.failures}
@@ -155,7 +149,7 @@ def test_plan_diff_rejects_each_non_action_difference(desired, observed, expecte
 
 
 def test_plan_diff_accepts_no_op_as_an_empty_plan():
-    result = _plan(diff_table(_desired(), _observed()))
+    result = plan_diff(diff_table(_desired(), _observed()))
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
@@ -177,7 +171,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     )
 
     # When planning
-    result = _plan(diff_table(desired, None))
+    result = plan_diff(diff_table(desired, None))
 
     # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningSucceeded)
@@ -193,7 +187,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
 def test_plan_diff_rejects_missing_table_when_table_existence_is_unmanaged():
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
 
-    result = _plan(diff_table(desired, None))
+    result = plan_diff(diff_table(desired, None))
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
@@ -212,7 +206,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the residual drift lands under the new name
     assert isinstance(result, PlanningSucceeded)
@@ -236,7 +230,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -266,7 +260,7 @@ def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then planning fails with the referenced-key rule
     assert isinstance(result, PlanningFailed)
@@ -300,7 +294,7 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -338,7 +332,7 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -369,7 +363,7 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
     )
 
     # When planning
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningSucceeded)
@@ -388,7 +382,7 @@ def test_plan_carries_the_observed_relation_kind():
     observed = _observed(kind=TableKind.STREAMING_TABLE)
 
     # When planning the diff
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan knows what its actions lower against
     assert isinstance(result, PlanningSucceeded)
@@ -399,7 +393,7 @@ def test_plan_carries_the_observed_relation_kind():
 def test_creation_plan_carries_the_ordinary_table_kind():
     # Given a missing table — absence has no observed kind, and the engine
     # only creates ordinary tables
-    result = _plan(diff_table(_desired(), None))
+    result = plan_diff(diff_table(_desired(), None))
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
@@ -417,39 +411,11 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
     observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
 
     # When planning the resulting feature drift
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the column-structure action is rejected as out of scope
     assert isinstance(result, PlanningFailed)
     assert any("column structure" in failure.message for failure in result.failures)
-
-
-def test_planning_a_diffed_table_without_its_own_schema_entry_is_an_engine_error():
-    desired = DesiredTable(
-        qualified_name=_NAME,
-        columns=(DesiredColumn("id", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="t_pk"),
-    )
-    diff = diff_table(
-        desired,
-        _observed(columns=(ObservedColumn("id", Integer(), nullable=False),)),
-    )
-
-    with pytest.raises(RuntimeError, match="resulting schema"):
-        plan_diff(diff, {})
-
-
-def test_a_rejected_diff_fails_before_binding_is_reached():
-    desired = DesiredTable(
-        qualified_name=_NAME,
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("extra", Integer())),
-        managed_aspects=METADATA_ASPECTS,
-    )
-    diff = diff_table(desired, _observed())
-
-    result = plan_diff(diff, {})
-
-    assert isinstance(result, PlanningFailed)
 
 
 def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spelling():
@@ -466,44 +432,44 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
     )
     diff = diff_table(desired, _observed())
 
-    result = plan_diff(diff, {diff.target: resulting_column_spellings(diff)})
+    result = plan_diff(diff)
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("parent_id",)
 
 
-def test_primary_key_binds_to_the_observed_column_spelling():
+def test_primary_key_action_uses_the_observed_column_name():
     desired = _desired(
         columns=(DesiredColumn("requestid", String(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("requestid",), constraint_name="test_pk"),
     )
     observed = _observed(columns=(ObservedColumn("requestId", String(), nullable=False),))
 
-    result = _plan(diff_table(desired, observed))
+    result = plan_diff(diff_table(desired, observed))
 
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetPrimaryKey)]
     assert tuple(str(c) for c in action.primary_key.columns) == ("requestId",)
 
 
-def test_created_table_binds_internal_references_to_declared_column_spelling():
+def test_created_table_preserves_its_declared_internal_references():
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="test_pk"),
         clustered_by=("REQUESTID",),
     )
 
-    result = _plan(diff_table(desired, None))
+    result = plan_diff(diff_table(desired, None))
 
     assert isinstance(result, PlanningSucceeded)
     [create] = [action for action in result.plan if isinstance(action, CreateTable)]
     assert create.table.primary_key is not None
-    assert tuple(str(c) for c in create.table.primary_key.columns) == ("requestId",)
-    assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
+    assert tuple(str(c) for c in create.table.primary_key.columns) == ("REQUESTID",)
+    assert tuple(str(c) for c in create.table.clustered_by) == ("REQUESTID",)
 
 
-def test_foreign_key_binds_both_sides_to_post_sync_spelling():
+def test_foreign_key_action_uses_observed_column_names_on_both_sides():
     # Given a child foreign key declared in lowercase on both sides
     parent_name = QualifiedName("dev", "silver", "parent")
     child_constraint = ForeignKeyConstraint(
@@ -517,36 +483,29 @@ def test_foreign_key_binds_both_sides_to_post_sync_spelling():
         foreign_keys=(child_constraint,),
     )
     child_observed = _observed(columns=(ObservedColumn("orderRef", Integer()),))
-    child_diff = diff_table(child_desired, child_observed)
-
     # And a parent whose observed spelling is mixed-case
-    parent_desired = DesiredTable(
-        qualified_name=parent_name,
-        columns=(DesiredColumn("orderid", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("orderid",), constraint_name="parent_pk"),
-    )
     parent_observed = ObservedTable(
         qualified_name=parent_name,
         columns=(ObservedColumn("OrderId", Integer(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("OrderId",), constraint_name="parent_pk"),
     )
-    parent_diff = diff_table(parent_desired, parent_observed)
 
-    # When planning with both resulting schemas registered
-    schemas = {
-        child_diff.target: resulting_column_spellings(child_diff),
-        parent_diff.target: resulting_column_spellings(parent_diff),
-    }
-    result = plan_diff(child_diff, schemas)
+    # When diffing with the observed parent available and then planning
+    child_diff = diff_table(
+        child_desired,
+        child_observed,
+        {parent_name: parent_observed.columns},
+    )
+    result = plan_diff(child_diff)
 
-    # Then both sides bind to the post-sync spelling
+    # Then both sides use their observed physical names
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.local_columns) == ("orderRef",)
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("OrderId",)
 
 
-def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
+def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
     # Given a parent renaming its key column
     parent_name = QualifiedName("dev", "silver", "parent")
     parent_desired = DesiredTable(
@@ -559,13 +518,11 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
         columns=(ObservedColumn("OrderId", Integer(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("OrderId",), constraint_name="parent_pk"),
     )
-    parent_diff = diff_table(parent_desired, parent_observed)
-
-    # And a child key referencing the post-rename name in lowercase
+    # And a child key referencing the parent's declared rename target
     child_constraint = ForeignKeyConstraint(
         local_columns=("ref",),
         referenced_table=parent_name,
-        referenced_columns=("ordernumber",),
+        referenced_columns=parent_desired.primary_key_columns,
         constraint_name="test_ref_fk",
     )
     child_desired = _desired(
@@ -575,22 +532,24 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
     child_diff = diff_table(
         child_desired,
         _observed(columns=(ObservedColumn("ref", Integer()),)),
+        {
+            parent_name: (
+                *parent_desired.columns,
+                *parent_observed.columns,
+            )
+        },
     )
 
-    # When planning with both resulting schemas registered
-    schemas = {
-        child_diff.target: resulting_column_spellings(child_diff),
-        parent_diff.target: resulting_column_spellings(parent_diff),
-    }
-    result = plan_diff(child_diff, schemas)
+    # When planning
+    result = plan_diff(child_diff)
 
-    # Then the referenced side binds to the new declared spelling
+    # Then the referenced side keeps the new declared name
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("orderNumber",)
 
 
-def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
+def test_self_referencing_foreign_key_uses_its_observed_column_names():
     # Given a self-referencing key declared lowercase against mixed-case physical spellings
     constraint = ForeignKeyConstraint(
         local_columns=("parentref",),
@@ -616,9 +575,9 @@ def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
     diff = diff_table(desired, observed)
 
     # When planning
-    result = _plan(diff)
+    result = plan_diff(diff)
 
-    # Then both sides bind through the table's own resulting schema
+    # Then both sides use their observed physical names
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.local_columns) == ("ParentRef",)

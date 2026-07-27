@@ -297,6 +297,19 @@ class _RecordingExecutor:
         return names
 
 
+class _SqlRecordingExecutor:
+    """Compile real SQL and record statements executed by the engine."""
+
+    def __init__(self) -> None:
+        self.executed_statements: list[str] = []
+
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        return compile_plan(plan)
+
+    def execute(self, statement: str) -> None:
+        self.executed_statements.append(statement)
+
+
 class _FailingMultiStatementExecutor:
     """Compile three statements and fail the middle one for every table."""
 
@@ -1493,16 +1506,6 @@ def test_created_tables_compile_as_ordinary_tables():
 
 
 def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
-    class _SqlRecordingExecutor:
-        def __init__(self) -> None:
-            self.executed_statements: list[str] = []
-
-        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-            return compile_plan(plan)
-
-        def execute(self, statement: str) -> None:
-            self.executed_statements.append(statement)
-
     # Given a live table whose physical column spelling differs from the declaration
     fqn = "c.s.mixed_case"
     catalog, schema, table_name = _split_fqn(fqn)
@@ -1530,9 +1533,64 @@ def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
     Engine(reader=_RecordingReader({fqn: observed}), executor=executor).sync(spec)
 
     # Then the executed SQL is byte-for-byte the planned SQL, with the
-    # primary key bound to the physical spelling
+    # primary-key action carrying the physical name
     [table_report] = list(dry_report)
     assert tuple(executor.executed_statements) == table_report.planned_sql_statements
     assert any(
         "PRIMARY KEY (`requestId`)" in statement for statement in executor.executed_statements
+    )
+
+
+def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
+    # Given a child and parent declared with different reference spelling than
+    # the columns already present in the catalog
+    parent = DeltaTable(
+        "c",
+        "s",
+        "parent",
+        columns=(Column("orderid", String(), nullable=False),),
+        primary_key=("orderid",),
+    )
+    child = DeltaTable(
+        "c",
+        "s",
+        "child",
+        columns=(Column("orderref", String()),),
+        foreign_keys=(
+            ForeignKey(
+                columns={"ORDERREF": "ORDERID"},
+                references=parent,
+            ),
+        ),
+    )
+    reader = _RecordingReader(
+        {
+            "c.s.parent": TablePresent(
+                ObservedTable(
+                    qualified_name=QualifiedName("c", "s", "parent"),
+                    columns=(ObservedColumn("OrderId", String(), nullable=False),),
+                    primary_key=PrimaryKeyConstraint(("OrderId",), "parent_pk"),
+                )
+            ),
+            "c.s.child": TablePresent(
+                ObservedTable(
+                    qualified_name=QualifiedName("c", "s", "child"),
+                    columns=(ObservedColumn("orderRef", String()),),
+                )
+            ),
+        }
+    )
+
+    # When compiling the sync
+    report = Engine(reader=reader, executor=_SqlRecordingExecutor()).sync(
+        child,
+        parent,
+        dry_run=True,
+    )
+
+    # Then the FK statement uses the catalog's exact name on each side
+    child_report = _reports_by_name(report)["c.s.child"]
+    assert any(
+        "FOREIGN KEY (`orderRef`) REFERENCES `c`.`s`.`parent` (`OrderId`)" in statement
+        for statement in child_report.planned_sql_statements
     )

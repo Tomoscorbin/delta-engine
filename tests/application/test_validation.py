@@ -45,7 +45,6 @@ from delta_engine.domain.plan import (
 )
 from delta_engine.domain.plan.diff import (
     TableDrift,
-    TableMissing,
     diff_table,
 )
 from delta_engine.domain.plan.unresolvable import ColumnRenameConflict
@@ -270,7 +269,7 @@ def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_
     )
 
     # Then creating the table is safe
-    assert validate_diff(TableMissing(desired=desired)).failed is False
+    assert validate_diff(diff_table(desired, None)).failed is False
 
 
 def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
@@ -280,7 +279,7 @@ def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
     )
 
     # When validating
-    result = validate_diff(TableMissing(desired=desired))
+    result = validate_diff(diff_table(desired, None))
 
     # Then the missing table cannot be created
     assert result.failed is True
@@ -293,7 +292,7 @@ def test_validate_diff_passes_table_missing_when_table_existence_managed():
     desired = _desired_table(managed_aspects=ALL_ASPECTS)
 
     # When validating
-    result = validate_diff(TableMissing(desired=desired))
+    result = validate_diff(diff_table(desired, None))
 
     # Then creation is allowed
     assert result.failed is False
@@ -307,7 +306,7 @@ def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
     )
 
     # When validating with no safety rules
-    result = validate_diff(TableMissing(desired=desired), rules=())
+    result = validate_diff(diff_table(desired, None), rules=())
 
     # Then the scope invariant still fails
     assert result.failed is True

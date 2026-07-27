@@ -699,7 +699,8 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="tbl_pk"),
+        clustered_by=("REQUESTID",),
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
 
@@ -708,6 +709,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     # Then both the column definition and the inline key carry the declared spelling
     assert "`requestId` STRING NOT NULL" in statement
     assert "PRIMARY KEY (`requestId`)" in statement
+    assert "CLUSTER BY (`requestId`)" in statement
 
 
 def test_foreign_key_emits_exact_spelling_on_both_sides():

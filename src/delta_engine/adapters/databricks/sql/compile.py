@@ -104,17 +104,20 @@ def _(action: CreateTable, target: _Target) -> str:
     """Compile a CREATE TABLE statement including columns, comment, properties, and optional PK."""
     table = action.table
     column_defs = [_column_definition(column) for column in table.columns]
+    column_names = {column.name: column.name for column in table.columns}
 
     if table.primary_key is not None:
-        pk_cols = ", ".join(backtick(name) for name in table.primary_key.columns)
+        pk_cols = ", ".join(backtick(column_names[name]) for name in table.primary_key.columns)
         constraint_name = table.primary_key.constraint_name
         column_defs.append(f"CONSTRAINT {backtick(constraint_name)} PRIMARY KEY ({pk_cols})")
 
     columns_clause = ", ".join(column_defs)
     table_comment = _table_comment_clause(table.comment)
     properties = _properties_clause(table.properties)
-    partition_by = _partitioned_by_clause(table.partitioned_by)
-    cluster_by = _clustered_by_clause(table.clustered_by)
+    partition_by = _partitioned_by_clause(
+        tuple(column_names[name] for name in table.partitioned_by)
+    )
+    cluster_by = _clustered_by_clause(tuple(column_names[name] for name in table.clustered_by))
 
     # A plain CREATE TABLE (no IF NOT EXISTS). CreateTable is only emitted after
     # the reader reports the table absent, but the read and the create are not

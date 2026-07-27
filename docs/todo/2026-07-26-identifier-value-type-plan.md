@@ -1,5 +1,9 @@
 # Identifier Value Type Implementation Plan
 
+> Historical plan. The `Identifier` value type remains current; its references
+> to a resulting-schema planning pass were superseded by the 2026-07-27
+> action-construction simplification recorded in the spelling design document.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the call-site `identifier_key()` convention with an `Identifier` domain value type whose equality and hash are case-insensitive by construction, deleting `identifier_key`, `index_by_identifier`, and `canonical_data_type` and reverting ~84 keyed call sites to plain comparisons.

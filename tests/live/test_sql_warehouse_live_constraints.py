@@ -242,11 +242,11 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     )
 
 
-def test_primary_key_binds_to_the_catalog_column_spelling(live_connection, live_tables):
+def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tables):
     """A primary key declared lowercase compiles with the catalog's camelCase spelling."""
     # The managed-constraint path is case-sensitive about physical column
-    # spelling, unlike ordinary ALTER COLUMN, so the planner binds key
-    # references to the observed spelling. Declared-lowercase against a live
+    # spelling, unlike ordinary ALTER COLUMN, so the key action uses the
+    # observed column name. Declared-lowercase against a live
     # camelCase column is the production shape that surfaced this.
     table_name = live_tables("column_case_add_primary_key")
     execute_sql(
