@@ -1,16 +1,18 @@
 # Preserve column identifier spelling — design
 
 Date: 2026-07-24
-Status: identifier model retained; resulting-schema binding superseded (2026-07-27)
+Status: identifier model retained; binding approaches superseded (2026-07-27)
 Branch: `fix/preserve-column-identifier-case`
 
 > **2026-07-27 simplification:** The identity and spelling rules in this
 > document still apply. The resulting-schema index and planning binding pass
-> described below no longer do. A table binds its column references to the
-> owning `Column.name` at construction. For execution, the diff uses one
-> identity-keyed name map per registered table: desired names first, overlaid
-> by observed names. Existing columns therefore use catalog spelling and new
-> columns use declared spelling. Planning only validates and constructs the
+> described below no longer do, nor does a later table-construction binding
+> step. Public references resolve once to their actual desired `Column.name`
+> during lowering; domain table snapshots never rewrite them. Each diff
+> operation puts the correct spelling directly on the action it returns:
+> observed for existing columns and desired for new or renamed columns.
+> `diff_tables` supplies both parent endpoints for foreign keys, so the engine
+> remains an orchestrator and planning only validates and constructs the
 > `ActionPlan`.
 
 ## Summary
@@ -839,11 +841,11 @@ subclass with case-insensitive `__eq__`/`__ne__`/`__hash__` and preserved
 spelling, wrapped once at each domain constructor. `identifier_key`,
 `index_by_identifier`, and `canonical_data_type` are deleted; the domain
 interior now compares, hashes, and indexes identifiers with plain
-`==`/`in`/dict/set code, and only a handful of boundary-probe sites (a raw
-string probing a domain-keyed collection, or the reverse) still wrap
-explicitly. The identity and spelling-preservation invariants this design
-specifies are unchanged: two spellings differing only in case are still the
-same identifier, and the resulting-schema binding pass under "Binding plans
-to physical names" is unaffected, since it resolves physical *spelling*, not
-identity. See `docs/todo/2026-07-26-identifier-value-type-plan.md` for the
-implementation plan.
+`==`/`in`/dict/set code. Public references are converted at declaration
+lowering rather than repeatedly at lookup sites. The identity and
+spelling-preservation invariants this design specifies are unchanged: two
+spellings differing only in case are still the same identifier. Execution
+spelling is now selected directly by the diff operation that constructs each
+action; there is no resulting-schema or table-construction binding pass. See
+`docs/todo/2026-07-26-identifier-value-type-plan.md` for the original
+identifier implementation plan.

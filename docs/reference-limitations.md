@@ -30,7 +30,8 @@ names differing only in case are the same column, collide as duplicates
 within one schema, and a case-only difference between a declaration and the
 catalog is never drift. A partition, clustering, primary-key, or foreign-key
 reference may use any casing; once attached to a table it uses the referenced
-``Column.name``. Thus ``Column("requestId", ...)`` and
+``Column.name`` when the public declaration is lowered. Thus
+``Column("requestId", ...)`` and
 ``primary_key=["REQUESTID"]`` are accepted, while
 ``DeltaTable.primary_key`` returns ``("requestId",)``.
 

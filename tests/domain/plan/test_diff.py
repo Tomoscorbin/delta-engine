@@ -48,6 +48,7 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     TableMissing,
     diff_table,
+    diff_tables,
 )
 from delta_engine.domain.plan.unresolvable import (
     ColumnRenameConflict,
@@ -94,6 +95,13 @@ def test_missing_table_diffs_to_table_missing_carrying_desired():
     assert isinstance(diff, TableMissing)
     assert diff.desired is desired
     assert diff.actions == (CreateTable(desired),)
+
+
+def test_diff_tables_rejects_duplicate_desired_endpoints():
+    desired = _desired()
+
+    with pytest.raises(ValueError, match="Duplicate desired table"):
+        diff_tables(((desired, None), (desired, None)))
 
 
 def test_missing_table_derives_target_from_desired_table():
@@ -1184,7 +1192,7 @@ def test_case_only_layout_and_key_differences_are_not_drift():
         qualified_name=qualified_name,
         columns=(ObservedColumn("requestid", String(), nullable=False),),
         clustered_by=("requestid",),
-        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="t_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestid",), constraint_name="t_pk"),
     )
 
     diff = diff_table(desired, observed)

@@ -34,6 +34,7 @@ from delta_engine.domain.plan import (
     SetPrimaryKey,
     SetTableTag,
     diff_table,
+    diff_tables,
 )
 
 _NAME = QualifiedName("dev", "silver", "test")
@@ -456,8 +457,8 @@ def test_primary_key_action_uses_the_observed_column_name():
 def test_created_table_uses_its_columns_spelling_for_internal_references():
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="test_pk"),
-        clustered_by=("REQUESTID",),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="test_pk"),
+        clustered_by=("requestId",),
     )
 
     result = plan_diff(diff_table(desired, None))
@@ -484,6 +485,11 @@ def test_foreign_key_action_uses_observed_column_names_on_both_sides():
     )
     child_observed = _observed(columns=(ObservedColumn("orderRef", Integer()),))
     # And a parent whose observed spelling is mixed-case
+    parent_desired = DesiredTable(
+        qualified_name=parent_name,
+        columns=(DesiredColumn("orderid", Integer(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("orderid",), constraint_name="parent_pk"),
+    )
     parent_observed = ObservedTable(
         qualified_name=parent_name,
         columns=(ObservedColumn("OrderId", Integer(), nullable=False),),
@@ -491,14 +497,11 @@ def test_foreign_key_action_uses_observed_column_names_on_both_sides():
     )
 
     # When diffing with the observed parent available and then planning
-    child_diff = diff_table(
-        child_desired,
-        child_observed,
-        {
-            parent_name: {
-                column.name: column.name for column in parent_observed.columns
-            }
-        },
+    child_diff, _ = diff_tables(
+        (
+            (child_desired, child_observed),
+            (parent_desired, parent_observed),
+        )
     )
     result = plan_diff(child_diff)
 
@@ -533,15 +536,14 @@ def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
         columns=(DesiredColumn("ref", Integer()),),
         foreign_keys=(child_constraint,),
     )
-    child_diff = diff_table(
-        child_desired,
-        _observed(columns=(ObservedColumn("ref", Integer()),)),
-        {
-            parent_name: {
-                column.name: column.name
-                for column in (*parent_desired.columns, *parent_observed.columns)
-            }
-        },
+    child_diff, _ = diff_tables(
+        (
+            (
+                child_desired,
+                _observed(columns=(ObservedColumn("ref", Integer()),)),
+            ),
+            (parent_desired, parent_observed),
+        )
     )
 
     # When planning

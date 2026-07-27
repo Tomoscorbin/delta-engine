@@ -1,7 +1,7 @@
 """Domain models for desired and observed table state."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from types import MappingProxyType
 from typing import Final
@@ -19,7 +19,7 @@ from delta_engine.domain.model.table_feature import TableFeature
 
 def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
     """Rules shared by partition and clustering key lists: existing and unique."""
-    missing = [name for name in names if name not in column_names]
+    missing = [name for name in names if str(name) not in column_names]
     if missing:
         raise ValueError(f"{kind} column not found: {', '.join(missing)}")
 
@@ -44,27 +44,33 @@ def _validate_table_structure(
     Columns must be non-empty and unique; partition and clustering columns
     must each exist in ``columns`` and must be unique.
     Primary key and foreign key local columns must each exist in ``columns``.
+    Owned references carry the exact column spelling; the public API resolves
+    user-supplied casing before constructing a domain table.
     Tag keys must not be blank.
     """
     if not columns:
         raise ValueError("Table requires at least one column")
 
     seen_names: set[str] = set()
+    exact_names: set[str] = set()
     for column in columns:
         if column.name in seen_names:
             raise ValueError(f"Duplicate column name: {column.name}")
         seen_names.add(column.name)
+        exact_names.add(str(column.name))
 
-    _validate_key_column_list("Partition", partitioned_by, seen_names)
-    _validate_key_column_list("Clustering", clustered_by, seen_names)
+    _validate_key_column_list("Partition", partitioned_by, exact_names)
+    _validate_key_column_list("Clustering", clustered_by, exact_names)
 
     if primary_key is not None:
-        missing_pk = [name for name in primary_key.columns if name not in seen_names]
+        missing_pk = [name for name in primary_key.columns if str(name) not in exact_names]
         if missing_pk:
             raise ValueError(f"Primary key column not found in columns: {missing_pk[0]}")
 
     for foreign_key in foreign_keys:
-        missing_fk_columns = [name for name in foreign_key.local_columns if name not in seen_names]
+        missing_fk_columns = [
+            name for name in foreign_key.local_columns if str(name) not in exact_names
+        ]
         if missing_fk_columns:
             raise ValueError(
                 f"Foreign key local column not found in columns: {missing_fk_columns[0]}"
@@ -193,8 +199,6 @@ class DesiredTable:
             primary_key=self.primary_key,
             foreign_keys=self.foreign_keys,
         )
-
-        _bind_column_references(self)
 
         if not self.managed_aspects:
             raise ValueError(
@@ -327,50 +331,3 @@ class ObservedTable:
             primary_key=self.primary_key,
             foreign_keys=self.foreign_keys,
         )
-
-        _bind_column_references(self)
-
-
-def _bind_column_references(table: DesiredTable | ObservedTable) -> None:
-    """Replace references to owned columns with the columns' actual identifiers."""
-    column_names = {column.name: column.name for column in table.columns}
-    object.__setattr__(
-        table,
-        "partitioned_by",
-        tuple(column_names[name] for name in table.partitioned_by),
-    )
-    object.__setattr__(
-        table,
-        "clustered_by",
-        tuple(column_names[name] for name in table.clustered_by),
-    )
-    if table.primary_key is not None:
-        object.__setattr__(
-            table,
-            "primary_key",
-            replace(
-                table.primary_key,
-                columns=tuple(column_names[name] for name in table.primary_key.columns),
-            ),
-        )
-    object.__setattr__(
-        table,
-        "foreign_keys",
-        tuple(
-            replace(
-                foreign_key,
-                local_columns=tuple(
-                    column_names[name] for name in foreign_key.local_columns
-                ),
-                referenced_columns=(
-                    tuple(
-                        column_names[name]
-                        for name in foreign_key.referenced_columns
-                    )
-                    if foreign_key.referenced_table == table.qualified_name
-                    else foreign_key.referenced_columns
-                ),
-            )
-            for foreign_key in table.foreign_keys
-        ),
-    )

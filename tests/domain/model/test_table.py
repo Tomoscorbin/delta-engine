@@ -70,10 +70,10 @@ def test_fails_when_partition_references_undefined_column(table_type, column_typ
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_partition_reference_uses_the_column_spelling(table_type, column_type):
+def test_partition_reference_must_use_the_column_spelling(table_type, column_type):
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
-    table = table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
-    assert tuple(str(column) for column in table.partitioned_by) == ("visit_date",)
+    with pytest.raises(ValueError, match="Partition column not found"):
+        table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -150,23 +150,21 @@ def test_desired_table_rejects_nullable_primary_key_column():
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_primary_key_reference_uses_the_column_spelling(table_type, column_type):
-    table = table_type(
-        qualified_name=_QUALIFIED_NAME,
-        columns=(column_type("requestId", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="t_pk"),
-    )
-
-    assert table.primary_key is not None
-    assert tuple(str(column) for column in table.primary_key.columns) == ("requestId",)
+def test_primary_key_reference_must_use_the_column_spelling(table_type, column_type):
+    with pytest.raises(ValueError, match="Primary key column not found"):
+        table_type(
+            qualified_name=_QUALIFIED_NAME,
+            columns=(column_type("requestId", Integer(), nullable=False),),
+            primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="t_pk"),
+        )
 
 
-def test_nullable_primary_key_column_is_rejected_across_casing():
+def test_nullable_primary_key_column_is_rejected():
     with pytest.raises(ValueError, match="NOT NULL"):
         DesiredTable(
             qualified_name=_QUALIFIED_NAME,
             columns=(DesiredColumn("request_id", Integer(), nullable=True),),
-            primary_key=PrimaryKeyConstraint(columns=("REQUEST_ID",), constraint_name="t_pk"),
+            primary_key=PrimaryKeyConstraint(columns=("request_id",), constraint_name="t_pk"),
         )
 
 
@@ -237,27 +235,24 @@ def test_desired_table_stores_foreign_keys():
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_foreign_key_local_reference_uses_the_column_spelling(table_type, column_type):
-    table = table_type(
-        qualified_name=_QUALIFIED_NAME,
-        columns=(column_type("customerId", Integer()),),
-        foreign_keys=(
-            ForeignKeyConstraint(
-                local_columns=("CUSTOMERID",),
-                referenced_table=QualifiedName("dev", "silver", "customers"),
-                referenced_columns=("ID",),
-                constraint_name="orders_customer_id_fk",
+def test_foreign_key_local_reference_must_use_the_column_spelling(table_type, column_type):
+    with pytest.raises(ValueError, match="Foreign key local column not found"):
+        table_type(
+            qualified_name=_QUALIFIED_NAME,
+            columns=(column_type("customerId", Integer()),),
+            foreign_keys=(
+                ForeignKeyConstraint(
+                    local_columns=("CUSTOMERID",),
+                    referenced_table=QualifiedName("dev", "silver", "customers"),
+                    referenced_columns=("ID",),
+                    constraint_name="orders_customer_id_fk",
+                ),
             ),
-        ),
-    )
-
-    assert tuple(str(column) for column in table.foreign_keys[0].local_columns) == (
-        "customerId",
-    )
+        )
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_self_foreign_key_reference_uses_the_column_spelling(table_type, column_type):
+def test_table_does_not_rewrite_foreign_key_references(table_type, column_type):
     table = table_type(
         qualified_name=_QUALIFIED_NAME,
         columns=(
@@ -266,7 +261,7 @@ def test_self_foreign_key_reference_uses_the_column_spelling(table_type, column_
         ),
         foreign_keys=(
             ForeignKeyConstraint(
-                local_columns=("MANAGERID",),
+                local_columns=("managerId",),
                 referenced_table=_QUALIFIED_NAME,
                 referenced_columns=("EMPLOYEEID",),
                 constraint_name="orders_manager_id_fk",
@@ -276,7 +271,7 @@ def test_self_foreign_key_reference_uses_the_column_spelling(table_type, column_
 
     constraint = table.foreign_keys[0]
     assert tuple(str(column) for column in constraint.local_columns) == ("managerId",)
-    assert tuple(str(column) for column in constraint.referenced_columns) == ("employeeId",)
+    assert tuple(str(column) for column in constraint.referenced_columns) == ("EMPLOYEEID",)
 
 
 def test_desired_table_rejects_fk_referencing_unknown_local_column():
@@ -617,10 +612,10 @@ def test_table_rejects_clustering_column_not_in_columns(table_type, column_type)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_clustering_reference_uses_the_column_spelling(table_type, column_type):
+def test_clustering_reference_must_use_the_column_spelling(table_type, column_type):
     columns = (column_type("id", Integer()), column_type("region", String()))
-    table = table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
-    assert tuple(str(column) for column in table.clustered_by) == ("region",)
+    with pytest.raises(ValueError, match="Clustering column not found"):
+        table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE

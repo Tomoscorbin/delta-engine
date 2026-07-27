@@ -699,8 +699,8 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     table = DesiredTable(
         qualified_name=_TARGET,
         columns=(DesiredColumn("requestId", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="tbl_pk"),
-        clustered_by=("REQUESTID",),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+        clustered_by=("requestId",),
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
 

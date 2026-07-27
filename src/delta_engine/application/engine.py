@@ -77,9 +77,10 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import (
     DesiredTable,
+    ObservedTable,
     QualifiedName,
 )
-from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
+from delta_engine.domain.plan import ActionPlan, TableDiff, diff_tables
 
 logger = logging.getLogger(__name__)
 
@@ -287,34 +288,22 @@ class Engine:
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
         """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
-        # A child FK needs the parent's physical names too. Identifier-keyed
-        # dict union selects observed spelling for existing columns and desired
-        # spelling for columns that this sync will create.
-        column_names_by_table: dict[QualifiedName, dict[str, str]] = {}
-        for run in runs:
-            column_names = {
-                column.name: column.name for column in run.desired.columns
-            }
-            if isinstance(run.read, TablePresent):
-                column_names |= {
-                    column.name: column.name for column in run.read.table.columns
-                }
-            column_names_by_table[run.qualified_name] = column_names
-
+        diffable_runs: list[_TableRun] = []
+        endpoints: list[tuple[DesiredTable, ObservedTable | None]] = []
         for run in runs:
             match run.read:
                 case ReadFailure():
                     continue
                 case TablePresent(table=observed):
-                    run.diff = diff_table(
-                        run.desired, observed, column_names_by_table
-                    )
+                    endpoints.append((run.desired, observed))
                 case TableAbsent():
-                    run.diff = diff_table(
-                        run.desired, None, column_names_by_table
-                    )
+                    endpoints.append((run.desired, None))
                 case _ as unreachable:
                     assert_never(unreachable)
+            diffable_runs.append(run)
+
+        for run, diff in zip(diffable_runs, diff_tables(endpoints), strict=True):
+            run.diff = diff
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> None:
         """

@@ -112,7 +112,10 @@ class TableDrift:
 
 
 type TableDiff = TableMissing | TableDrift
-type _ColumnNamesByTable = Mapping[QualifiedName, Mapping[str, str]]
+type _TableEndpoints = Mapping[
+    QualifiedName,
+    tuple[DesiredTable, ObservedTable | None],
+]
 
 
 def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
@@ -127,34 +130,58 @@ def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
 def diff_table(
     desired: DesiredTable,
     observed: ObservedTable | None,
-    column_names_by_table: _ColumnNamesByTable | None = None,
 ) -> TableDiff:
-    """
-    Describe every difference between desired and observed table state.
+    """Describe every difference between one desired and observed table state."""
+    return diff_tables(((desired, observed),))[0]
 
-    ``column_names_by_table`` supplies the physical column names of registered
-    tables so foreign-key actions can address a referenced table. Observed
-    spellings win for existing columns; desired spellings cover new columns.
-    """
-    column_names_by_table = dict(column_names_by_table or {})
-    own_names = {column.name: column.name for column in desired.columns}
-    if observed is not None:
-        own_names |= {column.name: column.name for column in observed.columns}
-    column_names_by_table[desired.qualified_name] = own_names
 
+def diff_tables(
+    endpoints: Iterable[tuple[DesiredTable, ObservedTable | None]],
+) -> tuple[TableDiff, ...]:
+    """
+    Describe every difference across a set of table endpoint pairs.
+
+    Diffing a set gives foreign-key actions both endpoint pairs: an existing
+    referenced column uses its observed spelling, while a new or renamed one
+    uses its desired spelling. Each result corresponds positionally to its
+    input pair.
+    """
+    endpoint_list = tuple(endpoints)
+    endpoints_by_name: dict[
+        QualifiedName,
+        tuple[DesiredTable, ObservedTable | None],
+    ] = {}
+    for desired, observed in endpoint_list:
+        if desired.qualified_name in endpoints_by_name:
+            raise ValueError(f"Duplicate desired table: {desired.qualified_name}")
+        if observed is not None:
+            _require_same_table(desired, observed)
+        endpoints_by_name[desired.qualified_name] = (desired, observed)
+
+    return tuple(
+        _diff_table(desired, observed, endpoints_by_name) for desired, observed in endpoint_list
+    )
+
+
+def _diff_table(
+    desired: DesiredTable,
+    observed: ObservedTable | None,
+    endpoints: _TableEndpoints,
+) -> TableDiff:
+    """Describe one endpoint pair with the registered tables as FK context."""
     if observed is None:
         return TableMissing(
             desired=desired,
-            actions=_actions_for_missing_table(desired, column_names_by_table),
+            actions=_actions_for_missing_table(desired, endpoints),
         )
 
-    return _diff_existing_table(desired, observed, column_names_by_table)
+    return _diff_existing_table(desired, observed, endpoints)
 
 
 def _diff_existing_table(
     desired: DesiredTable,
     observed: ObservedTable,
-    column_names_by_table: _ColumnNamesByTable,
+    endpoints: _TableEndpoints,
 ) -> TableDrift:
     """Describe every difference between two states of the same existing table."""
     _require_same_table(desired, observed)
@@ -166,13 +193,11 @@ def _diff_existing_table(
         observed.supported_features,
     )
     column_actions = _diff_columns(desired.columns, renames.columns)
-    own_names = column_names_by_table[desired.qualified_name]
-    layout_actions, layout_unresolvable = _diff_layout(desired, renames, own_names)
+    layout_actions, layout_unresolvable = _diff_layout(desired, renames)
     constraint_actions = _diff_constraints(
         desired,
         observed,
-        own_names,
-        column_names_by_table,
+        endpoints,
     )
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
@@ -227,7 +252,7 @@ def _walk_data_type(data_type: DataType) -> Iterable[DataType]:
 
 def _actions_for_missing_table(
     desired: DesiredTable,
-    column_names_by_table: _ColumnNamesByTable,
+    endpoints: _TableEndpoints,
 ) -> tuple[Action, ...]:
     """
     Return every action needed to realize a missing table.
@@ -249,20 +274,7 @@ def _actions_for_missing_table(
         for column in desired.columns
         for name, value in column.tags.items()
     )
-    foreign_key_actions = tuple(
-        SetForeignKey(
-            constraint=replace(
-                constraint,
-                referenced_columns=tuple(
-                    column_names_by_table.get(constraint.referenced_table, {}).get(
-                        name, name
-                    )
-                    for name in constraint.referenced_columns
-                ),
-            )
-        )
-        for constraint in desired.foreign_keys
-    )
+    foreign_key_actions = _diff_foreign_keys(desired, None, endpoints)
     return (
         CreateTable(desired),
         *table_tag_actions,
@@ -472,14 +484,16 @@ def _diff_column_tags(
 def _diff_layout(
     desired: DesiredTable,
     observed: _RenameResolution,
-    own_names: Mapping[str, str],
 ) -> tuple[tuple[AlterClustering, ...], tuple[PartitioningChanged, ...]]:
     """Return resolvable and unresolvable physical-layout differences."""
     actions: tuple[AlterClustering, ...] = ()
     if set(desired.clustered_by) != set(observed.clustered_by):
+        observed_names = {column.name: column.name for column in observed.columns}
         actions = (
             AlterClustering(
-                desired_clustering=tuple(own_names[name] for name in desired.clustered_by),
+                desired_clustering=tuple(
+                    observed_names.get(name, name) for name in desired.clustered_by
+                ),
                 observed_clustering=observed.clustered_by,
             ),
         )
@@ -499,8 +513,7 @@ def _diff_layout(
 def _diff_constraints(
     desired: DesiredTable,
     observed: ObservedTable,
-    own_names: Mapping[str, str],
-    column_names_by_table: _ColumnNamesByTable,
+    endpoints: _TableEndpoints,
 ) -> tuple[DropPrimaryKey | SetPrimaryKey | SetForeignKey | DropForeignKey, ...]:
     """
     Return primary- and foreign-key actions against raw observed names.
@@ -510,15 +523,14 @@ def _diff_constraints(
     name frame used by columns and physical layout.
     """
     return (
-        *_diff_primary_key(desired, observed, own_names),
-        *_diff_foreign_keys(desired, observed, own_names, column_names_by_table),
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed, endpoints),
     )
 
 
 def _diff_primary_key(
     desired: DesiredTable,
     observed: ObservedTable,
-    own_names: Mapping[str, str],
 ) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
     """
     Return primary-key actions; a changed key becomes a drop and a set.
@@ -544,11 +556,12 @@ def _diff_primary_key(
             )
         )
     if desired_key is not None:
+        observed_names = {column.name: column.name for column in observed.columns}
         actions.append(
             SetPrimaryKey(
                 primary_key=replace(
                     desired_key,
-                    columns=tuple(own_names[name] for name in desired_key.columns),
+                    columns=tuple(observed_names.get(name, name) for name in desired_key.columns),
                 )
             )
         )
@@ -557,25 +570,37 @@ def _diff_primary_key(
 
 def _diff_foreign_keys(
     desired: DesiredTable,
-    observed: ObservedTable,
-    own_names: Mapping[str, str],
-    column_names_by_table: _ColumnNamesByTable,
+    observed: ObservedTable | None,
+    endpoints: _TableEndpoints,
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
     """Return foreign-key actions matched by content signature."""
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+    observed_by_signature = (
+        {fk.signature: fk for fk in observed.foreign_keys} if observed is not None else {}
+    )
+    local_names = (
+        {column.name: column.name for column in observed.columns} if observed is not None else {}
+    )
     actions: list[SetForeignKey | DropForeignKey] = []
     for signature, constraint in desired_by_signature.items():
         if signature not in observed_by_signature:
-            referenced_names = column_names_by_table.get(
-                constraint.referenced_table, {}
-            )
+            referenced_names: dict[str, str] = {}
+            referenced_endpoints = endpoints.get(constraint.referenced_table)
+            if referenced_endpoints is not None:
+                referenced_desired, referenced_observed = referenced_endpoints
+                referenced_names = {
+                    column.name: column.name for column in referenced_desired.columns
+                }
+                if referenced_observed is not None:
+                    referenced_names |= {
+                        column.name: column.name for column in referenced_observed.columns
+                    }
             actions.append(
                 SetForeignKey(
                     constraint=replace(
                         constraint,
                         local_columns=tuple(
-                            own_names[name] for name in constraint.local_columns
+                            local_names.get(name, name) for name in constraint.local_columns
                         ),
                         referenced_columns=tuple(
                             referenced_names.get(name, name)

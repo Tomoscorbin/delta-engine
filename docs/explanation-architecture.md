@@ -816,18 +816,17 @@ dependency cost.
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
   subclass with case-insensitive equality and hash — at domain construction, so
   the domain interior compares, hashes, and indexes identifiers with plain
-  `==`/`in`/dict/set code. Boundary code — the public API's declaration
-  validation and the catalog adapters — that probes a domain-keyed collection
-  with a raw string that never passed a domain constructor (or the reverse)
-  wraps the raw side in `Identifier(...)` first.
-- Treat columns as the owners of identifier spelling. When a table is
-  constructed, its partition, clustering, primary-key, and locally owned
-  foreign-key references are replaced with the matching `Column.name`; input
-  casing is lookup syntax, not separate model state.
-- Give executable actions the physical identifier through one identity-keyed
-  name map per registered table. Desired columns establish the names that a
-  sync will create, then observed columns override matched entries with catalog
-  spelling. Planning only validates and orders the resulting actions.
+  `==`/`in`/dict/set code. Public column references are converted once at
+  declaration lowering rather than repeatedly at lookup sites.
+- Treat columns as the owners of identifier spelling. Public partition,
+  clustering, primary-key, and foreign-key references resolve to their actual
+  desired `Column.name` while lowering; domain table snapshots require local
+  references to carry that spelling and never rewrite their contents.
+- Let each diff operation put the executable spelling directly on its action:
+  observed for an existing physical column, desired for an addition or rename
+  target. Batch table diffing gives foreign-key actions the parent endpoint too,
+  without making the application engine maintain column-name state. Planning
+  only validates and orders the resulting actions.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

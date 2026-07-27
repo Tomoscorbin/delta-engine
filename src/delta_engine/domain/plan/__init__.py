@@ -28,6 +28,7 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     TableMissing,
     diff_table,
+    diff_tables,
 )
 from delta_engine.domain.plan.unresolvable import (
     ColumnRenameConflict,
@@ -68,4 +69,5 @@ __all__ = [
     "UnsetProperty",
     "UnsetTableTag",
     "diff_table",
+    "diff_tables",
 ]
