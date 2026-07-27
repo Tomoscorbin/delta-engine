@@ -92,7 +92,7 @@ def _struct_type(struct_type: T.StructType) -> DataType:
     for field in struct_type.fields:
         data_type = _data_type(field.dataType)
         if data_type is not None:
-            fields.append(StructField(field.name.casefold(), data_type))
+            fields.append(StructField(field.name, data_type))
     return Struct(tuple(fields))
 
 
@@ -105,7 +105,7 @@ def _observed_columns(struct: T.StructType) -> tuple[ObservedColumn, ...]:
             continue
         columns.append(
             ObservedColumn(
-                name=field.name.casefold(),
+                name=field.name,
                 data_type=data_type,
                 nullable=field.nullable,
                 comment=field.metadata.get("comment") or "",

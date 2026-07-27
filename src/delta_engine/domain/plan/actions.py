@@ -12,6 +12,7 @@ from delta_engine.domain.model import (
     DesiredTable,
     ForeignKeyConstraint,
     ForeignKeyReference,
+    Identifier,
     ObservedColumn,
     PrimaryKeyConstraint,
     QualifiedName,
@@ -151,6 +152,8 @@ class RenameColumn(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.RENAME_COLUMN
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "old_name", Identifier(self.old_name))
+        object.__setattr__(self, "new_name", Identifier(self.new_name))
         if self.old_name == self.new_name:
             raise ValueError(f"RenameColumn carries no difference: {self.old_name!r}")
 
@@ -240,6 +243,7 @@ class SetColumnComment(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_COMMENT
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "column_name", Identifier(self.column_name))
         if self.desired_comment == self.observed_comment:
             raise ValueError(f"SetColumnComment carries no difference: {self.desired_comment!r}")
 
@@ -261,6 +265,7 @@ class SetColumnTag(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_TAG
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "column_name", Identifier(self.column_name))
         if self.desired_value == self.observed_value:
             raise ValueError(f"SetColumnTag carries no difference: {self.desired_value!r}")
 
@@ -278,6 +283,9 @@ class UnsetColumnTag(Action):
 
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_TAGS
     phase: ClassVar[ActionPhase] = ActionPhase.UNSET_COLUMN_TAG
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "column_name", Identifier(self.column_name))
 
     @property
     def subject(self) -> str:
@@ -315,6 +323,7 @@ class SetColumnNullability(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_NULLABILITY
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "column_name", Identifier(self.column_name))
         if self.desired_nullable == self.observed_nullable:
             raise ValueError(
                 f"SetColumnNullability carries no difference: {self.desired_nullable!r}"
@@ -393,6 +402,12 @@ class AlterClustering(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "desired_clustering", tuple(Identifier(n) for n in self.desired_clustering)
+        )
+        object.__setattr__(
+            self, "observed_clustering", tuple(Identifier(n) for n in self.observed_clustering)
+        )
         if set(self.desired_clustering) == set(self.observed_clustering):
             raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
 
@@ -413,6 +428,7 @@ class AlterColumnType(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.ALTER_COLUMN_TYPE
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "column_name", Identifier(self.column_name))
         if self.desired_type == self.observed_type:
             raise ValueError(f"AlterColumnType carries no difference: {self.desired_type!r}")
 
@@ -421,9 +437,9 @@ class AlterColumnType(Action):
         return self.column_name
 
 
-def _execution_order(action: Action) -> tuple[int, str]:
-    """Deterministic ordering key for an action: execution phase, then subject name."""
-    return (action.phase, action.subject)
+def _execution_order(action: Action) -> tuple[int, str, str]:
+    """Deterministic ordering key: phase, lowercased subject, then exact subject."""
+    return (action.phase, action.subject.lower(), action.subject)
 
 
 @dataclass(frozen=True, slots=True)

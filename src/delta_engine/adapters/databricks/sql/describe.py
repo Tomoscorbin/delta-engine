@@ -160,8 +160,8 @@ def _string_list(document: dict, key: str, qualified_name: QualifiedName) -> tup
 
     Absent or null means no such layout. A present value of any other shape is
     drift, not "no layout", so it fails the read rather than silently reading as
-    an empty layout. Values carry the catalog's spelling; the domain table
-    canonicalizes them on construction.
+    an empty layout. Values carry the catalog's spelling, which the domain
+    table preserves.
     """
     value = document.get(key)
     if value is None:

@@ -1,7 +1,7 @@
 from hypothesis import given, strategies as st
 import pytest
 
-import delta_engine.application.engine as engine_module
+from delta_engine.adapters.databricks.sql.compile import compile_plan
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
@@ -540,22 +540,9 @@ def test_real_run_records_dry_run_false():
 # ---------------------------------------------------------------------------
 
 
-def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_all_reads_complete_before_execution_and_a_read_failure_blocks_only_its_table():
     # Given three tables where the middle read fails
     events: list[str] = []
-
-    # This intentionally observes private phase order. Compiling accepted plans
-    # before resolution keeps the compiler independent of resolution failures
-    # while preserving SQL previews for plans that dependency checks later block.
-    original_resolve = engine_module.resolve
-
-    def recording_resolve(*args, **kwargs):
-        events.append("resolve")
-        return original_resolve(*args, **kwargs)
-
-    monkeypatch.setattr(engine_module, "resolve", recording_resolve)
 
     class _EventRecordingReader:
         def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
@@ -566,7 +553,6 @@ def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
 
     class _EventRecordingExecutor:
         def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-            events.append(f"compile:{plan.target}")
             # The name is embedded so execute can recover the target table.
             return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
 
@@ -586,18 +572,12 @@ def test_phase_chain_reads_compiles_resolves_then_executes_all_eligible_tables(
             _spec("c.s.c"),
         )
 
-    # Then every read is attempted before execution starts
-    assert events[:3] == [
+    # Then every read happens before any execution starts — plans derive from
+    # a complete catalog snapshot — and only the readable tables execute
+    assert events == [
         "read:c.s.a",
         "read:c.s.b",
         "read:c.s.c",
-    ]
-    assert events[3:5] == [
-        "compile:c.s.a",
-        "compile:c.s.c",
-    ]
-    assert events[5] == "resolve"
-    assert events[6:] == [
         "execute:c.s.a",
         "execute:c.s.c",
     ]
@@ -636,7 +616,7 @@ def test_read_failure_is_reported_once_and_has_no_plan_or_execution():
     assert table_report.execution is None
     assert executor.executed_names == []
 
-    assert str(exc_info.value).count("Read error: IOError - cannot read") == 1
+    assert str(exc_info.value).count("cannot read") == 1
 
 
 def test_unexpected_reader_exception_propagates():
@@ -955,7 +935,7 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
     executor = _RecordingExecutor(
         [
             _execution_error(),  # customers
-            None,  # orders should not be reached after the engine fix
+            None,  # orders must not be reached
         ]
     )
     engine = Engine(reader=reader, executor=executor)
@@ -983,6 +963,10 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
     assert customers.execution is not None
     assert orders.execution is None
     assert executor.executed_names == ["cat.sch.customers"]
+
+    # The blocked plan keeps its SQL preview: compilation happened before
+    # resolution blocked execution
+    assert orders.planned_sql_statements != ()
 
     _assert_has_fk_failure(
         orders,
@@ -1378,7 +1362,7 @@ def test_metadata_scoped_sync_fails_when_table_is_missing():
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert table_report.execution is None
     assert executor.executed_names == []
-    assert any("does not exist" in failure.message for failure in table_report.failures)
+    assert any(failure.rule_name == "MissingTableUnmanaged" for failure in table_report.failures)
 
 
 def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
@@ -1405,6 +1389,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
     # Then it fails at validation, naming the property to declare
     table_report = excinfo.value.report.table_reports[0]
     assert table_report.status is TableRunStatus.PLANNING_FAILED
+    assert any(f.rule_name == "ColumnMappingRequiredForDrop" for f in table_report.failures)
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
@@ -1426,11 +1411,14 @@ def test_sync_fails_loud_on_undeclared_managed_property():
     engine = Engine(reader=reader, executor=_RecordingExecutor(per_table_errors=[]))
     spec = DeltaTable(catalog, schema, name, columns=(Column("id", String()),))
 
-    # When / Then the sync stops at validation naming the key
+    # When syncing
     with pytest.raises(SyncFailedError) as excinfo:
         engine.sync(spec)
+
+    # Then the sync stops at validation, naming the key to declare
     table_report = excinfo.value.report.table_reports[0]
     assert table_report.status is TableRunStatus.PLANNING_FAILED
+    assert any(f.rule_name == "PropertyMustBeDeclared" for f in table_report.failures)
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
@@ -1501,4 +1489,50 @@ def test_created_tables_compile_as_ordinary_tables():
     assert table_report.planned_sql_statements != ()
     assert all(
         f"AS TABLE FOR {fqn}" in statement for statement in table_report.planned_sql_statements
+    )
+
+
+def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
+    class _SqlRecordingExecutor:
+        def __init__(self) -> None:
+            self.executed_statements: list[str] = []
+
+        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+            return compile_plan(plan)
+
+        def execute(self, statement: str) -> None:
+            self.executed_statements.append(statement)
+
+    # Given a live table whose physical column spelling differs from the declaration
+    fqn = "c.s.mixed_case"
+    catalog, schema, table_name = _split_fqn(fqn)
+    observed = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, table_name),
+            columns=(ObservedColumn("requestId", String(), nullable=False),),
+        )
+    )
+    spec = DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
+    )
+
+    # When syncing the same declaration as a dry run and then for real
+    dry_report = Engine(
+        reader=_RecordingReader({fqn: observed}),
+        executor=_SqlRecordingExecutor(),
+    ).sync(spec, dry_run=True)
+
+    executor = _SqlRecordingExecutor()
+    Engine(reader=_RecordingReader({fqn: observed}), executor=executor).sync(spec)
+
+    # Then the executed SQL is byte-for-byte the planned SQL, with the
+    # primary key bound to the physical spelling
+    [table_report] = list(dry_report)
+    assert tuple(executor.executed_statements) == table_report.planned_sql_statements
+    assert any(
+        "PRIMARY KEY (`requestId`)" in statement for statement in executor.executed_statements
     )

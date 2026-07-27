@@ -75,6 +75,7 @@ def _read_error(responses) -> ReadError:
 
 
 def test_tags_and_inbound_fks_attached():
+    # Given info-schema responses carrying tags and an inbound foreign key
     responses = _describe_responses(
         **{
             table_tags_query(QN): [SimpleNamespace(tag_name="Owner", tag_value="Data")],
@@ -94,6 +95,7 @@ def test_tags_and_inbound_fks_attached():
 
     state = read_catalog_state(_router(responses), QN)
 
+    # Then all three attach to the observed table
     assert isinstance(state, TablePresent)
     observed = state.table
     assert dict(observed.tags) == {"Owner": "Data"}
@@ -104,6 +106,7 @@ def test_tags_and_inbound_fks_attached():
 
 
 def test_primary_and_foreign_keys_attached_from_info_schema():
+    # Given info-schema rows for a primary key and a foreign key
     responses = _describe_responses(
         **{
             primary_key_query(QN): [SimpleNamespace(constraint_name="tbl_pk", column_name="id")],
@@ -122,6 +125,7 @@ def test_primary_and_foreign_keys_attached_from_info_schema():
 
     state = read_catalog_state(_router(responses), QN)
 
+    # Then both constraints attach as value objects
     assert isinstance(state, TablePresent)
     observed = state.table
     assert observed.primary_key == PrimaryKeyConstraint(columns=("id",), constraint_name="tbl_pk")
@@ -136,6 +140,7 @@ def test_primary_and_foreign_keys_attached_from_info_schema():
 
 
 def test_all_description_fields_pass_through():
+    # Given a describe document with every field populated
     doc = _describe_doc(
         columns=[
             {"name": "id", "type": {"name": "int"}, "nullable": False},
@@ -196,14 +201,46 @@ def test_read_catalog_state_describes_first_then_reads_info_schema():
 
     read_catalog_state(run_query, QN)
 
-    assert calls == [
-        describe_json_query(QN),
+    # The describe must come first — it decides the relation is readable at
+    # all. The info-schema attachment queries carry no ordering guarantee.
+    assert calls[0] == describe_json_query(QN)
+    assert set(calls[1:]) == {
         column_tags_query(QN),
         table_tags_query(QN),
         primary_key_query(QN),
         foreign_keys_query(QN),
         referencing_foreign_keys_query(QN),
-    ]
+    }
+
+
+def test_tags_attach_by_identity_without_rewriting_the_observed_name():
+    responses = _describe_responses(
+        **{
+            describe_json_query(QN): [
+                (
+                    _describe_doc(
+                        columns=[
+                            {
+                                "name": "requestId",
+                                "type": {"name": "string"},
+                                "nullable": True,
+                            }
+                        ]
+                    ),
+                )
+            ],
+            column_tags_query(QN): [
+                SimpleNamespace(column_name="requestid", tag_name="pii", tag_value="low"),
+            ],
+        }
+    )
+
+    state = read_catalog_state(_router(responses), QN)
+
+    assert isinstance(state, TablePresent)
+    [column] = state.table.columns
+    assert str(column.name) == "requestId"
+    assert dict(column.tags) == {"pii": "low"}
 
 
 def test_missing_table_in_an_existing_schema_reads_as_absent():
@@ -243,13 +280,13 @@ def test_missing_table_in_an_unreadable_catalog_reads_as_failed_not_absent():
     _read_error(responses)
 
 
-def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent():
+@pytest.mark.parametrize("condition", ["SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"])
+def test_missing_schema_or_catalog_on_describe_reads_as_failed_not_absent(condition):
     # Where the backend does name the missing container on the describe, that
     # is not a creatable absence either.
-    for condition in ("SCHEMA_NOT_FOUND", "CATALOG_NOT_FOUND"):
-        responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
+    responses = {describe_json_query(QN): RuntimeError(f"[{condition}] nope")}
 
-        _read_error(responses)
+    _read_error(responses)
 
 
 def test_other_describe_error_reads_as_failed():
@@ -286,39 +323,39 @@ def test_an_external_delta_table_reads_as_present():
     assert isinstance(read_catalog_state(_router(responses), QN), TablePresent)
 
 
-def test_relation_kinds_the_engine_does_not_manage_read_as_failed():
+@pytest.mark.parametrize("kind", ["VIEW", "MATERIALIZED_VIEW", "FOREIGN", "FUTURE_KIND"])
+def test_relation_kinds_the_engine_does_not_manage_read_as_failed(kind):
     # The engine reads ordinary tables and streaming tables. Every other
     # relation kind fails the read — materialized views deliberately
     # included, and kinds Databricks adds in the future — rather than being
     # diffed and planned against as though it were a table.
-    for kind in ("VIEW", "MATERIALIZED_VIEW", "FOREIGN", "FUTURE_KIND"):
-        doc = _describe_doc(type=kind)
-        responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
+    doc = _describe_doc(type=kind)
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-        error = _read_error(responses)
+    error = _read_error(responses)
 
-        assert error.exception_type == "UnsupportedRelationError"
-
-
-def test_non_delta_formats_read_as_failed():
-    for provider in ("iceberg", "parquet", "csv"):
-        doc = _describe_doc(provider=provider)
-        responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
-
-        error = _read_error(responses)
-
-        assert error.exception_type == "UnsupportedRelationError"
+    assert error.exception_type == "UnsupportedRelationError"
 
 
-def test_document_without_relation_kind_or_provider_reads_as_failed():
-    for missing in ("type", "provider"):
-        doc = json.loads(_describe_doc())
-        doc.pop(missing)
-        responses = _describe_responses(**{describe_json_query(QN): [(json.dumps(doc),)]})
+@pytest.mark.parametrize("provider", ["iceberg", "parquet", "csv"])
+def test_non_delta_formats_read_as_failed(provider):
+    doc = _describe_doc(provider=provider)
+    responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-        error = _read_error(responses)
+    error = _read_error(responses)
 
-        assert error.exception_type == "UnsupportedRelationError"
+    assert error.exception_type == "UnsupportedRelationError"
+
+
+@pytest.mark.parametrize("missing", ["type", "provider"])
+def test_document_without_relation_kind_or_provider_reads_as_failed(missing):
+    doc = json.loads(_describe_doc())
+    doc.pop(missing)
+    responses = _describe_responses(**{describe_json_query(QN): [(json.dumps(doc),)]})
+
+    error = _read_error(responses)
+
+    assert error.exception_type == "UnsupportedRelationError"
 
 
 def test_rejection_names_the_found_relation_and_the_supported_kinds():
@@ -329,7 +366,8 @@ def test_rejection_names_the_found_relation_and_the_supported_kinds():
     # The admitted set is derived from the admit mapping, so the message
     # names every supported relation type and provider without going stale.
     assert "MATERIALIZED_VIEW" in str(error)
-    assert "EXTERNAL, MANAGED, STREAMING_TABLE" in str(error)
+    for kind in ("EXTERNAL", "MANAGED", "STREAMING_TABLE"):
+        assert kind in str(error)
     assert "delta" in str(error)
 
 

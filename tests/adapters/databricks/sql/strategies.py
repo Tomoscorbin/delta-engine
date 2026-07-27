@@ -187,17 +187,19 @@ def _struct_documents(
     children: st.SearchStrategy[TypeDocument],
 ) -> TypeDocument:
     fields = draw(st.dictionaries(CANONICAL_IDENTIFIERS, children, min_size=1, max_size=3))
-    data_type = Struct(
-        tuple(StructField(name, field_type) for name, (field_type, _) in fields.items())
-    )
-    document_fields: list[dict[str, object]] = [
-        {
-            "name": draw(st.sampled_from((name, name.upper()))),
-            "type": field_document,
-            "nullable": True,
-        }
-        for name, (_, field_document) in fields.items()
-    ]
+    expected_fields: list[StructField] = []
+    document_fields: list[dict[str, object]] = []
+    for name, (field_type, field_document) in fields.items():
+        raw_name = draw(st.sampled_from((name, name.upper())))
+        expected_fields.append(StructField(raw_name, field_type))
+        document_fields.append(
+            {
+                "name": raw_name,
+                "type": field_document,
+                "nullable": True,
+            }
+        )
+    data_type = Struct(tuple(expected_fields))
     return data_type, {"name": "struct", "fields": document_fields}
 
 

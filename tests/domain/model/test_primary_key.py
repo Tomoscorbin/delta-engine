@@ -1,5 +1,6 @@
 import pytest
 
+from delta_engine.domain.model import key_signature
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 
 
@@ -21,15 +22,20 @@ def test_rejects_blank_explicit_constraint_name():
         PrimaryKeyConstraint(columns=("id",), constraint_name="  ")
 
 
-def test_equal_by_value():
-    # Given two primary keys with the same columns and name
-    # Then they compare equal (frozen value object)
-    assert PrimaryKeyConstraint(columns=("a", "b"), constraint_name="t_pk") == PrimaryKeyConstraint(
-        columns=("a", "b"), constraint_name="t_pk"
-    )
-
-
-def test_mixed_case_columns_and_name_normalize_to_lowercase():
+def test_mixed_case_columns_and_name_are_preserved():
     pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
-    assert pk.columns == ("orderid",)
-    assert pk.constraint_name == "orders_pk"
+    assert tuple(str(column) for column in pk.columns) == ("OrderId",)
+    assert str(pk.constraint_name) == "Orders_PK"
+
+
+def test_signature_is_identical_across_declaration_casing():
+    camel = PrimaryKeyConstraint(columns=("RequestId",), constraint_name="t_pk")
+    lower = PrimaryKeyConstraint(columns=("requestid",), constraint_name="t_pk")
+
+    assert camel.signature == lower.signature
+    assert key_signature(("RequestId",)) == key_signature(("requestid",))
+
+
+def test_rejects_columns_differing_only_by_case_as_duplicates():
+    with pytest.raises(ValueError, match=r"[Dd]uplicate"):
+        PrimaryKeyConstraint(columns=("id", "ID"), constraint_name="t_pk")

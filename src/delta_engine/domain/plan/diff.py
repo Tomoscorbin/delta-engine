@@ -242,40 +242,41 @@ class _RenameResolution:
 
 def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameResolution:
     """Resolve applicable rename hints and project rename-preserved observed state."""
-    declared_renames = {
-        column.renamed_from: column.name
-        for column in desired.columns
-        if column.renamed_from is not None
+    rename_targets_by_source = {
+        column.renamed_from: column for column in desired.columns if column.renamed_from is not None
     }
-    observed_names = {column.name for column in observed.columns}
-    applied_renames: dict[str, str] = {}
+    observed_by_name = {column.name: column for column in observed.columns}
+    new_names_by_old: dict[str, str] = {}
     conflicted_sources: set[str] = set()
     actions: list[RenameColumn] = []
     conflicts: list[ColumnRenameConflict] = []
 
-    for old_name, new_name in declared_renames.items():
-        if old_name not in observed_names:
+    for old_name, target in rename_targets_by_source.items():
+        observed_column = observed_by_name.get(old_name)
+        if observed_column is None:
             continue
 
-        if new_name in observed_names:
+        if target.name in observed_by_name:
             conflicted_sources.add(old_name)
-            conflicts.append(ColumnRenameConflict(old_name=old_name, new_name=new_name))
+            conflicts.append(
+                ColumnRenameConflict(old_name=observed_column.name, new_name=target.name)
+            )
             continue
 
-        applied_renames[old_name] = new_name
-        actions.append(RenameColumn(old_name=old_name, new_name=new_name))
+        new_names_by_old[old_name] = target.name
+        actions.append(RenameColumn(old_name=observed_column.name, new_name=target.name))
 
     projected_columns = tuple(
-        replace(column, name=applied_renames[column.name])
-        if column.name in applied_renames
+        replace(column, name=new_names_by_old[column.name])
+        if column.name in new_names_by_old
         else column
         for column in observed.columns
         if column.name not in conflicted_sources
     )
     return _RenameResolution(
         columns=projected_columns,
-        partitioned_by=_project_names(observed.partitioned_by, applied_renames),
-        clustered_by=_project_names(observed.clustered_by, applied_renames),
+        partitioned_by=_project_names(observed.partitioned_by, new_names_by_old),
+        clustered_by=_project_names(observed.clustered_by, new_names_by_old),
         actions=tuple(actions),
         conflicts=tuple(conflicts),
     )
@@ -369,7 +370,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     if desired.data_type != observed.data_type:
         actions.append(
             AlterColumnType(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_type=desired.data_type,
                 observed_type=observed.data_type,
             )
@@ -377,7 +378,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     if desired.nullable != observed.nullable:
         actions.append(
             SetColumnNullability(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_nullable=desired.nullable,
                 observed_nullable=observed.nullable,
             )
@@ -385,7 +386,7 @@ def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> t
     if desired.comment != observed.comment:
         actions.append(
             SetColumnComment(
-                column_name=desired.name,
+                column_name=observed.name,
                 desired_comment=desired.comment,
                 observed_comment=observed.comment,
             )
@@ -405,7 +406,7 @@ def _diff_column_tags(
         if observed_value != desired_value:
             actions.append(
                 SetColumnTag(
-                    column_name=desired.name,
+                    column_name=observed.name,
                     name=name,
                     desired_value=desired_value,
                     observed_value=observed_value,
@@ -413,7 +414,7 @@ def _diff_column_tags(
             )
 
     actions.extend(
-        UnsetColumnTag(column_name=desired.name, name=name)
+        UnsetColumnTag(column_name=observed.name, name=name)
         for name in observed.tags
         if name not in desired.tags
     )

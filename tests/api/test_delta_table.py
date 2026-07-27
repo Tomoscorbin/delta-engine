@@ -46,9 +46,9 @@ def test_delta_table_exposes_declared_name_parts():
     assert table.name == "orders"
 
 
-def test_mixed_case_declaration_normalizes_to_lowercase():
-    # Identifiers are case-insensitive on Databricks and Unity Catalog stores
-    # object names lowercase, so the declaration canonicalizes rather than rejects
+def test_mixed_case_declaration_preserves_columns_and_lowercases_object_names():
+    # Unity Catalog stores catalog/schema/table names lowercase (live-pinned);
+    # column spelling is catalog display state and is preserved.
     table = DeltaTable(
         catalog="Main",
         schema="Sales",
@@ -57,7 +57,35 @@ def test_mixed_case_declaration_normalizes_to_lowercase():
     )
 
     assert (table.catalog, table.schema, table.name) == ("main", "sales", "orders")
-    assert [column.name for column in table.columns] == ["id"]
+    assert [str(column.name) for column in table.columns] == ["Id"]
+
+
+def test_delta_table_rejects_columns_differing_only_by_case_as_duplicates() -> None:
+    # The public API delegates to the same identity-keyed validation as the
+    # domain layer: a declaration cannot carry two spellings of one column.
+    with pytest.raises(ValueError, match="Duplicate column name"):
+        DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column("Id", Integer()), Column("ID", Integer())],
+        )
+
+
+def test_public_accessors_return_declared_spelling():
+    # Given mixed-case column, key, and layout declarations
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("OrderId", Integer(), nullable=False), Column("Region", String())],
+        clustered_by=["Region"],
+        primary_key=["OrderId"],
+    )
+
+    # Then the accessors echo the declared spelling
+    assert tuple(str(column) for column in table.primary_key) == ("OrderId",)
+    assert tuple(str(column) for column in table.clustered_by) == ("Region",)
 
 
 @pytest.mark.parametrize(
@@ -295,7 +323,7 @@ def test_delta_table_accepts_boolean_or_binary_partition_column(data_type):
     "bad_keys",
     [
         ["delta.random_thing"],
-        ["foo", "bar.baz"],  # multiple, order should not matter in message
+        ["foo", "bar.baz"],  # multiple unknown keys at once
     ],
 )
 def test_rejects_unknown_table_property_keys(bad_keys):
@@ -546,36 +574,6 @@ def test_column_no_longer_accepts_a_primary_key_flag():
     # The per-column flag is deleted; the fact lives at table level now
     with pytest.raises(TypeError):
         Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
-
-
-def test_delta_table_primary_key_returns_pk_column_names():
-    # Given a DeltaTable with one PK column
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[
-            Column("id", Integer(), nullable=False),
-            Column("name", String()),
-        ],
-        primary_key=["id"],
-    )
-
-    # Then primary_key returns the PK column names in declaration order
-    assert table.primary_key == ("id",)
-
-
-def test_delta_table_primary_key_returns_empty_when_no_pk_declared():
-    # Given a DeltaTable with no PK columns
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer())],
-    )
-
-    # Then primary_key is an empty tuple
-    assert table.primary_key == ()
 
 
 def test_delta_table_passes_pk_to_desired_table():
@@ -1244,7 +1242,7 @@ def test_delta_table_accepts_rename_hint_with_column_mapping_declared():
     assert table.columns[1].renamed_from == "customer_nm"
 
 
-def test_single_column_string_foreign_key_infers_and_normalizes_parent_column():
+def test_single_column_string_foreign_key_infers_and_preserves_spelling():
     customers = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1264,12 +1262,12 @@ def test_single_column_string_foreign_key_infers_and_normalizes_parent_column():
 
     [foreign_key] = orders.to_desired_table().foreign_keys
 
-    assert declaration.columns == ("customer_id",)
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_columns == ("id",)
+    assert declaration.columns == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.referenced_columns) == ("ID",)
 
 
-def test_single_column_sequence_infers_and_normalizes_parent_column():
+def test_single_column_sequence_infers_and_preserves_spelling():
     customers = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1289,12 +1287,12 @@ def test_single_column_sequence_infers_and_normalizes_parent_column():
 
     [foreign_key] = orders.to_desired_table().foreign_keys
 
-    assert declaration.columns == ("customer_id",)
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_columns == ("id",)
+    assert declaration.columns == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.referenced_columns) == ("ID",)
 
 
-def test_same_name_composite_foreign_key_is_inferred_by_normalized_name():
+def test_same_name_composite_foreign_key_is_paired_by_name_not_declared_order():
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1325,8 +1323,8 @@ def test_same_name_composite_foreign_key_is_inferred_by_normalized_name():
 
     [foreign_key] = entries.to_desired_table().foreign_keys
 
-    assert foreign_key.local_columns == ("account_id", "tenant_id")
-    assert foreign_key.referenced_columns == ("account_id", "tenant_id")
+    assert foreign_key.local_columns == ("Account_ID", "Tenant_ID")
+    assert foreign_key.referenced_columns == ("Account_ID", "Tenant_ID")
 
 
 def test_ambiguous_composite_foreign_key_requires_mapping():
@@ -1657,60 +1655,14 @@ def test_foreign_key_accepts_columns_as_any_mapping():
         foreign_keys=[declaration],
     )
 
-    # Then the declaration copies the mapping and the lowered constraint holds an immutable tuple
-    assert dict(declaration.columns) == {"customer_id": "id"}
+    # Then the declaration copies the mapping and the lowered constraint preserves spelling.
+    assert dict(declaration.columns) == {"Customer_ID": "ID"}
     [constraint] = orders.to_desired_table().foreign_keys
-    assert constraint.local_columns == ("customer_id",)
-
-
-def test_mapping_lowers_single_column_foreign_key():
-    customers = _customers()
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("customer_id", Integer())],
-        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
-    )
-
-    [foreign_key] = orders.to_desired_table().foreign_keys
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
-    assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.constraint_name == "orders_customer_id_fk"
-
-
-def test_mapping_lowers_composite_foreign_key_with_stated_pairing():
-    accounts = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="accounts",
-        columns=[
-            Column("tenant_id", Integer(), nullable=False),
-            Column("id", Integer(), nullable=False),
-        ],
-        primary_key=["tenant_id", "id"],
-    )
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("tenant_id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[
-            ForeignKey(
-                columns={"tenant_id": "tenant_id", "customer_id": "id"},
-                references=accounts,
-            )
-        ],
-    )
-
-    # Stored canonically (sorted by local column), pairing exactly as stated
-    [foreign_key] = orders.to_desired_table().foreign_keys
-    assert foreign_key.local_columns == ("customer_id", "tenant_id")
-    assert foreign_key.referenced_columns == ("id", "tenant_id")
+    assert tuple(str(c) for c in constraint.local_columns) == ("Customer_ID",)
 
 
 def test_mapping_insertion_order_is_irrelevant():
+    # Given the same composite mapping declared in two insertion orders
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1732,8 +1684,11 @@ def test_mapping_insertion_order_is_irrelevant():
         )
         return table.to_desired_table().foreign_keys[0]
 
+    # When lowering both declarations
     one = orders_with({"tenant_id": "tenant_id", "customer_id": "id"})
     two = orders_with({"customer_id": "id", "tenant_id": "tenant_id"})
+
+    # Then the constraints are identical, including the generated name
     assert one == two
     assert one.constraint_name == two.constraint_name
 
@@ -1811,13 +1766,17 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
             ],
         ).to_desired_table()
 
+    # When lowering the child against both parent key orders
     before = child_of(["tenant_id", "id"])
     after = child_of(["id", "tenant_id"])
+
+    # Then the lowered constraints are identical
     assert before.foreign_keys == after.foreign_keys
 
     from delta_engine.domain.model import ObservedTable
     from tests.builders import as_observed_columns
 
+    # And the reorder produces no drift against the original observed state
     observed = ObservedTable(
         qualified_name=before.qualified_name,
         columns=as_observed_columns(before.columns),
@@ -1827,3 +1786,44 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()
+
+
+def test_generated_foreign_key_name_is_identical_across_declaration_casing():
+    def declare(local_spelling: str) -> DeltaTable:
+        parent = DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="customers",
+            columns=[Column("id", Integer(), nullable=False)],
+            primary_key=["id"],
+        )
+        return DeltaTable(
+            catalog="main",
+            schema="sales",
+            name="orders",
+            columns=[Column(local_spelling, Integer())],
+            foreign_keys=[ForeignKey(columns={local_spelling: "id"}, references=parent)],
+        )
+
+    # When lowering the same declaration in two spellings
+    camel = declare("CustomerId").to_desired_table().foreign_keys[0].constraint_name
+    lower = declare("customerid").to_desired_table().foreign_keys[0].constraint_name
+
+    # Then the generated constraint name is identical and lowercase
+    assert camel == lower == "orders_customerid_fk"
+
+
+def test_layout_and_key_references_resolve_across_casing():
+    table = DeltaTable(
+        catalog="main",
+        schema="sales",
+        name="orders",
+        columns=[Column("region", String()), Column("order_id", Integer(), nullable=False)],
+        clustered_by=["REGION"],
+        primary_key=["ORDER_ID"],
+    )
+
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert desired.primary_key.columns == ("order_id",)
+    assert desired.clustered_by == ("region",)

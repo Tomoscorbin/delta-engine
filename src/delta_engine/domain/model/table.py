@@ -12,6 +12,7 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
+from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
 
@@ -178,8 +179,10 @@ class DesiredTable:
 
         """
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
+        object.__setattr__(
+            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
+        )
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
 
         _validate_table_structure(
@@ -308,8 +311,10 @@ class ObservedTable:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(self, "partitioned_by", tuple(n.lower() for n in self.partitioned_by))
-        object.__setattr__(self, "clustered_by", tuple(n.lower() for n in self.clustered_by))
+        object.__setattr__(
+            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
+        )
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
 
         _validate_table_structure(

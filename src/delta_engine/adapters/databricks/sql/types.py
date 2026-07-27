@@ -118,7 +118,7 @@ def data_type_from_json(type_obj: object) -> DataType | None:
 
     ``None`` covers a type the domain does not model (interval, void, geo,
     future types), malformed input, and domain constructor rejections (decimal
-    over the Delta limit, struct fields colliding after lowercasing). The column
+    over the Delta limit, struct fields colliding by identifier identity). The column
     reader treats ``None`` as an unreadable column and fails the read; the
     recursive element/key/value/field lookups here propagate it as an
     unmodelable nested type.

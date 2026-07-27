@@ -41,10 +41,10 @@ def test_decimal_accepts_maximum_precision_and_scale() -> None:
     assert Decimal(38, 38).precision == 38
 
 
-def test_struct_field_requires_non_blank_name_and_normalizes_case() -> None:
+def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    assert StructField("Amount", Integer()).name == "amount"
+    assert str(StructField("Amount", Integer()).name) == "Amount"
     assert StructField("straße", Integer()).name == "straße"
 
 
@@ -79,3 +79,28 @@ def test_map_allows_a_map_value_type() -> None:
     # Only the key is restricted; a MAP value may itself be a MAP.
     nested = Map(String(), Map(String(), Integer()))
     assert nested.value == Map(String(), Integer())
+
+
+def test_types_differing_only_in_nested_field_case_are_equal() -> None:
+    nested_camel = Map(String(), Array(Struct((StructField("Amount", Integer()),))))
+    nested_lower = Map(String(), Array(Struct((StructField("amount", Integer()),))))
+
+    assert nested_camel == nested_lower
+
+
+def test_genuinely_different_field_names_stay_semantically_different() -> None:
+    underscore = Struct((StructField("request_id", String()),))
+    camel = Struct((StructField("requestId", String()),))
+
+    assert underscore != camel
+
+
+def test_struct_rejects_fields_differing_only_by_case() -> None:
+    with pytest.raises(ValueError, match=r"[Dd]uplicate struct field"):
+        Struct((StructField("id", Integer()), StructField("ID", Integer())))
+
+
+def test_struct_types_differing_only_in_field_case_are_equal() -> None:
+    left = Struct((StructField("Payload", String()),))
+    right = Struct((StructField("payload", String()),))
+    assert left == right

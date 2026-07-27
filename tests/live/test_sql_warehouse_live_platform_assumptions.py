@@ -266,3 +266,27 @@ def test_platform_preserves_column_display_case(live_connection, live_tables):
 
     rows = fetch_rows(live_connection, f"DESCRIBE TABLE {qualified_table(table_name)}")
     assert rows[0]["col_name"] == "MyCol"
+
+
+def test_platform_resolves_column_references_case_insensitively(live_connection, live_tables):
+    """Ordinary ALTER COLUMN resolves a lowercase reference against a camelCase column."""
+    # Case is never identity for column references: the engine diffs
+    # case-variant spellings as the same column because ordinary DDL resolves
+    # them interchangeably. (The managed-constraint path is the exception —
+    # it needs the exact catalog spelling, which is why the planner binds
+    # constraint references; pinned in test_sql_warehouse_live_constraints.)
+    table_name = live_tables("column_case_raw_alter")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING) USING DELTA",
+    )
+
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} "
+        "ALTER COLUMN `requestid` COMMENT 'resolved through lowercase'",
+    )
+
+    [column] = read_live_table(live_connection, table_name)["columns"]
+    assert column["column_name"] == "requestId"
+    assert column["comment"] == "resolved through lowercase"

@@ -8,12 +8,11 @@ duck-typed catalog rows — pyspark ``Row`` or databricks-sql ``Row`` —
 accessed only by attribute lookups, so this module stays PySpark-free like
 the rest of the package.
 
-Identifier normalization happens in the domain constructors, which store
-every identifier in canonical lowercase — mapped rows carry catalog values
-verbatim and let construction canonicalize. The one exception is
-``read_column_tags``, which builds a plain lookup dict keyed by column name
-before any domain object exists, so it lowercases its keys itself. Tag keys
-and values are case-sensitive and preserved verbatim.
+Identifier spelling is preserved end to end — mapped rows carry catalog
+values verbatim and the domain stores them verbatim. The one derived key is
+``read_column_tags``'s lookup dict: it is keyed by ``Identifier``, so any
+spelling of the column probes it. Tag keys and values are case-sensitive and
+preserved verbatim.
 """
 
 from collections.abc import Callable, Sequence
@@ -31,6 +30,7 @@ from delta_engine.adapters.databricks.sql.queries import (
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
     ForeignKeyReference,
+    Identifier,
     PrimaryKeyConstraint,
     QualifiedName,
 )
@@ -134,12 +134,10 @@ def read_column_tags(
     """
     Read all column tags of this table as ``{column_name: {tag: value}}``.
 
-    The one adapter-side identifier lowering: this dict is probed with
-    domain-canonical column names, but it is a plain dict built before any
-    domain object exists, so nothing else can canonicalize its keys. Tag
-    keys and values are case-sensitive and returned verbatim.
+    The lookup dict is keyed by ``Identifier``, so any spelling of the column
+    probes it. Tag keys and values are case-sensitive and returned verbatim.
     """
     grouped: dict[str, dict[str, str]] = {}
     for row in run_query(column_tags_query(qualified_name)):
-        grouped.setdefault(row.column_name.lower(), {})[row.tag_name] = row.tag_value
+        grouped.setdefault(Identifier(row.column_name), {})[row.tag_name] = row.tag_value
     return MappingProxyType({column: MappingProxyType(tags) for column, tags in grouped.items()})

@@ -240,3 +240,38 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     assert read_live_table(live_connection, child_name)["foreign_keys"] == (
         (f"{child_name}_fk", "parent_email", parent_name, "email"),
     )
+
+
+def test_primary_key_binds_to_the_catalog_column_spelling(live_connection, live_tables):
+    """A primary key declared lowercase compiles with the catalog's camelCase spelling."""
+    # The managed-constraint path is case-sensitive about physical column
+    # spelling, unlike ordinary ALTER COLUMN, so the planner binds key
+    # references to the observed spelling. Declared-lowercase against a live
+    # camelCase column is the production shape that surfaced this.
+    table_name = live_tables("column_case_add_primary_key")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
+    )
+    declaration = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=table_name,
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
+        scope="metadata",
+    )
+    engine = build_sql_engine(live_connection)
+
+    report = engine.sync(declaration)
+
+    assert report.has_failures is False
+    statements = next(iter(report.planned_sql_statements.values()))
+    assert statements == (
+        f"ALTER TABLE {qualified_table(table_name)} "
+        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestId`)",
+    )
+    state = read_live_table(live_connection, table_name)
+    assert state["primary_key"] == ("requestId",)
+    assert state["primary_key_name"] == f"{table_name}_pk"
+    assert engine.sync(declaration).has_changes is False

@@ -137,18 +137,19 @@ self._desired_table = _lower_declaration(normalized)
 ```
 
 `_NormalizedDeclaration` is the frozen handoff between those stages. Iterable
-and mapping inputs are copied once, and identifiers use their canonical
-lowercase representation before any declaration policy tries to resolve them.
-The focused property, layout, column-name, rename, object-name, and tag
-validators remain in the same module, while `_lower_declaration` constructs
-constraints and delegates structural invariants to `DesiredTable`. Public
-`ForeignKey` declarations are retained separately because lowering resolves
-their table references and declaration syntax into domain
+and mapping inputs are copied once. Column-like identifier spelling is
+preserved, while declaration policy resolves identity through
+`identifier_key`; qualified object-name parts retain their separate lowercase
+storage policy. The focused property, layout, column-name, rename, object-name,
+and tag validators remain in the same module, while `_lower_declaration`
+constructs constraints and delegates structural invariants to `DesiredTable`.
+Public `ForeignKey` declarations are retained separately because lowering
+resolves their table references and declaration syntax into domain
 `ForeignKeyConstraint` values.
 
 This ordering also closes a policy gap: mixed-case partition and clustering
-keys can no longer evade API type or whole-table layout checks before the
-domain normalizes them.
+keys cannot evade API type or whole-table layout checks because validation
+indexes the declaration by identifier identity.
 
 ## Policy that is already in an appropriate place
 

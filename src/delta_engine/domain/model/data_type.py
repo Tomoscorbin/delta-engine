@@ -3,6 +3,8 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from delta_engine.domain.model.identifier import Identifier
+
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 
 
@@ -118,7 +120,7 @@ class StructField:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
-        object.__setattr__(self, "name", self.name.lower())
+        object.__setattr__(self, "name", Identifier(self.name))
 
 
 @dataclass(frozen=True, slots=True)

@@ -21,13 +21,20 @@ the page with the detail.
 
 Identifiers are case-insensitive, matching the platform: Databricks resolves
 all identifiers case-insensitively (backticked or not), and Unity Catalog
-stores catalog, schema, and table names in lowercase. The engine therefore
-accepts declarations in any case and normalizes every identifier — object
-name parts, column names, nested struct field names, and constraint names —
-to lowercase. A name that is already lowercase is preserved verbatim,
-including Unicode names such as `straße`. Case never distinguishes two
-identifiers, a case-only difference is never drift, and engine-created
-columns display in lowercase in the catalog.
+stores catalog, schema, and table names in lowercase. Object name parts are
+therefore normalized to lowercase, exactly as the catalog stores them.
+
+Column-like identifiers — column names, nested struct field names,
+partition and clustering references, and constraint columns and names —
+keep their declared or observed spelling. Case never distinguishes two
+identifiers: names differing only in case are the same column, collide as
+duplicates within one schema, and a case-only difference between a
+declaration and the catalog is never drift. When the engine changes an
+existing column or adds a constraint over one, it emits the catalog's
+exact spelling (some Databricks DDL paths require it); newly created
+columns are spelled as declared. Public accessors such as ``Column.name``
+and ``DeltaTable.primary_key`` return preserved spelling — callers that
+relied on lowercase values should apply their own presentation policy.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and

@@ -76,7 +76,12 @@ from delta_engine.application.report import (
     TableRunReport,
 )
 from delta_engine.domain.model import DesiredTable, QualifiedName
-from delta_engine.domain.plan import ActionPlan, TableDiff, diff_table
+from delta_engine.domain.plan import (
+    ActionPlan,
+    TableDiff,
+    diff_table,
+    resulting_column_spellings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,14 +304,22 @@ class Engine:
         """
         Accept or reject each diff according to the default planning policy.
 
-        Rejected runs retain ``PlanningFailed``; accepted runs retain
-        ``PlanningSucceeded`` with the validated action plan.
+        Builds the sync-wide resulting-schema index from every diffed run
+        first — planning binds symbolic references (including cross-table
+        foreign-key spellings) through it. Rejected runs retain
+        ``PlanningFailed``; accepted runs retain
+        ``PlanningSucceeded`` with the validated, bound action plan.
         """
+        resulting_schemas = {
+            run.diff.target: resulting_column_spellings(run.diff)
+            for run in runs
+            if run.diff is not None
+        }
         for run in runs:
             if run.diff is None:
                 continue
 
-            planning = plan_diff(run.diff)
+            planning = plan_diff(run.diff, resulting_schemas)
             run.planning = planning
 
             match planning:

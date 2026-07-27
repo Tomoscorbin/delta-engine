@@ -3,10 +3,7 @@ import inspect
 from hypothesis import given
 import pytest
 
-from delta_engine.adapters.databricks.sql.compile import (
-    _compile_action,
-    compile_plan,
-)
+from delta_engine.adapters.databricks.sql.compile import compile_plan
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -536,19 +533,39 @@ def test_set_tag_sql_ignores_observed_value(addition: Action, replacement: Actio
     assert _compile_single(addition) == _compile_single(replacement)
 
 
-def test_every_action_type_has_a_registered_compiler():
-    # Given every concrete domain action type
-    fallback = _compile_action.dispatch(object)
+_SAMPLE_ACTIONS: dict[type[Action], Action] = {
+    AddColumn: AddColumn(DesiredColumn("added", Integer())),
+    AlterClustering: AlterClustering(desired_clustering=("id",), observed_clustering=()),
+    AlterColumnType: AlterColumnType("id", Long(), Integer()),
+    CreateTable: _create_table(DesiredColumn("id", Integer())),
+    DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
+    DropForeignKey: DropForeignKey(constraint=_foreign_key()),
+    DropPrimaryKey: DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
+    EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
+    RenameColumn: RenameColumn("old", "new"),
+    SetColumnComment: SetColumnComment("id", "new", "old"),
+    SetColumnNullability: SetColumnNullability("id", False, True),
+    SetColumnTag: SetColumnTag("id", "pii", "low", None),
+    SetForeignKey: SetForeignKey(constraint=_foreign_key()),
+    SetPrimaryKey: SetPrimaryKey(primary_key=_primary_key()),
+    SetProperty: SetProperty("k", "v", None),
+    SetTableComment: SetTableComment("new", "old"),
+    SetTableTag: SetTableTag("env", "dev", None),
+    UnsetColumnTag: UnsetColumnTag("id", "pii"),
+    UnsetProperty: UnsetProperty("k", "v"),
+    UnsetTableTag: UnsetTableTag("env"),
+}
 
-    # When checking the singledispatch registry
-    unregistered = [
-        action_type.__name__
-        for action_type in _concrete_action_types()
-        if _compile_action.dispatch(action_type) is fallback
-    ]
 
-    # Then every action has a specific compiler
-    assert unregistered == []
+def test_every_action_type_compiles_through_the_public_compiler():
+    # Given a sample instance of every concrete domain action type
+    missing = [t.__name__ for t in _concrete_action_types() if t not in _SAMPLE_ACTIONS]
+    assert missing == [], f"add a sample action for: {missing}"
+
+    # Then each compiles to a statement — no action type can reach execution
+    # without a registered compiler
+    for action_type, action in _SAMPLE_ACTIONS.items():
+        assert _compile_single(action), action_type.__name__
 
 
 def test_compile_rename_column():
@@ -583,23 +600,30 @@ def test_create_table_properties_are_mapping_order_independent_and_omit_absent_k
         assert "TBLPROPERTIES" not in statement
 
 
-def test_tag_statements_compile_with_the_streaming_table_dialect():
-    cases = {
-        SetTableTag(name="owner", desired_value="gov", observed_value=None): (
-            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
+@pytest.mark.parametrize(
+    ("action", "expected"),
+    [
+        (
+            SetTableTag(name="owner", desired_value="gov", observed_value=None),
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')",
         ),
-        UnsetTableTag(name="owner"): (
-            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` UNSET TAGS ('owner')"
+        (
+            UnsetTableTag(name="owner"),
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` UNSET TAGS ('owner')",
         ),
-        SetColumnTag(column_name="id", name="pii", desired_value="low", observed_value=None): (
-            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET TAGS ('pii'='low')"
+        (
+            SetColumnTag(column_name="id", name="pii", desired_value="low", observed_value=None),
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET TAGS ('pii'='low')",
         ),
-        UnsetColumnTag(column_name="id", name="pii"): (
-            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET TAGS ('pii')"
+        (
+            UnsetColumnTag(column_name="id", name="pii"),
+            "ALTER STREAMING TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` UNSET TAGS ('pii')",
         ),
-    }
-    for action, expected in cases.items():
-        assert _compile_single(action, kind=TableKind.STREAMING_TABLE) == expected
+    ],
+    ids=["set-table-tag", "unset-table-tag", "set-column-tag", "unset-column-tag"],
+)
+def test_tag_statements_compile_with_the_streaming_table_dialect(action, expected):
+    assert _compile_single(action, kind=TableKind.STREAMING_TABLE) == expected
 
 
 def test_ordinary_tables_keep_the_alter_table_dialect():
@@ -608,7 +632,7 @@ def test_ordinary_tables_keep_the_alter_table_dialect():
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
 
 
-def test_every_alter_statement_adopts_the_dialect_mechanically():
+def test_alter_statements_adopt_the_dialect_mechanically():
     # The compiler is policy-free: validation keeps non-tag actions away from
     # streaming tables, but a statement compiled for one still targets it.
     statement = _compile_single(
@@ -656,3 +680,61 @@ def test_compile_enable_table_feature_uses_documented_variant_key():
         "ALTER TABLE `cat`.`sch`.`tbl` SET TBLPROPERTIES"
         " ('delta.feature.variantType-preview'='supported')"
     )
+
+
+def test_set_primary_key_emits_the_exact_bound_spelling():
+    action = SetPrimaryKey(
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk")
+    )
+    plan = ActionPlan(target=_TARGET, actions=(action,))
+
+    [statement] = compile_plan(plan)
+
+    assert statement == (
+        "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`requestId`)"
+    )
+
+
+def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
+    table = DesiredTable(
+        qualified_name=_TARGET,
+        columns=(DesiredColumn("requestId", String(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="tbl_pk"),
+    )
+    plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
+
+    [statement] = compile_plan(plan)
+
+    # Then both the column definition and the inline key carry the declared spelling
+    assert "`requestId` STRING NOT NULL" in statement
+    assert "PRIMARY KEY (`requestId`)" in statement
+
+
+def test_foreign_key_emits_exact_spelling_on_both_sides():
+    constraint = ForeignKeyConstraint(
+        local_columns=("orderRef",),
+        referenced_table=_REFERENCED_TABLE,
+        referenced_columns=("OrderId",),
+        constraint_name="tbl_orderref_fk",
+    )
+    plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
+
+    [statement] = compile_plan(plan)
+
+    # Then both sides carry their exact declared spelling
+    assert "FOREIGN KEY (`orderRef`)" in statement
+    assert "(`OrderId`)" in statement
+
+
+def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
+    constraint = ForeignKeyConstraint(
+        local_columns=("a",),
+        referenced_table=_REFERENCED_TABLE,
+        referenced_columns=("b",),
+        constraint_name="Legacy_FK_Name",
+    )
+    plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(constraint=constraint),))
+
+    [statement] = compile_plan(plan)
+
+    assert "DROP CONSTRAINT IF EXISTS `Legacy_FK_Name`" in statement

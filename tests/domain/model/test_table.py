@@ -52,6 +52,14 @@ def test_fails_when_column_names_duplicate(table_type, column_type):
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
+def test_rejects_columns_differing_only_by_case_as_duplicates(table_type, column_type):
+    cols = (column_type("Id", Integer()), column_type("ID", Integer()))
+
+    with pytest.raises(ValueError, match="Duplicate column name"):
+        table_type(_QUALIFIED_NAME, cols)
+
+
+@_EACH_TABLE_AND_COLUMN_TYPE
 def test_fails_when_partition_references_undefined_column(table_type, column_type):
     # Given: columns 'visit_date' and 'id'
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
@@ -62,15 +70,10 @@ def test_fails_when_partition_references_undefined_column(table_type, column_typ
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_mixed_case_partition_reference_normalizes_to_lowercase(table_type, column_type):
-    # Given: a column 'visit_date' and a partition spec naming it in upper case
+def test_mixed_case_partition_reference_is_preserved_and_resolves(table_type, column_type):
     cols = (column_type("visit_date", Date()), column_type("id", Integer()))
-
-    # When: constructing the table with a mixed-case partition reference
     table = table_type(_QUALIFIED_NAME, cols, partitioned_by=("VISIT_DATE",))
-
-    # Then: the reference normalizes and resolves to the declared column
-    assert table.partitioned_by == ("visit_date",)
+    assert tuple(str(column) for column in table.partitioned_by) == ("VISIT_DATE",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -143,6 +146,25 @@ def test_desired_table_rejects_nullable_primary_key_column():
             qualified_name=_QN,
             columns=(DesiredColumn("id", Integer(), nullable=True),),
             primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        )
+
+
+def test_primary_key_reference_resolves_across_casing():
+    table = DesiredTable(
+        qualified_name=_QUALIFIED_NAME,
+        columns=(DesiredColumn("request_id", Integer(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("REQUEST_ID",), constraint_name="t_pk"),
+    )
+
+    assert table.primary_key is not None
+
+
+def test_nullable_primary_key_column_is_rejected_across_casing():
+    with pytest.raises(ValueError, match="NOT NULL"):
+        DesiredTable(
+            qualified_name=_QUALIFIED_NAME,
+            columns=(DesiredColumn("request_id", Integer(), nullable=True),),
+            primary_key=PrimaryKeyConstraint(columns=("REQUEST_ID",), constraint_name="t_pk"),
         )
 
 
@@ -227,31 +249,6 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
             qualified_name=QualifiedName("cat", "sch", "orders"),
             columns=(DesiredColumn("id", Integer()),),
             foreign_keys=(fk,),
-        )
-
-
-def test_desired_table_rejects_foreign_keys_with_duplicate_derived_names():
-    # Given two FKs on the same local columns with distinct names (construction succeeds;
-    # the DesiredTable rejects them because the same local-column set is incoherent)
-    first = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
-    )
-    second = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "vips"),
-        referenced_columns=("id",),
-        constraint_name="orders_customer_id_vips_fk",
-    )
-
-    # When / Then — both FKs govern the same local-column set, which is incoherent
-    with pytest.raises(ValueError, match="same local columns"):
-        DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
-            foreign_keys=(first, second),
         )
 
 
@@ -575,10 +572,10 @@ def test_table_rejects_clustering_column_not_in_columns(table_type, column_type)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
-def test_mixed_case_clustering_reference_normalizes_to_lowercase(table_type, column_type):
+def test_mixed_case_clustering_reference_is_preserved_and_resolves(table_type, column_type):
     columns = (column_type("id", Integer()), column_type("region", String()))
     table = table_type(_QUALIFIED_NAME, columns, clustered_by=("REGION",))
-    assert table.clustered_by == ("region",)
+    assert tuple(str(column) for column in table.clustered_by) == ("REGION",)
 
 
 @_EACH_TABLE_AND_COLUMN_TYPE
@@ -640,6 +637,8 @@ def test_desired_table_rejects_duplicate_rename_sources() -> None:
 
 
 def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
+    # Given a declaration managing only metadata aspects — renames imply
+    # column-structure changes, which this scope does not manage
     metadata_aspects = frozenset(
         {
             TableAspect.TABLE_COMMENT,

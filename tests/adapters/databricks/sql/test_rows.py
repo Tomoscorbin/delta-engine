@@ -25,12 +25,7 @@ from delta_engine.adapters.databricks.sql import (
     schema_exists_query,
     table_tags_query,
 )
-from delta_engine.domain.model import (
-    ForeignKeyConstraint,
-    ForeignKeyReference,
-    PrimaryKeyConstraint,
-    QualifiedName,
-)
+from delta_engine.domain.model import QualifiedName
 from tests.adapters.databricks.sql.strategies import (
     CANONICAL_IDENTIFIERS,
     TAG_KEYS,
@@ -64,7 +59,7 @@ def test_schema_does_not_exist_when_the_probe_returns_no_rows() -> None:
 # ---------- primary key ----------
 
 
-def test_primary_key_rows_map_to_ordered_casefolded_columns() -> None:
+def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
     rows = [
         SimpleNamespace(constraint_name="Orders_PK", column_name="Order_Id"),
         SimpleNamespace(constraint_name="Orders_PK", column_name="Line_No"),
@@ -72,9 +67,9 @@ def test_primary_key_rows_map_to_ordered_casefolded_columns() -> None:
 
     result = read_primary_key(_runner(primary_key_query(QN), rows), QN)
 
-    assert result == PrimaryKeyConstraint(
-        columns=("order_id", "line_no"), constraint_name="orders_pk"
-    )
+    assert result is not None
+    assert tuple(str(column) for column in result.columns) == ("Order_Id", "Line_No")
+    assert str(result.constraint_name) == "Orders_PK"
 
 
 def test_primary_key_empty_rows_map_to_none() -> None:
@@ -84,7 +79,8 @@ def test_primary_key_empty_rows_map_to_none() -> None:
 # ---------- owned foreign keys ----------
 
 
-def test_foreign_key_rows_map_to_casefolded_constraint() -> None:
+def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
+    # Given catalog rows carrying mixed-case spellings
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -96,16 +92,13 @@ def test_foreign_key_rows_map_to_casefolded_constraint() -> None:
         ),
     ]
 
-    result = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
+    [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
-    assert result == (
-        ForeignKeyConstraint(
-            local_columns=("customer_id",),
-            referenced_table=QualifiedName("dev", "silver", "customer"),
-            referenced_columns=("id",),
-            constraint_name="orders_customer_fk",
-        ),
-    )
+    # Then constraint and column spellings carry verbatim
+    assert str(fk.constraint_name) == "Orders_Customer_FK"
+    assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
+    assert fk.referenced_table == QualifiedName("dev", "silver", "customer")
+    assert tuple(str(column) for column in fk.referenced_columns) == ("Id",)
 
 
 def test_composite_foreign_key_keeps_each_local_referenced_pair_together() -> None:
@@ -170,7 +163,7 @@ def test_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 # ---------- referencing foreign keys ----------
 
 
-def test_referencing_foreign_keys_rows_map_to_casefolded_references() -> None:
+def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -180,14 +173,12 @@ def test_referencing_foreign_keys_rows_map_to_casefolded_references() -> None:
         ),
     ]
 
-    result = read_referencing_foreign_keys(_runner(referencing_foreign_keys_query(QN), rows), QN)
-
-    assert result == (
-        ForeignKeyReference(
-            constraint_name="orders_customer_fk",
-            referencing_table=QualifiedName("dev", "silver", "orders"),
-        ),
+    [reference] = read_referencing_foreign_keys(
+        _runner(referencing_foreign_keys_query(QN), rows), QN
     )
+
+    assert str(reference.constraint_name) == "Orders_Customer_FK"
+    assert reference.referencing_table == QualifiedName("dev", "silver", "orders")
 
 
 def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
@@ -200,6 +191,7 @@ def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 def test_table_tags_read_returns_empty_read_only_mapping_for_no_rows():
     tags = read_table_tags(_runner(table_tags_query(QN), []), QN)
     assert dict(tags) == {}
+    # read-only: the mapping must refuse writes
     with pytest.raises(TypeError):
         tags["x"] = "y"  # type: ignore[index]
 
@@ -220,7 +212,7 @@ def test_column_tags_read_returns_empty_mapping_for_no_rows():
     assert dict(read_column_tags(_runner(column_tags_query(QN), []), QN)) == {}
 
 
-def test_column_tags_read_lowercases_column_names_but_preserves_tag_case():
+def test_column_tags_read_keys_by_identifier_identity_and_preserves_tag_case():
     rows = [
         SimpleNamespace(column_name="EMAIL", tag_name="PII", tag_value="Email"),
         SimpleNamespace(column_name="email", tag_name="mask", tag_value="hash"),

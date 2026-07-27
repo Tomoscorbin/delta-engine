@@ -88,7 +88,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         columns.append(column_document)
         expected_columns.append(
             ObservedColumn(
-                name=raw_name.lower(),
+                name=raw_name,
                 data_type=data_type,
                 nullable=nullable,
                 comment=comment,
@@ -123,8 +123,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         document=document,
         columns=tuple(expected_columns),
         comment=comment,
-        # Layout lists are carried verbatim by the description; the domain
-        # table canonicalizes them on construction.
+        # Layout lists are catalog spelling and stay verbatim.
         partitioned_by=tuple(partitioned_by),
         clustered_by=tuple(clustered_by),
         properties=properties,
@@ -177,7 +176,7 @@ def test_lowercase_unicode_column_name_is_preserved_verbatim():
     description = _parse(
         _doc(columns=[{"name": "straße", "type": {"name": "int"}, "nullable": True}])
     )
-    assert description.columns[0].name == "straße"
+    assert str(description.columns[0].name) == "straße"
 
 
 def test_partitioning_and_clustering_carried_verbatim_in_order():
@@ -311,12 +310,17 @@ def test_real_order_fact_fixture():
 
 
 @given(_valid_describe_documents())
-def test_valid_describe_documents_preserve_values_and_normalize_identifiers(
+def test_valid_describe_documents_preserve_values_and_identifier_spelling(
     case: DescribeCase,
 ) -> None:
+    # When parsing
     description = _parse(json.dumps(case.document))
 
+    # Then every carried field survives verbatim, including identifier spelling
     assert description.columns == case.columns
+    assert tuple(str(c.name) for c in description.columns) == tuple(
+        str(c.name) for c in case.columns
+    )
     assert description.comment == case.comment
     assert description.partitioned_by == case.partitioned_by
     assert description.clustered_by == case.clustered_by
