@@ -232,7 +232,7 @@ def test_tags_attach_by_identity_without_rewriting_the_observed_name():
 
     assert isinstance(state, TablePresent)
     [column] = state.table.columns
-    assert column.name.spelling == "requestId"
+    assert str(column.name) == "requestId"
     assert dict(column.tags) == {"pii": "low"}
 
 

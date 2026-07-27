@@ -21,7 +21,7 @@ def _observed(*columns: ObservedColumn) -> ObservedTable:
 
 def _spellings(diff: TableDiff) -> dict[str, str]:
     """Extract each resolved column's exact spelling, keyed by its identity."""
-    return {key: value.spelling for key, value in resulting_column_spellings(diff).items()}
+    return {key: str(value) for key, value in resulting_column_spellings(diff).items()}
 
 
 def test_a_missing_table_resolves_every_column_to_its_desired_spelling():
@@ -45,7 +45,7 @@ def test_an_added_column_resolves_to_the_desired_spelling():
         _observed(ObservedColumn("request_id", String())),
     )
 
-    assert resulting_column_spellings(diff)["extra"].spelling == "extra"
+    assert str(resulting_column_spellings(diff)["extra"]) == "extra"
 
 
 def test_a_renamed_column_resolves_to_the_rename_target_spelling():

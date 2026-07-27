@@ -111,7 +111,7 @@ class ForeignKeyConstraint:
                 (Identifier(column) for column in self.referenced_columns),
                 strict=True,
             ),
-            key=lambda pair: pair[0].key,
+            key=lambda pair: pair[0].lower(),
         )
         object.__setattr__(self, "local_columns", tuple(pair[0] for pair in pairs))
         object.__setattr__(self, "referenced_columns", tuple(pair[1] for pair in pairs))

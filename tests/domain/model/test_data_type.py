@@ -44,7 +44,7 @@ def test_decimal_accepts_maximum_precision_and_scale() -> None:
 def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    assert StructField("Amount", Integer()).name.spelling == "Amount"
+    assert str(StructField("Amount", Integer()).name) == "Amount"
     assert StructField("straße", Integer()).name == "straße"
 
 
@@ -108,7 +108,7 @@ def test_struct_types_differing_only_in_field_case_are_equal() -> None:
 
 def test_struct_field_spelling_is_preserved_verbatim() -> None:
     [field] = Struct((StructField("Payload", String()),)).fields
-    assert field.name.spelling == "Payload"
+    assert str(field.name) == "Payload"
 
 
 def test_struct_rejects_case_variant_duplicate_fields() -> None:

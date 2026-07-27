@@ -68,8 +68,8 @@ def test_primary_key_rows_preserve_ordered_catalog_spelling() -> None:
     result = read_primary_key(_runner(primary_key_query(QN), rows), QN)
 
     assert result is not None
-    assert tuple(column.spelling for column in result.columns) == ("Order_Id", "Line_No")
-    assert result.constraint_name.spelling == "Orders_PK"
+    assert tuple(str(column) for column in result.columns) == ("Order_Id", "Line_No")
+    assert str(result.constraint_name) == "Orders_PK"
 
 
 def test_primary_key_empty_rows_map_to_none() -> None:
@@ -93,10 +93,10 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
 
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
-    assert fk.constraint_name.spelling == "Orders_Customer_FK"
-    assert tuple(column.spelling for column in fk.local_columns) == ("Customer_Id",)
+    assert str(fk.constraint_name) == "Orders_Customer_FK"
+    assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
     assert fk.referenced_table == QualifiedName("dev", "silver", "customer")
-    assert tuple(column.spelling for column in fk.referenced_columns) == ("Id",)
+    assert tuple(str(column) for column in fk.referenced_columns) == ("Id",)
 
 
 def test_composite_foreign_key_keeps_each_local_referenced_pair_together() -> None:
@@ -175,7 +175,7 @@ def test_referencing_foreign_key_rows_preserve_constraint_spelling() -> None:
         _runner(referencing_foreign_keys_query(QN), rows), QN
     )
 
-    assert reference.constraint_name.spelling == "Orders_Customer_FK"
+    assert str(reference.constraint_name) == "Orders_Customer_FK"
     assert reference.referencing_table == QualifiedName("dev", "silver", "orders")
 
 

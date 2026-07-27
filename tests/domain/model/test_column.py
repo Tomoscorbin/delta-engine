@@ -17,7 +17,7 @@ def test_mixed_case_name_is_preserved_verbatim() -> None:
     # Case is never identity on Databricks, but display spelling is real
     # catalog state: the engine stores it verbatim and compares by identity.
     col = DesiredColumn("UserId", Integer())
-    assert col.name.spelling == "UserId"
+    assert str(col.name) == "UserId"
 
 
 def test_already_lowercase_unicode_name_is_preserved_verbatim() -> None:
@@ -28,7 +28,7 @@ def test_already_lowercase_unicode_name_is_preserved_verbatim() -> None:
 
 @given(st.text(min_size=1).filter(str.strip))
 def test_construction_preserves_any_name_verbatim(name: str) -> None:
-    assert DesiredColumn(name, Integer()).name.spelling == name
+    assert str(DesiredColumn(name, Integer()).name) == name
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"], ids=["empty", "spaces", "tab"])
@@ -81,7 +81,7 @@ def test_column_defaults_to_no_rename_hint() -> None:
 
 def test_renamed_from_is_preserved_verbatim() -> None:
     column = DesiredColumn("customer_name", String(), renamed_from="Customer_NM")
-    assert column.renamed_from.spelling == "Customer_NM"
+    assert str(column.renamed_from) == "Customer_NM"
 
 
 def test_column_rejects_malformed_renamed_from() -> None:
@@ -101,16 +101,16 @@ def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
     # Given/Then: blank names are rejected and catalog spelling is preserved.
     with pytest.raises(ValueError, match="blank"):
         ObservedColumn("  ", Integer())
-    assert ObservedColumn("Amount", Integer()).name.spelling == "Amount"
+    assert str(ObservedColumn("Amount", Integer()).name) == "Amount"
 
     # And a well-formed observed column carries the observable fields
     column = ObservedColumn("amount", Integer(), nullable=False, comment="c", tags={"k": "v"})
-    assert (column.name.spelling, column.nullable, column.comment) == ("amount", False, "c")
+    assert (str(column.name), column.nullable, column.comment) == ("amount", False, "c")
     assert dict(column.tags) == {"k": "v"}
 
 
 def test_observed_column_preserves_catalog_spelling() -> None:
-    assert ObservedColumn("requestId", Integer()).name.spelling == "requestId"
+    assert str(ObservedColumn("requestId", Integer()).name) == "requestId"
 
 
 def test_column_names_compare_case_insensitively() -> None:
@@ -122,7 +122,7 @@ def test_column_names_compare_case_insensitively() -> None:
 
 def test_column_name_spelling_is_preserved_verbatim() -> None:
     column = DesiredColumn(name="RequestId", data_type=String())
-    assert column.name.spelling == "RequestId"
+    assert str(column.name) == "RequestId"
 
 
 def test_case_only_self_rename_is_rejected() -> None:

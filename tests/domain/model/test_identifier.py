@@ -26,6 +26,22 @@ class TestIdentifierIdentity:
         # Adapter dicts keyed by plain lowercase strings stay probe-able.
         assert {"requestid": 1}[Identifier("RequestId")] == 1
 
+    def test_identity_preserves_already_lowercase_unicode(self) -> None:
+        # 'straße' is already lowercase; casefold would rewrite it to
+        # 'strasse', a different identifier from the one Unity Catalog stores.
+        # The != line is the load-bearing discriminator: under casefold both
+        # sides fold to 'strasse' and it would fail.
+        assert Identifier("straße") == "straße"
+        assert Identifier("straße") != "strasse"
+
+    def test_identity_uses_lower_not_casefold(self) -> None:
+        # lower() keeps 'ß'; casefold() would expand it to 'ss' and silently
+        # merge distinct identifiers. The != line is the load-bearing
+        # discriminator: under casefold both sides fold to 'grösse' and it
+        # would fail.
+        assert Identifier("GRÖßE") == "größe"
+        assert Identifier("GRÖßE") != "GRÖSSE"
+
 
 class TestIdentifierSpelling:
     def test_spelling_is_preserved_verbatim(self) -> None:
@@ -33,25 +49,11 @@ class TestIdentifierSpelling:
         assert f"{Identifier('requestId')}" == "requestId"
         assert repr(Identifier("requestId")) == "'requestId'"
 
-    def test_spelling_property_is_a_plain_case_sensitive_str(self) -> None:
-        spelling = Identifier("requestId").spelling
+    def test_str_returns_a_plain_case_sensitive_str(self) -> None:
+        spelling = str(Identifier("requestId"))
         assert type(spelling) is str
         assert spelling == "requestId"
         assert spelling != "REQUESTID"
-
-    def test_key_is_the_lowercase_identity(self) -> None:
-        assert Identifier("RequestId").key == "requestid"
-        assert type(Identifier("RequestId").key) is str
-
-    def test_key_preserves_already_lowercase_unicode(self) -> None:
-        # 'straße' is already lowercase; casefold would rewrite it to
-        # 'strasse', a different identifier from the one Unity Catalog stores.
-        assert Identifier("straße").key == "straße"
-
-    def test_key_uses_lower_not_casefold(self) -> None:
-        # lower() keeps 'ß'; casefold() would expand it to 'ss' and silently
-        # change identity semantics.
-        assert Identifier("GRÖßE").key == "größe"
 
 
 class TestIdentifierConstruction:
@@ -63,4 +65,4 @@ class TestIdentifierConstruction:
         original = Identifier("requestId")
         rewrapped = Identifier(original)
         assert isinstance(rewrapped, Identifier)
-        assert rewrapped.spelling == "requestId"
+        assert str(rewrapped) == "requestId"

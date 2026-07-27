@@ -57,7 +57,7 @@ def test_mixed_case_declaration_preserves_columns_and_lowercases_object_names():
     )
 
     assert (table.catalog, table.schema, table.name) == ("main", "sales", "orders")
-    assert [column.name.spelling for column in table.columns] == ["Id"]
+    assert [str(column.name) for column in table.columns] == ["Id"]
 
 
 def test_delta_table_rejects_columns_differing_only_by_case_as_duplicates() -> None:
@@ -82,8 +82,8 @@ def test_public_accessors_return_declared_spelling():
         primary_key=["OrderId"],
     )
 
-    assert tuple(column.spelling for column in table.primary_key) == ("OrderId",)
-    assert tuple(column.spelling for column in table.clustered_by) == ("Region",)
+    assert tuple(str(column) for column in table.primary_key) == ("OrderId",)
+    assert tuple(str(column) for column in table.clustered_by) == ("Region",)
 
 
 @pytest.mark.parametrize(
@@ -1291,8 +1291,8 @@ def test_single_column_string_foreign_key_infers_and_preserves_spelling():
     [foreign_key] = orders.to_desired_table().foreign_keys
 
     assert declaration.columns == ("Customer_ID",)
-    assert tuple(c.spelling for c in foreign_key.local_columns) == ("Customer_ID",)
-    assert tuple(c.spelling for c in foreign_key.referenced_columns) == ("ID",)
+    assert tuple(str(c) for c in foreign_key.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.referenced_columns) == ("ID",)
 
 
 def test_single_column_sequence_infers_and_preserves_spelling():
@@ -1316,8 +1316,8 @@ def test_single_column_sequence_infers_and_preserves_spelling():
     [foreign_key] = orders.to_desired_table().foreign_keys
 
     assert declaration.columns == ("Customer_ID",)
-    assert tuple(c.spelling for c in foreign_key.local_columns) == ("Customer_ID",)
-    assert tuple(c.spelling for c in foreign_key.referenced_columns) == ("ID",)
+    assert tuple(str(c) for c in foreign_key.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in foreign_key.referenced_columns) == ("ID",)
 
 
 def test_same_name_composite_foreign_key_is_paired_by_name_not_declared_order():
@@ -1686,7 +1686,7 @@ def test_foreign_key_accepts_columns_as_any_mapping():
     # Then the declaration copies the mapping and the lowered constraint preserves spelling.
     assert dict(declaration.columns) == {"Customer_ID": "ID"}
     [constraint] = orders.to_desired_table().foreign_keys
-    assert tuple(c.spelling for c in constraint.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in constraint.local_columns) == ("Customer_ID",)
 
 
 def test_mapping_lowers_single_column_foreign_key():

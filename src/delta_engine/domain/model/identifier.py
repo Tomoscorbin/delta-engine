@@ -29,17 +29,6 @@ class Identifier(str):
             raise ValueError(f"Identifier must not be blank: {spelling!r}")
         return super().__new__(cls, spelling)
 
-    @property
-    def key(self) -> str:
-        """The lowercase identity key shared by every spelling of this identifier."""
-        return str.lower(self)
-
-    @property
-    def spelling(self) -> str:
-        """The exact spelling as a plain ``str``, for case-sensitive comparison."""
-        # Slicing a str subclass returns a plain str copy.
-        return self[:]
-
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):
             return str.lower(self) == other.lower()

@@ -167,8 +167,8 @@ def test_mixed_case_columns_are_preserved_and_sorted_by_identity():
         referenced_columns=("z_id", "a_id"),
         constraint_name="t_fk",
     )
-    assert tuple(column.spelling for column in constraint.local_columns) == ("Apple", "Zebra")
-    assert tuple(column.spelling for column in constraint.referenced_columns) == ("a_id", "z_id")
+    assert tuple(str(column) for column in constraint.local_columns) == ("Apple", "Zebra")
+    assert tuple(str(column) for column in constraint.referenced_columns) == ("a_id", "z_id")
 
 
 def test_signature_is_identical_across_declaration_casing():
@@ -213,8 +213,8 @@ def test_signatures_match_across_case_variant_spellings() -> None:
         constraint_name="fk_from_catalog",
     )
     assert declared.signature == observed.signature
-    assert declared.local_columns[0].spelling == "orderref"
-    assert observed.local_columns[0].spelling == "OrderRef"
+    assert str(declared.local_columns[0]) == "orderref"
+    assert str(observed.local_columns[0]) == "OrderRef"
 
 
 def test_signature_matches_when_case_flips_raw_pair_sort_order() -> None:
@@ -222,8 +222,8 @@ def test_signature_matches_when_case_flips_raw_pair_sort_order() -> None:
     # where raw (case-sensitive) ordering of the sort column disagrees with
     # identity-key ordering: "Zeta" sorts before "alpha" by raw ASCII (Z <
     # a), but "zeta" sorts after "alpha" by identity key. Sorting pairs by
-    # the bare Identifier instead of its `.key` would canonicalize the two
-    # declarations into different pair orders.
+    # the bare case-sensitive spelling instead of the lowercased identity
+    # would canonicalize the two declarations into different pair orders.
     declared = ForeignKeyConstraint(
         local_columns=("Zeta", "alpha"),
         referenced_table=QualifiedName("cat", "sch", "parent"),

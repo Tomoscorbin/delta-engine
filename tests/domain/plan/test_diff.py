@@ -1166,7 +1166,7 @@ def test_matched_column_actions_carry_the_observed_column_name():
 
     [action] = diff.actions
     assert isinstance(action, SetColumnComment)
-    assert action.column_name.spelling == observed.columns[0].name.spelling
+    assert str(action.column_name) == str(observed.columns[0].name)
 
 
 def test_rename_action_carries_the_observed_source_name():
@@ -1184,8 +1184,8 @@ def test_rename_action_carries_the_observed_source_name():
 
     [action] = diff.actions
     assert isinstance(action, RenameColumn)
-    assert action.old_name.spelling == observed.columns[0].name.spelling
-    assert action.new_name.spelling == "customer_name"
+    assert str(action.old_name) == str(observed.columns[0].name)
+    assert str(action.new_name) == "customer_name"
 
 
 def test_case_only_column_difference_is_not_drift():
@@ -1270,7 +1270,7 @@ def test_matched_column_action_uses_observed_spelling_across_casing():
     [action] = diff_table(desired, observed).actions
 
     assert isinstance(action, SetColumnComment)
-    assert action.column_name.spelling == "requestId"
+    assert str(action.column_name) == "requestId"
 
 
 def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
@@ -1287,5 +1287,5 @@ def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
     [action] = diff_table(desired, observed).actions
 
     assert isinstance(action, RenameColumn)
-    assert action.old_name.spelling == "OldName"
-    assert action.new_name.spelling == "newName"
+    assert str(action.old_name) == "OldName"
+    assert str(action.new_name) == "newName"

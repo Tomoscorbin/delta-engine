@@ -402,7 +402,7 @@ def test_plan_orders_subjects_by_lowercased_key_not_ascii_order():
         ),
     )
 
-    assert [action.subject.spelling for action in plan] == ["alpha", "Beta"]
+    assert [str(action.subject) for action in plan] == ["alpha", "Beta"]
 
 
 def test_case_only_rename_carries_no_difference_even_from_raw_strings() -> None:
