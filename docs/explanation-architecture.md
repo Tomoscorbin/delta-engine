@@ -813,8 +813,12 @@ dependency cost.
   propagation in the application layer.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog,
   schema, and table-name parts, parsing Spark types, and quoting SQL. Preserve
-  column-like identifier spelling and derive explicit identity keys when
-  comparing it.
+  column-like identifier spelling by wrapping it in `Identifier` — a `str`
+  subclass with case-insensitive equality and hash — at domain construction, so
+  the domain interior compares, hashes, and indexes identifiers with plain
+  `==`/`in`/dict/set code. An adapter that probes a domain-keyed collection
+  with a raw string that never passed a domain constructor (or the reverse)
+  wraps the raw side in `Identifier(...)` first.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

@@ -813,3 +813,28 @@ while exact-string lookups still depend on it.
 - A live FK reproduction proves local and referenced exact-case binding.
 - The real-name mismatch control still reports structural drift.
 - The full local suite and Live Databricks Tests workflow pass.
+
+## Amendment (2026-07-26)
+
+Implementation triggered this design's own escape hatch (see "New identifier
+policy module": no wrapper "unless implementation shows raw strings cannot
+maintain the invariants"). Threading `identifier_key` through roughly 84
+call-site comparisons made it easy to compare, hash, or index a raw string
+against a keyed collection without remembering to key it first — a silent
+case-sensitivity bug at any forgotten site — and semantic data-type identity
+needed its own recursive helper (`canonical_data_type`) to get the same
+keying into struct fields.
+
+The implementation replaces the convention with `Identifier`, a `str`
+subclass with case-insensitive `__eq__`/`__ne__`/`__hash__` and preserved
+spelling, wrapped once at each domain constructor. `identifier_key`,
+`index_by_identifier`, and `canonical_data_type` are deleted; the domain
+interior now compares, hashes, and indexes identifiers with plain
+`==`/`in`/dict/set code, and only a handful of boundary-probe sites (a raw
+string probing a domain-keyed collection, or the reverse) still wrap
+explicitly. The identity and spelling-preservation invariants this design
+specifies are unchanged: two spellings differing only in case are still the
+same identifier, and the resulting-schema binding pass under "Binding plans
+to physical names" is unaffected, since it resolves physical *spelling*, not
+identity. See `docs/todo/2026-07-26-identifier-value-type-plan.md` for the
+implementation plan.
