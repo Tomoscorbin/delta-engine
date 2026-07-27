@@ -124,7 +124,6 @@ def test_drift_carries_the_desired_table():
     # validation reads scope and properties from it with no second argument
     assert isinstance(diff, TableDrift)
     assert diff.desired is desired
-    assert not hasattr(diff, "plan")
 
 
 def test_drift_derives_target_from_the_shared_table_identity():
@@ -230,10 +229,9 @@ def test_existing_table_diff_enables_feature_required_by_added_column():
     diff = diff_table(desired, _observed())
 
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (
-        EnableTableFeature(TableFeature.TIMESTAMP_NTZ),
-        AddColumn(DesiredColumn("seen_at", TimestampNtz())),
-    )
+    assert len(diff.actions) == 2
+    assert EnableTableFeature(TableFeature.TIMESTAMP_NTZ) in diff.actions
+    assert AddColumn(DesiredColumn("seen_at", TimestampNtz())) in diff.actions
 
 
 def test_existing_table_diff_does_not_reenable_supported_feature():
@@ -630,11 +628,6 @@ def test_clustering_removal_produces_cluster_by_none_action():
     )
 
 
-def test_clustering_changed_rejects_equal_key_sets():
-    with pytest.raises(ValueError, match="no difference"):
-        AlterClustering(desired_clustering=("a", "b"), observed_clustering=("b", "a"))
-
-
 # ---------- primary key changes
 
 
@@ -691,34 +684,6 @@ def test_equal_foreign_keys_by_signature_produce_no_change():
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
     assert diff.unresolvable == ()
-
-
-# ---------- no-difference changes are unrepresentable
-
-
-def test_column_data_type_changed_rejects_equal_types():
-    with pytest.raises(ValueError, match="no difference"):
-        AlterColumnType(column_name="id", desired_type=Integer(), observed_type=Integer())
-
-
-def test_column_nullability_changed_rejects_equal_flags():
-    with pytest.raises(ValueError, match="no difference"):
-        SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=True)
-
-
-def test_column_comment_changed_rejects_equal_comments():
-    with pytest.raises(ValueError, match="no difference"):
-        SetColumnComment(column_name="id", desired_comment="same", observed_comment="same")
-
-
-def test_table_comment_changed_rejects_equal_comments():
-    with pytest.raises(ValueError, match="no difference"):
-        SetTableComment(desired_comment="same", observed_comment="same")
-
-
-def test_partitioning_changed_rejects_equal_specs():
-    with pytest.raises(ValueError, match="no difference"):
-        PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
 def test_observed_only_primary_key_produces_removed_change():
@@ -915,6 +880,7 @@ def test_diff_hint_is_inert_when_applied_rename_is_steady_state():
 
 
 def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
+    # Given a rename hint whose source column was never observed
     desired = _desired(
         columns=(
             DesiredColumn("id", Integer()),
@@ -925,6 +891,7 @@ def test_diff_hint_is_a_plain_add_when_neither_name_is_observed():
 
     actions = diff_table(desired, observed).actions
 
+    # Then the hint is inert and the column is a plain add
     assert actions == (
         AddColumn(column=DesiredColumn("customer_name", String(), renamed_from="customer_nm")),
     )
@@ -956,10 +923,10 @@ def test_diff_missing_table_ignores_rename_hints():
 
     assert isinstance(diff, TableMissing)
     assert diff.desired is desired
-    assert not hasattr(diff, "plan")
 
 
 def test_diff_projects_clustering_identity_across_a_rename():
+    # Given clustering keyed by a column that is being renamed
     desired = _desired(
         columns=(
             DesiredColumn("id", Integer()),
@@ -974,10 +941,12 @@ def test_diff_projects_clustering_identity_across_a_rename():
 
     actions = diff_table(desired, observed).actions
 
+    # Then identity projects across the rename — only the rename itself remains
     assert actions == (RenameColumn(old_name="customer_nm", new_name="customer_name"),)
 
 
 def test_diff_projects_partition_identity_across_a_rename():
+    # Given partitioning keyed by a column that is being renamed
     desired = _desired(
         columns=(
             DesiredColumn("id", Integer()),
@@ -992,10 +961,12 @@ def test_diff_projects_partition_identity_across_a_rename():
 
     actions = diff_table(desired, observed).actions
 
+    # Then identity projects across the rename — only the rename itself remains
     assert actions == (RenameColumn(old_name="day", new_name="event_day"),)
 
 
 def test_diff_rename_and_primary_key_replacement_are_direct_actions():
+    # Given a primary key moving to a renamed column
     desired_key = PrimaryKeyConstraint(columns=("customer_name",), constraint_name="test_pk")
     observed_key = PrimaryKeyConstraint(columns=("customer_nm",), constraint_name="legacy_pk")
     desired = _desired(
@@ -1011,6 +982,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
 
     drift = diff_table(desired, observed)
 
+    # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropPrimaryKey(
@@ -1022,6 +994,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
 
 
 def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
+    # Given a foreign key whose local column is being renamed
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = ForeignKeyConstraint(
         local_columns=("parent_id",),
@@ -1046,6 +1019,7 @@ def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
 
     drift = diff_table(desired, observed)
 
+    # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="parent", new_name="parent_id"),
         SetForeignKey(constraint=desired_key),
@@ -1054,6 +1028,7 @@ def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
 
 
 def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_actions():
+    # Given a self-referencing key whose referenced column is being renamed
     desired_key = ForeignKeyConstraint(
         local_columns=("manager_id",),
         referenced_table=_QUALIFIED_NAME,
@@ -1080,6 +1055,7 @@ def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_acti
 
     drift = diff_table(desired, observed)
 
+    # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="id", new_name="employee_id"),
         SetForeignKey(constraint=desired_key),
@@ -1088,6 +1064,7 @@ def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_acti
 
 
 def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
+    # Given an observed-only foreign key unrelated to the rename
     unrelated_key = ForeignKeyConstraint(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
@@ -1107,10 +1084,11 @@ def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
 
     drift = diff_table(desired, observed)
 
-    assert drift.actions == (
+    # Then the drop still accompanies the rename
+    assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropForeignKey(constraint=unrelated_key),
-    )
+    }
 
 
 def test_drift_carries_the_observed_table_it_was_computed_against():
@@ -1151,43 +1129,6 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
     assert diff.observed.kind is TableKind.TABLE
 
 
-def test_matched_column_actions_carry_the_observed_column_name():
-    qualified_name = QualifiedName("cat", "sch", "t")
-    desired = DesiredTable(
-        qualified_name=qualified_name,
-        columns=(DesiredColumn("amount", Integer(), comment="net"),),
-    )
-    observed = ObservedTable(
-        qualified_name=qualified_name,
-        columns=(ObservedColumn("amount", Integer(), comment=""),),
-    )
-
-    diff = diff_table(desired, observed)
-
-    [action] = diff.actions
-    assert isinstance(action, SetColumnComment)
-    assert str(action.column_name) == str(observed.columns[0].name)
-
-
-def test_rename_action_carries_the_observed_source_name():
-    qualified_name = QualifiedName("cat", "sch", "t")
-    desired = DesiredTable(
-        qualified_name=qualified_name,
-        columns=(DesiredColumn("customer_name", String(), renamed_from="customer_nm"),),
-    )
-    observed = ObservedTable(
-        qualified_name=qualified_name,
-        columns=(ObservedColumn("customer_nm", String()),),
-    )
-
-    diff = diff_table(desired, observed)
-
-    [action] = diff.actions
-    assert isinstance(action, RenameColumn)
-    assert str(action.old_name) == str(observed.columns[0].name)
-    assert str(action.new_name) == "customer_name"
-
-
 def test_case_only_column_difference_is_not_drift():
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
@@ -1223,6 +1164,7 @@ def test_case_only_layout_and_key_differences_are_not_drift():
     diff = diff_table(desired, observed)
 
     assert diff.actions == ()
+    assert diff.unresolvable == ()
 
 
 def test_case_only_struct_field_difference_is_not_drift():

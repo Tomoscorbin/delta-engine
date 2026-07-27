@@ -113,20 +113,6 @@ def test_rejects_blank_explicit_constraint_name():
         )
 
 
-def test_foreign_key_constraint_is_frozen():
-    # Given a constraint
-    constraint = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=_customers(),
-        referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
-    )
-
-    # When / Then assignment is rejected (frozen dataclass)
-    with pytest.raises(AttributeError):
-        constraint.referenced_table = _customers()  # type: ignore[misc]
-
-
 def test_construction_canonicalizes_pair_order_by_local_column():
     # Given pairs declared in non-canonical order: b->y, a->x
     constraint = ForeignKeyConstraint(

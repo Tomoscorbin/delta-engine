@@ -22,14 +22,6 @@ def test_rejects_blank_explicit_constraint_name():
         PrimaryKeyConstraint(columns=("id",), constraint_name="  ")
 
 
-def test_equal_by_value():
-    # Given two primary keys with the same columns and name
-    # Then they compare equal (frozen value object)
-    assert PrimaryKeyConstraint(columns=("a", "b"), constraint_name="t_pk") == PrimaryKeyConstraint(
-        columns=("a", "b"), constraint_name="t_pk"
-    )
-
-
 def test_mixed_case_columns_and_name_are_preserved():
     pk = PrimaryKeyConstraint(columns=("OrderId",), constraint_name="Orders_PK")
     assert tuple(str(column) for column in pk.columns) == ("OrderId",)

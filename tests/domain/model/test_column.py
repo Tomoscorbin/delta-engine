@@ -91,7 +91,7 @@ def test_column_rejects_malformed_renamed_from() -> None:
         DesiredColumn("customer_name", String(), renamed_from="customer_name")
 
 
-def test_case_only_rename_collapses_to_renamed_from_itself() -> None:
+def test_case_only_rename_is_rejected_as_a_self_rename() -> None:
     # Case is not identity, so a case-only rename still names the same column.
     with pytest.raises(ValueError, match="itself"):
         DesiredColumn("customer_name", String(), renamed_from="Customer_Name")
@@ -109,22 +109,8 @@ def test_observed_column_enforces_the_same_field_invariants_as_column() -> None:
     assert dict(column.tags) == {"k": "v"}
 
 
-def test_observed_column_preserves_catalog_spelling() -> None:
-    assert str(ObservedColumn("requestId", Integer()).name) == "requestId"
-
-
 def test_column_names_compare_case_insensitively() -> None:
     desired = DesiredColumn(name="RequestId", data_type=String())
     observed = ObservedColumn(name="requestid", data_type=String())
     assert desired.name == observed.name
     assert desired.name in {observed.name}
-
-
-def test_column_name_spelling_is_preserved_verbatim() -> None:
-    column = DesiredColumn(name="RequestId", data_type=String())
-    assert str(column.name) == "RequestId"
-
-
-def test_case_only_self_rename_is_rejected() -> None:
-    with pytest.raises(ValueError, match="cannot be renamed_from itself"):
-        DesiredColumn(name="RequestId", data_type=String(), renamed_from="requestid")

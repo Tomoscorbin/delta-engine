@@ -41,7 +41,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
-from delta_engine.domain.plan.unresolvable import ColumnRenameConflict
+from delta_engine.domain.plan.unresolvable import ColumnRenameConflict, PartitioningChanged
 
 _TARGET = QualifiedName("cat", "sch", "table")
 
@@ -110,10 +110,6 @@ def test_actionplan_truthiness_and_length():
     assert len(empty) == 0
     assert non_empty
     assert len(non_empty) == 1
-
-
-def test_actionplan_retains_its_table_target():
-    assert _plan().target == _TARGET
 
 
 def test_actionplan_rejects_create_table_for_a_different_target():
@@ -220,6 +216,7 @@ def test_actionplan_order_is_independent_of_input_permutation(shuffled: list[Act
 
 
 def test_plan_full_phase_order_with_all_action_types():
+    # Given one action of every type, declared in a jumbled order
     plan = _plan(
         SetPrimaryKey(_primary_key()),
         SetForeignKey(_foreign_key()),
@@ -242,6 +239,7 @@ def test_plan_full_phase_order_with_all_action_types():
         AlterColumnType("w_col", Long(), Integer()),
     )
 
+    # Then the plan orders them by canonical phase
     assert [type(action) for action in plan] == [
         CreateTable,
         SetProperty,
@@ -331,10 +329,6 @@ def test_transition_actions_reject_no_difference(factory):
         factory()
 
 
-def test_drop_foreign_key_phases_before_drop_primary_key():
-    assert ActionPhase.DROP_FOREIGN_KEY < ActionPhase.DROP_PRIMARY_KEY
-
-
 def test_column_rename_conflict_is_unresolvable_not_an_action():
     unresolvable = ColumnRenameConflict(old_name="customer_nm", new_name="customer_name")
 
@@ -345,6 +339,11 @@ def test_column_rename_conflict_is_unresolvable_not_an_action():
 def test_column_rename_conflict_rejects_no_difference():
     with pytest.raises(ValueError, match="no difference"):
         ColumnRenameConflict(old_name="same", new_name="same")
+
+
+def test_partitioning_changed_rejects_no_difference():
+    with pytest.raises(ValueError, match="no difference"):
+        PartitioningChanged(desired_partitioning=("ds",), observed_partitioning=("ds",))
 
 
 def test_tag_aspects_belong_to_exactly_the_four_tag_actions():

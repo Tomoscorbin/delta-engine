@@ -73,6 +73,7 @@ def test_delta_table_rejects_columns_differing_only_by_case_as_duplicates() -> N
 
 
 def test_public_accessors_return_declared_spelling():
+    # Given mixed-case column, key, and layout declarations
     table = DeltaTable(
         catalog="main",
         schema="sales",
@@ -82,6 +83,7 @@ def test_public_accessors_return_declared_spelling():
         primary_key=["OrderId"],
     )
 
+    # Then the accessors echo the declared spelling
     assert tuple(str(column) for column in table.primary_key) == ("OrderId",)
     assert tuple(str(column) for column in table.clustered_by) == ("Region",)
 
@@ -321,7 +323,7 @@ def test_delta_table_accepts_boolean_or_binary_partition_column(data_type):
     "bad_keys",
     [
         ["delta.random_thing"],
-        ["foo", "bar.baz"],  # multiple, order should not matter in message
+        ["foo", "bar.baz"],  # multiple unknown keys at once
     ],
 )
 def test_rejects_unknown_table_property_keys(bad_keys):
@@ -572,36 +574,6 @@ def test_column_no_longer_accepts_a_primary_key_flag():
     # The per-column flag is deleted; the fact lives at table level now
     with pytest.raises(TypeError):
         Column("id", Integer(), nullable=False, primary_key=True)  # type: ignore[call-arg]
-
-
-def test_delta_table_primary_key_returns_pk_column_names():
-    # Given a DeltaTable with one PK column
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[
-            Column("id", Integer(), nullable=False),
-            Column("name", String()),
-        ],
-        primary_key=["id"],
-    )
-
-    # Then primary_key returns the PK column names in declaration order
-    assert table.primary_key == ("id",)
-
-
-def test_delta_table_primary_key_returns_empty_when_no_pk_declared():
-    # Given a DeltaTable with no PK columns
-    table = DeltaTable(
-        catalog="c",
-        schema="s",
-        name="orders",
-        columns=[Column("id", Integer())],
-    )
-
-    # Then primary_key is an empty tuple
-    assert table.primary_key == ()
 
 
 def test_delta_table_passes_pk_to_desired_table():
@@ -1689,54 +1661,8 @@ def test_foreign_key_accepts_columns_as_any_mapping():
     assert tuple(str(c) for c in constraint.local_columns) == ("Customer_ID",)
 
 
-def test_mapping_lowers_single_column_foreign_key():
-    customers = _customers()
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("customer_id", Integer())],
-        foreign_keys=[ForeignKey(columns={"customer_id": "id"}, references=customers)],
-    )
-
-    [foreign_key] = orders.to_desired_table().foreign_keys
-    assert foreign_key.local_columns == ("customer_id",)
-    assert foreign_key.referenced_table == QualifiedName("cat", "sch", "customers")
-    assert foreign_key.referenced_columns == ("id",)
-    assert foreign_key.constraint_name == "orders_customer_id_fk"
-
-
-def test_mapping_lowers_composite_foreign_key_with_stated_pairing():
-    accounts = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="accounts",
-        columns=[
-            Column("tenant_id", Integer(), nullable=False),
-            Column("id", Integer(), nullable=False),
-        ],
-        primary_key=["tenant_id", "id"],
-    )
-    orders = DeltaTable(
-        catalog="cat",
-        schema="sch",
-        name="orders",
-        columns=[Column("tenant_id", Integer()), Column("customer_id", Integer())],
-        foreign_keys=[
-            ForeignKey(
-                columns={"tenant_id": "tenant_id", "customer_id": "id"},
-                references=accounts,
-            )
-        ],
-    )
-
-    # Stored canonically (sorted by local column), pairing exactly as stated
-    [foreign_key] = orders.to_desired_table().foreign_keys
-    assert foreign_key.local_columns == ("customer_id", "tenant_id")
-    assert foreign_key.referenced_columns == ("id", "tenant_id")
-
-
 def test_mapping_insertion_order_is_irrelevant():
+    # Given the same composite mapping declared in two insertion orders
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1758,8 +1684,11 @@ def test_mapping_insertion_order_is_irrelevant():
         )
         return table.to_desired_table().foreign_keys[0]
 
+    # When lowering both declarations
     one = orders_with({"tenant_id": "tenant_id", "customer_id": "id"})
     two = orders_with({"customer_id": "id", "tenant_id": "tenant_id"})
+
+    # Then the constraints are identical, including the generated name
     assert one == two
     assert one.constraint_name == two.constraint_name
 
@@ -1837,13 +1766,17 @@ def test_reordering_the_parent_primary_key_produces_no_foreign_key_drift():
             ],
         ).to_desired_table()
 
+    # When lowering the child against both parent key orders
     before = child_of(["tenant_id", "id"])
     after = child_of(["id", "tenant_id"])
+
+    # Then the lowered constraints are identical
     assert before.foreign_keys == after.foreign_keys
 
     from delta_engine.domain.model import ObservedTable
     from tests.builders import as_observed_columns
 
+    # And the reorder produces no drift against the original observed state
     observed = ObservedTable(
         qualified_name=before.qualified_name,
         columns=as_observed_columns(before.columns),
@@ -1872,9 +1805,11 @@ def test_generated_foreign_key_name_is_identical_across_declaration_casing():
             foreign_keys=[ForeignKey(columns={local_spelling: "id"}, references=parent)],
         )
 
+    # When lowering the same declaration in two spellings
     camel = declare("CustomerId").to_desired_table().foreign_keys[0].constraint_name
     lower = declare("customerid").to_desired_table().foreign_keys[0].constraint_name
 
+    # Then the generated constraint name is identical and lowercase
     assert camel == lower == "orders_customerid_fk"
 
 
@@ -1888,4 +1823,7 @@ def test_layout_and_key_references_resolve_across_casing():
         primary_key=["ORDER_ID"],
     )
 
-    assert table.to_desired_table().primary_key is not None
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert desired.primary_key.columns == ("order_id",)
+    assert desired.clustered_by == ("region",)

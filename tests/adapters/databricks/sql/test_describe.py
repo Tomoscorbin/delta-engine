@@ -176,7 +176,7 @@ def test_lowercase_unicode_column_name_is_preserved_verbatim():
     description = _parse(
         _doc(columns=[{"name": "straße", "type": {"name": "int"}, "nullable": True}])
     )
-    assert description.columns[0].name == "straße"
+    assert str(description.columns[0].name) == "straße"
 
 
 def test_partitioning_and_clustering_carried_verbatim_in_order():
@@ -313,8 +313,10 @@ def test_real_order_fact_fixture():
 def test_valid_describe_documents_preserve_values_and_identifier_spelling(
     case: DescribeCase,
 ) -> None:
+    # When parsing
     description = _parse(json.dumps(case.document))
 
+    # Then every carried field survives verbatim, including identifier spelling
     assert description.columns == case.columns
     assert tuple(str(c.name) for c in description.columns) == tuple(
         str(c.name) for c in case.columns

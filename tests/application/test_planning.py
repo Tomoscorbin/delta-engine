@@ -163,6 +163,7 @@ def test_plan_diff_accepts_no_op_as_an_empty_plan():
 
 
 def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
+    # Given a missing table declared with tags and a foreign key
     foreign_key = _foreign_key(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
@@ -175,8 +176,10 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
         foreign_keys=(foreign_key,),
     )
 
+    # When planning
     result = _plan(diff_table(desired, None))
 
+    # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == desired.qualified_name
     assert result.plan.actions == (
@@ -198,6 +201,7 @@ def test_plan_diff_rejects_missing_table_when_table_existence_is_unmanaged():
 
 
 def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
+    # Given a rename hint plus a type change on the renamed column
     desired = _desired(
         columns=(DesiredColumn("amount", Long(), renamed_from="amt"),),
         properties={"delta.enableTypeWidening": "true"},
@@ -207,8 +211,10 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
         properties={"delta.enableTypeWidening": "true"},
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then the residual drift lands under the new name
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
         RenameColumn(old_name="amt", new_name="amount"),
@@ -217,6 +223,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
 
 
 def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
+    # Given a primary key moving to a renamed column
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
     desired = _desired(
@@ -228,8 +235,10 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
         primary_key=observed_key,
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
         DropPrimaryKey(primary_key=observed_key, referencing_foreign_keys=()),
@@ -239,6 +248,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
 
 
 def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
+    # Given an inbound reference to the primary key being renamed
     reference = ForeignKeyReference(
         constraint_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
@@ -255,8 +265,10 @@ def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
         referencing_foreign_keys=(reference,),
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then planning fails with the referenced-key rule
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == [
         "PrimaryKeyReferencedByForeignKeys"
@@ -265,6 +277,7 @@ def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
 
 
 def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
+    # Given a foreign key whose local column is being renamed
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = _foreign_key(
         local_columns=("parent_id",),
@@ -286,8 +299,10 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
         columns=(ObservedColumn("parent", Integer()),), foreign_keys=(observed_key,)
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
         DropForeignKey(constraint=observed_key),
@@ -297,6 +312,7 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
 
 
 def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_rename():
+    # Given a self-referencing key whose referenced column is being renamed
     desired_key = _foreign_key(
         local_columns=("manager_id",),
         referenced_table=_NAME,
@@ -321,8 +337,10 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
         foreign_keys=(observed_key,),
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
         DropForeignKey(constraint=observed_key),
@@ -332,6 +350,7 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
 
 
 def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
+    # Given an observed-only foreign key unrelated to the rename
     unrelated_key = _foreign_key(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "parent"),
@@ -349,8 +368,10 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
         foreign_keys=(unrelated_key,),
     )
 
+    # When planning
     result = _plan(diff_table(desired, observed))
 
+    # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
         DropForeignKey(constraint=unrelated_key),
@@ -398,13 +419,6 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
 
     assert isinstance(result, PlanningFailed)
     assert any("column structure" in failure.message for failure in result.failures)
-
-
-def test_plan_diff_requires_the_resulting_schema_index():
-    diff = diff_table(_desired(), _observed())
-
-    with pytest.raises(TypeError):
-        plan_diff(diff)  # type: ignore[call-arg]
 
 
 def test_planning_a_diffed_table_without_its_own_schema_entry_is_an_engine_error():
@@ -487,6 +501,7 @@ def test_created_table_binds_internal_references_to_declared_column_spelling():
 
 
 def test_foreign_key_binds_both_sides_to_post_sync_spelling():
+    # Given a child foreign key declared in lowercase on both sides
     parent_name = QualifiedName("dev", "silver", "parent")
     child_constraint = ForeignKeyConstraint(
         local_columns=("orderref",),
@@ -501,6 +516,7 @@ def test_foreign_key_binds_both_sides_to_post_sync_spelling():
     child_observed = _observed(columns=(ObservedColumn("orderRef", Integer()),))
     child_diff = diff_table(child_desired, child_observed)
 
+    # And a parent whose observed spelling is mixed-case
     parent_desired = DesiredTable(
         qualified_name=parent_name,
         columns=(DesiredColumn("orderid", Integer(), nullable=False),),
@@ -513,12 +529,14 @@ def test_foreign_key_binds_both_sides_to_post_sync_spelling():
     )
     parent_diff = diff_table(parent_desired, parent_observed)
 
+    # When planning with both resulting schemas registered
     schemas = {
         child_diff.target: resulting_column_spellings(child_diff),
         parent_diff.target: resulting_column_spellings(parent_diff),
     }
     result = plan_diff(child_diff, schemas)
 
+    # Then both sides bind to the post-sync spelling
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.local_columns) == ("orderRef",)
@@ -526,6 +544,7 @@ def test_foreign_key_binds_both_sides_to_post_sync_spelling():
 
 
 def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
+    # Given a parent renaming its key column
     parent_name = QualifiedName("dev", "silver", "parent")
     parent_desired = DesiredTable(
         qualified_name=parent_name,
@@ -539,6 +558,7 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
     )
     parent_diff = diff_table(parent_desired, parent_observed)
 
+    # And a child key referencing the post-rename name in lowercase
     child_constraint = ForeignKeyConstraint(
         local_columns=("ref",),
         referenced_table=parent_name,
@@ -554,18 +574,21 @@ def test_foreign_key_to_a_renamed_parent_key_binds_to_the_new_spelling():
         _observed(columns=(ObservedColumn("ref", Integer()),)),
     )
 
+    # When planning with both resulting schemas registered
     schemas = {
         child_diff.target: resulting_column_spellings(child_diff),
         parent_diff.target: resulting_column_spellings(parent_diff),
     }
     result = plan_diff(child_diff, schemas)
 
+    # Then the referenced side binds to the new declared spelling
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("orderNumber",)
 
 
 def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
+    # Given a self-referencing key declared lowercase against mixed-case physical spellings
     constraint = ForeignKeyConstraint(
         local_columns=("parentref",),
         referenced_table=_NAME,
@@ -589,8 +612,10 @@ def test_self_referencing_foreign_key_binds_through_the_tables_own_schema():
     )
     diff = diff_table(desired, observed)
 
+    # When planning
     result = _plan(diff)
 
+    # Then both sides bind through the table's own resulting schema
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.local_columns) == ("ParentRef",)

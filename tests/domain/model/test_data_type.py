@@ -104,13 +104,3 @@ def test_struct_types_differing_only_in_field_case_are_equal() -> None:
     left = Struct((StructField("Payload", String()),))
     right = Struct((StructField("payload", String()),))
     assert left == right
-
-
-def test_struct_field_spelling_is_preserved_verbatim() -> None:
-    [field] = Struct((StructField("Payload", String()),)).fields
-    assert str(field.name) == "Payload"
-
-
-def test_struct_rejects_case_variant_duplicate_fields() -> None:
-    with pytest.raises(ValueError, match="Duplicate struct field name"):
-        Struct((StructField("id", String()), StructField("ID", String())))

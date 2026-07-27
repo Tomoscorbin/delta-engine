@@ -80,6 +80,7 @@ def test_primary_key_empty_rows_map_to_none() -> None:
 
 
 def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
+    # Given catalog rows carrying mixed-case spellings
     rows = [
         SimpleNamespace(
             constraint_name="Orders_Customer_FK",
@@ -93,6 +94,7 @@ def test_foreign_key_rows_preserve_constraint_and_column_spelling() -> None:
 
     [fk] = read_foreign_keys(_runner(foreign_keys_query(QN), rows), QN)
 
+    # Then constraint and column spellings carry verbatim
     assert str(fk.constraint_name) == "Orders_Customer_FK"
     assert tuple(str(column) for column in fk.local_columns) == ("Customer_Id",)
     assert fk.referenced_table == QualifiedName("dev", "silver", "customer")
@@ -189,6 +191,7 @@ def test_referencing_foreign_keys_empty_rows_map_to_empty_tuple() -> None:
 def test_table_tags_read_returns_empty_read_only_mapping_for_no_rows():
     tags = read_table_tags(_runner(table_tags_query(QN), []), QN)
     assert dict(tags) == {}
+    # read-only: the mapping must refuse writes
     with pytest.raises(TypeError):
         tags["x"] = "y"  # type: ignore[index]
 

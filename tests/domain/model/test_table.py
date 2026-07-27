@@ -252,31 +252,6 @@ def test_desired_table_rejects_fk_referencing_unknown_local_column():
         )
 
 
-def test_desired_table_rejects_foreign_keys_with_duplicate_derived_names():
-    # Given two FKs on the same local columns with distinct names (construction succeeds;
-    # the DesiredTable rejects them because the same local-column set is incoherent)
-    first = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "customers"),
-        referenced_columns=("id",),
-        constraint_name="orders_customer_id_fk",
-    )
-    second = ForeignKeyConstraint(
-        local_columns=("customer_id",),
-        referenced_table=QualifiedName("cat", "sch", "vips"),
-        referenced_columns=("id",),
-        constraint_name="orders_customer_id_vips_fk",
-    )
-
-    # When / Then — both FKs govern the same local-column set, which is incoherent
-    with pytest.raises(ValueError, match="same local columns"):
-        DesiredTable(
-            qualified_name=QualifiedName("cat", "sch", "orders"),
-            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
-            foreign_keys=(first, second),
-        )
-
-
 def test_desired_table_rejects_two_foreign_keys_over_the_same_local_columns():
     # Given two FKs whose local-column sets are identical (semantically incoherent;
     # each carries a distinct name so construction succeeds)
@@ -662,6 +637,8 @@ def test_desired_table_rejects_duplicate_rename_sources() -> None:
 
 
 def test_desired_table_rejects_renames_outside_column_structure_scope() -> None:
+    # Given a declaration managing only metadata aspects — renames imply
+    # column-structure changes, which this scope does not manage
     metadata_aspects = frozenset(
         {
             TableAspect.TABLE_COMMENT,
@@ -777,12 +754,3 @@ def test_observed_table_supported_features_default_to_empty():
     )
 
     assert table.supported_features == frozenset()
-
-
-def test_layout_references_preserve_spelling_and_resolve_case_insensitively() -> None:
-    table = DesiredTable(
-        qualified_name=QualifiedName("cat", "sch", "tbl"),
-        columns=(DesiredColumn(name="RequestId", data_type=String()),),
-        clustered_by=("REQUESTID",),
-    )
-    assert str(table.clustered_by[0]) == "REQUESTID"

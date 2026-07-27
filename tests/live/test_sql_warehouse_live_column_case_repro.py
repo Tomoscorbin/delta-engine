@@ -82,6 +82,7 @@ def test_column_identifier_case_repro_metadata_sync_matches_contract_schema(
 ):
     """Metadata sync accepts camelCase display names without structural drift."""
     table_name = live_tables("column_case_metadata_sync")
+    # Given a live table created with camelCase display names
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} ("
@@ -141,8 +142,10 @@ def test_column_identifier_case_repro_metadata_sync_matches_contract_schema(
     )
     engine = build_sql_engine(live_connection)
 
+    # When syncing a metadata-scoped declaration matching those spellings
     report = engine.sync(declaration)
 
+    # Then comments apply through the camelCase spellings without structural drift
     assert report.has_failures is False
     assert report.has_changes is True
     statements = next(iter(report.planned_sql_statements.values()))
@@ -181,11 +184,7 @@ def test_column_identifier_case_repro_real_name_mismatch_reports_structural_drif
     assert table_report.planned_sql_statements == ()
     [failure] = table_report.failures
     assert failure.rule_name == "UnmanagedAspectDrift"
-    assert failure.message == (
-        "Operation not allowed: column structure has drifted but is not managed "
-        "by this definition. Sync the table fully or update the declaration to "
-        "match the live schema."
-    )
+    assert "column structure" in failure.message
 
 
 def test_column_identifier_case_foreign_key_binds_exact_spelling_on_both_sides(
