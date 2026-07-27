@@ -6,10 +6,12 @@ Branch: `fix/preserve-column-identifier-case`
 
 > **2026-07-27 simplification:** The identity and spelling rules in this
 > document still apply. The resulting-schema index and planning binding pass
-> described below no longer do. Diff actions now take the observed column name
-> when they address an existing column and otherwise take the declared column
-> name. Cross-table FK diffing receives the desired and observed columns already
-> held by the engine. Planning only validates and constructs the `ActionPlan`.
+> described below no longer do. A table binds its column references to the
+> owning `Column.name` at construction. For execution, the diff uses one
+> identity-keyed name map per registered table: desired names first, overlaid
+> by observed names. Existing columns therefore use catalog spelling and new
+> columns use declared spelling. Planning only validates and constructs the
+> `ActionPlan`.
 
 ## Summary
 

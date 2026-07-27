@@ -1,7 +1,7 @@
 """Domain models for desired and observed table state."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from types import MappingProxyType
 from typing import Final
@@ -194,6 +194,8 @@ class DesiredTable:
             foreign_keys=self.foreign_keys,
         )
 
+        _bind_column_references(self)
+
         if not self.managed_aspects:
             raise ValueError(
                 "managed_aspects must not be empty: a table that manages no aspect"
@@ -325,3 +327,50 @@ class ObservedTable:
             primary_key=self.primary_key,
             foreign_keys=self.foreign_keys,
         )
+
+        _bind_column_references(self)
+
+
+def _bind_column_references(table: DesiredTable | ObservedTable) -> None:
+    """Replace references to owned columns with the columns' actual identifiers."""
+    column_names = {column.name: column.name for column in table.columns}
+    object.__setattr__(
+        table,
+        "partitioned_by",
+        tuple(column_names[name] for name in table.partitioned_by),
+    )
+    object.__setattr__(
+        table,
+        "clustered_by",
+        tuple(column_names[name] for name in table.clustered_by),
+    )
+    if table.primary_key is not None:
+        object.__setattr__(
+            table,
+            "primary_key",
+            replace(
+                table.primary_key,
+                columns=tuple(column_names[name] for name in table.primary_key.columns),
+            ),
+        )
+    object.__setattr__(
+        table,
+        "foreign_keys",
+        tuple(
+            replace(
+                foreign_key,
+                local_columns=tuple(
+                    column_names[name] for name in foreign_key.local_columns
+                ),
+                referenced_columns=(
+                    tuple(
+                        column_names[name]
+                        for name in foreign_key.referenced_columns
+                    )
+                    if foreign_key.referenced_table == table.qualified_name
+                    else foreign_key.referenced_columns
+                ),
+            )
+            for foreign_key in table.foreign_keys
+        ),
+    )

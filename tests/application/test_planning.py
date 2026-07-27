@@ -453,7 +453,7 @@ def test_primary_key_action_uses_the_observed_column_name():
     assert tuple(str(c) for c in action.primary_key.columns) == ("requestId",)
 
 
-def test_created_table_preserves_its_declared_internal_references():
+def test_created_table_uses_its_columns_spelling_for_internal_references():
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="test_pk"),
@@ -465,8 +465,8 @@ def test_created_table_preserves_its_declared_internal_references():
     assert isinstance(result, PlanningSucceeded)
     [create] = [action for action in result.plan if isinstance(action, CreateTable)]
     assert create.table.primary_key is not None
-    assert tuple(str(c) for c in create.table.primary_key.columns) == ("REQUESTID",)
-    assert tuple(str(c) for c in create.table.clustered_by) == ("REQUESTID",)
+    assert tuple(str(c) for c in create.table.primary_key.columns) == ("requestId",)
+    assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
 
 
 def test_foreign_key_action_uses_observed_column_names_on_both_sides():
@@ -494,7 +494,11 @@ def test_foreign_key_action_uses_observed_column_names_on_both_sides():
     child_diff = diff_table(
         child_desired,
         child_observed,
-        {parent_name: parent_observed.columns},
+        {
+            parent_name: {
+                column.name: column.name for column in parent_observed.columns
+            }
+        },
     )
     result = plan_diff(child_diff)
 
@@ -533,10 +537,10 @@ def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
         child_desired,
         _observed(columns=(ObservedColumn("ref", Integer()),)),
         {
-            parent_name: (
-                *parent_desired.columns,
-                *parent_observed.columns,
-            )
+            parent_name: {
+                column.name: column.name
+                for column in (*parent_desired.columns, *parent_observed.columns)
+            }
         },
     )
 

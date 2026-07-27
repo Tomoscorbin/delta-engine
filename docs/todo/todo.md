@@ -31,10 +31,12 @@
 - [x] Structured report output for reporting / understanding runs. DONE as part of CI-grade dry runs: `SyncReport.to_dict()` / `TableRunReport.to_dict()` project a backend-free, JSON-serialisable per-table record (name, status, has_changes/has_failures, change-summary records, full compiled SQL, failure records, statement-denominated execution counts) under `schema_version: 2`; `SyncReport.planned_sql_statements` and `has_changes` added; `TableRunReport` and the concrete failure types are now public. Still deferred: the thin `databricks.py` Spark `display()` / run-history lift — add only if interactive display or persistence becomes a real need, keeping Spark at the edge.
 - [x] Review identifier case handling. RESOLVED 2026-07-25: column-like
   identifiers preserve declared/catalog spelling, identity comparisons use
-  `Identifier`'s `str.lower()` identity (not `casefold()`), and diff actions
-  carry the observed name when they address an existing physical column.
-  Creates, additions, and rename targets retain their declared names. Catalog,
-  schema, and table-name parts remain lowercase as Unity Catalog stores them.
+  `Identifier`'s `str.lower()` identity (not `casefold()`), and attached column
+  references canonicalize to their owning `Column.name`. Diff actions use a
+  desired-name map overlaid by observed names, so existing columns use catalog
+  spelling while creates, additions, and rename targets retain their declared
+  names. Catalog, schema, and table-name parts remain lowercase as Unity
+  Catalog stores them.
   See `2026-07-24-column-identifier-spelling-design.md`. (Supersedes the
   2026-07-13 identifier-normalization review noted during PR #215; the original
   resulting-schema planning pass was removed on 2026-07-27.)

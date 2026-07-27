@@ -15,7 +15,6 @@ from delta_engine.domain.model import (
     DataType,
     DesiredColumn,
     DesiredTable,
-    ForeignKeyConstraint,
     Map,
     ObservedColumn,
     ObservedTable,
@@ -113,10 +112,7 @@ class TableDrift:
 
 
 type TableDiff = TableMissing | TableDrift
-type _ColumnsByTable = Mapping[
-    QualifiedName,
-    tuple[DesiredColumn | ObservedColumn, ...],
-]
+type _ColumnNamesByTable = Mapping[QualifiedName, Mapping[str, str]]
 
 
 def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
@@ -131,29 +127,34 @@ def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
 def diff_table(
     desired: DesiredTable,
     observed: ObservedTable | None,
-    columns_by_table: _ColumnsByTable | None = None,
+    column_names_by_table: _ColumnNamesByTable | None = None,
 ) -> TableDiff:
     """
     Describe every difference between desired and observed table state.
 
-    ``columns_by_table`` supplies the already-known columns of registered
-    tables so foreign-key actions can use a referenced column's observed name.
-    No table lookup is needed for ordinary single-table diffs.
+    ``column_names_by_table`` supplies the physical column names of registered
+    tables so foreign-key actions can address a referenced table. Observed
+    spellings win for existing columns; desired spellings cover new columns.
     """
-    columns_by_table = columns_by_table or {}
+    column_names_by_table = dict(column_names_by_table or {})
+    own_names = {column.name: column.name for column in desired.columns}
+    if observed is not None:
+        own_names |= {column.name: column.name for column in observed.columns}
+    column_names_by_table[desired.qualified_name] = own_names
+
     if observed is None:
         return TableMissing(
             desired=desired,
-            actions=_actions_for_missing_table(desired, columns_by_table),
+            actions=_actions_for_missing_table(desired, column_names_by_table),
         )
 
-    return _diff_existing_table(desired, observed, columns_by_table)
+    return _diff_existing_table(desired, observed, column_names_by_table)
 
 
 def _diff_existing_table(
     desired: DesiredTable,
     observed: ObservedTable,
-    columns_by_table: _ColumnsByTable,
+    column_names_by_table: _ColumnNamesByTable,
 ) -> TableDrift:
     """Describe every difference between two states of the same existing table."""
     _require_same_table(desired, observed)
@@ -165,12 +166,13 @@ def _diff_existing_table(
         observed.supported_features,
     )
     column_actions = _diff_columns(desired.columns, renames.columns)
-    layout_actions, layout_unresolvable = _diff_layout(desired, renames)
+    own_names = column_names_by_table[desired.qualified_name]
+    layout_actions, layout_unresolvable = _diff_layout(desired, renames, own_names)
     constraint_actions = _diff_constraints(
         desired,
         observed,
-        (*desired.columns, *renames.columns),
-        columns_by_table,
+        own_names,
+        column_names_by_table,
     )
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
@@ -225,7 +227,7 @@ def _walk_data_type(data_type: DataType) -> Iterable[DataType]:
 
 def _actions_for_missing_table(
     desired: DesiredTable,
-    columns_by_table: _ColumnsByTable,
+    column_names_by_table: _ColumnNamesByTable,
 ) -> tuple[Action, ...]:
     """
     Return every action needed to realize a missing table.
@@ -249,11 +251,14 @@ def _actions_for_missing_table(
     )
     foreign_key_actions = tuple(
         SetForeignKey(
-            constraint=_foreign_key_for_action(
+            constraint=replace(
                 constraint,
-                owner=desired.qualified_name,
-                own_columns=desired.columns,
-                columns_by_table=columns_by_table,
+                referenced_columns=tuple(
+                    column_names_by_table.get(constraint.referenced_table, {}).get(
+                        name, name
+                    )
+                    for name in constraint.referenced_columns
+                ),
             )
         )
         for constraint in desired.foreign_keys
@@ -467,16 +472,14 @@ def _diff_column_tags(
 def _diff_layout(
     desired: DesiredTable,
     observed: _RenameResolution,
+    own_names: Mapping[str, str],
 ) -> tuple[tuple[AlterClustering, ...], tuple[PartitioningChanged, ...]]:
     """Return resolvable and unresolvable physical-layout differences."""
     actions: tuple[AlterClustering, ...] = ()
     if set(desired.clustered_by) != set(observed.clustered_by):
         actions = (
             AlterClustering(
-                desired_clustering=_resolve_column_names(
-                    desired.clustered_by,
-                    (*desired.columns, *observed.columns),
-                ),
+                desired_clustering=tuple(own_names[name] for name in desired.clustered_by),
                 observed_clustering=observed.clustered_by,
             ),
         )
@@ -496,8 +499,8 @@ def _diff_layout(
 def _diff_constraints(
     desired: DesiredTable,
     observed: ObservedTable,
-    own_columns: tuple[DesiredColumn | ObservedColumn, ...],
-    columns_by_table: _ColumnsByTable,
+    own_names: Mapping[str, str],
+    column_names_by_table: _ColumnNamesByTable,
 ) -> tuple[DropPrimaryKey | SetPrimaryKey | SetForeignKey | DropForeignKey, ...]:
     """
     Return primary- and foreign-key actions against raw observed names.
@@ -507,15 +510,15 @@ def _diff_constraints(
     name frame used by columns and physical layout.
     """
     return (
-        *_diff_primary_key(desired, observed, own_columns),
-        *_diff_foreign_keys(desired, observed, own_columns, columns_by_table),
+        *_diff_primary_key(desired, observed, own_names),
+        *_diff_foreign_keys(desired, observed, own_names, column_names_by_table),
     )
 
 
 def _diff_primary_key(
     desired: DesiredTable,
     observed: ObservedTable,
-    own_columns: tuple[DesiredColumn | ObservedColumn, ...],
+    own_names: Mapping[str, str],
 ) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
     """
     Return primary-key actions; a changed key becomes a drop and a set.
@@ -545,7 +548,7 @@ def _diff_primary_key(
             SetPrimaryKey(
                 primary_key=replace(
                     desired_key,
-                    columns=_resolve_column_names(desired_key.columns, own_columns),
+                    columns=tuple(own_names[name] for name in desired_key.columns),
                 )
             )
         )
@@ -555,8 +558,8 @@ def _diff_primary_key(
 def _diff_foreign_keys(
     desired: DesiredTable,
     observed: ObservedTable,
-    own_columns: tuple[DesiredColumn | ObservedColumn, ...],
-    columns_by_table: _ColumnsByTable,
+    own_names: Mapping[str, str],
+    column_names_by_table: _ColumnNamesByTable,
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
     """Return foreign-key actions matched by content signature."""
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
@@ -564,13 +567,20 @@ def _diff_foreign_keys(
     actions: list[SetForeignKey | DropForeignKey] = []
     for signature, constraint in desired_by_signature.items():
         if signature not in observed_by_signature:
+            referenced_names = column_names_by_table.get(
+                constraint.referenced_table, {}
+            )
             actions.append(
                 SetForeignKey(
-                    constraint=_foreign_key_for_action(
+                    constraint=replace(
                         constraint,
-                        owner=desired.qualified_name,
-                        own_columns=own_columns,
-                        columns_by_table=columns_by_table,
+                        local_columns=tuple(
+                            own_names[name] for name in constraint.local_columns
+                        ),
+                        referenced_columns=tuple(
+                            referenced_names.get(name, name)
+                            for name in constraint.referenced_columns
+                        ),
                     )
                 )
             )
@@ -578,42 +588,6 @@ def _diff_foreign_keys(
         if signature not in desired_by_signature:
             actions.append(DropForeignKey(constraint=constraint))
     return tuple(actions)
-
-
-def _foreign_key_for_action(
-    constraint: ForeignKeyConstraint,
-    *,
-    owner: QualifiedName,
-    own_columns: tuple[DesiredColumn | ObservedColumn, ...],
-    columns_by_table: _ColumnsByTable,
-) -> ForeignKeyConstraint:
-    """Use physical column names for a foreign key action."""
-    if constraint.referenced_table == owner:
-        referenced_columns = own_columns
-    else:
-        referenced_columns = columns_by_table.get(constraint.referenced_table, ())
-
-    return replace(
-        constraint,
-        local_columns=_resolve_column_names(constraint.local_columns, own_columns),
-        referenced_columns=_resolve_column_names(
-            constraint.referenced_columns,
-            referenced_columns,
-        ),
-    )
-
-
-def _resolve_column_names(
-    names: tuple[str, ...],
-    columns: tuple[DesiredColumn | ObservedColumn, ...],
-) -> tuple[str, ...]:
-    """Use the observed column name, then its declaration, then the reference itself."""
-    declared = {column.name: column.name for column in columns if isinstance(column, DesiredColumn)}
-    observed = {
-        column.name: column.name for column in columns if isinstance(column, ObservedColumn)
-    }
-    available = declared | observed
-    return tuple(available.get(name, name) for name in names)
 
 
 def _diff_table_metadata(

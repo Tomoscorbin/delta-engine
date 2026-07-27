@@ -366,8 +366,15 @@ class ForeignKey:
             )
 
         pairs = self._resolve_column_pairs(referenced)
-        local_columns = tuple(local for local, _ in pairs)
-        referenced_columns = tuple(parent for _, parent in pairs)
+        local_names = {column.name: column.name for column in owner_columns}
+        referenced_names = {name: name for name in referenced.column_types}
+        local_columns = tuple(
+            local_names.get(Identifier(local), Identifier(local)) for local, _ in pairs
+        )
+        referenced_columns = tuple(
+            referenced_names.get(Identifier(parent), Identifier(parent))
+            for _, parent in pairs
+        )
 
         declared = key_signature(referenced_columns)
         key = key_signature(referenced.key_columns)

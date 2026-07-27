@@ -820,11 +820,14 @@ dependency cost.
   validation and the catalog adapters — that probes a domain-keyed collection
   with a raw string that never passed a domain constructor (or the reverse)
   wraps the raw side in `Identifier(...)` first.
-- Give executable actions the physical identifier when the diff creates them:
-  actions over existing columns use the observed `Identifier`, while creates,
-  additions, and rename targets use the declared one. Foreign-key diffs receive
-  the desired and observed columns already read for registered tables so both
-  sides follow the same rule. Planning only validates and orders these actions.
+- Treat columns as the owners of identifier spelling. When a table is
+  constructed, its partition, clustering, primary-key, and locally owned
+  foreign-key references are replaced with the matching `Column.name`; input
+  casing is lookup syntax, not separate model state.
+- Give executable actions the physical identifier through one identity-keyed
+  name map per registered table. Desired columns establish the names that a
+  sync will create, then observed columns override matched entries with catalog
+  spelling. Planning only validates and orders the resulting actions.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to
