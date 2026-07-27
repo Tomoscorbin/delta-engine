@@ -43,6 +43,16 @@ class TestIdentifierSpelling:
         assert Identifier("RequestId").key == "requestid"
         assert type(Identifier("RequestId").key) is str
 
+    def test_key_preserves_already_lowercase_unicode(self) -> None:
+        # 'straße' is already lowercase; casefold would rewrite it to
+        # 'strasse', a different identifier from the one Unity Catalog stores.
+        assert Identifier("straße").key == "straße"
+
+    def test_key_uses_lower_not_casefold(self) -> None:
+        # lower() keeps 'ß'; casefold() would expand it to 'ss' and silently
+        # change identity semantics.
+        assert Identifier("GRÖßE").key == "größe"
+
 
 class TestIdentifierConstruction:
     def test_blank_spelling_is_rejected(self) -> None:
