@@ -273,8 +273,8 @@ def test_platform_resolves_column_references_case_insensitively(live_connection,
     # Case is never identity for column references: the engine diffs
     # case-variant spellings as the same column because ordinary DDL resolves
     # them interchangeably. (The managed-constraint path is the exception: it
-    # needs the exact catalog spelling, so constraint actions use the observed
-    # column name; pinned in test_sql_warehouse_live_constraints.)
+    # needs the exact catalog spelling — pinned directly below; the engine's
+    # use of observed spelling is pinned in test_sql_warehouse_live_constraints.)
     table_name = live_tables("column_case_raw_alter")
     execute_sql(
         live_connection,
@@ -290,3 +290,89 @@ def test_platform_resolves_column_references_case_insensitively(live_connection,
     [column] = read_live_table(live_connection, table_name)["columns"]
     assert column["column_name"] == "requestId"
     assert column["comment"] == "resolved through lowercase"
+
+
+def test_platform_requires_exact_case_for_primary_key_constraint_columns(
+    live_connection, live_tables
+):
+    """ADD CONSTRAINT ... PRIMARY KEY resolves its columns case-sensitively."""
+    # Ordinary DDL resolves references case-insensitively (pinned above); the
+    # managed-constraint path does not. This grounds the engine's choice to
+    # spell an existing constraint column exactly as the catalog does. If this
+    # pin ever fails — the platform accepting `requestid` against a physical
+    # `requestId` — constraint actions no longer need observed spelling.
+    table_name = live_tables("pk_case_sensitivity")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
+    )
+
+    # A mis-cased key column is rejected...
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(table_name)} "
+            f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestid`)",
+        )
+
+    # ...while the exact catalog spelling is accepted.
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(table_name)} "
+        f"ADD CONSTRAINT `{table_name}_pk` PRIMARY KEY (`requestId`)",
+    )
+    assert read_live_table(live_connection, table_name)["primary_key"] == ("requestId",)
+
+
+def test_platform_requires_exact_case_for_foreign_key_constraint_columns(
+    live_connection, live_tables
+):
+    """ADD CONSTRAINT ... FOREIGN KEY resolves local and referenced columns case-sensitively."""
+    # The referenced half of this pin is what justifies the catalog-spelling
+    # adoption pass: a child's SetForeignKey can only carry the parent's
+    # physical spelling if adoption can see the parent's snapshot. If the
+    # platform accepted `orderid` against the parent's physical `orderId`,
+    # declared spelling would suffice on the referenced side and the
+    # cross-table adoption pass would be unnecessary.
+    parent_name = live_tables("fk_case_parent")
+    child_name = live_tables("fk_case_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} "
+        f"(`orderId` STRING NOT NULL, CONSTRAINT `{parent_name}_pk` "
+        "PRIMARY KEY (`orderId`)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (`orderRef` STRING) USING DELTA",
+    )
+
+    # A mis-cased referenced column is rejected...
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(child_name)} "
+            f"ADD CONSTRAINT `{child_name}_ref_fk` FOREIGN KEY (`orderRef`) "
+            f"REFERENCES {qualified_table(parent_name)} (`orderid`)",
+        )
+
+    # ...and so is a mis-cased local column...
+    with pytest.raises(ServerOperationError):
+        execute_sql(
+            live_connection,
+            f"ALTER TABLE {qualified_table(child_name)} "
+            f"ADD CONSTRAINT `{child_name}_local_fk` FOREIGN KEY (`orderref`) "
+            f"REFERENCES {qualified_table(parent_name)} (`orderId`)",
+        )
+
+    # ...while the exact catalog spelling on both sides is accepted. This
+    # control certifies the rejections above were about case, not setup.
+    execute_sql(
+        live_connection,
+        f"ALTER TABLE {qualified_table(child_name)} "
+        f"ADD CONSTRAINT `{child_name}_exact_fk` FOREIGN KEY (`orderRef`) "
+        f"REFERENCES {qualified_table(parent_name)} (`orderId`)",
+    )
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (f"{child_name}_exact_fk", "orderRef", parent_name, "orderId"),
+    )
