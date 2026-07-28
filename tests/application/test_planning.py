@@ -34,7 +34,6 @@ from delta_engine.domain.plan import (
     SetPrimaryKey,
     SetTableTag,
     diff_table,
-    diff_tables,
 )
 
 _NAME = QualifiedName("dev", "silver", "test")
@@ -440,20 +439,6 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("parent_id",)
 
 
-def test_primary_key_action_uses_the_observed_column_name():
-    desired = _desired(
-        columns=(DesiredColumn("requestid", String(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("requestid",), constraint_name="test_pk"),
-    )
-    observed = _observed(columns=(ObservedColumn("requestId", String(), nullable=False),))
-
-    result = plan_diff(diff_table(desired, observed))
-
-    assert isinstance(result, PlanningSucceeded)
-    [action] = [action for action in result.plan if isinstance(action, SetPrimaryKey)]
-    assert tuple(str(c) for c in action.primary_key.columns) == ("requestId",)
-
-
 def test_created_table_uses_its_columns_spelling_for_internal_references():
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
@@ -468,123 +453,3 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     assert create.table.primary_key is not None
     assert tuple(str(c) for c in create.table.primary_key.columns) == ("requestId",)
     assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
-
-
-def test_foreign_key_action_uses_observed_column_names_on_both_sides():
-    # Given a child foreign key declared in lowercase on both sides
-    parent_name = QualifiedName("dev", "silver", "parent")
-    child_constraint = ForeignKeyConstraint(
-        local_columns=("orderref",),
-        referenced_table=parent_name,
-        referenced_columns=("orderid",),
-        constraint_name="test_orderref_fk",
-    )
-    child_desired = _desired(
-        columns=(DesiredColumn("orderref", Integer()),),
-        foreign_keys=(child_constraint,),
-    )
-    child_observed = _observed(columns=(ObservedColumn("orderRef", Integer()),))
-    # And a parent whose observed spelling is mixed-case
-    parent_desired = DesiredTable(
-        qualified_name=parent_name,
-        columns=(DesiredColumn("orderid", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("orderid",), constraint_name="parent_pk"),
-    )
-    parent_observed = ObservedTable(
-        qualified_name=parent_name,
-        columns=(ObservedColumn("OrderId", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("OrderId",), constraint_name="parent_pk"),
-    )
-
-    # When diffing with the observed parent available and then planning
-    child_diff, _ = diff_tables(
-        (
-            (child_desired, child_observed),
-            (parent_desired, parent_observed),
-        )
-    )
-    result = plan_diff(child_diff)
-
-    # Then both sides use their observed physical names
-    assert isinstance(result, PlanningSucceeded)
-    [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert tuple(str(c) for c in action.constraint.local_columns) == ("orderRef",)
-    assert tuple(str(c) for c in action.constraint.referenced_columns) == ("OrderId",)
-
-
-def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
-    # Given a parent renaming its key column
-    parent_name = QualifiedName("dev", "silver", "parent")
-    parent_desired = DesiredTable(
-        qualified_name=parent_name,
-        columns=(DesiredColumn("orderNumber", Integer(), nullable=False, renamed_from="orderid"),),
-        primary_key=PrimaryKeyConstraint(columns=("orderNumber",), constraint_name="parent_pk"),
-    )
-    parent_observed = ObservedTable(
-        qualified_name=parent_name,
-        columns=(ObservedColumn("OrderId", Integer(), nullable=False),),
-        primary_key=PrimaryKeyConstraint(columns=("OrderId",), constraint_name="parent_pk"),
-    )
-    # And a child key referencing the parent's declared rename target
-    child_constraint = ForeignKeyConstraint(
-        local_columns=("ref",),
-        referenced_table=parent_name,
-        referenced_columns=parent_desired.primary_key_columns,
-        constraint_name="test_ref_fk",
-    )
-    child_desired = _desired(
-        columns=(DesiredColumn("ref", Integer()),),
-        foreign_keys=(child_constraint,),
-    )
-    child_diff, _ = diff_tables(
-        (
-            (
-                child_desired,
-                _observed(columns=(ObservedColumn("ref", Integer()),)),
-            ),
-            (parent_desired, parent_observed),
-        )
-    )
-
-    # When planning
-    result = plan_diff(child_diff)
-
-    # Then the referenced side keeps the new declared name
-    assert isinstance(result, PlanningSucceeded)
-    [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert tuple(str(c) for c in action.constraint.referenced_columns) == ("orderNumber",)
-
-
-def test_self_referencing_foreign_key_uses_its_observed_column_names():
-    # Given a self-referencing key declared lowercase against mixed-case physical spellings
-    constraint = ForeignKeyConstraint(
-        local_columns=("parentref",),
-        referenced_table=_NAME,
-        referenced_columns=("id",),
-        constraint_name="test_parentref_fk",
-    )
-    desired = _desired(
-        columns=(
-            DesiredColumn("id", Integer(), nullable=False),
-            DesiredColumn("parentref", Integer()),
-        ),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk"),
-        foreign_keys=(constraint,),
-    )
-    observed = _observed(
-        columns=(
-            ObservedColumn("Id", Integer(), nullable=False),
-            ObservedColumn("ParentRef", Integer()),
-        ),
-        primary_key=PrimaryKeyConstraint(columns=("Id",), constraint_name="test_pk"),
-    )
-    diff = diff_table(desired, observed)
-
-    # When planning
-    result = plan_diff(diff)
-
-    # Then both sides use their observed physical names
-    assert isinstance(result, PlanningSucceeded)
-    [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
-    assert tuple(str(c) for c in action.constraint.local_columns) == ("ParentRef",)
-    assert tuple(str(c) for c in action.constraint.referenced_columns) == ("Id",)

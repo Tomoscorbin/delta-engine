@@ -80,7 +80,12 @@ from delta_engine.domain.model import (
     ObservedTable,
     QualifiedName,
 )
-from delta_engine.domain.plan import ActionPlan, TableDiff, diff_tables
+from delta_engine.domain.plan import (
+    ActionPlan,
+    TableDiff,
+    adopt_catalog_spellings,
+    diff_table,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,23 +292,22 @@ class Engine:
         return tuple(runs)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
-        """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
-        diffable_runs: list[_TableRun] = []
-        endpoints: list[tuple[DesiredTable, ObservedTable | None]] = []
+        """Adopt catalog spellings, then diff each run; read-failed runs carry no diff."""
+        diffable: list[tuple[_TableRun, ObservedTable | None]] = []
         for run in runs:
             match run.read:
                 case ReadFailure():
                     continue
-                case TablePresent(table=observed):
-                    endpoints.append((run.desired, observed))
+                case TablePresent(table=observed_table):
+                    diffable.append((run, observed_table))
                 case TableAbsent():
-                    endpoints.append((run.desired, None))
+                    diffable.append((run, None))
                 case _ as unreachable:
                     assert_never(unreachable)
-            diffable_runs.append(run)
 
-        for run, diff in zip(diffable_runs, diff_tables(endpoints), strict=True):
-            run.diff = diff
+        adopted = adopt_catalog_spellings((run.desired, observed) for run, observed in diffable)
+        for run, observed in diffable:
+            run.diff = diff_table(adopted[run.qualified_name], observed)
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> None:
         """
