@@ -5,7 +5,6 @@ from delta_engine.domain.model import (
     Array,
     DesiredColumn,
     DesiredTable,
-    ForeignKeyReference,
     Integer,
     Long,
     Map,
@@ -726,28 +725,7 @@ def test_observed_only_primary_key_produces_removed_change():
 
     # Then the primary key is marked for removal
     assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropPrimaryKey(primary_key=primary_key, referencing_foreign_keys=()),)
-
-
-def test_primary_key_removal_carries_observed_referencing_foreign_keys():
-    # Given a catalog primary key that other tables reference by foreign key
-    reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
-        referencing_table=QualifiedName("dev", "silver", "orders"),
-    )
-    primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="customers_pk")
-
-    # When diffing a declaration that drops the primary key
-    diff = diff_table(
-        _desired(),
-        _observed(primary_key=primary_key, referencing_foreign_keys=(reference,)),
-    )
-
-    # Then the removal change carries the inbound reference for validation to judge
-    assert isinstance(diff, TableDrift)
-    (change,) = diff.actions
-    assert isinstance(change, DropPrimaryKey)
-    assert change.referencing_foreign_keys == (reference,)
+    assert diff.actions == (DropPrimaryKey(primary_key=primary_key),)
 
 
 def test_changed_primary_key_produces_drop_and_set_actions():
@@ -768,42 +746,9 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     # Then the observed key is dropped and the desired key is set
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        DropPrimaryKey(
-            primary_key=observed_primary_key,
-            referencing_foreign_keys=(),
-        ),
+        DropPrimaryKey(primary_key=observed_primary_key),
         SetPrimaryKey(primary_key=desired_primary_key),
     )
-
-
-def test_primary_key_change_carries_observed_referencing_foreign_keys():
-    # Given desired and observed primary keys over different column sets, where
-    # another table references the observed key by foreign key
-    reference = ForeignKeyReference(
-        constraint_name="orders_customer_id_fk",
-        referencing_table=QualifiedName("dev", "silver", "orders"),
-    )
-    desired_primary_key = PrimaryKeyConstraint(columns=("id",), constraint_name="test_pk")
-    observed_primary_key = PrimaryKeyConstraint(columns=("other_id",), constraint_name="legacy_pk")
-    columns = (
-        DesiredColumn("id", Integer(), nullable=False),
-        DesiredColumn("other_id", Integer(), nullable=False),
-    )
-
-    # When diffing a declaration that changes the primary key
-    diff = diff_table(
-        _desired(columns=columns, primary_key=desired_primary_key),
-        _observed(
-            columns=columns,
-            primary_key=observed_primary_key,
-            referencing_foreign_keys=(reference,),
-        ),
-    )
-
-    # Then the drop half carries the inbound reference for validation to judge
-    assert isinstance(diff, TableDrift)
-    drop = next(change for change in diff.actions if isinstance(change, DropPrimaryKey))
-    assert drop.referencing_foreign_keys == (reference,)
 
 
 def test_observed_only_foreign_key_produces_removed_change():
@@ -1013,10 +958,7 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
     # Then the rename plus an explicit key drop-and-set are direct actions
     assert set(drift.actions) == {
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropPrimaryKey(
-            primary_key=observed_key,
-            referencing_foreign_keys=(),
-        ),
+        DropPrimaryKey(primary_key=observed_key),
         SetPrimaryKey(primary_key=desired_key),
     }
 

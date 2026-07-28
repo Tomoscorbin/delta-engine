@@ -470,8 +470,7 @@ def _diff_primary_key(
     Return primary-key actions; a changed key becomes a drop and a set.
 
     A primary key is identified by its column set, with absence its own
-    identity. Dropping one carries its inbound references so validation can
-    judge the transition.
+    identity.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -483,12 +482,7 @@ def _diff_primary_key(
 
     actions: list[DropPrimaryKey | SetPrimaryKey] = []
     if observed_key is not None:
-        actions.append(
-            DropPrimaryKey(
-                primary_key=observed_key,
-                referencing_foreign_keys=observed.referencing_foreign_keys,
-            )
-        )
+        actions.append(DropPrimaryKey(primary_key=observed_key))
     if desired_key is not None:
         actions.append(SetPrimaryKey(primary_key=desired_key))
     return tuple(actions)

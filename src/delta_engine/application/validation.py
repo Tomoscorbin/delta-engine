@@ -416,8 +416,9 @@ class PrimaryKeyReferencedByForeignKeys:
     Disallow dropping or changing a primary key while foreign keys reference it.
 
     DROP PRIMARY KEY is RESTRICT by default: it fails while any FK references
-    the key. The referencing constraints ride on the primary-key change (an
-    observed fact), so this rule needs no second input. A referencing FK on
+    the key. The referencing constraints are read from the drift's observed
+    table — carried as judging context — so this rule needs no second input.
+    A referencing FK on
     *this* table that this same sync also drops is exempt — DROP_FOREIGN_KEY
     phases before DROP_PRIMARY_KEY, so that plan executes cleanly. FKs on
     other tables cannot be exempted per-table: even when the other table's
@@ -443,7 +444,7 @@ class PrimaryKeyReferencedByForeignKeys:
                 continue
             blockers = tuple(
                 reference
-                for reference in change.referencing_foreign_keys
+                for reference in drift.observed.referencing_foreign_keys
                 if not (
                     reference.referencing_table == drift.desired.qualified_name
                     and reference.constraint_name in dropped_here

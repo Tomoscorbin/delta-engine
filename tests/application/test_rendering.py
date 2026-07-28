@@ -130,7 +130,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.KEYS, "+", ("primary key (id, tenant_id)",)),),
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
+            DropPrimaryKey(primary_key=_primary_key()),
             (DiffEntry(DiffCategory.KEYS, "-", ("primary key",)),),
         ),
         (

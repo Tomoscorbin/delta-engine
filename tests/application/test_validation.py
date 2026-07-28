@@ -78,6 +78,7 @@ def _observed_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
     kind: TableKind = TableKind.TABLE,
+    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = (),
 ) -> ObservedTable:
     source = (DesiredColumn("id", Integer()),) if columns is None else columns
     return ObservedTable(
@@ -87,6 +88,7 @@ def _observed_table(
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
         kind=kind,
+        referencing_foreign_keys=referencing_foreign_keys,
     )
 
 
@@ -94,15 +96,18 @@ def _drift(
     *differences: Action | Unresolvable,
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
     desired: DesiredTable | None = None,
+    observed: ObservedTable | None = None,
     kind: TableKind = TableKind.TABLE,
 ) -> TableDrift:
     if desired is None:
         desired = _desired_table(managed_aspects=managed_aspects)
+    if observed is None:
+        observed = _observed_table(kind=kind)
     actions = tuple(item for item in differences if isinstance(item, Action))
     unresolvable = tuple(item for item in differences if not isinstance(item, Action))
     return TableDrift(
         desired=desired,
-        observed=_observed_table(kind=kind),
+        observed=observed,
         actions=actions,
         unresolvable=unresolvable,
     )
@@ -930,17 +935,16 @@ def test_multiple_column_drops_produce_one_column_mapping_failure():
 
 
 def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
-    # Given a PK removal observed to be referenced by another table's FK
+    # Given a PK removal while the observed table is referenced by another table's FK
     reference = ForeignKeyReference(
         constraint_name="orders_customer_id_fk",
         referencing_table=QualifiedName("dev", "silver", "orders"),
     )
-    change = DropPrimaryKey(
-        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
-        referencing_foreign_keys=(reference,),
-    )
+    change = DropPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "customers_pk"))
 
-    result = validate_diff(_drift(change))
+    result = validate_diff(
+        _drift(change, observed=_observed_table(referencing_foreign_keys=(reference,)))
+    )
 
     # Then validation fails naming the referencing constraint
     assert result.failed
@@ -952,10 +956,7 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
 
 
 def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
-    change = DropPrimaryKey(
-        primary_key=PrimaryKeyConstraint(("id",), "customers_pk"),
-        referencing_foreign_keys=(),
-    )
+    change = DropPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "customers_pk"))
 
     result = validate_diff(_drift(change))
 
@@ -975,13 +976,11 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
         constraint_name="test_parent_id_fk",
         referencing_table=_QUALIFIED_NAME,
     )
-    pk_change = DropPrimaryKey(
-        primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
-        referencing_foreign_keys=(reference,),
-    )
+    pk_change = DropPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "test_pk"))
     fk_change = DropForeignKey(constraint=own_fk)
 
-    result = validate_diff(_drift(pk_change, fk_change))
+    observed = _observed_table(referencing_foreign_keys=(reference,))
+    result = validate_diff(_drift(pk_change, fk_change, observed=observed))
 
     assert not any(
         failure.rule_name == "PrimaryKeyReferencedByForeignKeys" for failure in result.failures

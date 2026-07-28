@@ -235,7 +235,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
-        DropPrimaryKey(primary_key=observed_key, referencing_foreign_keys=()),
+        DropPrimaryKey(primary_key=observed_key),
         RenameColumn("customer_nm", "customer_name"),
         SetPrimaryKey(primary_key=desired_key),
     )
