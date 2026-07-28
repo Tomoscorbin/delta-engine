@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from delta_engine.application.dependency_resolution import (
+from delta_engine.application.relationships import (
     ResolutionFailed,
     ResolutionSucceeded,
 )

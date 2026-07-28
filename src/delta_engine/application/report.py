@@ -12,7 +12,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, assert_never
 
-from delta_engine.application.dependency_resolution import (
+from delta_engine.application.relationships import (
     ResolutionFailed,
     ResolutionSucceeded,
     TableResolution,

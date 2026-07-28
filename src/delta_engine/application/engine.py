@@ -39,11 +39,11 @@ from datetime import UTC, datetime
 import logging
 from typing import assert_never
 
-from delta_engine.application.dependency_resolution import (
+from delta_engine.application.relationships import (
     ResolutionFailed,
     ResolutionSucceeded,
     TableResolution,
-    resolve,
+    resolve_with_blocking,
 )
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
@@ -363,7 +363,7 @@ class Engine:
         """
         failed_names = {run.qualified_name for run in runs if run.has_failures}
 
-        ordered_resolutions = resolve(
+        ordered_resolutions = resolve_with_blocking(
             tables=tuple(run.desired for run in runs),
             failed_names=failed_names,
         )

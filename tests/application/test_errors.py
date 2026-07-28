@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.dependency_resolution import (
+from delta_engine.application.relationships import (
     ResolutionFailed,
     ResolutionSucceeded,
 )

@@ -1,7 +1,7 @@
 """
-Foreign key dependency resolution for sync ordering and failure classification.
+Cross-table relationship resolution: ordering, classification, and (soon) FK planning.
 
-The public entry point is `resolve`, which takes the registered tables and
+The public entry point is `resolve_with_blocking`, which takes the registered tables and
 returns one explicit success or failure per table in dependency-first order.
 A successful resolution retains its resolved foreign-key dependencies so the
 engine can react to execution-time failures without reinterpreting the desired
@@ -12,7 +12,7 @@ For example, given these declared foreign keys (child ──► parent)::
     order_items ──► orders ──► customers      invoices ◄──► ledger
     payments ──► invoices                     refunds ──► archive (not registered)
 
-`resolve` orders every table dependency-first and classifies its outcome::
+`resolve_with_blocking` orders every table dependency-first and classifies its outcome::
 
     ResolutionSucceeded(customers)
     ResolutionSucceeded(orders)
@@ -80,7 +80,7 @@ type TableResolution = ResolutionSucceeded | ResolutionFailed
 type ResolveResult = tuple[TableResolution, ...]
 
 
-def resolve(
+def resolve_with_blocking(
     tables: tuple[DesiredTable, ...],
     *,
     failed_names: AbstractSet[QualifiedName] = frozenset(),

@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from delta_engine.application.dependency_resolution import ResolutionSucceeded
+from delta_engine.application.relationships import ResolutionSucceeded
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,

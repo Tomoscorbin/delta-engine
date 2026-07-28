@@ -1,5 +1,5 @@
 """
-Unit tests for dependency_resolution.resolve().
+Unit tests for relationships.resolve_with_blocking().
 
 These tests exercise the public resolver API rather than the graph traversal
 implementation details. They cover dependency-first ordering, direct FK failure
@@ -9,11 +9,11 @@ failed dependencies.
 
 import pytest
 
-from delta_engine.application.dependency_resolution import (
+from delta_engine.application.relationships import (
     ResolutionFailed,
     ResolutionSucceeded,
     ResolveResult,
-    resolve,
+    resolve_with_blocking as resolve,
 )
 from delta_engine.application.failures import ForeignKeyFailureReason
 from delta_engine.domain.model import QualifiedName
