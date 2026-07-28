@@ -751,6 +751,40 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     )
 
 
+def test_set_primary_key_adopts_the_catalog_column_spelling():
+    # Given a PK declared camelCase over a column the catalog spells lowercase
+    desired = _desired(
+        columns=(DesiredColumn("orderId", String(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("orderId",), constraint_name="orders_pk"),
+    )
+    observed = _observed(columns=(ObservedColumn("orderid", String(), nullable=False),))
+
+    # When the table is diffed
+    drift = diff_table(desired, observed)
+
+    # Then ADD CONSTRAINT will carry the catalog's spelling
+    set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
+    assert len(set_actions) == 1
+    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderid",)
+
+
+def test_set_primary_key_keeps_declared_spelling_for_new_columns():
+    # Given a PK over a column that does not exist in the catalog yet
+    desired = _desired(
+        columns=(DesiredColumn("orderId", String(), nullable=False),),
+        primary_key=PrimaryKeyConstraint(columns=("orderId",), constraint_name="orders_pk"),
+    )
+    observed = _observed(columns=(ObservedColumn("other", String(), nullable=False),))
+
+    # When the table is diffed
+    drift = diff_table(desired, observed)
+
+    # Then the new column keeps its declared spelling
+    set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
+    assert len(set_actions) == 1
+    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
+
+
 def test_observed_only_foreign_key_produces_removed_change():
     # Given a catalog foreign key that is absent from the declaration
     foreign_key = _foreign_key("legacy_fk")

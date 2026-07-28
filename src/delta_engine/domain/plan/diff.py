@@ -18,6 +18,7 @@ from delta_engine.domain.model import (
     Map,
     ObservedColumn,
     ObservedTable,
+    PrimaryKeyConstraint,
     QualifiedName,
     Struct,
     TableAspect,
@@ -470,7 +471,9 @@ def _diff_primary_key(
     Return primary-key actions; a changed key becomes a drop and a set.
 
     A primary key is identified by its column set, with absence its own
-    identity.
+    identity. ``SetPrimaryKey`` respells its columns from the observed table:
+    ADD CONSTRAINT resolves column names case-sensitively, so existing columns
+    must wear the catalog's spelling.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -484,8 +487,19 @@ def _diff_primary_key(
     if observed_key is not None:
         actions.append(DropPrimaryKey(primary_key=observed_key))
     if desired_key is not None:
-        actions.append(SetPrimaryKey(primary_key=desired_key))
+        actions.append(SetPrimaryKey(primary_key=_respell_primary_key(desired_key, observed)))
     return tuple(actions)
+
+
+def _respell_primary_key(
+    primary_key: PrimaryKeyConstraint, observed: ObservedTable
+) -> PrimaryKeyConstraint:
+    """Existing columns wear the catalog's spelling; new columns keep the declared."""
+    spellings = {column.name: column.name for column in observed.columns}
+    return replace(
+        primary_key,
+        columns=tuple(spellings.get(name, name) for name in primary_key.columns),
+    )
 
 
 def _diff_foreign_keys(
