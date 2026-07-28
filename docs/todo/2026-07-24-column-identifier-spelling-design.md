@@ -8,12 +8,12 @@ Branch: `fix/preserve-column-identifier-case`
 > document still apply. The resulting-schema index and planning binding pass
 > described below no longer do, nor does a later table-construction binding
 > step. Public references resolve once to their actual desired `Column.name`
-> during lowering; domain table snapshots never rewrite them. Each diff
-> operation puts the correct spelling directly on the action it returns:
-> observed for existing columns and desired for new or renamed columns.
-> `diff_tables` supplies both parent endpoints for foreign keys, so the engine
-> remains an orchestrator and planning only validates and constructs the
-> `ActionPlan`.
+> during lowering; domain table snapshots never rewrite them. Since
+> 2026-07-28, execution spelling is applied by a single adoption pass between
+> read and diff (`domain/plan/spelling.py`): desired tables adopt the
+> catalog's exact column spellings — foreign-key referenced columns via the
+> referenced table — and diffing stays single-table, emitting desired values
+> verbatim. Planning only validates and constructs the `ActionPlan`.
 
 ## Summary
 
@@ -845,7 +845,7 @@ interior now compares, hashes, and indexes identifiers with plain
 lowering rather than repeatedly at lookup sites. The identity and
 spelling-preservation invariants this design specifies are unchanged: two
 spellings differing only in case are still the same identifier. Execution
-spelling is now selected directly by the diff operation that constructs each
-action; there is no resulting-schema or table-construction binding pass. See
+spelling is now applied by a single adoption pass before diffing; there is no
+resulting-schema, table-construction, or diff-time binding. See
 `docs/todo/2026-07-26-identifier-value-type-plan.md` for the original
 identifier implementation plan.

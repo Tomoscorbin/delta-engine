@@ -822,11 +822,12 @@ dependency cost.
   clustering, primary-key, and foreign-key references resolve to their actual
   desired `Column.name` while lowering; domain table snapshots require local
   references to carry that spelling and never rewrite their contents.
-- Let each diff operation put the executable spelling directly on its action:
-  observed for an existing physical column, desired for an addition or rename
-  target. Batch table diffing gives foreign-key actions the parent endpoint too,
-  without making the application engine maintain column-name state. Planning
-  only validates and orders the resulting actions.
+- Adopt catalog spellings once, between read and diff: `adopt_catalog_spellings`
+  respells each desired table so an existing column carries the catalog's exact
+  spelling and a new or renamed column keeps its declared spelling, with
+  foreign-key referenced columns taking the referenced table's spelling. Diffing
+  stays single-table and emits desired values verbatim; planning only validates
+  and orders the resulting actions.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to
