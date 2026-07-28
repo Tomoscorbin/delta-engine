@@ -419,6 +419,7 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
 
 
 def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spelling():
+    # Given a foreign key to a table outside this sync
     constraint = ForeignKeyConstraint(
         local_columns=("id",),
         referenced_table=QualifiedName("dev", "silver", "unregistered_parent"),
@@ -432,22 +433,27 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
     )
     diff = diff_table(desired, _observed())
 
+    # When planning
     result = plan_diff(diff)
 
+    # Then the referenced spelling passes through planning untouched
     assert isinstance(result, PlanningSucceeded)
     [action] = [action for action in result.plan if isinstance(action, SetForeignKey)]
     assert tuple(str(c) for c in action.constraint.referenced_columns) == ("parent_id",)
 
 
 def test_created_table_uses_its_columns_spelling_for_internal_references():
+    # Given a mixed-case table to create with key and layout references
     desired = _desired(
         columns=(DesiredColumn("requestId", String(), nullable=False),),
         primary_key=PrimaryKeyConstraint(columns=("requestId",), constraint_name="test_pk"),
         clustered_by=("requestId",),
     )
 
+    # When planning the creation
     result = plan_diff(diff_table(desired, None))
 
+    # Then the creation plan carries the declared spelling untouched
     assert isinstance(result, PlanningSucceeded)
     [create] = [action for action in result.plan if isinstance(action, CreateTable)]
     assert create.table.primary_key is not None

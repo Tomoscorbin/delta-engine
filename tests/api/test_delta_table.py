@@ -1729,6 +1729,7 @@ def test_mapping_not_covering_the_key_is_rejected():
 
 
 def test_mapping_to_an_unknown_parent_column_is_rejected_as_a_key_mismatch():
+    # Given a mapping naming a column the parent does not have
     accounts = DeltaTable(
         catalog="cat",
         schema="sch",
@@ -1737,6 +1738,7 @@ def test_mapping_to_an_unknown_parent_column_is_rejected_as_a_key_mismatch():
         primary_key=["id"],
     )
 
+    # Then the declaration fails naming the unknown column
     with pytest.raises(ValueError, match="unknown_id"):
         DeltaTable(
             catalog="cat",

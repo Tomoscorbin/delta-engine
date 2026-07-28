@@ -248,6 +248,8 @@ def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tabl
     # spelling, unlike ordinary ALTER COLUMN, so the key action uses the
     # observed column name. Declared-lowercase against a live
     # camelCase column is the production shape that surfaced this.
+
+    # Given a camelCase catalog column declared lowercase
     table_name = live_tables("column_case_add_primary_key")
     execute_sql(
         live_connection,
@@ -263,8 +265,11 @@ def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tabl
     )
     engine = build_sql_engine(live_connection)
 
+    # When syncing
     report = engine.sync(declaration)
 
+    # Then the key statement, the live state, and the re-sync all carry
+    # the catalog spelling
     assert report.has_failures is False
     statements = next(iter(report.planned_sql_statements.values()))
     assert statements == (
@@ -277,10 +282,10 @@ def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tabl
     assert engine.sync(declaration).has_changes is False
 
 
-def test_foreign_key_uses_catalog_column_spelling_on_both_sides(
-    live_connection, live_tables
-):
+def test_foreign_key_uses_catalog_column_spelling_on_both_sides(live_connection, live_tables):
     """An FK action uses the existing child and parent columns' exact spelling."""
+    # Given camelCase child and parent columns in the catalog, declared with
+    # scrambled casing throughout the model
     parent_name = live_tables("column_case_fk_parent")
     child_name = live_tables("column_case_fk_child")
     execute_sql(
@@ -316,12 +321,13 @@ def test_foreign_key_uses_catalog_column_spelling_on_both_sides(
     )
     engine = build_sql_engine(live_connection)
 
+    # When syncing both tables
     report = engine.sync(child, parent)
 
+    # Then the constraint statement, the live state, and the re-sync all
+    # spell both sides exactly as the catalog does
     assert report.has_failures is False
-    assert report.planned_sql_statements[
-        f"{live_catalog()}.{live_schema()}.{child_name}"
-    ] == (
+    assert report.planned_sql_statements[f"{live_catalog()}.{live_schema()}.{child_name}"] == (
         f"ALTER TABLE {qualified_table(child_name)} "
         f"ADD CONSTRAINT `{child_name}_orderref_fk` FOREIGN KEY (`orderRef`) "
         f"REFERENCES {qualified_table(parent_name)} (`orderId`)",

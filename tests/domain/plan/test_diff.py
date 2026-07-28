@@ -103,10 +103,14 @@ def test_missing_table_derives_target_from_desired_table():
     assert diff.target == _QUALIFIED_NAME
 
 
-def test_direct_missing_table_construction_derives_its_creation_actions():
+def test_missing_table_actions_are_exactly_the_table_creation():
+    # Given a table with no observed counterpart
     desired = _desired()
 
-    assert TableMissing(desired).actions == (CreateTable(desired),)
+    diff = diff_table(desired, observed=None)
+
+    # Then the derived actions are exactly the create
+    assert diff.actions == (CreateTable(desired),)
 
 
 def test_equal_tables_diff_to_empty_drift():
