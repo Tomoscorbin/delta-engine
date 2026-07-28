@@ -459,3 +459,90 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     assert create.table.primary_key is not None
     assert tuple(str(c) for c in create.table.primary_key.columns) == ("requestId",)
     assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
+
+
+# ---------- relationship actions from the resolver ----------
+
+
+def test_relationship_actions_join_the_validated_plan_in_phase_order():
+    # Given an in-scope drift with no single-table work and a resolver-supplied FK
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    diff = diff_table(_desired(), _observed())
+
+    # When planning with the relationship stream
+    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+
+    # Then the accepted plan carries the resolver's action
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.actions == (SetForeignKey(constraint=fk),)
+
+
+def test_pk_drop_exemption_sees_resolver_supplied_foreign_key_drops():
+    # Given a drift dropping its PK while this table's own FK references it,
+    # and the resolver dropping that FK in the same sync
+    reference = ForeignKeyReference(
+        constraint_name="test_parent_id_fk",
+        referencing_table=_NAME,
+    )
+    own_fk = _foreign_key(
+        local_columns=("parent_id",),
+        referenced_table=_NAME,
+        referenced_columns=("id",),
+        constraint_name="test_parent_id_fk",
+    )
+    diff = diff_table(
+        _desired(),
+        _observed(
+            primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
+            referencing_foreign_keys=(reference,),
+        ),
+    )
+
+    # When planning with the resolver's DropForeignKey
+    result = plan_diff(diff, relationship_actions=(DropForeignKey(constraint=own_fk),))
+
+    # Then the exemption found the drop in the merged stream, and the plan
+    # phases the FK drop before the PK drop
+    assert isinstance(result, PlanningSucceeded)
+    assert [type(action) for action in result.plan.actions] == [DropForeignKey, DropPrimaryKey]
+
+
+def test_relationship_actions_on_an_unmanaged_aspect_fail_the_scope_gate():
+    # Given a declaration that does not manage foreign keys
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    diff = diff_table(_desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT})), _observed())
+
+    # When planning with a resolver-supplied SetForeignKey
+    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+
+    # Then the scope gate rejects the unmanaged work
+    assert isinstance(result, PlanningFailed)
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
+def test_missing_table_plan_appends_relationship_actions():
+    # Given a missing table and one resolver-supplied FK
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    diff = diff_table(_desired(), None)
+
+    # When planning with the relationship stream
+    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+
+    # Then the accepted plan creates the table and then adds the constraint
+    assert isinstance(result, PlanningSucceeded)
+    assert [type(action) for action in result.plan.actions] == [CreateTable, SetForeignKey]
