@@ -31,11 +31,18 @@
 - [x] Structured report output for reporting / understanding runs. DONE as part of CI-grade dry runs: `SyncReport.to_dict()` / `TableRunReport.to_dict()` project a backend-free, JSON-serialisable per-table record (name, status, has_changes/has_failures, change-summary records, full compiled SQL, failure records, statement-denominated execution counts) under `schema_version: 2`; `SyncReport.planned_sql_statements` and `has_changes` added; `TableRunReport` and the concrete failure types are now public. Still deferred: the thin `databricks.py` Spark `display()` / run-history lift — add only if interactive display or persistence becomes a real need, keeping Spark at the edge.
 - [x] Review identifier case handling. RESOLVED 2026-07-25: column-like
   identifiers preserve declared/catalog spelling, identity comparisons use
-  explicit `str.lower()` keys (not `casefold()`), and executable plans bind
-  references to post-sync physical spelling. Catalog, schema, and table-name
-  parts remain lowercase as Unity Catalog stores them. See
-  `2026-07-24-column-identifier-spelling-design.md`. (Supersedes the
-  2026-07-13 identifier-normalization review noted during PR #215.)
+  `Identifier`'s `str.lower()` identity (not `casefold()`), and public column
+  references resolve once to their owning `Column.name` during lowering.
+  Domain snapshots do not rewrite references. A single adoption pass between
+  read and diff respells each desired table with the catalog's exact column
+  spellings (foreign-key referenced columns via the referenced table), so
+  diffing stays single-table and every action carries executable spelling
+  verbatim. Catalog, schema, and table-name parts remain lowercase as Unity
+  Catalog stores them.
+  See `2026-07-24-column-identifier-spelling-design.md`. (Supersedes the
+  2026-07-13 identifier-normalization review noted during PR #215; the original
+  resulting-schema planning pass and the later table-binding and diff-time
+  approaches were superseded by the 2026-07-28 adoption pass.)
 - [x] Spark variable substitution corrupting `${...}` in declared free text. RESOLVED 2026-07-22: the backend-private `SparkSqlRunner` is the sole production caller of `spark.sql`, shared by the reader and executor. SQL without `${` takes the unchanged fast path; for SQL containing it, the runner disables `spark.sql.variable.substitute` for the call and restores the original setting in `finally`, leaves an already-disabled session untouched, and refuses to execute if the guard cannot be installed. Focused runner tests cover guard installation, restoration after success and failure, and fail-closed behavior. A local engine regression enables substitution, syncs table and column comments containing `${env:HOME}`, reads both back verbatim, confirms the setting was restored, and confirms a second sync is a no-op.
 - [ ] Verify SQL Warehouse `${...}` behavior before adding any warehouse-side substitution policy. The current evidence concerns Spark's session preprocessor only; the SQL connector is expected to send the text verbatim, but that has not been verified. Run `test_sql_warehouse_preserves_spark_style_variable_expressions` in `tests/live/test_sql_warehouse_live_variable_substitution.py`; it checks a direct connector query, independently reads back comments and tags written by an engine sync, and requires a convergent resync. If DBSQL substitutes the expression, contain the workaround in `WarehouseSqlRunner`; if it round-trips literally, record that result and leave the runner unchanged.
 - [x] Align tag-value validation with Unity Catalog's current 256-character limit. DONE: `_MAX_TAG_VALUE_LENGTH` lowered to 256 and a new `_MAX_TAG_KEY_LENGTH` (256) now rejects over-long keys as well, with the boundary tests and the safe-change-rules reference updated. The 256-character limit on keys and values is pinned live by `test_platform_rejects_an_over_long_column_tag_key_or_value`. Still not enforced at declaration time and left to surface at execution: the 1,000-column-tags-per-table total and the tag-key character restrictions.

@@ -29,7 +29,7 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
-from delta_engine.domain.plan.resulting_schema import resulting_column_spellings
+from delta_engine.domain.plan.spelling import adopt_catalog_spellings
 from delta_engine.domain.plan.unresolvable import (
     ColumnRenameConflict,
     PartitioningChanged,
@@ -68,6 +68,6 @@ __all__ = [
     "UnsetColumnTag",
     "UnsetProperty",
     "UnsetTableTag",
+    "adopt_catalog_spellings",
     "diff_table",
-    "resulting_column_spellings",
 ]

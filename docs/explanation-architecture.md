@@ -816,10 +816,18 @@ dependency cost.
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
   subclass with case-insensitive equality and hash — at domain construction, so
   the domain interior compares, hashes, and indexes identifiers with plain
-  `==`/`in`/dict/set code. Boundary code — the public API's declaration
-  validation and the catalog adapters — that probes a domain-keyed collection
-  with a raw string that never passed a domain constructor (or the reverse)
-  wraps the raw side in `Identifier(...)` first.
+  `==`/`in`/dict/set code. Public column references are converted once at
+  declaration lowering rather than repeatedly at lookup sites.
+- Treat columns as the owners of identifier spelling. Public partition,
+  clustering, primary-key, and foreign-key references resolve to their actual
+  desired `Column.name` while lowering; domain table snapshots require local
+  references to carry that spelling and never rewrite their contents.
+- Adopt catalog spellings once, between read and diff: `adopt_catalog_spellings`
+  respells each desired table so an existing column carries the catalog's exact
+  spelling and a new or renamed column keeps its declared spelling, with
+  foreign-key referenced columns taking the referenced table's spelling. Diffing
+  stays single-table and emits desired values verbatim; planning only validates
+  and orders the resulting actions.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

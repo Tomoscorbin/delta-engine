@@ -1,8 +1,19 @@
 # Preserve column identifier spelling — design
 
 Date: 2026-07-24
-Status: accepted for implementation (2026-07-25); dated decision notes below
+Status: identifier model retained; binding approaches superseded (2026-07-27)
 Branch: `fix/preserve-column-identifier-case`
+
+> **2026-07-27 simplification:** The identity and spelling rules in this
+> document still apply. The resulting-schema index and planning binding pass
+> described below no longer do, nor does a later table-construction binding
+> step. Public references resolve once to their actual desired `Column.name`
+> during lowering; domain table snapshots never rewrite them. Since
+> 2026-07-28, execution spelling is applied by a single adoption pass between
+> read and diff (`domain/plan/spelling.py`): desired tables adopt the
+> catalog's exact column spellings — foreign-key referenced columns via the
+> referenced table — and diffing stays single-table, emitting desired values
+> verbatim. Planning only validates and constructs the `ActionPlan`.
 
 ## Summary
 
@@ -830,11 +841,11 @@ subclass with case-insensitive `__eq__`/`__ne__`/`__hash__` and preserved
 spelling, wrapped once at each domain constructor. `identifier_key`,
 `index_by_identifier`, and `canonical_data_type` are deleted; the domain
 interior now compares, hashes, and indexes identifiers with plain
-`==`/`in`/dict/set code, and only a handful of boundary-probe sites (a raw
-string probing a domain-keyed collection, or the reverse) still wrap
-explicitly. The identity and spelling-preservation invariants this design
-specifies are unchanged: two spellings differing only in case are still the
-same identifier, and the resulting-schema binding pass under "Binding plans
-to physical names" is unaffected, since it resolves physical *spelling*, not
-identity. See `docs/todo/2026-07-26-identifier-value-type-plan.md` for the
-implementation plan.
+`==`/`in`/dict/set code. Public references are converted at declaration
+lowering rather than repeatedly at lookup sites. The identity and
+spelling-preservation invariants this design specifies are unchanged: two
+spellings differing only in case are still the same identifier. Execution
+spelling is now applied by a single adoption pass before diffing; there is no
+resulting-schema, table-construction, or diff-time binding. See
+`docs/todo/2026-07-26-identifier-value-type-plan.md` for the original
+identifier implementation plan.

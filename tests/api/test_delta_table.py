@@ -72,18 +72,18 @@ def test_delta_table_rejects_columns_differing_only_by_case_as_duplicates() -> N
         )
 
 
-def test_public_accessors_return_declared_spelling():
-    # Given mixed-case column, key, and layout declarations
+def test_public_accessors_return_column_spelling_for_references():
+    # Given references whose casing differs from their columns
     table = DeltaTable(
         catalog="main",
         schema="sales",
         name="orders",
         columns=[Column("OrderId", Integer(), nullable=False), Column("Region", String())],
-        clustered_by=["Region"],
-        primary_key=["OrderId"],
+        clustered_by=["REGION"],
+        primary_key=["ORDERID"],
     )
 
-    # Then the accessors echo the declared spelling
+    # Then attached references use the columns' spelling
     assert tuple(str(column) for column in table.primary_key) == ("OrderId",)
     assert tuple(str(column) for column in table.clustered_by) == ("Region",)
 
@@ -1655,10 +1655,12 @@ def test_foreign_key_accepts_columns_as_any_mapping():
         foreign_keys=[declaration],
     )
 
-    # Then the declaration copies the mapping and the lowered constraint preserves spelling.
+    # Then the declaration copies the mapping and the attached constraint uses
+    # the actual columns' spelling on both sides.
     assert dict(declaration.columns) == {"Customer_ID": "ID"}
     [constraint] = orders.to_desired_table().foreign_keys
-    assert tuple(str(c) for c in constraint.local_columns) == ("Customer_ID",)
+    assert tuple(str(c) for c in constraint.local_columns) == ("customer_id",)
+    assert tuple(str(c) for c in constraint.referenced_columns) == ("id",)
 
 
 def test_mapping_insertion_order_is_irrelevant():
@@ -1724,6 +1726,32 @@ def test_mapping_not_covering_the_key_is_rejected():
     # Both sides named: what's missing from the mapping, what isn't in the key
     assert "id" in str(excinfo.value)
     assert "region" in str(excinfo.value)
+
+
+def test_mapping_to_an_unknown_parent_column_is_rejected_as_a_key_mismatch():
+    # Given a mapping naming a column the parent does not have
+    accounts = DeltaTable(
+        catalog="cat",
+        schema="sch",
+        name="accounts",
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
+    )
+
+    # Then the declaration fails naming the unknown column
+    with pytest.raises(ValueError, match="unknown_id"):
+        DeltaTable(
+            catalog="cat",
+            schema="sch",
+            name="orders",
+            columns=[Column("account_id", Integer())],
+            foreign_keys=[
+                ForeignKey(
+                    columns={"account_id": "unknown_id"},
+                    references=accounts,
+                )
+            ],
+        )
 
 
 def test_two_locals_mapped_to_the_same_key_column_are_rejected():
@@ -1825,5 +1853,5 @@ def test_layout_and_key_references_resolve_across_casing():
 
     desired = table.to_desired_table()
     assert desired.primary_key is not None
-    assert desired.primary_key.columns == ("order_id",)
-    assert desired.clustered_by == ("region",)
+    assert tuple(str(column) for column in desired.primary_key.columns) == ("order_id",)
+    assert tuple(str(column) for column in desired.clustered_by) == ("region",)

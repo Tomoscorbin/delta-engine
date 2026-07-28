@@ -196,21 +196,21 @@ def _validate_layout(
 
     columns_by_name = {column.name: column for column in columns}
     for name in partitioned_by:
-        column = columns_by_name.get(Identifier(name))
+        column = columns_by_name.get(name)
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_PARTITION_KEYS):
             raise ValueError(
                 f"Partition column {name!r} has type"
                 f" {type(column.data_type).__name__}, which Delta cannot partition by"
             )
     for name in clustered_by:
-        column = columns_by_name.get(Identifier(name))
+        column = columns_by_name.get(name)
         if column is not None and isinstance(column.data_type, _TYPES_UNUSABLE_AS_CLUSTERING_KEYS):
             raise ValueError(
                 f"Clustering column {name!r} has type"
                 f" {type(column.data_type).__name__}, which cannot be a clustering key"
             )
 
-    partition_names = {Identifier(name) for name in partitioned_by}
+    partition_names = set(partitioned_by)
     if (
         partitioned_by
         and partition_names <= columns_by_name.keys()
@@ -365,9 +365,14 @@ class ForeignKey:
                 f"foreign key references {referenced.table}, which declares no primary key"
             )
 
-        pairs = self._resolve_column_pairs(referenced)
-        local_columns = tuple(local for local, _ in pairs)
-        referenced_columns = tuple(parent for _, parent in pairs)
+        pairs = tuple(
+            (Identifier(local), Identifier(parent))
+            for local, parent in self._resolve_column_pairs(referenced)
+        )
+        local_names = {column.name: column.name for column in owner_columns}
+        referenced_names = {name: name for name in referenced.column_types}
+        local_columns = tuple(local_names.get(local, local) for local, _ in pairs)
+        referenced_columns = tuple(referenced_names.get(parent, parent) for _, parent in pairs)
 
         declared = key_signature(referenced_columns)
         key = key_signature(referenced.key_columns)
@@ -387,10 +392,10 @@ class ForeignKey:
 
         local_types = {column.name: column.data_type for column in owner_columns}
         for local_name, referenced_name in pairs:
-            local_type = local_types.get(Identifier(local_name))
+            local_type = local_types.get(local_name)
             if local_type is None:
                 continue  # local column existence is enforced when the DesiredTable is built
-            referenced_type = referenced.column_types[Identifier(referenced_name)]
+            referenced_type = referenced.column_types[referenced_name]
             if local_type != referenced_type:
                 raise ValueError(
                     f"foreign key column type mismatch: {owner_name}.{local_name}"
@@ -452,9 +457,7 @@ class ForeignKey:
         if len(local_columns) == 1 and len(parent_columns) == 1:
             return ((local_columns[0], parent_columns[0]),)
 
-        if {Identifier(column) for column in local_columns} == {
-            Identifier(column) for column in parent_columns
-        }:
+        if key_signature(local_columns) == key_signature(parent_columns):
             return tuple((column, column) for column in local_columns)
 
         raise ValueError(
@@ -474,9 +477,9 @@ class _NormalizedDeclaration:
     comment: str
     properties: Mapping[str, str | None]
     tags: Mapping[str, str]
-    partitioned_by: tuple[str, ...]
-    clustered_by: tuple[str, ...]
-    primary_key: tuple[str, ...] | None
+    partitioned_by: tuple[Identifier, ...]
+    clustered_by: tuple[Identifier, ...]
+    primary_key: tuple[Identifier, ...] | None
     foreign_key_declarations: tuple[ForeignKey, ...]
     managed_aspects: frozenset[TableAspect]
 
@@ -512,9 +515,11 @@ def _normalize_declaration(
         comment=comment,
         properties=MappingProxyType(dict(properties or {})),
         tags=MappingProxyType(dict(tags or {})),
-        partitioned_by=tuple(partitioned_by),
-        clustered_by=tuple(clustered_by),
-        primary_key=tuple(primary_key) if primary_key is not None else None,
+        partitioned_by=tuple(Identifier(name) for name in partitioned_by),
+        clustered_by=tuple(Identifier(name) for name in clustered_by),
+        primary_key=(
+            tuple(Identifier(name) for name in primary_key) if primary_key is not None else None
+        ),
         foreign_key_declarations=tuple(foreign_keys or ()),
         managed_aspects=managed_aspects_for(scope),
     )
@@ -544,22 +549,26 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
 
 def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     """Lower a valid public declaration into the domain model."""
-    primary_key_constraint = (
-        PrimaryKeyConstraint(
-            columns=declaration.primary_key,
-            constraint_name=f"{declaration.qualified_name.name}_pk",
-        )
+    column_names = {column.name: column.name for column in declaration.columns}
+    primary_key_columns = (
+        tuple(column_names.get(name, name) for name in declaration.primary_key)
         if declaration.primary_key is not None
         else None
     )
-    primary_key_columns = (
-        primary_key_constraint.columns if primary_key_constraint is not None else ()
+    primary_key_constraint = (
+        PrimaryKeyConstraint(
+            columns=primary_key_columns,
+            constraint_name=f"{declaration.qualified_name.name}_pk",
+        )
+        if primary_key_columns is not None
+        else None
     )
+    owner_primary_key = primary_key_constraint.columns if primary_key_constraint is not None else ()
     foreign_keys = tuple(
         foreign_key._to_constraint(
             declaration.qualified_name,
             declaration.columns,
-            primary_key_columns,
+            owner_primary_key,
         )
         for foreign_key in declaration.foreign_key_declarations
     )
@@ -572,8 +581,8 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         comment=declaration.comment,
         properties=declaration.properties,
         tags=declaration.tags,
-        partitioned_by=declaration.partitioned_by,
-        clustered_by=declaration.clustered_by,
+        partitioned_by=tuple(column_names.get(name, name) for name in declaration.partitioned_by),
+        clustered_by=tuple(column_names.get(name, name) for name in declaration.clustered_by),
         primary_key=primary_key_constraint,
         foreign_keys=foreign_keys,
         managed_aspects=declaration.managed_aspects,

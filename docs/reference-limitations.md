@@ -24,17 +24,21 @@ all identifiers case-insensitively (backticked or not), and Unity Catalog
 stores catalog, schema, and table names in lowercase. Object name parts are
 therefore normalized to lowercase, exactly as the catalog stores them.
 
-Column-like identifiers — column names, nested struct field names,
-partition and clustering references, and constraint columns and names —
-keep their declared or observed spelling. Case never distinguishes two
-identifiers: names differing only in case are the same column, collide as
-duplicates within one schema, and a case-only difference between a
-declaration and the catalog is never drift. When the engine changes an
-existing column or adds a constraint over one, it emits the catalog's
-exact spelling (some Databricks DDL paths require it); newly created
-columns are spelled as declared. Public accessors such as ``Column.name``
-and ``DeltaTable.primary_key`` return preserved spelling — callers that
-relied on lowercase values should apply their own presentation policy.
+Column names, nested struct field names, and constraint names keep their
+declared or observed spelling. Case never distinguishes two identifiers:
+names differing only in case are the same column, collide as duplicates
+within one schema, and a case-only difference between a declaration and the
+catalog is never drift. A partition, clustering, primary-key, or foreign-key
+reference may use any casing; once attached to a table it uses the referenced
+``Column.name`` when the public declaration is lowered. Thus
+``Column("requestId", ...)`` and
+``primary_key=["REQUESTID"]`` are accepted, while
+``DeltaTable.primary_key`` returns ``("requestId",)``.
+
+When the engine changes an existing column or adds a constraint over one, it
+emits the catalog's exact spelling (some Databricks DDL paths require it);
+newly created columns are spelled as declared. Callers that relied on
+lowercase accessor values should apply their own presentation policy.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and

@@ -242,12 +242,14 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     )
 
 
-def test_primary_key_binds_to_the_catalog_column_spelling(live_connection, live_tables):
+def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tables):
     """A primary key declared lowercase compiles with the catalog's camelCase spelling."""
     # The managed-constraint path is case-sensitive about physical column
-    # spelling, unlike ordinary ALTER COLUMN, so the planner binds key
-    # references to the observed spelling. Declared-lowercase against a live
+    # spelling, unlike ordinary ALTER COLUMN, so the key action uses the
+    # observed column name. Declared-lowercase against a live
     # camelCase column is the production shape that surfaced this.
+
+    # Given a camelCase catalog column declared lowercase
     table_name = live_tables("column_case_add_primary_key")
     execute_sql(
         live_connection,
@@ -263,8 +265,11 @@ def test_primary_key_binds_to_the_catalog_column_spelling(live_connection, live_
     )
     engine = build_sql_engine(live_connection)
 
+    # When syncing
     report = engine.sync(declaration)
 
+    # Then the key statement, the live state, and the re-sync all carry
+    # the catalog spelling
     assert report.has_failures is False
     statements = next(iter(report.planned_sql_statements.values()))
     assert statements == (
@@ -275,3 +280,59 @@ def test_primary_key_binds_to_the_catalog_column_spelling(live_connection, live_
     assert state["primary_key"] == ("requestId",)
     assert state["primary_key_name"] == f"{table_name}_pk"
     assert engine.sync(declaration).has_changes is False
+
+
+def test_foreign_key_uses_catalog_column_spelling_on_both_sides(live_connection, live_tables):
+    """An FK action uses the existing child and parent columns' exact spelling."""
+    # Given camelCase child and parent columns in the catalog, declared with
+    # scrambled casing throughout the model
+    parent_name = live_tables("column_case_fk_parent")
+    child_name = live_tables("column_case_fk_child")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(parent_name)} "
+        f"(`orderId` STRING NOT NULL, CONSTRAINT `{parent_name}_pk` "
+        "PRIMARY KEY (`orderId`)) USING DELTA",
+    )
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(child_name)} (`orderRef` STRING) USING DELTA",
+    )
+    parent = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=parent_name,
+        columns=(Column("orderid", String(), nullable=False),),
+        primary_key=("ORDERID",),
+        scope="metadata",
+    )
+    child = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=child_name,
+        columns=(Column("orderref", String()),),
+        foreign_keys=(
+            ForeignKey(
+                columns={"ORDERREF": "ORDERID"},
+                references=parent,
+            ),
+        ),
+        scope="metadata",
+    )
+    engine = build_sql_engine(live_connection)
+
+    # When syncing both tables
+    report = engine.sync(child, parent)
+
+    # Then the constraint statement, the live state, and the re-sync all
+    # spell both sides exactly as the catalog does
+    assert report.has_failures is False
+    assert report.planned_sql_statements[f"{live_catalog()}.{live_schema()}.{child_name}"] == (
+        f"ALTER TABLE {qualified_table(child_name)} "
+        f"ADD CONSTRAINT `{child_name}_orderref_fk` FOREIGN KEY (`orderRef`) "
+        f"REFERENCES {qualified_table(parent_name)} (`orderId`)",
+    )
+    assert read_live_table(live_connection, child_name)["foreign_keys"] == (
+        (f"{child_name}_orderref_fk", "orderRef", parent_name, "orderId"),
+    )
+    assert engine.sync(child, parent).has_changes is False

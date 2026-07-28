@@ -103,6 +103,16 @@ def test_missing_table_derives_target_from_desired_table():
     assert diff.target == _QUALIFIED_NAME
 
 
+def test_missing_table_actions_are_exactly_the_table_creation():
+    # Given a table with no observed counterpart
+    desired = _desired()
+
+    diff = diff_table(desired, observed=None)
+
+    # Then the derived actions are exactly the create
+    assert diff.actions == (CreateTable(desired),)
+
+
 def test_equal_tables_diff_to_empty_drift():
     # Given identical desired and observed definitions
     diff = diff_table(_desired(), _observed())
@@ -1176,7 +1186,7 @@ def test_case_only_layout_and_key_differences_are_not_drift():
         qualified_name=qualified_name,
         columns=(ObservedColumn("requestid", String(), nullable=False),),
         clustered_by=("requestid",),
-        primary_key=PrimaryKeyConstraint(columns=("REQUESTID",), constraint_name="t_pk"),
+        primary_key=PrimaryKeyConstraint(columns=("requestid",), constraint_name="t_pk"),
     )
 
     diff = diff_table(desired, observed)

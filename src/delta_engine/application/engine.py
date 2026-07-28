@@ -75,12 +75,16 @@ from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
 )
-from delta_engine.domain.model import DesiredTable, QualifiedName
+from delta_engine.domain.model import (
+    DesiredTable,
+    ObservedTable,
+    QualifiedName,
+)
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
+    adopt_catalog_spellings,
     diff_table,
-    resulting_column_spellings,
 )
 
 logger = logging.getLogger(__name__)
@@ -288,38 +292,35 @@ class Engine:
         return tuple(runs)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
-        """Compute the desired-observed diff for each run; read-failed runs carry no diff."""
+        """Adopt catalog spellings, then diff each run; read-failed runs carry no diff."""
+        diffable: list[tuple[_TableRun, ObservedTable | None]] = []
         for run in runs:
             match run.read:
                 case ReadFailure():
                     continue
-                case TablePresent(table=observed):
-                    run.diff = diff_table(run.desired, observed)
+                case TablePresent(table=observed_table):
+                    diffable.append((run, observed_table))
                 case TableAbsent():
-                    run.diff = diff_table(run.desired, None)
+                    diffable.append((run, None))
                 case _ as unreachable:
                     assert_never(unreachable)
+
+        adopted = adopt_catalog_spellings((run.desired, observed) for run, observed in diffable)
+        for run, observed in diffable:
+            run.diff = diff_table(adopted[run.qualified_name], observed)
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> None:
         """
         Accept or reject each diff according to the default planning policy.
 
-        Builds the sync-wide resulting-schema index from every diffed run
-        first — planning binds symbolic references (including cross-table
-        foreign-key spellings) through it. Rejected runs retain
-        ``PlanningFailed``; accepted runs retain
-        ``PlanningSucceeded`` with the validated, bound action plan.
+        Rejected runs retain ``PlanningFailed``; accepted runs retain
+        ``PlanningSucceeded`` with the validated action plan.
         """
-        resulting_schemas = {
-            run.diff.target: resulting_column_spellings(run.diff)
-            for run in runs
-            if run.diff is not None
-        }
         for run in runs:
             if run.diff is None:
                 continue
 
-            planning = plan_diff(run.diff, resulting_schemas)
+            planning = plan_diff(run.diff)
             run.planning = planning
 
             match planning:
