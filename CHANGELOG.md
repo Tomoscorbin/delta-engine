@@ -1,3 +1,93 @@
+## v0.6.0 (2026-07-28)
+
+### Feat
+
+- bind symbolic plan references to post-sync spelling
+- derive post-sync column spellings from a table diff
+- add recursive semantic data-type identity
+- add the identifier identity-key policy module
+- observe enabled delta table features at the read boundary
+- plan required table-feature enablement in the differ
+- add EnableTableFeature action with compiler and diff rendering
+- add table-feature domain vocabulary and observed feature state
+
+### Fix
+
+- explain missing Databricks Spark runtime
+- bound optional dependency majors
+- remove unsupported spark extra
+- verify supported CLI dependencies
+- preserve column identifier spelling in the model and API
+- read an unrecognized feature value as unsupported
+- reject feature policies whose names resolve ambiguously
+- report all state established by table creation
+- stale docs and tests
+- fix covereage
+
+### Refactor
+
+- adopt catalog spellings before diffing
+- add catalog-spelling adoption pass
+- select identifier spelling during diffing
+- bind references to column identifiers
+- simplify identifier execution spelling
+- simplify Spark runtime diagnostic
+- streamline distribution validation
+- simplify distribution validation
+- keep feature policy in table diff
+- trust observed table features
+- tighten table feature ownership
+- drop Identifier.key and .spelling properties
+- delete identifier_key helpers superseded by Identifier
+- key catalog column tags by Identifier
+- wrap raw declaration input at the Identifier boundary
+- bind plans through Identifier-keyed resulting schemas
+- diff through plain Identifier collections
+- wrap action name fields as Identifiers
+- wrap table layout references as Identifiers
+- store constraint columns and names as Identifiers
+- replace canonical_data_type with Identifier-aware type equality
+- store column and struct-field names as Identifiers
+- add case-insensitive Identifier str type
+- key dependency types and tag joins by identity
+- resolve declaration references through identifier keys
+- align and order the diff through identifier keys
+- validate table structure through identifier keys
+- judge key signatures and generated names by identity key
+- centralize Databricks feature policy
+- simplify table feature reconciliation
+- make feature property keys explicit
+- redesign
+- keep the feature policy an ordinary frozen value
+- build and keep the feature-policy lookups
+- make the definitions the feature vocabulary
+- name the two kinds of table-feature requirement
+- consolidate the table-feature policy into one module
+- move table-feature vocabulary into the application layer
+- remove unnecessary postponed annotations
+- WarehouseSqlRunner added
+- introduced SparkSqlRunner
+- make phase outcomes the run source of truth
+- constraint identity consolidated
+- make diff.py more readable
+- added desired and observed values to SetColumn/TableTag
+- consolidate column diffing
+- tighten comparison boundary invariants
+- make action plans self-contained
+- keep execution summaries passive
+- keep run reports passive
+- expose report construction
+- simplify run outcome ownership
+- consolidate table run outcomes
+- consolidate declaration validation
+- keep foreign key declarations public
+- make constraint naming explicit
+- separate port errors from failures
+- consolidate execution sequencing
+- consolidate named scopes
+- make validation composition explicit
+- rejig policy validation
+
 ## v0.5.0 (2026-07-20)
 
 ### Feat
