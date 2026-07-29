@@ -133,7 +133,8 @@ def test_failure_headlines_summarize_without_the_detail_message():
 
 def test_each_failure_kind_declares_its_producing_phase():
     # Given the four failure kinds
-    # Then each declares the phase that produced it, ordered read < planning < fk < execution
+    # Then each declares the phase that produced it, ordered as the pipeline
+    # runs them: fk < read < planning < execution
     assert ReadFailure("E", "m").phase is FailurePhase.READ
     assert ValidationFailure("R", "m").phase is FailurePhase.PLANNING
     assert (
@@ -150,9 +151,9 @@ def test_each_failure_kind_declares_its_producing_phase():
         is FailurePhase.EXECUTION
     )
     assert (
-        FailurePhase.READ
+        FailurePhase.FOREIGN_KEY
+        < FailurePhase.READ
         < FailurePhase.PLANNING
-        < FailurePhase.FOREIGN_KEY
         < FailurePhase.EXECUTION
     )
 

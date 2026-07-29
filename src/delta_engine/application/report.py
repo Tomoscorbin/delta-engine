@@ -184,14 +184,18 @@ class TableRunReport:
 
     @property
     def failures(self) -> tuple[Failure, ...]:
-        """Flatten canonical phase outcomes into lifecycle order for callers."""
+        """
+        Flatten canonical phase outcomes for callers.
+
+        Lifecycle order: structural, read, planning, execution.
+        """
         failures: list[Failure] = []
 
+        failures.extend(self.resolution.structural_failures)
         if isinstance(self.read, ReadFailure):
             failures.append(self.read)
         if isinstance(self.planning, PlanningFailed):
             failures.extend(self.planning.failures)
-        failures.extend(self.resolution.structural_failures)
 
         match self.execution_outcome:
             case ExecutionSummary() as summary:
