@@ -70,7 +70,7 @@ through a sync.
 | `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                      |
 | `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
-| `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.                  |
+| `ResolveResult`    | One explicit success or structural failure per table in dependency-first order; every resolution carries its planned foreign-key actions, and successful ones retain the resolved dependencies the execution gate applies.                   |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
 | `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
@@ -275,9 +275,9 @@ sequenceDiagram
     participant User
     participant Engine
     participant Reader as CatalogStateReader
+    participant Resolver as relationships.resolve
     participant Differ as diff_table
     participant Planner as plan_diff
-    participant Resolver as resolve
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
@@ -285,19 +285,19 @@ sequenceDiagram
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadError
     Engine->>Engine: ReadError → ReadFailure
+    Engine->>Resolver: resolve((desired, read) pairs)
+    Resolver-->>Engine: dependency order + structural verdicts + FK actions
     Engine->>Differ: diff_table(desired, observed_or_none)
     Differ-->>Engine: TableMissing / TableDrift
-    Engine->>Planner: plan_diff(diff)
+    Engine->>Planner: plan_diff(diff, relationship_actions)
     Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
     Engine->>Executor: compile(plan)
     Executor-->>Engine: SQL statements
-    Engine->>Resolver: resolve(tables, blocked=failed_tables)
-    Resolver-->>Engine: dependency order + FK failures
-    loop each statement until the first failure
-        Engine->>Executor: execute(statement)
+    loop dependency-ordered runs
+        Engine->>Engine: block the run if a dependency will not converge
+        Engine->>Executor: execute(statement) until the first failure (real runs)
         Executor-->>Engine: success or ExecutionError
     end
-    Engine->>Engine: build ExecutionSummary
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
@@ -307,23 +307,29 @@ phases:
 1. **Prepare** (before the chain): lower user-facing table declarations to
    `DesiredTable` values and reject duplicate qualified names.
 2. **Read**: ask the reader port for the current catalog state of each table.
-3. **Diff**: compute the typed `TableDiff` with `diff_table`.
-4. **Plan**: call the total `plan_diff` boundary, which always applies the
-   default validation policy. A rejected result contributes validation
+3. **Resolve**: order tables dependency-first with `relationships.resolve`,
+   judging each declared foreign key structurally and planning the
+   catalog-spelled set/drop actions that converge it.
+4. **Diff**: compute the typed `TableDiff` with `diff_table`.
+5. **Plan**: call the total `plan_diff` boundary with the diff and the
+   resolver's relationship actions; validation always applies the default
+   policy to the merged stream. A rejected result contributes validation
    failures and has no plan; an accepted result carries the privately
    constructed `ActionPlan` into the next phase.
-5. **Compile**: lower every accepted plan through the executor port and record
+6. **Compile**: lower every accepted plan through the executor port and record
    the exact statements used for both dry-run preview and real execution.
-6. **Resolve**: order tables by foreign-key dependency and block dependents of
-   failed tables.
-7. **Execute**: run the compiled statements of every table that has a
-   non-empty plan and no failures.
+7. **Execute**: walk the dependency-ordered runs, blocking every run whose
+   dependency will not reach desired state this sync, then run the compiled
+   statements of tables with a non-empty plan and no failures. Dry runs walk
+   the same gate without executing, so blocking stays visible in previews.
 8. **Report** (after the chain): return `SyncReport`, or raise
    `SyncFailedError` with the report on real runs that failed.
 
 Execution is gated by failures derived from the retained phase outcomes. A
-table that failed read, validation, or foreign-key resolution is skipped during
-execution. The engine still processes other tables.
+table that failed read, validation, or structural foreign-key resolution is
+skipped during execution, and its FK dependents are blocked with
+`ExecutionBlockedByDependency` on their execution slot. The engine still
+processes other tables.
 
 | Shape              | Produced by            | Consumed by                      | Purpose                                     |
 | ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
@@ -345,7 +351,7 @@ execution. The engine still processes other tables.
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
 | `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
 | `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`, `Property`                                               |
-| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, dependency resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
+| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |
 | `delta_engine.adapters`    | Backend integration and translation                                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler |
 
@@ -602,7 +608,8 @@ flowchart LR
 ```
 
 The resolver builds a graph from desired foreign keys and uses strongly
-connected components to produce a dependency-first order. It reports:
+connected components to produce a dependency-first order. It judges each
+declared foreign key structurally and reports:
 
 - `UNRESOLVABLE_REFERENCE` when a foreign key points to a table that is not part
   of the sync.
@@ -611,22 +618,27 @@ connected components to produce a dependency-first order. It reports:
 - `REFERENCED_COLUMN_TYPE_MISMATCH` when a foreign-key column's type does not
   match the referenced column's type on the table registered for the sync.
 - `CYCLE` for true multi-table FK cycles.
-- `BLOCKED_BY_FAILED_DEPENDENCY` when a table depends on another table that
-  is already known to have failed before execution begins, such as a table with
-  a read failure, validation failure, unresolvable FK, invalid FK target, or FK
-  cycle.
+
+Whether a table is *blocked* by another table's failure is not a resolution
+outcome: the engine's execution gate emits `BLOCKED_BY_FAILED_DEPENDENCY` when
+a table depends on another table that will not reach desired state this sync,
+whatever phase failed it — a read failure, validation failure, structural FK
+failure, or an execution failure in the same run.
 
 Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
 `validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid and no unmanaged aspect has drifted. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default composition in place and turns the verdict into the accepted/rejected planning sum.
 
 Execution walks the dependency-first order produced by the resolver and keeps a
-set of every table that has failed so far. Before each table executes, the engine
-re-applies the same blocking rule to its foreign-key dependencies. An execution
-failure in a parent therefore gives every later dependent a
+set of every table that will not converge — seeded with the tables that failed
+an earlier phase, then grown as tables fail or are blocked during the walk.
+Before each table executes, the engine applies the blocking rule the resolution
+value carries (`blocking_failures`) to its foreign-key dependencies. An
+execution failure in a parent therefore gives every later dependent a
 `BLOCKED_BY_FAILED_DEPENDENCY` failure in the same run, including a dependent
-whose own plan is empty. No second graph ordering pass is needed because the
-resolver already placed parents before their dependents.
+whose own plan is empty. One pass suffices because the resolver already placed
+parents before their dependents, and dry runs walk the same gate without
+executing.
 
 ## Public declarations and lowering
 
@@ -791,7 +803,7 @@ dependency cost.
 | Add a safety rule                 | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and unresolvable differences and return `ValidationFailure` values.                                                                                                                               |
 | Add a data type                   | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                |
 | Change public declarations        | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                     |
-| Change FK ordering or blocking    | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                       |
+| Change FK planning, ordering, or blocking | `delta_engine.application.relationships` (blocking gate: `Engine._execute`) | Cross-table relationship policy — FK existence diffing, spelling, structural validation, ordering — lives in the application layer, not in the domain plan or SQL compiler.                                                                  |
 | Change report output              | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                              |
 | Change Databricks SQL             | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                       |
 | Change CLI commands or output     | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                     |
@@ -809,8 +821,10 @@ dependency cost.
   still holds. This applies at the public boundary too: `ForeignKey.columns`
   and `Column.tags` copy what the user passed, so mutating the original
   mapping later does not alter the declaration.
-- Put orchestration, safety policy, dependency resolution, and failure
-  propagation in the application layer.
+- Put orchestration, safety policy, relationship resolution, and failure
+  propagation in the application layer. Constraint planning and spelling are
+  cross-table policy and live in `application/relationships.py`, consistent
+  with this rule.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog,
   schema, and table-name parts, parsing Spark types, and quoting SQL. Preserve
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
@@ -822,12 +836,13 @@ dependency cost.
   clustering, primary-key, and foreign-key references resolve to their actual
   desired `Column.name` while lowering; domain table snapshots require local
   references to carry that spelling and never rewrite their contents.
-- Adopt catalog spellings once, between read and diff: `adopt_catalog_spellings`
-  respells each desired table so an existing column carries the catalog's exact
-  spelling and a new or renamed column keeps its declared spelling, with
-  foreign-key referenced columns taking the referenced table's spelling. Diffing
-  stays single-table and emits desired values verbatim; planning only validates
-  and orders the resulting actions.
+- Spell constraint SQL as the catalog does, at the two emission sites that
+  hold the right observed objects: the resolver respells `SetForeignKey`
+  through the owner's and the parent's effective spellings, and
+  `_diff_primary_key` respells `SetPrimaryKey` from its own observed table.
+  Existing columns wear the catalog's exact spelling; new or renamed columns
+  keep the declared spelling. Comparisons never need respelling —
+  `Identifier` equality already makes case invisible to matching.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

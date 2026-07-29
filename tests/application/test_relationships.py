@@ -1051,9 +1051,7 @@ def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
     child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
     (action,) = child_resolution.actions
     assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == (
-        "orderNumber",
-    )
+    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("orderNumber",)
 
 
 def test_unreadable_table_contributes_edges_but_no_actions():
