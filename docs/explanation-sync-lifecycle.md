@@ -26,7 +26,7 @@ read → resolve → diff → plan → compile → execute → report
 | **Resolve** | Can each declared foreign key work, and which tables go first? | Tables ordered dependency-first, with structural FK verdicts and planned FK actions |
 | **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — or no drift            |
 | **Plan**    | Is the diff, merged with the planned FK actions, accepted? | A validated action plan, or named validation failures with no plan |
-| **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
+| **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution, rendered in the catalog's column spellings |
 | **Execute** | Apply the compiled statements                | Attempted results, a dependency block, or skipped on a dry run     |
 
 The result is a `SyncReport` with one entry per table. On a real run, if any
