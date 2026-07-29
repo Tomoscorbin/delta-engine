@@ -34,7 +34,9 @@ Until live Spark coverage exists, the honest contract is:
 2. The Spark backend has no published tested-runtime matrix.
 3. Newer runtimes are allowed but unverified unless a concrete incompatibility is known.
 4. SQL warehouse evidence is separate from Spark-runtime evidence.
-5. Serverless Spark, warehouse release channels, clouds, and access modes need explicit
+5. Dedicated access mode (`data_security_mode` value `SINGLE_USER`) has an observed failure
+   and is currently unsupported while its cause and affected runtime range are unknown.
+6. Serverless Spark, warehouse release channels, clouds, and access modes need explicit
    scope; none is implied by a numbered-runtime result.
 
 The first supported Spark floor should be DBR 16.4 LTS, after it passes the exact-wheel
@@ -49,6 +51,7 @@ budget supporting a non-LTS minor as the oldest maintained environment.
 | Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks reads |
 | SQL warehouse | Weekly credentialed suite against one configured endpoint | Shared SQL core and warehouse adapter behaviour on that endpoint |
 | Numbered DBR Spark | None | No runtime can currently be called tested |
+| Dedicated (`SINGLE_USER`) Spark | User-observed failure; exact cause and environment not yet pinned | Treat this access mode as unsupported pending investigation |
 | Serverless Spark | None | Spark Connect and rolling server behaviour are unverified |
 | Python | CI runs 3.12 | The advertised 3.13 classifier is not continuously verified |
 
@@ -130,7 +133,45 @@ SQL warehouses likewise expose Current and Preview channels. Preview is valuable
 warning but should not be a production support promise. See
 [SQL warehouse release channels](https://docs.databricks.com/aws/en/compute/sql-warehouse/create).
 
-### 3. A runtime family is not a reproducible environment
+### 3. Dedicated (`SINGLE_USER`) access mode currently fails
+
+A user-observed Spark deployment has established that Delta Engine does not currently
+work when compute uses the `data_security_mode` value `SINGLE_USER`. Databricks now
+calls this Dedicated access mode; `SINGLE_USER` remains the API and system-table value.
+See the
+[Dedicated compute overview](https://docs.databricks.com/aws/en/compute/dedicated-overview)
+and
+[access-mode value reference](https://docs.databricks.com/aws/en/admin/system-tables/compute#access-mode-reference).
+
+The root cause, first failing operation, runtime/build range, and other environment axes
+have not yet been isolated. Do not generalize the observation into a Databricks platform
+explanation without that evidence. Until the investigation is complete:
+
+- state that Dedicated (`SINGLE_USER`) compute is unsupported;
+- scope every classic-runtime result to its tested access mode;
+- run the initial blocking runtime matrix on Standard access mode;
+- do not treat a Standard result as evidence that the Dedicated failure is fixed;
+- do not treat this failure as evidence that Standard mode is supported before its own
+  matrix passes.
+
+The investigation should capture:
+
+1. the exact Delta Engine artifact, `current_version()` result, Spark/Python versions,
+   cloud, Photon setting, single-node setting, Unity Catalog context, and executing
+   principal;
+2. the first failing boundary: import, Spark-engine construction, `current_version()`,
+   `DESCRIBE TABLE EXTENDED ... AS JSON`, `information_schema`, session configuration,
+   or DDL execution;
+3. the complete structured Databricks condition, message, and traceback;
+4. the same minimal operation on Standard mode with the runtime, identity, and table
+   held constant;
+5. a sanitized reproduction and live regression before changing the support status.
+
+The `spark.sql.variable.substitute` guard, production JSON reader, information-schema
+queries, Unity Catalog identity, and exception translation are useful isolation
+boundaries, not assumed causes.
+
+### 4. A runtime family is not a reproducible environment
 
 Databricks can update a runtime line without changing the headline DBR version. DBR 19's
 unified release model makes this especially visible: clusters receive continuing updates
@@ -156,7 +197,7 @@ Databricks exposes runtime and build identity through
 Do not record credentials, workspace hostnames, catalog contents, or other secrets in
 public artifacts.
 
-### 4. Runtime and capability failures arrive too late
+### 5. Runtime and capability failures arrive too late
 
 The Spark factory currently diagnoses only a missing PySpark import. The runtime and
 Delta protocol are not inspected before a read or write. Unsupported operations therefore
@@ -186,7 +227,7 @@ Avoid a large speculative version table. Preflight only:
 2. reliable feature requirements;
 3. requirements whose late failure could leave a partially applied sync.
 
-### 5. Metadata evolution can create silent semantic loss
+### 6. Metadata evolution can create silent semantic loss
 
 The JSON reader is directionally safe: malformed and unknown data types fail the whole
 read, and unknown relation kinds are rejected. Additive, irrelevant top-level JSON fields
@@ -221,7 +262,7 @@ Capture sanitized real `AS JSON` documents from each matrix runtime as parser co
 fixtures. These complement live tests by making metadata-shape changes reviewable and
 reproducible without credentials.
 
-### 6. Compatibility jobs must test the consumer artifact
+### 7. Compatibility jobs must test the consumer artifact
 
 The current live workflow installs the repository's locked development environment. That
 does not prove the exact wheel a user installs works on the platform.
@@ -241,7 +282,7 @@ Baseline compatibility tests must not skip. Optional feature tests may report an
 unsupported capability, but the summary must preserve and count every skip so a green
 job cannot silently lose coverage.
 
-### 7. Current local Spark coverage cannot represent the runtime range
+### 8. Current local Spark coverage cannot represent the runtime range
 
 The locked development environment exercises one OSS Spark/Delta pair and uses an
 alternate metadata reader. It remains valuable for fast lifecycle regression tests but
@@ -298,7 +339,8 @@ The following is a proposed test matrix, not a current support claim:
 
 | Surface | Blocking coverage after implementation | Non-blocking early warning |
 | --- | --- | --- |
-| Classic Spark | DBR 16.4 LTS, 17.3 LTS, 18 LTS, and 19 GA | Newest Beta |
+| Classic Spark — Standard | DBR 16.4 LTS, 17.3 LTS, 18 LTS, and 19 GA | Newest Beta on Standard |
+| Classic Spark — Dedicated (`SINGLE_USER`) | No support claim until the observed failure is reproduced, understood, and fixed | Retest the failing environment and newest GA |
 | SQL warehouse | Current channel | Preview channel |
 | Serverless Spark | Latest environment plus oldest maintained Python-3.12 environment | Newly released environment |
 | Python client | 3.12 and advertised 3.13 for pure-Python/SQL surfaces | Next Python prerelease when useful |
@@ -314,16 +356,18 @@ because the runtime suite should be thin. If that becomes materially expensive, 
 and publish a narrower window such as current plus previous LTS; do not silently stop
 testing an older claimed runtime.
 
-Start with the cloud and access mode available to the project, but label that evidence
-precisely. Other clouds or modes may be expected to work; they are not tested until a
-job records them.
+Run the initial classic matrix on Standard access mode and label the cloud and exact
+mode precisely. Dedicated (`SINGLE_USER`) remains unsupported until its observed failure
+is reproduced and resolved. Other clouds or modes may be expected to work; they are not
+tested until a job records them.
 
 ## Thin Spark-runtime smoke suite
 
 Keep the full behavioural suite on the SQL warehouse and make the numbered-runtime
 matrix deliberately small. Each job should:
 
-1. provision an isolated Unity Catalog namespace on an exact runtime identifier;
+1. provision an isolated Unity Catalog namespace on an exact runtime identifier and
+   explicit access mode;
 2. install an exact base wheel without installing `pyspark` or `delta-spark`;
 3. restart Python where the installation mechanism requires it;
 4. record the sanitized platform profile before testing;
@@ -368,14 +412,22 @@ Optional functionality available only on a new runtime should use feature-level
 capability validation. It should not raise the package-wide floor unless the production
 reader or every safe baseline operation genuinely requires the new API.
 
+Every runtime result remains scoped to its access mode. A passing Standard job must not
+silently clear or hide the Dedicated (`SINGLE_USER`) limitation.
+
 ## Implementation backlog
 
 ### P0 — establish honest support evidence
 
 - [ ] Make user-facing documentation call 16.2 the technical Spark floor rather than a
       blanket tested-support claim.
+- [ ] Publish Dedicated (`SINGLE_USER`) as a current unsupported access mode while the
+      observed failure remains unexplained.
+- [ ] Reproduce the Dedicated failure with a sanitized environment profile, identify the
+      first failing boundary, compare the same operation on Standard, and retain the
+      failure as a regression test.
 - [ ] Add exact-wheel, production-reader Spark smoke jobs for DBR 16.4 LTS, 17.3 LTS,
-      18 LTS, and 19 GA.
+      18 LTS, and 19 GA on explicit Standard access-mode compute.
 - [ ] Add the newest Beta as a non-blocking early-warning job.
 - [ ] Test the latest published wheel when assessing a new runtime and the candidate
       wheel before a Delta Engine release.
@@ -420,6 +472,7 @@ reader or every safe baseline operation genuinely requires the new API.
 - Do not add a hard maximum DBR version.
 - Do not infer production-reader support from the local OSS Spark suite.
 - Do not infer Spark-runtime or serverless support from a SQL warehouse result.
+- Do not infer support for one compute access mode from a result on another.
 - Do not scatter runtime comparisons throughout the domain or application layers; keep
   platform policy at the Databricks adapter boundary.
 - Do not create a speculative gate for every feature. Prefer live evidence, stable
