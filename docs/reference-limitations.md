@@ -144,12 +144,9 @@ matrix. The recurring live suite exercises the SQL warehouse backend; treat
 other Databricks Runtime versions as requiring validation in your own
 environment until Spark-runtime smoke coverage is published.
 
-The Spark backend is currently unsupported on Dedicated access-mode compute
+The Spark backend does not currently work on Dedicated access-mode compute
 (`data_security_mode` value `SINGLE_USER`, formerly called single-user access mode).
-An observed deployment fails in this mode, but the first failing operation,
-root cause, and affected runtime range have not yet been isolated. This is an
-access-mode finding, not a runtime-version finding, and it does not establish
-tested support for Standard mode. The investigation is tracked in the
+Treat this mode as unsupported. Adding support is tracked in the
 [Databricks runtime compatibility audit](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/todo/2026-07-29-databricks-runtime-compatibility-audit.md).
 
 ## Delta table features

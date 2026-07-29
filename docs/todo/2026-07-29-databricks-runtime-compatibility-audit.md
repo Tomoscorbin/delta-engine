@@ -29,8 +29,7 @@ suggest:
 3. a user may request an optional Databricks or Delta feature that needs a newer
    runtime;
 4. Databricks may change SQL behaviour or metadata that Delta Engine reads;
-5. a compute mode may behave differently, as demonstrated by the current
-   Dedicated/`SINGLE_USER` failure.
+5. the Spark backend does not currently work on Dedicated/`SINGLE_USER` compute.
 
 Each existing layer can own one of those concerns. Python packaging should reject an
 old interpreter, feature documentation should tell users when they need a newer DBR,
@@ -45,9 +44,8 @@ The intended baseline contract is:
 > Engine places no maximum on the runtime version. Individual features may require a
 > newer runtime. Tested environments and known exceptions are recorded separately.
 
-Dedicated access mode (`data_security_mode` value `SINGLE_USER`) is currently one such
-known exception. It remains unsupported until the observed failure is reproduced and
-understood.
+The Spark backend does not currently work on Dedicated access mode
+(`data_security_mode` value `SINGLE_USER`), so that mode is unsupported.
 
 ## Responsibility model
 
@@ -74,7 +72,7 @@ be confusing or could occur after earlier statements have already changed a tabl
 | Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks metadata reads |
 | SQL warehouse | Weekly credentialed suite against one configured endpoint | Shared SQL core and warehouse adapter behaviour on that endpoint |
 | Numbered DBR Spark | None | No numbered runtime can currently be called live-tested |
-| Dedicated (`SINGLE_USER`) Spark | User-observed failure; exact cause not yet pinned | Treat this access mode as unsupported pending investigation |
+| Dedicated (`SINGLE_USER`) Spark | Does not currently work | Treat this access mode as unsupported |
 
 Relevant implementation boundaries:
 
@@ -240,30 +238,17 @@ For new metadata, use a simple rule:
 This parser policy and a live smoke test are more valuable than a general runtime
 capability registry.
 
-### 5. Dedicated (`SINGLE_USER`) is currently unsupported
+### 5. Dedicated (`SINGLE_USER`) does not currently work
 
-A user-observed Spark deployment fails when compute uses the `data_security_mode` value
-`SINGLE_USER`. Databricks now calls this Dedicated access mode; `SINGLE_USER` remains the
-API and system-table value. See the
+The Spark backend does not currently work when compute uses the `data_security_mode`
+value `SINGLE_USER`. Databricks calls this Dedicated access mode; `SINGLE_USER` remains
+the API and system-table value. See the
 [Dedicated compute overview](https://docs.databricks.com/aws/en/compute/dedicated-overview)
 and
 [access-mode value reference](https://docs.databricks.com/aws/en/admin/system-tables/compute#access-mode-reference).
 
-Investigation is deliberately deferred. This should not motivate a general access-mode
-framework before the failure is understood. When Dedicated support becomes a priority,
-keep the investigation focused:
-
-1. install the same Delta Engine wheel on Standard and Dedicated compute using the same
-   DBR and equivalent Unity Catalog permissions;
-2. locate the first differing operation: import, engine construction, metadata SQL,
-   information-schema query, session configuration, or DDL;
-3. retain the complete structured Databricks condition and traceback;
-4. fix the specific boundary or document the narrow platform limitation;
-5. add the minimal reproduction as a live regression before changing the support
-   statement.
-
-Until the todo is completed, document Dedicated (`SINGLE_USER`) as unsupported. A
-Standard result neither explains nor clears this failure.
+Treat Dedicated as unsupported. Adding support is deferred and tracked in the focused
+backlog below.
 
 ### 6. The missing assurance is a thin exact-wheel notebook smoke test
 
@@ -319,7 +304,7 @@ The following is deliberately representative rather than exhaustive:
 | --- | --- |
 | Oldest maintained LTS on Standard | Protect the backward compatibility boundary |
 | Current LTS on Standard | Cover the common current notebook environment |
-| Current LTS on Dedicated | Cover the other claimed access mode after the known failure is fixed |
+| Current LTS on Dedicated | Cover Dedicated after support is implemented |
 | Newest DBR on Standard, optional and non-blocking | Give early warning of an upcoming regression |
 
 If multiple active LTS releases become important to users, add them because demand
@@ -381,10 +366,9 @@ triggered canary is enough for the expected release rate and risk.
 
 ### Deferred — Dedicated access mode
 
-- [ ] When Dedicated support becomes a priority, reproduce the `SINGLE_USER` failure
-      against Standard on the same DBR, identify the first differing operation, and
-      retain a live regression for any fix.
-- [ ] Add Dedicated coverage on the current LTS only after the known failure is fixed.
+- [ ] Add Spark-backend support for Dedicated (`SINGLE_USER`) compute. Identify the
+      incompatible boundary, implement the narrow fix, and retain a live regression.
+- [ ] Add Dedicated coverage on the current LTS after support is implemented.
 
 ### P1 — strengthen the real compatibility boundaries
 
@@ -410,7 +394,7 @@ triggered canary is enough for the expected release rate and risk.
   environment diagnostic without a demonstrated need.
 - Do not infer production Spark support from the local alternate reader or SQL
   warehouse suite.
-- Do not infer Dedicated support from a Standard-mode result.
+- Do not claim Dedicated support until a live regression passes.
 - Do not raise the package-wide runtime floor for an optional feature.
 - Do preserve unknown platform state or fail closed when ignoring it could make a sync
   unsafe.
