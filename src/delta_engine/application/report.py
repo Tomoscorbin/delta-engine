@@ -12,11 +12,6 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, assert_never
 
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-)
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
@@ -31,6 +26,11 @@ from delta_engine.application.planning import (
     PlanningSucceeded,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
+from delta_engine.application.relationships import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+    TableResolution,
+)
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 

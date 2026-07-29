@@ -2,7 +2,6 @@ from datetime import datetime
 
 import pytest
 
-from delta_engine.application.relationships import ResolutionSucceeded
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
@@ -15,6 +14,7 @@ from delta_engine.application.ports import (
     ExecutionSummary,
     TablePresent,
 )
+from delta_engine.application.relationships import ResolutionSucceeded
 from delta_engine.application.rendering import (
     render_diff,
     render_diff_block,

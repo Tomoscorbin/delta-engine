@@ -1,9 +1,5 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -24,6 +20,10 @@ from delta_engine.application.ports import (
     ExecutionSummary,
     ReadResult,
     TableAbsent,
+)
+from delta_engine.application.relationships import (
+    ResolutionFailed,
+    ResolutionSucceeded,
 )
 from delta_engine.application.report import (
     SyncReport,

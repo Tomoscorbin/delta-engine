@@ -3,10 +3,6 @@ import json
 
 import pytest
 
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -22,6 +18,10 @@ from delta_engine.application.ports import (
     ReadResult,
     TableAbsent,
     TablePresent,
+)
+from delta_engine.application.relationships import (
+    ResolutionFailed,
+    ResolutionSucceeded,
 )
 from delta_engine.application.report import (
     ExecutionBlockedByDependency,
