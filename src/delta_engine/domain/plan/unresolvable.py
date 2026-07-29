@@ -16,8 +16,9 @@ class ColumnCaseDrift:
     aspect: ClassVar[TableAspect] = TableAspect.COLUMN_STRUCTURE
 
     def __post_init__(self) -> None:
-        # Coerce to plain str so the guards compare exact spelling even when
-        # callers pass Identifiers, whose equality is case-insensitive.
+        # Coerce to plain str so the guards and this record's own equality
+        # compare exact spelling even when callers pass Identifiers, whose
+        # equality is case-insensitive.
         object.__setattr__(self, "declared_name", str(self.declared_name))
         object.__setattr__(self, "observed_name", str(self.observed_name))
         if self.declared_name == self.observed_name:
