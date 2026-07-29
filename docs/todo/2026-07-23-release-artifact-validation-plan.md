@@ -75,8 +75,9 @@ them without turning the basic artifact job into a version matrix:
 - the existing installed-wheel CLI smoke verifies the minimum direct CLI set;
 - periodic lock refreshes exercise newer versions inside the declared ranges through
   the normal suite;
-- Python 3.12 and 3.13, and supported Databricks Runtime versions, remain separate
-  environment-compatibility checks.
+- The minimum supported and latest stable Python versions, and supported Databricks
+  Runtime versions, remain separate environment-compatibility checks. Intermediate
+  Python minors need a dedicated job only for a distinct compatibility path.
 
 The repository's local Spark/Delta suite is an internal locked test
 environment, not a published optional-dependency compatibility promise.

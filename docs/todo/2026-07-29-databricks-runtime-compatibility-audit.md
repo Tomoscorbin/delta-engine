@@ -54,7 +54,7 @@ understood.
 | Concern | Natural owner | Delta Engine policy |
 | --- | --- | --- |
 | Python too old | Package metadata and `pip` | Declare the real lower bound with `requires-python` |
-| Newer Python | Python CI | Do not impose a speculative upper bound |
+| Newer Python | Minimum/latest Python CI | Test the supported endpoints without a speculative upper bound |
 | Spark/Delta package pairing | Databricks Runtime | Never install or pin replacements on Databricks compute |
 | Baseline metadata API | Spark adapter contract | Document DBR 16.2 as the technical floor |
 | Optional platform feature | User plus feature documentation | State a minimum only for the feature that needs it |
@@ -70,7 +70,7 @@ be confusing or could occur after earlier statements have already changed a tabl
 | Area | Current evidence | What it proves |
 | --- | --- | --- |
 | Base distribution | Installed-wheel and lazy-import tests | Declarations and planning import without backend packages |
-| Python | CI runs Python 3.12 | The declared floor works; advertised 3.13 is not continuously verified |
+| Python | CI runs Python 3.12 | The declared floor works; the latest stable endpoint is not continuously verified |
 | Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks metadata reads |
 | SQL warehouse | Weekly credentialed suite against one configured endpoint | Shared SQL core and warehouse adapter behaviour on that endpoint |
 | Numbered DBR Spark | None | No numbered runtime can currently be called live-tested |
@@ -103,20 +103,63 @@ not yet establish Spark notebook support.
 The base wheel is pure Python (`py3-none-any`) and has no runtime dependencies.
 `requires-python = ">=3.12"` gives an old notebook interpreter a standard, early
 installation failure instead of allowing code with unsupported syntax or standard
-library assumptions to run.
+library assumptions to run. The floor is not arbitrary: production modules use the
+[`type` alias statement](https://peps.python.org/pep-0695/), which was introduced in
+Python 3.12.
 
 Keep the lower bound aligned with the oldest Python version the project is prepared to
-test. Do not add an upper bound such as `<3.14` merely because a new interpreter has not
-yet appeared in a DBR. Upper bounds turn likely-compatible new runtimes into guaranteed
-installation failures.
+test. Do not add an upper bound merely because a new interpreter has not yet appeared in
+a DBR. The
+[Python packaging guidance](https://packaging.python.org/en/latest/guides/dropping-older-python-versions/)
+warns against upper Python bounds because they create resolver conflicts and prevent
+likely-compatible installations.
 
-The current metadata advertises both Python 3.12 and 3.13, while CI runs only 3.12. The
-smallest correction is to test 3.13 or remove that classifier until it is tested. When
-a future DBR adopts another Python version, add it to CI. If the tests pass, no matching
-Delta Engine release or metadata change is required.
+Python has an explicit
+[backwards-compatibility policy](https://peps.python.org/pep-0387/), and Delta Engine has
+no Python-version branches, compiled extensions, or base dependencies. Test the minimum
+supported Python and the latest stable Python rather than every intermediate minor. At
+this review date those endpoints are 3.12 and 3.14. Python 3.13 remains inside the
+supported range without needing a dedicated job. Add an intermediate version only when
+version-specific code, dependency resolution, or a reproduced defect creates a distinct
+path.
+
+Keep linting and type checking targeted at the minimum version so newer-only syntax and
+APIs cannot enter accidentally. Build one universal wheel and install that exact wheel
+on both Python endpoints. Spark compatibility remains a separate live DBR concern,
+using the Python and PySpark combination supplied by Databricks.
 
 The optional SQL and CLI dependencies have their own resolver constraints, but they are
 not part of the normal base-wheel Spark notebook installation.
+
+#### When the Python floor should rise
+
+Raising the floor is a product compatibility decision, not routine housekeeping. Do it
+only when at least one concrete need exists:
+
+- production code needs newer syntax or a standard-library API and a compatibility
+  implementation is not worthwhile;
+- a required core dependency drops the old interpreter;
+- the old Python reaches end of life and retaining it creates a security or material
+  tooling burden;
+- supporting it requires significant version branches, backports, or duplicated code;
+- an interpreter defect prevents correct or safe behaviour.
+
+Also confirm that no Databricks environment the project intends to support still needs
+the old Python. A new Python release, a development-tool requirement, an optional
+dependency, or an optional DBR feature does not by itself justify raising the global
+floor.
+
+When the floor does rise:
+
+1. announce the compatibility change;
+2. identify the final Delta Engine release supporting the old Python;
+3. keep production installation examples pinned;
+4. update `requires-python`, static-tool targets, CI endpoints, classifiers, and release
+   notes together.
+
+An unpinned installer can select the last package release compatible with an old
+interpreter, which is another reason production notebooks should use exact Delta Engine
+versions.
 
 ### 2. New Databricks and Delta features should be handled feature by feature
 
@@ -300,11 +343,15 @@ triggered canary is enough for the expected release rate and risk.
 ### When a new Python version appears in DBR
 
 1. Leave the open-ended `>=3.12` requirement in place.
-2. Add the interpreter to ordinary Python CI.
-3. Run the real notebook smoke test on the adopting DBR.
-4. Add a classifier after it is tested, or simply retain the generic Python 3
-   classifier.
-5. Add an upper bound only for a reproduced break that cannot promptly be fixed.
+2. Advance the explicit latest-stable CI endpoint; do not add a permanent job for every
+   intervening minor.
+3. Add another endpoint only for version-specific code, dependency resolution, or a
+   reproduced defect.
+4. Run the real notebook smoke test when a DBR adopts the interpreter.
+5. If the endpoint passes, add its classifier without requiring a Delta Engine release
+   solely for compatibility.
+6. If it fails, fix or narrowly document the incompatibility rather than adding a
+   speculative upper bound.
 
 ### When a new Delta or Databricks feature appears
 
@@ -319,7 +366,9 @@ triggered canary is enough for the expected release rate and risk.
 
 ### P0 — establish the missing evidence
 
-- [ ] Test Python 3.13 in CI or remove its support classifier until tested.
+- [ ] Run core and exact-wheel consumer tests on the minimum supported and latest stable
+      Python versions (currently 3.12 and 3.14); keep intermediate 3.13 supported without
+      a dedicated job while it has no distinct compatibility path.
 - [ ] Reproduce the Dedicated (`SINGLE_USER`) failure against Standard on the same DBR,
       identify the first differing operation, and retain a live regression.
 - [ ] Add the exact-wheel production Spark smoke on the oldest maintained and current
@@ -347,6 +396,8 @@ triggered canary is enough for the expected release rate and risk.
 - Do not create a Spark-by-Delta compatibility matrix.
 - Do not create a runtime allowlist or hard maximum.
 - Do not create one wheel or Delta Engine release line per DBR.
+- Do not test every intermediate Python minor unless it has a distinct compatibility
+  path; test the minimum and latest stable endpoints.
 - Do not build a general platform profile, tri-state capability registry, or public
   environment diagnostic without a demonstrated need.
 - Do not infer production Spark support from the local alternate reader or SQL
