@@ -4,7 +4,8 @@ Cross-table relationship resolution: ordering, classification, and FK planning.
 The public entry point is `resolve`, which takes each registered table with its
 read snapshot and returns one explicit success or failure per table in
 dependency-first order. A successful resolution carries the planned set/drop
-foreign-key actions (spelled as the catalogs spell them) and retains its
+foreign-key actions — declared spellings verbatim; validation has already
+required declared spelling to match the catalog's — and retains its
 resolved dependencies so the engine's gating walk can block dependents of
 tables that fail, without reinterpreting the desired table declaration.
 
@@ -32,7 +33,7 @@ strongly-connected-components algorithm) are hidden behind that interface.
 """
 
 from collections.abc import Mapping, Set as AbstractSet
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from delta_engine.application.failures import (
     ForeignKeyFailure,
@@ -44,7 +45,6 @@ from delta_engine.domain.model import (
     DataType,
     DesiredTable,
     ForeignKeyConstraint,
-    ObservedTable,
     QualifiedName,
     TableAspect,
 )
@@ -107,18 +107,14 @@ def resolve(tables: tuple[TableSnapshot, ...]) -> tuple[TableResolution, ...]:
 
     Pure function of the read snapshots: orders every table dependency-first,
     judges each declared foreign key structurally, and plans the set/drop
-    actions that converge each table's foreign keys — spelled as the catalogs
-    spell them, because this is the one module holding both endpoints.
+    actions that converge each table's foreign keys — carrying declared
+    spellings verbatim, because the declaration is the executable truth once
+    validation has required it to match the catalog.
     Blocking is not computed here: successful resolutions expose
     ``blocking_failures`` and the engine's gating walk applies it.
     """
     desired_tables = tuple(desired for desired, _ in tables)
     registered_names = {table.qualified_name for table in desired_tables}
-    observed_by_name = {
-        desired.qualified_name: read.table
-        for desired, read in tables
-        if isinstance(read, TablePresent)
-    }
     read_by_name = {desired.qualified_name: read for desired, read in tables}
 
     resolved_dependencies = _build_resolved_dependencies(desired_tables, registered_names)
@@ -128,17 +124,11 @@ def resolve(tables: tuple[TableSnapshot, ...]) -> tuple[TableResolution, ...]:
     failures_by_table = _classify_structural_failures(
         desired_tables, registered_names, cycle_partners
     )
-    spellings_by_table = {
-        desired.qualified_name: _effective_spellings(
-            desired, observed_by_name.get(desired.qualified_name)
-        )
-        for desired in desired_tables
-    }
 
     resolutions: list[TableResolution] = []
     for table in ordered:
         qualified_name = table.qualified_name
-        actions = _foreign_key_actions(table, read_by_name[qualified_name], spellings_by_table)
+        actions = _foreign_key_actions(table, read_by_name[qualified_name])
         failures = failures_by_table.get(qualified_name)
         if failures is None:
             resolutions.append(
@@ -164,51 +154,20 @@ def _managed_foreign_keys(table: DesiredTable) -> tuple[ForeignKeyConstraint, ..
     return table.foreign_keys
 
 
-type _SpellingMap = Mapping[str, str]
-
-
-def _effective_spellings(desired: DesiredTable, observed: ObservedTable | None) -> _SpellingMap:
-    """Effective spelling per column: the catalog's where present, else the declared."""
-    declared: dict[str, str] = {column.name: column.name for column in desired.columns}
-    if observed is None:
-        return declared
-    return declared | {column.name: column.name for column in observed.columns}
-
-
-def _respell_constraint(
-    constraint: ForeignKeyConstraint,
-    own: _SpellingMap,
-    spellings_by_table: Mapping[QualifiedName, _SpellingMap],
-) -> ForeignKeyConstraint:
-    """ADD CONSTRAINT is case-sensitive on both sides; spell as the catalogs do."""
-    referenced: _SpellingMap = spellings_by_table.get(constraint.referenced_table, {})
-    return replace(
-        constraint,
-        local_columns=tuple(own.get(name, name) for name in constraint.local_columns),
-        referenced_columns=tuple(
-            referenced.get(name, name) for name in constraint.referenced_columns
-        ),
-    )
-
-
 def _foreign_key_actions(
     desired: DesiredTable,
     read: ReadResult,
-    spellings_by_table: Mapping[QualifiedName, _SpellingMap],
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
-    """Set/drop actions converging the table's declared foreign keys, catalog-spelled."""
+    """Set/drop actions converging the table's declared foreign keys, declared-spelled."""
     if isinstance(read, ReadFailure):
         return ()
     observed_constraints = read.table.foreign_keys if isinstance(read, TablePresent) else ()
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
     observed_by_signature = {fk.signature: fk for fk in observed_constraints}
-    own = spellings_by_table[desired.qualified_name]
     actions: list[SetForeignKey | DropForeignKey] = []
     for signature, constraint in desired_by_signature.items():
         if signature not in observed_by_signature:
-            actions.append(
-                SetForeignKey(constraint=_respell_constraint(constraint, own, spellings_by_table))
-            )
+            actions.append(SetForeignKey(constraint=constraint))
     for signature, constraint in observed_by_signature.items():
         if signature not in desired_by_signature:
             actions.append(DropForeignKey(constraint=constraint))

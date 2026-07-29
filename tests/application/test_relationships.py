@@ -956,7 +956,7 @@ def test_present_table_diffs_foreign_keys_by_signature():
     assert [a.constraint.constraint_name for a in drop_actions] == ["legacy_archive_fk"]
 
 
-def test_set_foreign_key_carries_catalog_spelling_on_both_sides():
+def test_set_foreign_key_carries_the_declared_spelling_on_both_sides():
     # Given child declares local column "customerId" that the catalog spells
     # "customerid", referencing parent column "Id" that the catalog spells "id"
     parent = _referenced_table(
@@ -974,12 +974,13 @@ def test_set_foreign_key_carries_catalog_spelling_on_both_sides():
     # When resolved
     resolutions = resolve((_present(parent, parent_observed), _present(child, child_observed)))
 
-    # Then the emitted SetForeignKey wears the catalogs' spellings on both sides
+    # Then the emitted SetForeignKey is a semantic value wearing the declared
+    # spellings; each table's case drift is rejected by validation separately
     child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
     (action,) = child_resolution.actions
     assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.local_columns) == ("customerid",)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("id",)
+    assert tuple(str(column) for column in action.constraint.local_columns) == ("customerId",)
+    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
 
 
 def test_referenced_spelling_of_a_parent_created_this_sync_is_the_declared_one():
@@ -1004,7 +1005,7 @@ def test_referenced_spelling_of_a_parent_created_this_sync_is_the_declared_one()
     assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
 
 
-def test_self_referencing_foreign_key_adopts_its_own_catalog_spelling():
+def test_self_referencing_foreign_key_keeps_its_declared_spelling():
     # Given a self-referencing key declared lowercase against camelCase catalog columns
     employees = DeltaTable(
         "dev",
@@ -1022,12 +1023,13 @@ def test_self_referencing_foreign_key_adopts_its_own_catalog_spelling():
     # When resolved
     resolutions = resolve((_present(employees, observed),))
 
-    # Then both sides wear the table's own catalog spelling
+    # Then both sides wear the declared spelling; the columns' case drift is
+    # rejected by validation separately
     employees_resolution = _successful_resolution(resolutions, "dev.silver.employees")
     (action,) = employees_resolution.actions
     assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.local_columns) == ("ManagerId",)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
+    assert tuple(str(column) for column in action.constraint.local_columns) == ("managerid",)
+    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("id",)
 
 
 def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
