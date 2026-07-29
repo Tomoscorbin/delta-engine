@@ -62,10 +62,6 @@ create version commit and tag locally
     -> separate job creates the GitHub release
 ```
 
-For a new release, the consumer smoke also runs on the latest stable Python as a cheap
-final compatibility gate. This does not imply that the universal wheel needs a build
-matrix.
-
 The build job can write the release commit and tag but has no PyPI identity token. The
 publishing job has `id-token: write`, but it cannot modify the repository and does not
 build or test a different copy. Passing the artifacts between jobs is the provenance
