@@ -2,9 +2,20 @@ import pytest
 
 from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
+    CatalogSpellings,
     ExecutionSucceeded,
     ExecutionSummary,
 )
+from delta_engine.domain.model import (
+    DesiredColumn,
+    DesiredTable,
+    ObservedColumn,
+    ObservedTable,
+    QualifiedName,
+    String,
+)
+
+_ORDERS = QualifiedName("dev", "silver", "orders")
 
 
 def _ok_exec(idx=0, preview="ALTER TABLE ..."):
@@ -61,3 +72,50 @@ def test_execution_summary_rejects_non_contiguous_statement_indexes():
 def test_execution_summary_rejects_results_after_a_failure():
     with pytest.raises(ValueError, match="after a failure"):
         ExecutionSummary((_failed_exec(0), _ok_exec(1)))
+
+
+def _desired_table(*column_names: str) -> DesiredTable:
+    return DesiredTable(
+        qualified_name=_ORDERS,
+        columns=tuple(DesiredColumn(name, String()) for name in column_names),
+    )
+
+
+def _observed_table(*column_names: str) -> ObservedTable:
+    return ObservedTable(
+        qualified_name=_ORDERS,
+        columns=tuple(ObservedColumn(name, String()) for name in column_names),
+    )
+
+
+def test_catalog_spellings_prefer_the_observed_spelling_across_casing():
+    # Given a column declared "CustomerID" that the catalog spells "customerid"
+    spellings = CatalogSpellings(((_desired_table("CustomerID"), _observed_table("customerid")),))
+
+    # Then the effective spelling is the catalog's, however the caller cases the lookup
+    assert str(spellings.spelling(_ORDERS, "CustomerID")) == "customerid"
+    assert str(spellings.spelling(_ORDERS, "CUSTOMERID")) == "customerid"
+
+
+def test_catalog_spellings_fall_back_to_the_declared_spelling_for_unobserved_columns():
+    # Given a declared column the catalog has not seen yet
+    spellings = CatalogSpellings(((_desired_table("newCol"), _observed_table("other")),))
+
+    # Then the declared spelling is returned verbatim
+    assert str(spellings.spelling(_ORDERS, "newCol")) == "newCol"
+
+
+def test_catalog_spellings_keep_the_declared_spelling_when_the_table_is_absent():
+    # Given a registered table with no observed counterpart (created this sync)
+    spellings = CatalogSpellings(((_desired_table("OrderId"), None),))
+
+    # Then the declared spelling is the only spelling there is
+    assert str(spellings.spelling(_ORDERS, "orderid")) == "OrderId"
+
+
+def test_catalog_spellings_return_the_given_spelling_for_unknown_tables_and_columns():
+    # Given an empty lookup
+    spellings = CatalogSpellings(())
+
+    # Then any spelling passes through unchanged — the rule is total
+    assert str(spellings.spelling(_ORDERS, "Whatever")) == "Whatever"

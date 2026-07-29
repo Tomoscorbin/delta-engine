@@ -8,11 +8,17 @@ the whole contract. ``DesiredTableSource`` is the inbound counterpart: the
 contract a user-facing declaration satisfies to enter a sync.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
-from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
+from delta_engine.domain.model import (
+    DesiredTable,
+    Identifier,
+    ObservedTable,
+    QualifiedName,
+)
 from delta_engine.domain.plan import ActionPlan
 
 # ---------- DesiredTableSource ----------
@@ -74,6 +80,42 @@ class CatalogStateReader(Protocol):
 
         """
         ...
+
+
+# ---------- CatalogSpellings ----------
+
+
+class CatalogSpellings:
+    """
+    Column spellings as the catalog spells them, for SQL rendering.
+
+    Maps each registered table's columns to their effective spelling: the
+    catalog's where the column was observed, the declared spelling otherwise.
+    Lookups are case-insensitive (``Identifier`` identity); an unknown table
+    or column returns the given spelling unchanged, so the rule is total — a
+    referent that exists resolves to the catalog's spelling, and one that
+    does not exist yet keeps the spelling it was given.
+
+    Consumed by :meth:`PlanExecutor.compile`: a dialect with case-sensitive
+    DDL paths renders its column references through it; a dialect that does
+    not care ignores it. Spelling is presentation, never identity —
+    comparisons upstream use ``Identifier`` equality and never consult this.
+    """
+
+    def __init__(self, tables: Iterable[tuple[DesiredTable, ObservedTable | None]]) -> None:
+        self._spellings_by_table: dict[QualifiedName, dict[str, str]] = {}
+        for desired, observed in tables:
+            spellings: dict[str, str] = {column.name: column.name for column in desired.columns}
+            if observed is not None:
+                spellings |= {column.name: column.name for column in observed.columns}
+            self._spellings_by_table[desired.qualified_name] = spellings
+
+    def spelling(self, table: QualifiedName, column: str) -> str:
+        """Catalog spelling where known; the given spelling unchanged otherwise."""
+        spellings = self._spellings_by_table.get(table)
+        if spellings is None:
+            return column
+        return spellings.get(Identifier(column), column)
 
 
 # ---------- ExecutionResult ----------
