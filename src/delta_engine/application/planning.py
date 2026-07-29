@@ -52,14 +52,14 @@ def plan_diff(
     """
     match diff:
         case TableDrift() as drift:
-            enriched = replace(drift, actions=(*drift.actions, *relationship_actions))
-            validation = validate_diff(enriched)
+            merged = replace(drift, actions=(*drift.actions, *relationship_actions))
+            validation = validate_diff(merged)
             if validation.failed:
                 return PlanningFailed(failures=validation.failures)
             plan = ActionPlan(
-                target=enriched.target,
-                actions=enriched.actions,
-                kind=enriched.observed.kind,
+                target=merged.target,
+                actions=merged.actions,
+                kind=merged.observed.kind,
             )
         case TableMissing() as missing:
             validation = validate_diff(missing)
