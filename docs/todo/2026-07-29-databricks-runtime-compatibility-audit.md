@@ -1,479 +1,357 @@
-# Databricks platform compatibility and runtime assurance audit
+# Databricks runtime compatibility audit
 
 **Reviewed and recorded:** 2026-07-29
-**Status:** Review record and implementation backlog. No support status proposed here is
-implemented until the corresponding live evidence exists.
+**Status:** Review record and focused implementation backlog. No tested Spark-runtime
+claim exists until the proposed live smoke tests pass.
 
 This is a focused follow-up to the
 [distribution, versioning, and runtime review](2026-07-23-distribution-versioning-runtime-review.md).
-That review establishes the right packaging and forward-compatibility policy. This audit
-checks the current implementation and test evidence against that policy, expands the
-scope beyond numbered Databricks Runtimes, and turns the remaining gaps into an
-actionable assurance plan.
+It reviews what Delta Engine actually depends on inside a Databricks notebook and
+proposes the smallest compatibility policy justified by that dependency surface.
 
 ## Executive conclusion
 
-Delta Engine has the right foundation for working across Databricks releases:
+Delta Engine should not grow a general Databricks compatibility framework. Its
+production Spark integration is deliberately small:
 
 - the base wheel is pure Python and has no runtime dependencies;
-- the Spark and SQL backends load lazily;
-- Databricks compute supplies its own mutually compatible PySpark and Delta packages;
-- the production integration uses a deliberately small PySpark surface and delegates
-  catalog work to SQL;
-- unknown relation kinds and data types generally fail closed rather than being guessed.
+- Databricks supplies its own mutually compatible PySpark and Delta packages;
+- Delta Engine does not use the production `delta-spark` Python API;
+- the Spark adapter primarily passes SQL through `SparkSession.sql()`;
+- the production reader parses Databricks SQL metadata rather than traversing Spark or
+  Delta internals.
 
-The missing piece is evidence. Databricks Runtime 16.2 is a technical syntax floor for
-the production Spark reader, not a tested-support statement. The recurring live suite
-uses one SQL warehouse, while the local Spark suite substitutes a test-only reader for
-the production Databricks reader. No current job proves that the released wheel works
-through `build_spark_engine()` on any numbered Databricks Runtime.
+The practical risks are therefore narrower than a DBR-by-Spark-by-Delta matrix would
+suggest:
 
-Until live Spark coverage exists, the honest contract is:
+1. the notebook's Python version may be below Delta Engine's declared floor;
+2. Delta Engine's baseline metadata SQL may not exist on an old runtime;
+3. a user may request an optional Databricks or Delta feature that needs a newer
+   runtime;
+4. Databricks may change SQL behaviour or metadata that Delta Engine reads;
+5. a compute mode may behave differently, as demonstrated by the current
+   Dedicated/`SINGLE_USER` failure.
 
-1. DBR 16.2 is the earliest runtime on which the production reader can technically run.
-2. The Spark backend has no published tested-runtime matrix.
-3. Newer runtimes are allowed but unverified unless a concrete incompatibility is known.
-4. SQL warehouse evidence is separate from Spark-runtime evidence.
-5. Dedicated access mode (`data_security_mode` value `SINGLE_USER`) has an observed failure
-   and is currently unsupported while its cause and affected runtime range are unknown.
-6. Serverless Spark, warehouse release channels, clouds, and access modes need explicit
-   scope; none is implied by a numbered-runtime result.
+Each existing layer can own one of those concerns. Python packaging should reject an
+old interpreter, feature documentation should tell users when they need a newer DBR,
+Databricks should provide the Spark/Delta pair, and a thin live notebook smoke test
+should catch platform regressions. A new runtime should remain allowed unless a concrete
+incompatibility is found.
 
-The first supported Spark floor should be DBR 16.4 LTS, after it passes the exact-wheel
-smoke suite. Keep 16.2 documented as the technical floor, but do not spend assurance
-budget supporting a non-LTS minor as the oldest maintained environment.
+The intended baseline contract is:
+
+> The Spark backend requires Python 3.12 or later, Databricks Runtime 16.2 or later,
+> Unity Catalog, and the PySpark and Delta libraries supplied by Databricks. Delta
+> Engine places no maximum on the runtime version. Individual features may require a
+> newer runtime. Tested environments and known exceptions are recorded separately.
+
+Dedicated access mode (`data_security_mode` value `SINGLE_USER`) is currently one such
+known exception. It remains unsupported until the observed failure is reproduced and
+understood.
+
+## Responsibility model
+
+| Concern | Natural owner | Delta Engine policy |
+| --- | --- | --- |
+| Python too old | Package metadata and `pip` | Declare the real lower bound with `requires-python` |
+| Newer Python | Python CI | Do not impose a speculative upper bound |
+| Spark/Delta package pairing | Databricks Runtime | Never install or pin replacements on Databricks compute |
+| Baseline metadata API | Spark adapter contract | Document DBR 16.2 as the technical floor |
+| Optional platform feature | User plus feature documentation | State a minimum only for the feature that needs it |
+| Platform SQL or metadata regression | Thin live notebook smoke test | Test representative real runtimes using the exact wheel |
+| Known environment-specific defect | Targeted investigation and regression | Fix or document the narrow incompatibility |
+
+This model intentionally does not try to discover every runtime capability before a
+sync. Add a targeted preflight only when a demonstrated feature failure would otherwise
+be confusing or could occur after earlier statements have already changed a table.
 
 ## Evidence available today
 
 | Area | Current evidence | What it proves |
 | --- | --- | --- |
 | Base distribution | Installed-wheel and lazy-import tests | Declarations and planning import without backend packages |
-| Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks reads |
+| Python | CI runs Python 3.12 | The declared floor works; advertised 3.13 is not continuously verified |
+| Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks metadata reads |
 | SQL warehouse | Weekly credentialed suite against one configured endpoint | Shared SQL core and warehouse adapter behaviour on that endpoint |
-| Numbered DBR Spark | None | No runtime can currently be called tested |
-| Dedicated (`SINGLE_USER`) Spark | User-observed failure; exact cause and environment not yet pinned | Treat this access mode as unsupported pending investigation |
-| Serverless Spark | None | Spark Connect and rolling server behaviour are unverified |
-| Python | CI runs 3.12 | The advertised 3.13 classifier is not continuously verified |
+| Numbered DBR Spark | None | No numbered runtime can currently be called live-tested |
+| Dedicated (`SINGLE_USER`) Spark | User-observed failure; exact cause not yet pinned | Treat this access mode as unsupported pending investigation |
 
 Relevant implementation boundaries:
 
-- [`pyproject.toml`](../../pyproject.toml) deliberately leaves base dependencies empty
-  and keeps PySpark and Delta development-only.
-- [`delta_engine.databricks`](../../src/delta_engine/databricks.py) constructs the Spark
-  backend lazily but checks only whether PySpark can be imported.
+- [`pyproject.toml`](../../pyproject.toml) declares Python 3.12 or later, leaves base
+  dependencies empty, and keeps PySpark and Delta development-only.
+- [`delta_engine.databricks`](../../src/delta_engine/databricks.py) loads the Spark
+  backend lazily.
+- The production Spark shell imports `SparkSession` and `DataFrame`, then delegates
+  physical work to `spark.sql()`.
 - The production reader depends on
-  [`DESCRIBE TABLE EXTENDED ... AS JSON`](../../src/delta_engine/adapters/databricks/sql/queries.py).
-- The [live workflow](../../.github/workflows/live.yaml) runs only the SQL warehouse
-  suite from a repository checkout and locked development environment.
-- The [local native reader](../../tests/adapters/databricks/native_reader.py) explicitly
-  bypasses the production reader because OSS Spark cannot execute the required metadata
-  command.
+  [`DESCRIBE TABLE EXTENDED ... AS JSON`](../../src/delta_engine/adapters/databricks/sql/queries.py),
+  which establishes the DBR 16.2 technical floor.
+- The [live workflow](../../.github/workflows/live.yaml) exercises the SQL warehouse
+  backend, not `build_spark_engine()`.
+- The [local native reader](../../tests/adapters/databricks/native_reader.py) replaces
+  the production reader because open-source Spark cannot execute the Databricks
+  metadata command.
 
-The [installation guide](../installation.md#requirements) currently presents DBR 16.2+
-as a requirement. The [limitations reference](../reference-limitations.md#runtime-features)
-more accurately says there is no complete tested Spark-backend matrix. User-facing
-support language should consistently distinguish those two facts.
+The implementation has a low compatibility risk, but the current test evidence does
+not yet establish Spark notebook support.
 
-## Prioritized findings
+## Findings
 
-### 1. Technical minimum and tested support are conflated
+### 1. Python compatibility is already mostly a packaging concern
 
-`DESCRIBE TABLE EXTENDED ... AS JSON` establishes a DBR 16.2 floor. It does not prove
-that every later runtime preserves the metadata schema, information-schema behaviour,
-SQL syntax, session configuration, exception shape, or Delta protocol operations used
-by the package.
+The base wheel is pure Python (`py3-none-any`) and has no runtime dependencies.
+`requires-python = ">=3.12"` gives an old notebook interpreter a standard, early
+installation failure instead of allowing code with unsupported syntax or standard
+library assumptions to run.
 
-The distinction must be explicit:
+Keep the lower bound aligned with the oldest Python version the project is prepared to
+test. Do not add an upper bound such as `<3.14` merely because a new interpreter has not
+yet appeared in a DBR. Upper bounds turn likely-compatible new runtimes into guaranteed
+installation failures.
 
-- **technical floor:** the earliest environment containing the baseline API;
-- **tested:** an environment exercised by a live suite for a specific Delta Engine
-  artifact;
-- **supported:** a tested environment covered by the maintenance policy;
-- **newer, untested:** permitted, with no tested-support claim;
-- **known incompatible:** a reproduced failure with an actionable recommendation.
+The current metadata advertises both Python 3.12 and 3.13, while CI runs only 3.12. The
+smallest correction is to test 3.13 or remove that classifier until it is tested. When
+a future DBR adopts another Python version, add it to CI. If the tests pass, no matching
+Delta Engine release or metadata change is required.
 
-The existing runtime review's dated table uses proposed statuses, not evidence. Its
-snapshot already illustrates the maintenance problem: it records DBR 19 as Beta and DBR
-18 as non-LTS, while the official table on 2026-07-29 records DBR 19 as GA and DBR 18 as
-LTS. A manually edited runtime list is useful as a dated review record but must not be
-the source of truth for current support.
+The optional SQL and CLI dependencies have their own resolver constraints, but they are
+not part of the normal base-wheel Spark notebook installation.
 
-See the official
-[Databricks Runtime compatibility table](https://docs.databricks.com/aws/en/release-notes/runtime)
-and
-[runtime support lifecycle](https://docs.databricks.com/aws/en/release-notes/runtime/databricks-runtime-ver).
+### 2. New Databricks and Delta features should be handled feature by feature
 
-### 2. Compatibility has several independent platform axes
+A user who needs a feature introduced by a newer DBR is responsible for selecting a
+runtime that provides it. Delta Engine is responsible only for the features it chooses
+to expose or manage.
 
-A single `DBR x.y` result cannot represent every supported deployment:
+When Delta Engine adds such a feature:
 
-| Axis | Relevant states |
-| --- | --- |
-| Backend | Spark session, SQL warehouse connection |
-| Spark compute | Classic numbered runtime, serverless Spark |
-| Warehouse release channel | Current, Preview |
-| Runtime lifecycle | LTS, GA, Beta |
-| Runtime identity | Version family, Databricks build hashes, test date |
-| Workspace | Cloud, region, Unity Catalog configuration |
-| Compute policy | Standard or dedicated access mode, Photon where relevant |
-| Client environment | Python version, SQL connector version, serverless environment |
-| Table state | Delta protocol and enabled table features |
+1. model the feature and its safety implications;
+2. document its minimum DBR or protocol requirement beside the feature;
+3. add compiler, planning, and failure tests;
+4. keep the package-wide DBR floor unchanged unless every baseline operation now needs
+   the newer API;
+5. preserve the original structured Databricks error when the user's environment
+   cannot execute it.
 
-Do not build the full Cartesian product. Pick representative supported combinations,
-record the exact environment, and use feature-level tests for differences. However,
-documentation must say which axes were actually tested.
+The existing approach described in
+[runtime features](../reference-limitations.md#runtime-features) is reasonable:
+Databricks normally enforces its feature requirements. A targeted preflight is justified
+only when waiting for execution creates a poor or unsafe result, especially when a
+multi-statement plan could be partially applied.
 
-Serverless Spark needs a separate contract. Databricks automatically upgrades its server
-runtime, while the Python/Spark Connect client environment has its own version. A classic
-DBR result therefore does not establish serverless support. See
-[serverless compute](https://docs.databricks.com/aws/en/compute/serverless) and
-[serverless environment versions](https://docs.databricks.com/aws/en/release-notes/serverless/environment-version).
+A newly announced platform feature needs no Delta Engine work when the package neither
+models nor changes it.
 
-SQL warehouses likewise expose Current and Preview channels. Preview is valuable early
-warning but should not be a production support promise. See
-[SQL warehouse release channels](https://docs.databricks.com/aws/en/compute/sql-warehouse/create).
+### 3. A Spark-by-Delta dependency matrix would not represent the real risk
 
-### 3. Dedicated (`SINGLE_USER`) access mode currently fails
+Databricks owns and tests the Spark and Delta versions installed together in a runtime.
+Installing another `pyspark` or `delta-spark` version into a notebook would create the
+very mismatch the package should avoid.
 
-A user-observed Spark deployment has established that Delta Engine does not currently
-work when compute uses the `data_security_mode` value `SINGLE_USER`. Databricks now
-calls this Dedicated access mode; `SINGLE_USER` remains the API and system-table value.
-See the
+Delta Engine's production Spark dependency is limited to stable shell types and
+`spark.sql()`. It does not import or call the production `delta-spark` API. The
+development dependencies on PySpark and Delta 4.x are therefore test tooling, not a
+statement that a notebook must contain those versions.
+
+Do not publish:
+
+- a Spark-by-Delta compatibility table;
+- a `spark` extra that installs either platform package;
+- one Delta Engine wheel or release line per DBR;
+- separate minimum and maximum dependency matrices for the notebook backend.
+
+One real-runtime smoke test is more relevant than several local combinations because the
+metadata SQL itself is Databricks-specific.
+
+### 4. SQL and metadata evolution are the important forward-compatibility risks
+
+Basic PySpark calls are unlikely to be the source of a future break. The more credible
+risks are:
+
+- a change to `DESCRIBE TABLE EXTENDED ... AS JSON`;
+- a change to `information_schema` data or permissions;
+- a structured exception changing shape;
+- a known type gaining semantics outside Delta Engine's model;
+- a DDL statement changing behaviour.
+
+The reader is directionally safe: malformed and unknown data types fail the read, and
+unknown relation kinds are rejected. Irrelevant additive top-level JSON fields can be
+ignored without coupling the parser to every platform release.
+
+Known semantic gaps still need explicit decisions:
+
+- string collation is ignored;
+- `CHAR(n)` and `VARCHAR(n)` are normalized to unbounded `String`;
+- nested struct-field nullability is available in metadata but absent from the domain.
+
+For new metadata, use a simple rule:
+
+1. model and compare it when Delta Engine owns it;
+2. ignore it only when Delta Engine demonstrably preserves it and it is outside the
+   package's ownership;
+3. otherwise fail the read rather than incorrectly reporting convergence.
+
+This parser policy and a live smoke test are more valuable than a general runtime
+capability registry.
+
+### 5. Dedicated (`SINGLE_USER`) is a concrete defect to investigate
+
+A user-observed Spark deployment fails when compute uses the `data_security_mode` value
+`SINGLE_USER`. Databricks now calls this Dedicated access mode; `SINGLE_USER` remains the
+API and system-table value. See the
 [Dedicated compute overview](https://docs.databricks.com/aws/en/compute/dedicated-overview)
 and
 [access-mode value reference](https://docs.databricks.com/aws/en/admin/system-tables/compute#access-mode-reference).
 
-The root cause, first failing operation, runtime/build range, and other environment axes
-have not yet been isolated. Do not generalize the observation into a Databricks platform
-explanation without that evidence. Until the investigation is complete:
-
-- state that Dedicated (`SINGLE_USER`) compute is unsupported;
-- scope every classic-runtime result to its tested access mode;
-- run the initial blocking runtime matrix on Standard access mode;
-- do not treat a Standard result as evidence that the Dedicated failure is fixed;
-- do not treat this failure as evidence that Standard mode is supported before its own
-  matrix passes.
-
-The investigation should capture:
-
-1. the exact Delta Engine artifact, `current_version()` result, Spark/Python versions,
-   cloud, Photon setting, single-node setting, Unity Catalog context, and executing
-   principal;
-2. the first failing boundary: import, Spark-engine construction, `current_version()`,
-   `DESCRIBE TABLE EXTENDED ... AS JSON`, `information_schema`, session configuration,
-   or DDL execution;
-3. the complete structured Databricks condition, message, and traceback;
-4. the same minimal operation on Standard mode with the runtime, identity, and table
-   held constant;
-5. a sanitized reproduction and live regression before changing the support status.
-
-The `spark.sql.variable.substitute` guard, production JSON reader, information-schema
-queries, Unity Catalog identity, and exception translation are useful isolation
-boundaries, not assumed causes.
-
-### 4. A runtime family is not a reproducible environment
-
-Databricks can update a runtime line without changing the headline DBR version. DBR 19's
-unified release model makes this especially visible: clusters receive continuing updates
-when restarted. A report saying only "DBR 19 passed" loses the identity needed to
-reproduce a later failure.
-
-See the [DBR 19 release notes](https://docs.databricks.com/aws/en/release-notes/runtime/19).
-
-Every live result should record:
-
-- Delta Engine version and artifact digest;
-- backend kind;
-- `dbr_version` or `dbsql_version`;
-- `u_build_hash` and `r_build_hash`;
-- Spark and Python versions;
-- serverless environment version, when applicable;
-- warehouse channel/type or compute access mode, where discoverable;
-- cloud and test timestamp;
-- required capability results and skips.
-
-Databricks exposes runtime and build identity through
-[`current_version()`](https://docs.databricks.com/aws/en/sql/language-manual/functions/current_version).
-Do not record credentials, workspace hostnames, catalog contents, or other secrets in
-public artifacts.
-
-### 5. Runtime and capability failures arrive too late
-
-The Spark factory currently diagnoses only a missing PySpark import. The runtime and
-Delta protocol are not inspected before a read or write. Unsupported operations therefore
-surface as adapter read or execution errors, and a capability failure in a
-multi-statement plan can occur after earlier DDL has succeeded.
-
-Add one adapter-owned platform profile, created lazily at backend construction or first
-operation rather than package import. It should support:
-
-- a typed baseline incompatibility error below the technical floor;
-- known-incompatible rules for reproduced platform defects;
-- an informational newer/unknown state rather than a hard maximum;
-- feature-level capability decisions where late failure risks partial application;
-- environment provenance in `SyncReport` or an associated diagnostic result.
-
-Capabilities should be tri-state: supported, unsupported, or unknown. Unknown must not
-be silently treated as unsupported, and a permission failure must not be misclassified
-as a platform capability failure.
-
-Keep platform capabilities separate from table capabilities. For example, a runtime may
-understand `VARIANT` while an existing table still requires a permanent protocol feature
-upgrade. Runtime version alone cannot answer both questions.
-
-Avoid a large speculative version table. Preflight only:
-
-1. the baseline needed to read and operate safely;
-2. reliable feature requirements;
-3. requirements whose late failure could leave a partially applied sync.
-
-### 6. Metadata evolution can create silent semantic loss
-
-The JSON reader is directionally safe: malformed and unknown data types fail the whole
-read, and unknown relation kinds are rejected. Additive, irrelevant top-level JSON fields
-can be tolerated without coupling the parser to every platform release.
-
-The weak point is a known type acquiring semantics outside the domain model:
-
-- string collation is ignored;
-- `CHAR(n)` and `VARCHAR(n)` are normalized to unbounded `String`;
-- nested struct-field nullability is present in metadata but absent from the domain;
-- future governance or generation metadata may affect whether an operation is safe even
-  when Delta Engine does not manage that feature.
-
-The current string parser and its tests explicitly assert lossy collation and length
-handling in
-[`sql/types.py`](../../src/delta_engine/adapters/databricks/sql/types.py) and
-[`test_types.py`](../../tests/adapters/databricks/sql/test_types.py).
-
-The structured response evolves over time; Databricks documents fields introduced in
-later versions in
-[`DESCRIBE TABLE`](https://docs.databricks.com/aws/en/sql/language-manual/sql-ref-syntax-aux-describe-table).
-For every semantic addition, choose one explicit policy:
-
-1. model and compare it;
-2. prove it is outside Delta Engine's ownership and operations preserve it;
-3. fail the read with an actionable unsupported-state error.
-
-Do not silently report convergence after discarding state that can change the meaning or
-safety of the declared table.
-
-Capture sanitized real `AS JSON` documents from each matrix runtime as parser contract
-fixtures. These complement live tests by making metadata-shape changes reviewable and
-reproducible without credentials.
-
-### 7. Compatibility jobs must test the consumer artifact
-
-The current live workflow installs the repository's locked development environment. That
-does not prove the exact wheel a user installs works on the platform.
-
-Two artifacts answer different questions:
-
-- **latest published wheel:** does a new or rolling Databricks environment remain safe
-  for existing users?
-- **candidate wheel built from the current commit:** will the next Delta Engine release
-  preserve the supported matrix?
-
-The scheduled new-runtime canary must test the published wheel first. Pull-request or
-release validation should test the candidate wheel. Neither job should accidentally
-import the checkout instead of the installed artifact.
-
-Baseline compatibility tests must not skip. Optional feature tests may report an explicit
-unsupported capability, but the summary must preserve and count every skip so a green
-job cannot silently lose coverage.
-
-### 8. Current local Spark coverage cannot represent the runtime range
-
-The locked development environment exercises one OSS Spark/Delta pair and uses an
-alternate metadata reader. It remains valuable for fast lifecycle regression tests but
-cannot substitute for Databricks Runtime coverage.
-
-In particular, the development requirements begin at PySpark and Delta 4.x, while the
-oldest candidate LTS uses Spark 3.5 and Delta 3.x. The production PySpark surface is
-small, which lowers the compatibility risk; it does not eliminate the need to execute
-that surface on the oldest supported runtime.
-
-The Spark SQL runner's temporary change to `spark.sql.variable.substitute` is one
-specific hotspot to include in classic and serverless tests. Spark Connect or restricted
-compute may expose different session-configuration behaviour. PySpark exception
-conditions and information-schema result shapes are other adapter boundaries that need
-real-runtime coverage.
-
-## What this package should guarantee
-
-A declarative schema-management package should:
-
-1. install without replacing platform-managed Spark or Delta dependencies;
-2. observe every piece of state it claims to manage faithfully, or refuse the read;
-3. tolerate irrelevant additive platform metadata without guessing new semantics;
-4. produce deterministic, inspectable plans before making changes;
-5. identify baseline and high-risk feature incompatibilities before mutation;
-6. preserve structured platform errors and enough environment provenance to reproduce
-   failures;
-7. state support as dated test evidence rather than a broad version assumption;
-8. continuously test the released consumer artifact against supported and upcoming
-   environments.
-
-Delta Engine already has strong foundations for installation, deterministic planning,
-and explicit failure values. The assurance matrix, environment diagnostics, capability
-boundary, and semantic metadata policy are the material gaps.
-
-## Recommended support contract
-
-Use four externally visible states:
-
-| State | Meaning | Behaviour |
-| --- | --- | --- |
-| Technical minimum | Earliest platform with the baseline metadata API | Fail clearly below it |
-| Tested and supported | Live matrix passed for the released artifact | Normal support |
-| Newer, untested | No known incompatibility and no passing evidence yet | Allow; expose the unverified profile |
-| Known incompatible | A concrete failure is reproduced | Fail early or publish a constrained version recommendation |
-
-Never encode the newest tested runtime as a hard upper bound. Doing so would convert each
-compatible Databricks release into an unnecessary outage. There should be no one-to-one
-mapping between Delta Engine and DBR version numbers.
-
-### Initial assurance matrix
-
-The following is a proposed test matrix, not a current support claim:
-
-| Surface | Blocking coverage after implementation | Non-blocking early warning |
-| --- | --- | --- |
-| Classic Spark — Standard | DBR 16.4 LTS, 17.3 LTS, 18 LTS, and 19 GA | Newest Beta on Standard |
-| Classic Spark — Dedicated (`SINGLE_USER`) | No support claim until the observed failure is reproduced, understood, and fixed | Retest the failing environment and newest GA |
-| SQL warehouse | Current channel | Preview channel |
-| Serverless Spark | Latest environment plus oldest maintained Python-3.12 environment | Newly released environment |
-| Python client | 3.12 and advertised 3.13 for pure-Python/SQL surfaces | Next Python prerelease when useful |
-| SQL connector | Declared minimum and current supported 4.x | Next major during compatibility review |
-
-DBR 16.2 remains the technical floor. DBR 16.2 and 16.3 may be technically eligible but
-are not proposed maintained environments. Every runtime below 16.2, including DBR 15.4,
-is explicitly unsupported because it does not provide the metadata command required by
-the production reader.
-
-Testing every currently supported LTS at or above the floor is initially affordable
-because the runtime suite should be thin. If that becomes materially expensive, choose
-and publish a narrower window such as current plus previous LTS; do not silently stop
-testing an older claimed runtime.
-
-Run the initial classic matrix on Standard access mode and label the cloud and exact
-mode precisely. Dedicated (`SINGLE_USER`) remains unsupported until its observed failure
-is reproduced and resolved. Other clouds or modes may be expected to work; they are not
-tested until a job records them.
-
-## Thin Spark-runtime smoke suite
-
-Keep the full behavioural suite on the SQL warehouse and make the numbered-runtime
-matrix deliberately small. Each job should:
-
-1. provision an isolated Unity Catalog namespace on an exact runtime identifier and
-   explicit access mode;
-2. install an exact base wheel without installing `pyspark` or `delta-spark`;
-3. restart Python where the installation mechanism requires it;
-4. record the sanitized platform profile before testing;
-5. import public pure-Python surfaces and construct the production Spark engine;
-6. create an isolated Delta table through the engine;
-7. read it through the production `AS JSON` reader;
-8. prove a second sync is a no-op;
-9. dry-run and apply one representative safe change;
-10. exercise tags, properties, constraints, and required table-feature enablement in
-    focused cases;
-11. verify missing-table and execution-error normalization;
-12. round-trip text containing `${...}` through the Spark SQL runner;
-13. drop all isolated objects in guaranteed cleanup;
-14. publish the profile, pass/fail/skip counts, timings, and artifact identity.
-
-Use required baseline tests for the blocking support decision. Feature cases may be
-separated so a new optional feature can have a higher runtime floor without raising the
-whole package baseline.
-
-## Procedure when Databricks releases a runtime
-
-1. **Discovery:** compare the workspace's available runtime identifiers with the
-   maintained matrix and alert when a new Beta, GA, LTS, serverless environment, or
-   warehouse channel state appears.
-2. **Beta/Preview:** run the latest published wheel as a non-blocking canary. Record
-   failures and metadata changes without breaking supported releases.
-3. **GA:** test the already-published wheel first. This answers whether current users can
-   move to the new runtime without upgrading Delta Engine.
-4. **Passing GA:** add dated evidence to the matrix. Do not release a matching Delta
-   Engine version merely to change a compatibility label.
-5. **Failing GA:** mark it known-incompatible, preserve the profile and sanitized
-   metadata, isolate the adapter boundary, add a regression fixture, and release the
-   smallest compatibility patch when code must change.
-6. **LTS promotion:** make the runtime blocking once it passes and enters the maintained
-   support window.
-7. **Retirement:** announce removal at least one Delta Engine release ahead, identify the
-   final compatible package line, and state whether that line receives critical fixes.
-8. **Rolling verification:** rerun supported environments weekly because service and
-   runtime builds can change without a new headline version.
-
-Optional functionality available only on a new runtime should use feature-level
-capability validation. It should not raise the package-wide floor unless the production
-reader or every safe baseline operation genuinely requires the new API.
-
-Every runtime result remains scoped to its access mode. A passing Standard job must not
-silently clear or hide the Dedicated (`SINGLE_USER`) limitation.
-
-## Implementation backlog
-
-### P0 — establish honest support evidence
-
-- [ ] Make user-facing documentation call 16.2 the technical Spark floor rather than a
-      blanket tested-support claim.
-- [ ] Publish Dedicated (`SINGLE_USER`) as a current unsupported access mode while the
-      observed failure remains unexplained.
-- [ ] Reproduce the Dedicated failure with a sanitized environment profile, identify the
-      first failing boundary, compare the same operation on Standard, and retain the
-      failure as a regression test.
-- [ ] Add exact-wheel, production-reader Spark smoke jobs for DBR 16.4 LTS, 17.3 LTS,
-      18 LTS, and 19 GA on explicit Standard access-mode compute.
-- [ ] Add the newest Beta as a non-blocking early-warning job.
-- [ ] Test the latest published wheel when assessing a new runtime and the candidate
-      wheel before a Delta Engine release.
-- [ ] Publish a generated matrix with artifact version, runtime/build identity, backend,
-      environment scope, last-tested date, and result.
-- [ ] Make baseline skips fail and preserve all optional-feature skips in the published
-      summary.
-
-### P1 — diagnose and contain compatibility failures
-
-- [ ] Add one adapter-private platform profile and a public diagnostic/report projection
-      without making package import perform I/O.
-- [ ] Add a typed baseline incompatibility error and known-incompatible rules; allow
-      newer unknown environments.
-- [ ] Introduce tri-state feature capabilities only where reliable preflight prevents
-      confusing or partially applied execution.
-- [ ] Keep runtime, table-protocol, permission, and declaration-policy decisions
-      separate.
-- [ ] Capture sanitized production `AS JSON` fixtures from every tested runtime.
-- [ ] Model, preserve, or reject non-default collation, bounded strings, and nested
-      struct nullability instead of silently erasing semantics.
-- [ ] Include stable Databricks conditions and the sanitized platform profile in failure
-      diagnostics where the backend exposes them.
-
-### P2 — broaden explicitly supported surfaces
-
-- [ ] Decide whether serverless Spark is in scope; if so, test the oldest maintained and
-      latest environments separately from classic compute.
-- [ ] Exercise SQL warehouse Current as blocking and Preview as non-blocking.
-- [ ] Test advertised Python 3.13 support for pure-Python and SQL surfaces.
-- [ ] Exercise the declared minimum and current supported SQL connector releases.
-- [ ] Record the tested cloud and access mode, then add additional environments only when
-      product demand justifies their cost.
-- [ ] Define the supported-LTS window and maintenance period for a retired runtime's
-      final Delta Engine release line.
+This should not motivate a general access-mode framework before the failure is
+understood. The focused investigation is:
+
+1. install the same Delta Engine wheel on Standard and Dedicated compute using the same
+   DBR and equivalent Unity Catalog permissions;
+2. locate the first differing operation: import, engine construction, metadata SQL,
+   information-schema query, session configuration, or DDL;
+3. retain the complete structured Databricks condition and traceback;
+4. fix the specific boundary or document the narrow platform limitation;
+5. add the minimal reproduction as a live regression before changing the support
+   statement.
+
+Until then, document Dedicated (`SINGLE_USER`) as unsupported. A Standard result neither
+explains nor clears this failure.
+
+### 6. The missing assurance is a thin exact-wheel notebook smoke test
+
+The local Spark suite remains useful, but its alternate reader cannot prove the
+production notebook path. The SQL warehouse live suite also cannot prove that
+`build_spark_engine()` works.
+
+The missing test should install the same base wheel a notebook user receives. A minimal
+job should:
+
+1. install one exact candidate or published wheel without installing PySpark or Delta;
+2. restart Python when required by the notebook installation mechanism;
+3. import the public API and build the production Spark engine;
+4. create a disposable Unity Catalog Delta table through the engine;
+5. read it through the production JSON metadata reader;
+6. prove a second sync is a no-op;
+7. plan and apply one representative safe alteration;
+8. verify one representative failure retains an actionable Databricks condition;
+9. drop the disposable objects in cleanup.
+
+Record only the information needed to reproduce a failure: Delta Engine version and
+artifact digest, DBR identifier, Python and Spark versions, access mode, test date, and
+the build values returned by `current_version()` when readily available. Do not build a
+public environment-profile subsystem merely to collect CI metadata.
+
+## Recommended support and verification policy
+
+### User-facing contract
+
+- Require Python 3.12 or later through package metadata.
+- Require DBR 16.2 or later for the Spark backend because the production reader needs
+  the JSON metadata command.
+- Require Unity Catalog.
+- Use Databricks-supplied PySpark and Delta packages.
+- Place no maximum on Python or DBR versions without a reproduced incompatibility.
+- Document newer requirements beside individual optional features.
+- List live-tested environments as evidence, not as a hard runtime allowlist.
+- List concrete known incompatibilities separately.
+
+Newer DBRs should be expected to work because the integration surface is small. They
+remain allowed before they are added to the tested list.
+
+Classic compute, serverless Spark, and SQL warehouses are different execution surfaces.
+Do not imply one from another, but add coverage only when the project intends to claim
+that surface. There is no need to build the full Cartesian product of cloud, runtime,
+access mode, Photon setting, and table feature.
+
+### Minimal live matrix
+
+The following is deliberately representative rather than exhaustive:
+
+| Notebook environment | Purpose |
+| --- | --- |
+| Oldest maintained LTS on Standard | Protect the backward compatibility boundary |
+| Current LTS on Standard | Cover the common current notebook environment |
+| Current LTS on Dedicated | Cover the other claimed access mode after the known failure is fixed |
+| Newest DBR on Standard, optional and non-blocking | Give early warning of an upcoming regression |
+
+If multiple active LTS releases become important to users, add them because demand
+justifies the cost, not because every possible runtime combination must exist in a
+framework.
+
+Run the candidate wheel before a Delta Engine release. Periodically run the latest
+published wheel to detect a Databricks service or runtime-build change affecting
+existing users. Baseline smoke steps must not silently skip.
+
+### When a new DBR is released
+
+1. Do not change package metadata or add a maximum runtime.
+2. Run the published wheel through the notebook smoke test.
+3. If it passes, record the dated result. Do not release Delta Engine solely to announce
+   compatibility.
+4. If it fails, reproduce the narrow boundary, document the concrete incompatibility,
+   and add a regression.
+5. Release a compatibility fix only when Delta Engine code actually needs to change.
+
+No automatic runtime discovery service is required initially. A scheduled or manually
+triggered canary is enough for the expected release rate and risk.
+
+### When a new Python version appears in DBR
+
+1. Leave the open-ended `>=3.12` requirement in place.
+2. Add the interpreter to ordinary Python CI.
+3. Run the real notebook smoke test on the adopting DBR.
+4. Add a classifier after it is tested, or simply retain the generic Python 3
+   classifier.
+5. Add an upper bound only for a reproduced break that cannot promptly be fixed.
+
+### When a new Delta or Databricks feature appears
+
+1. Do nothing until Delta Engine intentionally supports or manages it.
+2. When support is added, document the feature's own runtime/protocol floor.
+3. Let the user select an appropriate runtime.
+4. Prefer the original Databricks error unless a targeted early validation materially
+   improves safety or clarity.
+5. Do not raise the global DBR floor for optional functionality.
+
+## Focused backlog
+
+### P0 — establish the missing evidence
+
+- [ ] Test Python 3.13 in CI or remove its support classifier until tested.
+- [ ] Reproduce the Dedicated (`SINGLE_USER`) failure against Standard on the same DBR,
+      identify the first differing operation, and retain a live regression.
+- [ ] Add the exact-wheel production Spark smoke on the oldest maintained and current
+      LTS runtimes using Standard access mode.
+- [ ] Add Dedicated coverage on the current LTS after the known failure is fixed.
+- [ ] Report the exact artifact and minimal sanitized runtime identity in smoke output.
+- [ ] Keep user-facing language clear that DBR 16.2 is a technical floor, while the
+      tested list is evidence and not an allowlist.
+
+### P1 — strengthen the real compatibility boundaries
+
+- [ ] Decide whether to model, preserve, or reject collation, bounded strings, and
+      nested struct nullability instead of silently erasing their semantics.
+- [ ] Capture sanitized production JSON metadata fixtures when a live runtime exposes a
+      meaningful new shape or reproduces a parser defect.
+- [ ] Add a non-blocking newest-DBR canary if its operating cost proves worthwhile.
+- [ ] Add serverless Spark or additional access-mode/runtime combinations only when the
+      project intends to support them.
+- [ ] Add a targeted feature preflight only when a demonstrated execution-time failure
+      is confusing or risks partial application.
 
 ## Decisions to preserve
 
-- Do not publish or install PySpark or `delta-spark` on Databricks compute; use the
-  runtime's compatible pair.
-- Do not create one wheel, extra, or Delta Engine version line per DBR release.
-- Do not add a hard maximum DBR version.
-- Do not infer production-reader support from the local OSS Spark suite.
-- Do not infer Spark-runtime or serverless support from a SQL warehouse result.
-- Do not infer support for one compute access mode from a result on another.
-- Do not scatter runtime comparisons throughout the domain or application layers; keep
-  platform policy at the Databricks adapter boundary.
-- Do not create a speculative gate for every feature. Prefer live evidence, stable
-  capability checks, and clear execution errors where preflight would be unreliable.
+- Do not publish or install PySpark or `delta-spark` on Databricks compute.
+- Do not create a Spark-by-Delta compatibility matrix.
+- Do not create a runtime allowlist or hard maximum.
+- Do not create one wheel or Delta Engine release line per DBR.
+- Do not build a general platform profile, tri-state capability registry, or public
+  environment diagnostic without a demonstrated need.
+- Do not infer production Spark support from the local alternate reader or SQL
+  warehouse suite.
+- Do not infer Dedicated support from a Standard-mode result.
+- Do not raise the package-wide runtime floor for an optional feature.
+- Do preserve unknown platform state or fail closed when ignoring it could make a sync
+  unsafe.
