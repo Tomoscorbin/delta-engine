@@ -1004,6 +1004,58 @@ def test_referenced_spelling_of_a_parent_created_this_sync_is_the_declared_one()
     assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
 
 
+def test_self_referencing_foreign_key_adopts_its_own_catalog_spelling():
+    # Given a self-referencing key declared lowercase against camelCase catalog columns
+    employees = DeltaTable(
+        "dev",
+        "silver",
+        "employees",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("managerid", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[ForeignKey(columns={"managerid": "id"}, references=Self)],
+    ).to_desired_table()
+    observed = _observed("dev.silver.employees", ("Id", "ManagerId"))
+
+    # When resolved
+    resolutions = resolve((_present(employees, observed),))
+
+    # Then both sides wear the table's own catalog spelling
+    employees_resolution = _successful_resolution(resolutions, "dev.silver.employees")
+    (action,) = employees_resolution.actions
+    assert isinstance(action, SetForeignKey)
+    assert tuple(str(column) for column in action.constraint.local_columns) == ("ManagerId",)
+    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
+
+
+def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
+    # Given a parent renaming its key column — the catalog still spells the old
+    # name — and a child referencing the declared new name
+    parent = _referenced_table(
+        "dev.silver.customers", primary_key_columns=("orderNumber",)
+    ).to_desired_table()
+    child = _table_with_fk(
+        "dev.silver.orders",
+        "dev.silver.customers",
+        referenced_primary_key_columns=("orderNumber",),
+    )
+    parent_observed = _observed("dev.silver.customers", ("OrderId",))
+    child_observed = _observed("dev.silver.orders", ("id", "ref_id"))
+
+    # When resolved
+    resolutions = resolve((_present(parent, parent_observed), _present(child, child_observed)))
+
+    # Then the reference keeps the declared post-rename name, not the observed old one
+    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
+    (action,) = child_resolution.actions
+    assert isinstance(action, SetForeignKey)
+    assert tuple(str(column) for column in action.constraint.referenced_columns) == (
+        "orderNumber",
+    )
+
+
 def test_unreadable_table_contributes_edges_but_no_actions():
     # Given a child declaring an FK whose own catalog state could not be read
     parent = _referenced_table("dev.silver.customers").to_desired_table()
