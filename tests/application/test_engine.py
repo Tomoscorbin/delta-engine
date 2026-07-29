@@ -794,6 +794,26 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     )
 
 
+def test_structural_verdicts_are_recorded_even_when_every_read_fails():
+    # Given orders references a table that is not registered, and its read errors
+    reader = _RecordingReader(
+        {
+            "cat.sch.orders": ReadError("IOError", "cannot read"),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.ghost"), dry_run=True)
+
+    # Then the declaration was judged without consulting the world: the
+    # structural verdict and the read failure both stand on the run
+    [orders] = list(report)
+    assert orders.resolution.structural_failures != ()
+    assert isinstance(orders.read, ReadFailure)
+
+
 def test_read_failure_in_upstream_blocks_fk_dependent():
     # Given a fails to read and b depends on a
     reader = _RecordingReader(

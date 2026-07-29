@@ -1,25 +1,30 @@
 """
 High-level orchestration of planning and execution.
 
-`Engine.sync` threads one private table run through six phases. Each run retains
-the canonical outcome of every completed phase; failures, status, and public
-report views are derived from those outcomes rather than copied into parallel
-fields. On a real run, if any table fails, `SyncFailedError` is raised with a
-formatted summary.
+`Engine.sync` threads one private table run through eight phases. Each run
+retains the canonical outcome of every completed phase; failures, status, and
+public report views are derived from those outcomes rather than copied into
+parallel fields. On a real run, if any table fails, `SyncFailedError` is raised
+with a formatted summary.
 
 The phases are:
-  1. Read     — fetch the current catalog state of every declared table
-  2. Resolve  — birth one run per table, FK-dependency-first, retaining its
-                structural verdict and planned foreign-key actions
-  3. Diff     — compute direct actions and non-action differences in place
-  4. Plan     — retain an accepted plan of the complete diff, or the
+  1. Lower    — lower the declaration set into domain tables, deduplicated
+  2. Resolve  — birth one run per table, FK-dependency-first, carrying its
+                dependency edges and structural verdicts
+  3. Read     — fetch the current catalog state of every declared table
+  4. Diff     — compute direct actions and non-action differences in place
+  5. Plan     — retain an accepted plan of the complete diff, or the
                 rejected planning outcome
-  5. Compile  — retain the exact backend statements for every accepted plan
-  6. Execute  — gate dependents of failed tables (dry and real runs), then
-                retain attempted statement results (real runs only)
+  6. Compile  — retain the exact backend statements for every accepted plan
+  7. Gate     — block dependents of failed tables (dry and real runs)
+  8. Execute  — retain attempted statement results (real runs only)
 
-Resolution is a pure structural judgment of the declarations and their read
-snapshots (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
+The declaration set is judged before the world is consulted: resolution reads
+only declarations, so a run is born knowing its position, its edges, and its
+structural verdicts, and no later phase has to narrow a union to reach them.
+
+Resolution is a pure structural judgment of the declarations against each
+other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
 by another table's failure is decided later, at the execution gate: walking
 the dependency-ordered runs, a run whose resolved dependency will not reach
 desired state this sync — a failed read, a rejected plan, a failed
@@ -123,16 +128,17 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the resolve phase with its read and resolution outcomes already
-    decided, it accretes its diff, planning outcome, compiled SQL, and
-    execution outcome as the phases proceed, then is frozen into a public
-    :class:`TableRunReport` once complete. Kept private to the engine so the
+    Born in the resolve phase, in dependency order, carrying its static facts:
+    the declaration, its dependency edges, and its structural verdicts. Its
+    read, diff, planning outcome, compiled SQL, and execution outcome accrete
+    as the worldly phases run, each written once, then the run is frozen into
+    a public :class:`TableRunReport`. Kept private to the engine so the
     published report stays immutable while the phases mutate in place.
     """
 
     desired: DesiredTable
-    read: ReadResult
     resolution: TableResolution
+    read: ReadResult | None = None
     diff: TableDiff | None = None
     planning: PlanningResult | None = None
     planned_sql_statements: tuple[str, ...] = ()
@@ -165,6 +171,8 @@ class _TableRun:
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
+        if self.read is None:
+            raise RuntimeError(f"Run was frozen before its read completed: {self.qualified_name}")
         return TableRunReport(
             desired=self.desired,
             read=self.read,
@@ -213,11 +221,11 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs read → resolve → diff → plan → compile → execute. Resolution
-        births one private run per table in dependency-first order, the middle
-        phases enrich the runs in place, the execution gate blocks dependents
-        of failed tables, and the completed outcomes are finally frozen into
-        ``TableRunReport`` values.
+        Runs lower → resolve → read → diff → plan → compile → gate → execute.
+        Resolution births one private run per table in dependency-first order
+        carrying its static facts, the worldly phases enrich the runs in
+        place, the gate blocks dependents of failed tables, and the completed
+        outcomes are finally frozen into ``TableRunReport`` values.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -251,8 +259,8 @@ class Engine:
         desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
-        snapshots = self._read(desired)
-        runs = self._resolve(snapshots)
+        runs = self._resolve(desired)
+        self._read(runs)
         self._diff(runs)
         self._plan(runs)
         self._compile(runs)
@@ -278,45 +286,40 @@ class Engine:
 
         return report
 
-    def _read(
-        self, tables: tuple[DesiredTable, ...]
-    ) -> tuple[tuple[DesiredTable, ReadResult], ...]:
-        """Fetch the current catalog state of every table, as (desired, read) pairs."""
-        snapshots: list[tuple[DesiredTable, ReadResult]] = []
-        for desired in tables:
+    def _read(self, runs: tuple[_TableRun, ...]) -> None:
+        """Fetch the current catalog state of every run's table."""
+        for run in runs:
             read: ReadResult
             try:
-                read = self.reader.fetch_state(desired.qualified_name)
+                read = self.reader.fetch_state(run.qualified_name)
             except ReadError as error:
                 read = ReadFailure(
                     exception_type=error.exception_type,
                     message=str(error),
                 )
 
-            snapshots.append((desired, read))
+            run.read = read
 
             match read:
                 case ReadFailure() as failure:
                     logger.error(
                         "Read failed for %s: %s - %s",
-                        desired.qualified_name,
+                        run.qualified_name,
                         failure.exception_type,
                         failure.message,
                     )
                 case TablePresent():
-                    logger.info("Table present: %s", desired.qualified_name)
+                    logger.info("Table present: %s", run.qualified_name)
                 case TableAbsent():
-                    logger.info("Table absent: %s", desired.qualified_name)
+                    logger.info("Table absent: %s", run.qualified_name)
                 case _ as unreachable:
                     assert_never(unreachable)
-
-        return tuple(snapshots)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
         """Diff each readable run; read-failed runs carry no diff."""
         for run in runs:
             match run.read:
-                case ReadFailure():
+                case ReadFailure() | None:
                     continue
                 case TablePresent(table=observed_table):
                     run.diff = diff_table(run.desired, observed_table)
@@ -370,27 +373,25 @@ class Engine:
                 run.qualified_name,
             )
 
-    def _resolve(
-        self, snapshots: tuple[tuple[DesiredTable, ReadResult], ...]
-    ) -> tuple[_TableRun, ...]:
+    def _resolve(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
         """
         Birth one run per table, dependency-first, with its resolution outcome.
 
         Resolution is structural: it judges the declarations against each
-        other, with no catalog state involved. Whether a table is *blocked*
-        by another's failure is decided later, by the gating walk in
+        other, before any catalog state is fetched. Whether a table is
+        *blocked* by another's failure is decided later, by the gating walk in
         ``_gate``. Every run carries a resolution from birth, so no later
         phase has to consider a half-resolved table.
         """
-        ordered_resolutions = resolve(tuple(desired for desired, _ in snapshots))
+        ordered_resolutions = resolve(tables)
 
-        snapshot_by_name = {desired.qualified_name: (desired, read) for desired, read in snapshots}
+        desired_by_name = {table.qualified_name: table for table in tables}
 
         runs: list[_TableRun] = []
 
         for resolution in ordered_resolutions:
-            desired, read = snapshot_by_name[resolution.qualified_name]
-            runs.append(_TableRun(desired=desired, read=read, resolution=resolution))
+            desired = desired_by_name[resolution.qualified_name]
+            runs.append(_TableRun(desired=desired, resolution=resolution))
 
             if resolution.structural_failures:
                 logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
