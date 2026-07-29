@@ -8,6 +8,10 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 
 
+def test_distribution_requires_supported_python_floor_without_an_upper_bound():
+    assert metadata("delta-engine")["Requires-Python"] == ">=3.12"
+
+
 def test_base_distribution_has_no_unconditional_runtime_dependencies():
     requirements = requires("delta-engine") or []
 
