@@ -82,7 +82,8 @@ users an exact, documented version combination they can keep running.
 - CI proves that a base-only installation imports the public declaration surface without
   development dependencies. The packaging tests also inspect installed metadata and the
   console-script target.
-- CI currently uses Python 3.12 only, although the project advertises Python 3.12 and 3.13.
+- CI currently uses Python 3.12 only. The proposed policy tests the minimum supported
+  and latest stable Python endpoints rather than every intermediate minor.
 - `uv.lock` makes development and release automation reproducible, but it does not
   constrain what downstream pip users resolve from the published lower bounds.
 
@@ -184,8 +185,9 @@ and CI exercises the exact minimum direct CLI dependency set from an installed w
 
 Do not add an upper Python bound merely because a future Python has not yet been tested.
 An upper bound would prevent installation on a new Databricks Runtime even when the pure
-Python package works. Add a Python upper bound only for a demonstrated incompatibility,
-and expand the CI matrix as supported versions appear.
+Python package works and can cause installers to choose an older distribution instead.
+Fix or narrowly document a demonstrated incompatibility rather than using an upper bound
+as the normal response.
 
 Published backend and CLI dependencies describe reviewed major lines rather than
 accepting every future major:
@@ -216,8 +218,10 @@ Dependency validation is deliberately not a Cartesian compatibility matrix:
   use the existing suite rather than a separate newest-version job;
 - there is no maximum-version job: the exclusive upper bounds are metadata review gates.
 
-Python 3.12 and 3.13 coverage and live Databricks Runtime coverage remain separate
-environment-compatibility concerns.
+Minimum/latest CPython coverage and live Databricks Runtime coverage remain separate
+environment-compatibility concerns. Intermediate Python minors need a dedicated job only
+when version-specific code, dependency resolution, or a reproduced defect creates a
+distinct path.
 
 ## Databricks Runtime compatibility
 
@@ -467,7 +471,9 @@ Strengthen the runtime guard by:
 
 ### Compatibility infrastructure
 
-- [ ] Test Python 3.12 and 3.13 in CI.
+- [x] Test the minimum supported and latest stable Python versions in CI (currently 3.12
+      and 3.14); add intermediate minors only for a distinct compatibility path.
+      Implemented in PR #294.
 - [ ] Refresh the dependency lock periodically and validate updates with the normal
       suite; do not add separate minimum, maximum, or newest-compatible matrices.
 - [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than

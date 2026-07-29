@@ -19,6 +19,10 @@ inspecting reports are pure Python. The Spark backend uses the PySpark and
 Delta libraries supplied by Databricks Runtime; the SQL warehouse backend
 needs no PySpark at all.
 
+The Spark backend does not currently work on Dedicated access-mode compute
+(`data_security_mode` value `SINGLE_USER`). See
+[runtime features](reference-limitations.md#runtime-features).
+
 ## Install
 
 ```bash

@@ -144,6 +144,10 @@ matrix. The recurring live suite exercises the SQL warehouse backend; treat
 other Databricks Runtime versions as requiring validation in your own
 environment until Spark-runtime smoke coverage is published.
 
+The Spark backend does not currently work on Dedicated access-mode compute
+(`data_security_mode` value `SINGLE_USER`, formerly called single-user access mode).
+Treat this mode as unsupported.
+
 ## Delta table features
 
 Declaring a type that needs a Delta table feature — `TimestampNtz` or
