@@ -46,6 +46,10 @@ uv build
     -> isolated wheel smoke test
 ```
 
+The pull-request artifact smoke runs once on the Python floor. The normal test matrix
+provides minimum/latest Python compatibility evidence, so repeating the same
+pure-Python wheel smoke in the build job would be redundant.
+
 Release:
 
 ```text
@@ -57,6 +61,10 @@ create version commit and tag locally
     -> isolated OIDC publishing job downloads and publishes them
     -> separate job creates the GitHub release
 ```
+
+For a new release, the consumer smoke also runs on the latest stable Python as a cheap
+final compatibility gate. This does not imply that the universal wheel needs a build
+matrix.
 
 The build job can write the release commit and tag but has no PyPI identity token. The
 publishing job has `id-token: write`, but it cannot modify the repository and does not

@@ -124,9 +124,13 @@ version-specific code, dependency resolution, or a reproduced defect creates a d
 path.
 
 Keep linting and type checking targeted at the minimum version so newer-only syntax and
-APIs cannot enter accidentally. Build one universal wheel and install that exact wheel
-on both Python endpoints. Spark compatibility remains a separate live DBR concern,
-using the Python and PySpark combination supplied by Databricks.
+APIs cannot enter accidentally. Build one universal wheel and smoke-test that exact
+artifact once in pull-request CI. The full suite already supplies the minimum/latest
+Python evidence, so repeating the same packaging smoke at both endpoints there would
+not prove a distinct property. Before publishing a new release, repeat the exact-wheel
+smoke at both endpoints as a cheap final compatibility gate. Spark compatibility remains
+a separate live DBR concern, using the Python and PySpark combination supplied by
+Databricks.
 
 The optional SQL and CLI dependencies have their own resolver constraints, but they are
 not part of the normal base-wheel Spark notebook installation.
@@ -366,9 +370,10 @@ triggered canary is enough for the expected release rate and risk.
 
 ### P0 — establish the missing evidence
 
-- [ ] Run core and exact-wheel consumer tests on the minimum supported and latest stable
-      Python versions (currently 3.12 and 3.14); keep intermediate 3.13 supported without
-      a dedicated job while it has no distinct compatibility path.
+- [ ] Run the core suite on the minimum supported and latest stable Python versions
+      (currently 3.12 and 3.14); keep intermediate 3.13 supported without a dedicated
+      job while it has no distinct compatibility path. Smoke-test the exact wheel once
+      in pull-request CI and at both endpoints before publishing a new release.
 - [ ] Reproduce the Dedicated (`SINGLE_USER`) failure against Standard on the same DBR,
       identify the first differing operation, and retain a live regression.
 - [ ] Add the exact-wheel production Spark smoke on the oldest maintained and current
