@@ -3,11 +3,11 @@ Unit tests for relationships.resolve().
 
 These tests exercise the public resolver API rather than the graph traversal
 implementation details. They cover dependency-first ordering, structural FK
-failure classification, cycle detection, self-reference handling, and the
-dependency edges each resolution retains. The resolver is pure declaration
-analysis — the world is consulted later, and blocking is inherited at
-enactment along the retained edges by the engine's gating walk, tested with
-the engine.
+failure classification, cycle detection, self-reference handling, the
+dependency edges each resolution retains, and the blocking those edges name
+for a given set of tables that will not converge. The resolver is pure
+declaration analysis — the world is consulted later, so how blocking
+propagates across a whole run is tested with the engine.
 """
 
 from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
@@ -972,3 +972,67 @@ def test_foreign_key_referenced_spelling_matching_exactly_is_sound():
     resolutions = resolve((parent, child))
 
     _sound_resolution(resolutions, "dev.silver.orders")
+
+
+def test_a_resolution_is_blocked_by_each_dependency_that_will_not_converge():
+    # Given orders depends on customers, and customers will not converge this sync
+    resolutions = resolve(
+        (
+            _table_with_fk("cat.sch.orders", "cat.sch.customers"),
+            _table("cat.sch.customers"),
+        )
+    )
+    orders = _sound_resolution(resolutions, "cat.sch.orders")
+
+    # When asked what blocks it
+    blocking = orders.blocked_by({_qualified_name("cat.sch.customers")})
+
+    # Then the blocked edge is named as a dependency-blocking failure
+    assert blocking == (
+        ForeignKeyFailure(
+            table=_qualified_name("cat.sch.orders"),
+            local_columns=("ref_id",),
+            references=_qualified_name("cat.sch.customers"),
+            reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        ),
+    )
+
+
+def test_a_resolution_is_blocked_only_by_the_tables_it_depends_on():
+    # Given orders depends on customers, alongside an unrelated table
+    resolutions = resolve(
+        (
+            _table_with_fk("cat.sch.orders", "cat.sch.customers"),
+            _table("cat.sch.customers"),
+            _table("cat.sch.unrelated"),
+        )
+    )
+    orders = _sound_resolution(resolutions, "cat.sch.orders")
+
+    # When tables it does not depend on will not converge
+    # Then nothing blocks it
+    assert orders.blocked_by({_qualified_name("cat.sch.unrelated")}) == ()
+    assert orders.blocked_by(set()) == ()
+
+
+def test_a_resolution_names_every_blocked_dependency_separately():
+    # Given shipments depends on both orders and customers, and both fail
+    resolutions = resolve(
+        (
+            _table_with_fks("cat.sch.shipments", "cat.sch.orders", "cat.sch.customers"),
+            _table("cat.sch.orders"),
+            _table("cat.sch.customers"),
+        )
+    )
+    shipments = _sound_resolution(resolutions, "cat.sch.shipments")
+
+    # When both dependencies will not converge
+    blocking = shipments.blocked_by(
+        {_qualified_name("cat.sch.orders"), _qualified_name("cat.sch.customers")}
+    )
+
+    # Then each blocked edge is reported on its own, naming its own columns
+    assert {(failure.references, failure.local_columns) for failure in blocking} == {
+        (_qualified_name("cat.sch.orders"), ("orders_id",)),
+        (_qualified_name("cat.sch.customers"), ("customers_id",)),
+    }

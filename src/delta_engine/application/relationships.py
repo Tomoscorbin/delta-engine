@@ -6,8 +6,8 @@ and returns one `TableResolution` per table in dependency-first order. It is
 pure declaration analysis: no catalog state is consulted, and no work is
 planned — differences are the differ's. Each resolution carries the table's
 dependency edges (the declared constraints themselves) and its structural
-foreign-key verdicts; blocking is inherited at enactment along those edges by
-the engine's gating walk.
+foreign-key verdicts, and states through `blocked_by` which of those edges
+block it once the caller knows which tables will not converge.
 
 For example, given these declared foreign keys (child ──► parent)::
 
@@ -24,9 +24,10 @@ For example, given these declared foreign keys (child ──► parent)::
     TableResolution(payments,    dependencies=(fk → invoices,))
     TableResolution(refunds,     failures=(UNRESOLVABLE_REFERENCE,))
 
-Healthy tables execute in that order; whether a table is *blocked* by another's
-failure is the engine's gating walk following the retained edges in that same
-order.
+Healthy tables execute in that order. Whether a table is *blocked* by another's
+failure depends on how the run goes, so the caller supplies the tables that
+will not converge and each resolution names its own blocked edges — folded
+over the tables in that same order, the block propagates along FK chains.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm) are hidden behind that interface.
@@ -67,6 +68,27 @@ class TableResolution:
     dependencies: tuple[ForeignKeyConstraint, ...]
     structural_failures: tuple[ForeignKeyFailure, ...]
 
+    def blocked_by(self, unconverged: AbstractSet[QualifiedName]) -> tuple[ForeignKeyFailure, ...]:
+        """
+        Return one failure per dependency edge that will not converge this sync.
+
+        Empty when no edge points into ``unconverged``, which is what a caller
+        walking tables in dependency order treats as "free to enact". Which
+        tables will not converge is a fact about the run, not about the
+        declarations, so it is supplied rather than resolved: the caller
+        accumulates it as reads, plans, and statements fail.
+        """
+        return tuple(
+            ForeignKeyFailure(
+                table=self.qualified_name,
+                local_columns=dependency.local_columns,
+                references=dependency.referenced_table,
+                reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+            )
+            for dependency in self.dependencies
+            if dependency.referenced_table in unconverged
+        )
+
 
 def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     """
@@ -76,7 +98,8 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     each managed foreign key structurally, and retains each table's
     dependency edges as the declared constraints themselves. No catalog
     state is consulted, and no work is planned — differences are the
-    differ's, and blocking is inherited at enactment along these edges.
+    differ's, and blocking is inherited at enactment along these edges via
+    :meth:`TableResolution.blocked_by`.
     """
     registered_names = {table.qualified_name for table in tables}
     dependencies_by_table = _build_dependencies(tables, registered_names)

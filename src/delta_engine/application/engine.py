@@ -40,7 +40,6 @@ is skipped by execution, so all tables are attempted and the report is always
 complete.
 """
 
-from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -54,8 +53,6 @@ from delta_engine.application.errors import (
 )
 from delta_engine.application.failures import (
     ExecutionFailure,
-    ForeignKeyFailure,
-    ForeignKeyFailureReason,
     ReadFailure,
 )
 from delta_engine.application.planning import (
@@ -181,22 +178,6 @@ class _TableRun:
             resolution=self.resolution,
             execution_outcome=self.execution,
         )
-
-
-def _blocking_failures(
-    run: _TableRun, failed: AbstractSet[QualifiedName]
-) -> tuple[ForeignKeyFailure, ...]:
-    """Return the failures blocking this run, given tables that will not converge."""
-    return tuple(
-        ForeignKeyFailure(
-            table=run.qualified_name,
-            local_columns=dependency.local_columns,
-            references=dependency.referenced_table,
-            reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
-        )
-        for dependency in run.resolution.dependencies
-        if dependency.referenced_table in failed
-    )
 
 
 class Engine:
@@ -416,7 +397,7 @@ class Engine:
             if run.has_failures:
                 continue
 
-            blocking_failures = _blocking_failures(run, failed)
+            blocking_failures = run.resolution.blocked_by(failed)
             if blocking_failures:
                 run.execution = ExecutionBlockedByDependency(blocking_failures)
                 failed.add(run.qualified_name)
@@ -445,7 +426,7 @@ class Engine:
             if run.has_failures:
                 continue
 
-            blocking_failures = _blocking_failures(run, failed_during_execution)
+            blocking_failures = run.resolution.blocked_by(failed_during_execution)
             if blocking_failures:
                 run.execution = ExecutionBlockedByDependency(blocking_failures)
                 failed_during_execution.add(run.qualified_name)
