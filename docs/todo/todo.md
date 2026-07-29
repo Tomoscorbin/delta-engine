@@ -1,7 +1,12 @@
 # Open questions and decisions
 
 - [x] Resolve the [PR #280 table-feature enablement design review](2026-07-24-table-feature-enablement-ousterhout-review.md): the domain differ derives desired requirements from the column tree, observed support comes from the existing AS JSON `delta.feature.*` property projection, feature identities are typed, the report contract includes `features`, and properties remain semantically separate. Credentialed live verification remains required before merge.
-- [ ] Address the prioritized stale, inaccurate, and missing documentation in the [2026-07-24 documentation accuracy and coverage review](2026-07-24-documentation-accuracy-review.md). Immediate corrections are the walkthrough's Databricks Runtime floor, `Map` key validation, the full liquid-clustering key-type restriction, and the unpinned CI installation example; broader follow-up is publishing tested-runtime evidence once live Spark coverage exists.
+- [x] Correct the stale and inaccurate documentation identified during the
+      2026-07-24 documentation cleanup. The walkthrough states the Databricks
+      Runtime floor, `Map` key validation and the full liquid-clustering
+      key-type restriction are documented, and the CI installation example is
+      pinned. Tested-runtime evidence remains tracked separately with the
+      distribution and runtime-confidence work below.
 - [ ] Complete the remaining distribution and runtime-confidence work recorded in the [2026-07-23 distribution/versioning/runtime review](2026-07-23-distribution-versioning-runtime-review.md). Artifact validation, dependency bounds, installation-path guidance, base-only Databricks guidance, actionable optional-dependency errors, and the [runtime compatibility policy](../explanation-runtime-compatibility.md) are implemented. Remaining runtime work is live Spark-backend smoke coverage and publishing the environments it actually tests as evidence; the existing weekly SQL warehouse suite does not exercise numbered cluster runtimes.
       The focused [2026-07-29 Databricks runtime compatibility audit](2026-07-29-databricks-runtime-compatibility-audit.md) records the evidence gaps, proposed minimum live coverage, serverless and warehouse-channel scope, runtime diagnostics, metadata-evolution policy, and prioritized assurance backlog.
 - [ ] Add Spark-backend support for Dedicated access-mode compute (`data_security_mode` value `SINGLE_USER`). It does not currently work and should be treated as unsupported. Identify the incompatible boundary, implement the narrow fix, and add a live regression before documenting support. See the [runtime compatibility audit](2026-07-29-databricks-runtime-compatibility-audit.md).

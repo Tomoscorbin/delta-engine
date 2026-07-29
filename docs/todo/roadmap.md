@@ -9,11 +9,11 @@ this document supersedes their prioritisation but not their detail.
 
 | #   | Item                                              | Tier | Effort | Tracking       |
 | --- | ------------------------------------------------- | ---- | ------ | -------------- |
-| 1   | Type widening                                     | 1    | M      | tracked        |
+| 1   | Type widening                                     | 1    | M      | shipped        |
 | 2   | Column renames (`renamed_from`)                   | 1    | M      | shipped        |
 | 3   | CI-grade dry runs: structured report, SQL preview | 1    | M      | shipped        |
 | 4   | Databricks SQL warehouse adapter (no PySpark)     | 1    | L      | shipped        |
-| 5   | Delta-format / view guard in the reader           | 2    | S      | not tracked    |
+| 5   | Delta-format / view guard in the reader           | 2    | S      | shipped        |
 | 6   | Identity columns                                  | 2    | M      | not tracked    |
 | 7   | Adoption tooling: declaration codegen + names     | 2    | M–L    | partly tracked |
 | 8   | CHECK constraints                                 | 2    | M      | not tracked    |
@@ -29,11 +29,12 @@ this document supersedes their prioritisation but not their detail.
 | 18  | Plan artifacts (approve-then-apply)               | 4    | L      | not tracked    |
 | 19  | Existing gated items (UNIQUE, Char/Varchar, ...)  | 4    | —      | tracked        |
 
-Sequencing note: impact order is not build order. Items 3 and 4 shipped as the
-read-only `delta-engine plan MODULE:ATTRIBUTE` workflow; the remaining items
-are future work. Item 2 shipped without the over-broad interim heuristic; items
-5 and 9 are afternoon-sized and can ship independently;
-items 17 and 18 remain deliberately gated on evidence from real users.
+Sequencing note: impact order is not build order. Items 1–5 are shipped; items
+3 and 4 shipped as the read-only `delta-engine plan MODULE:ATTRIBUTE`
+workflow, and item 2 shipped without the over-broad interim heuristic. Identity
+columns are the highest-impact unfinished item, while item 9 remains a smaller
+independent change. Items 17 and 18 remain deliberately gated on evidence from
+real users.
 
 ---
 
@@ -139,19 +140,15 @@ the Python API remains the write/apply mechanism.
 
 ### 5. Delta-format and view guard in the reader
 
-**Why.** `tableExists` answers true for views and non-Delta tables, and
-nothing downstream checks the format. A view limps to a confusing raw
-`ReadError` at `DESCRIBE DETAIL`. A Parquet/Iceberg table is worse:
-`DESCRIBE DETAIL` succeeds, the engine diffs it as Delta, and can plan
-`delta.*` properties, `CLUSTER BY`, and constraint DDL against it, failing (or
-partially succeeding) at execution with errors pointing nowhere near the
-cause.
+**Status.** Shipped 2026-07-16 through the shared AS JSON reader.
 
-**Shape (S).** The `DESCRIBE DETAIL` row is already fetched for every present
-table and carries `format`. Check it and return a typed "exists but is not a
-Delta table" read failure; catch the view case earlier via the catalog table
-type for a clean message. Same protective class as
-`ColumnMappingRequiredForDrop`, at the read boundary.
+`DESCRIBE TABLE EXTENDED ... AS JSON` supplies the relation type and provider.
+The reader admits managed tables, external tables, and streaming tables only
+when their provider is Delta. Views, materialized views, foreign tables,
+non-Delta providers, missing metadata, and unknown future relation kinds fail
+the read before the engine can diff or plan changes against them. Focused
+reader tests cover every admitted kind and representative rejected kinds and
+providers.
 
 ### 6. Identity columns
 
