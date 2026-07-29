@@ -28,12 +28,14 @@ from delta_engine.domain.plan.actions import (
     AlterColumnType,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -56,6 +58,7 @@ from delta_engine.domain.plan.unresolvable import (
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
+_PARENT_NAME = QualifiedName("dev", "silver", "other")
 
 
 def _desired(**overrides) -> DesiredTable:
@@ -70,11 +73,16 @@ def _observed(**overrides) -> ObservedTable:
     return ObservedTable(**merged)
 
 
-def _foreign_key(constraint_name: str = "test_id_fk") -> ForeignKeyConstraint:
+def _foreign_key(
+    constraint_name: str = "test_id_fk",
+    local_columns: tuple[str, ...] = ("id",),
+    referenced_columns: tuple[str, ...] = ("id",),
+    referenced_table: QualifiedName = _PARENT_NAME,
+) -> ForeignKeyConstraint:
     return ForeignKeyConstraint(
-        local_columns=("id",),
-        referenced_table=QualifiedName("dev", "silver", "other"),
-        referenced_columns=("id",),
+        local_columns=local_columns,
+        referenced_table=referenced_table,
+        referenced_columns=referenced_columns,
         constraint_name=constraint_name,
     )
 
@@ -692,17 +700,104 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
 # ---------- constraint changes
 
 
-def test_foreign_keys_are_not_the_differs_concern():
-    # Given declared and observed foreign keys that disagree
-    diff = diff_table(
-        _desired(foreign_keys=(_foreign_key("declared_fk"),)),
-        _observed(),
+def test_present_table_diffs_foreign_keys_by_signature():
+    # Given one FK declared-and-present, one declared-but-absent,
+    # and one observed-but-undeclared
+    shared = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    declared_only = _foreign_key("orders_billing_fk", local_columns=("billing_id",))
+    observed_only = _foreign_key("legacy_archive_fk", local_columns=("legacy_id",))
+    desired = _desired(
+        columns=(
+            DesiredColumn("customer_id", String()),
+            DesiredColumn("billing_id", String()),
+            DesiredColumn("legacy_id", String()),
+        ),
+        foreign_keys=(shared, declared_only),
+    )
+    observed = _observed(
+        columns=(
+            ObservedColumn("customer_id", String()),
+            ObservedColumn("billing_id", String()),
+            ObservedColumn("legacy_id", String()),
+        ),
+        foreign_keys=(shared, observed_only),
     )
 
-    # Then the differ states no FK action — relationships are planned by the
-    # resolver, the one module holding both endpoints
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == ()
+    # When the table is diffed
+    drift = diff_table(desired, observed)
+
+    # Then the absent declaration is set and the undeclared observation dropped
+    assert isinstance(drift, TableDrift)
+    set_actions = [a for a in drift.actions if isinstance(a, SetForeignKey)]
+    drop_actions = [a for a in drift.actions if isinstance(a, DropForeignKey)]
+    assert [a.constraint for a in set_actions] == [declared_only]
+    assert [a.constraint.constraint_name for a in drop_actions] == ["legacy_archive_fk"]
+
+
+def test_set_foreign_key_carries_the_declared_spelling():
+    # Given a declared FK whose catalog columns are spelled differently
+    declared = _foreign_key("orders_customer_fk", local_columns=("CustomerId",))
+    desired = _desired(
+        columns=(DesiredColumn("CustomerId", String()),),
+        foreign_keys=(declared,),
+    )
+    observed = _observed(columns=(ObservedColumn("customerid", String()),))
+
+    drift = diff_table(desired, observed)
+
+    # Then the action is a semantic value: declared spelling, untouched.
+    # The case drift itself is stated separately (ColumnCaseDrift) and
+    # rejected by ColumnSpellingMustMatchCatalog — stating both is the
+    # differ's job; judging is validation's.
+    (action,) = [a for a in drift.actions if isinstance(a, SetForeignKey)]
+    assert tuple(str(c) for c in action.constraint.local_columns) == ("CustomerId",)
+
+
+def test_missing_table_actions_include_every_declared_foreign_key():
+    # Given a missing table declaring an outbound FK and a self-referential FK
+    outbound = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    self_ref = _foreign_key(
+        "orders_parent_fk",
+        local_columns=("parent_order_id",),
+        referenced_columns=("id",),
+        referenced_table=_QUALIFIED_NAME,
+    )
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", String(), nullable=False),
+            DesiredColumn("customer_id", String()),
+            DesiredColumn("parent_order_id", String()),
+        ),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        foreign_keys=(outbound, self_ref),
+    )
+
+    diff = diff_table(desired, observed=None)
+
+    # Then creation is stated first and every declared FK follows
+    assert isinstance(diff, TableMissing)
+    assert isinstance(diff.actions[0], CreateTable)
+    fk_actions = [a for a in diff.actions if isinstance(a, SetForeignKey)]
+    assert {str(a.constraint.constraint_name) for a in fk_actions} == {
+        "orders_customer_fk",
+        "orders_parent_fk",
+    }
+
+
+def test_foreign_key_drift_is_stated_even_when_unmanaged():
+    # Given a declaration that does not manage foreign keys but declares one
+    declared = _foreign_key("orders_customer_fk", local_columns=("customer_id",))
+    desired = _desired(
+        columns=(DesiredColumn("customer_id", String()),),
+        foreign_keys=(declared,),
+        managed_aspects=ALL_ASPECTS - frozenset({TableAspect.FOREIGN_KEYS}),
+    )
+    observed = _observed(columns=(ObservedColumn("customer_id", String()),))
+
+    drift = diff_table(desired, observed)
+
+    # Then the difference is stated; rejecting it is the scope gate's job
+    assert any(isinstance(a, SetForeignKey) for a in drift.actions)
 
 
 def test_observed_only_primary_key_produces_removed_change():

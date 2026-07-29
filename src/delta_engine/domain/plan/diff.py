@@ -1,10 +1,11 @@
 """
 Compare desired and observed table state.
 
-The differ reports every single-table discrepancy as either an executable
-action or an unresolvable difference. Cross-table relationships (foreign
-keys) are planned by ``application/relationships.py``; validation, safety
-policy, execution ordering, and backend compilation live elsewhere.
+The differ reports every single-table discrepancy — foreign-key existence
+included — as either an executable action or an unresolvable difference.
+Cross-table judgment (dependency ordering, structural foreign-key verdicts)
+lives in ``application/relationships.py``; validation, safety policy,
+execution ordering, and backend compilation live elsewhere.
 """
 
 from collections.abc import Iterable, Mapping
@@ -33,12 +34,14 @@ from delta_engine.domain.plan.actions import (
     AlterColumnType,
     CreateTable,
     DropColumn,
+    DropForeignKey,
     DropPrimaryKey,
     EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
+    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -140,7 +143,10 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
     column_actions = _diff_columns(desired.columns, renames.columns)
     case_drift = _column_case_drift(desired, observed, renames)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
-    constraint_actions = _diff_primary_key(desired, observed)
+    constraint_actions = (
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed),
+    )
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
     return TableDrift(
@@ -198,8 +204,9 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
     Return every action needed to realize a missing table.
 
     CREATE TABLE establishes columns, comment, properties, layout, and the
-    primary key. Unity Catalog tags require follow-up actions; foreign keys
-    are planned by the relationship resolver.
+    primary key. Unity Catalog tags and foreign keys need follow-up actions;
+    ``SET_FOREIGN_KEY`` phases after ``CREATE_TABLE``, so a self-referential
+    key sequences correctly by action phasing alone.
     """
     table_tag_actions = tuple(
         SetTableTag(name=name, desired_value=value, observed_value=None)
@@ -219,6 +226,7 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
         CreateTable(desired),
         *table_tag_actions,
         *column_tag_actions,
+        *(SetForeignKey(constraint=foreign_key) for foreign_key in desired.foreign_keys),
     )
 
 
@@ -504,6 +512,32 @@ def _diff_primary_key(
         actions.append(DropPrimaryKey(primary_key=observed_key))
     if desired_key is not None:
         actions.append(SetPrimaryKey(primary_key=desired_key))
+    return tuple(actions)
+
+
+def _diff_foreign_keys(
+    desired: DesiredTable, observed: ObservedTable
+) -> tuple[SetForeignKey | DropForeignKey, ...]:
+    """
+    Return set/drop actions converging the table's foreign keys.
+
+    Constraints are matched by content signature (columns and referenced
+    table; names excluded), so a generated name and a catalog name still
+    match. A declared-but-absent constraint is set carrying the declaration
+    verbatim; an observed-but-undeclared one is dropped carrying the observed
+    constraint — drops go by name. Everything here reads the child's own
+    snapshot; whether the referenced table can hold up its end is the
+    relationship resolver's judgment, not a difference.
+    """
+    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
+    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
+    actions: list[SetForeignKey | DropForeignKey] = []
+    for signature, constraint in desired_by_signature.items():
+        if signature not in observed_by_signature:
+            actions.append(SetForeignKey(constraint=constraint))
+    for signature, constraint in observed_by_signature.items():
+        if signature not in desired_by_signature:
+            actions.append(DropForeignKey(constraint=constraint))
     return tuple(actions)
 
 

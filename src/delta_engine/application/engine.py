@@ -12,18 +12,11 @@ The phases are:
   2. Resolve  — birth one run per table, FK-dependency-first, retaining its
                 structural verdict and planned foreign-key actions
   3. Diff     — compute direct actions and non-action differences in place
-  4. Plan     — retain an accepted plan of the merged diff and relationship
-                stream, or the rejected planning outcome
+  4. Plan     — retain an accepted plan of the complete diff, or the
+                rejected planning outcome
   5. Compile  — retain the exact backend statements for every accepted plan
   6. Execute  — gate dependents of failed tables (dry and real runs), then
                 retain attempted statement results (real runs only)
-
-Resolution deliberately precedes planning. The resolver plans each table's
-foreign-key actions, and the validated planning boundary must judge those
-merged with the table's own diff — the PK-drop exemption has to see this
-table's foreign-key drops wherever they were planned. Planning and
-compilation still run for resolution-failed tables, so a resolution failure
-does not erase a valid preview.
 
 Resolution is a pure structural judgment of the declarations and their read
 snapshots (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
@@ -332,8 +325,7 @@ class Engine:
         """
         Accept or reject each diff according to the default planning policy.
 
-        The diff is judged merged with the resolver's relationship actions, so
-        validation sees one complete stream. Rejected runs retain
+        Each diff is judged as one complete stream. Rejected runs retain
         ``PlanningFailed``; accepted runs retain ``PlanningSucceeded`` with the
         validated action plan.
         """
@@ -341,7 +333,7 @@ class Engine:
             if run.diff is None:
                 continue
 
-            planning = plan_diff(run.diff, relationship_actions=run.resolution.actions)
+            planning = plan_diff(run.diff)
             run.planning = planning
 
             match planning:
