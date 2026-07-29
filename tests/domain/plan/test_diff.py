@@ -5,6 +5,7 @@ from delta_engine.domain.model import (
     Array,
     DesiredColumn,
     DesiredTable,
+    Identifier,
     Integer,
     Long,
     Map,
@@ -1109,6 +1110,15 @@ def test_column_case_drift_requires_a_real_spelling_difference():
 def test_column_case_drift_requires_the_same_identifier():
     with pytest.raises(ValueError, match="different columns"):
         ColumnCaseDrift(declared_name="orderid", observed_name="customer_id")
+
+
+def test_column_case_drift_equality_is_exact_even_when_built_from_identifiers():
+    # Given a drift built from Identifier names, as the differ builds them
+    drift = ColumnCaseDrift(Identifier("OrderId"), Identifier("orderid"))
+
+    # Then the record compares by exact spelling, not case-insensitively
+    assert drift == ColumnCaseDrift("OrderId", "orderid")
+    assert drift != ColumnCaseDrift("ORDERID", "orderid")
 
 
 def test_matched_column_case_drift_is_stated_as_unresolvable():
