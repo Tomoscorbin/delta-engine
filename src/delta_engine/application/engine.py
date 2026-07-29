@@ -98,9 +98,12 @@ from delta_engine.domain.plan import (
 logger = logging.getLogger(__name__)
 
 
-def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+def lower_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
     """
     Lower table specifications into domain tables for the phase chain.
+
+    The system lowers at both edges: specifications into domain tables here,
+    and plans into SQL at translation.
 
     Converts each source via ``to_desired_table()``, rejects duplicate
     qualified names, and returns the tables in deterministic qualified-name
@@ -252,7 +255,7 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = prepare_desired_tables(*tables)
+        desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
         snapshots = self._read(desired)

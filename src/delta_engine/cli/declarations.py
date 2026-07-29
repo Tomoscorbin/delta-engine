@@ -7,7 +7,7 @@ import os
 import sys
 from types import ModuleType
 
-from delta_engine.application.engine import prepare_desired_tables
+from delta_engine.application.engine import lower_desired_tables
 from delta_engine.cli.errors import ConfigError
 from delta_engine.schema import DeltaTable
 
@@ -59,9 +59,9 @@ def load_declarations(reference: DeclarationRef) -> tuple[DeltaTable, ...]:
     module = _import_module(reference.module_name)
     value = _attribute(module, reference)
     tables = _tables_from_attribute(value, reference)
-    # The engine's own preparation step owns the duplicate-name rule; running
+    # The engine's own lowering step owns the duplicate-name rule; running
     # it here surfaces the same typed error before a connection is opened.
-    prepare_desired_tables(*tables)
+    lower_desired_tables(*tables)
     return tables
 
 
