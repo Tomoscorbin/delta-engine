@@ -1714,3 +1714,30 @@ def test_compile_receives_catalog_spellings_built_from_every_run():
     assert executor.spellings is not None
     assert str(executor.spellings.spelling(_qualified_name("dev.silver.orders"), "id")) == "ID"
     assert str(executor.spellings.spelling(_qualified_name("dev.silver.customers"), "id")) == "id"
+
+
+def test_planned_sql_wears_the_catalog_spelling_for_constraint_ddl():
+    # Given a declared camelCase PK over a column the catalog spells lowercase
+    spec = DeltaTable(
+        "dev",
+        "silver",
+        "orders",
+        columns=(Column("OrderId", String(), nullable=False),),
+        primary_key=["OrderId"],
+    )
+    observed = ObservedTable(
+        qualified_name=_qualified_name("dev.silver.orders"),
+        columns=(ObservedColumn("orderid", String(), nullable=False),),
+    )
+    reader = _RecordingReader({"dev.silver.orders": TablePresent(observed)})
+    executor = _SqlRecordingExecutor()
+
+    # When previewed
+    report = Engine(reader, executor).sync(spec, dry_run=True)
+
+    # Then ADD CONSTRAINT wears the catalog's spelling in the emitted SQL
+    [orders] = report.table_reports
+    assert (
+        "ALTER TABLE `dev`.`silver`.`orders` ADD CONSTRAINT `orders_pk`"
+        " PRIMARY KEY (`orderid`)" in orders.planned_sql_statements
+    )
