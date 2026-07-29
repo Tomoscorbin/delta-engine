@@ -2,7 +2,8 @@
 Compile domain action plans into Spark/Databricks SQL statements.
 
 Uses `functools.singledispatch` to render SQL per action type and returns the
-statements in plan order, ready to execute against a Spark session.
+statements in plan order, ready to execute against a Spark session. Statements
+are rendered in the catalog's column spellings via the respell pass.
 """
 
 from collections.abc import Mapping
@@ -16,8 +17,10 @@ from delta_engine.adapters.databricks.sql.dialect import (
     backtick_qualified_name,
     quote_literal,
 )
+from delta_engine.adapters.databricks.sql.respell import respell_plan
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
+from delta_engine.application.ports import CatalogSpellings
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
     Action,
@@ -81,14 +84,23 @@ class _Target:
         return f"{_ALTER_CLAUSES[self.kind]} {self.name}"
 
 
-def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
+_NO_SPELLINGS: Final[CatalogSpellings] = CatalogSpellings(())
+
+
+def compile_plan(plan: ActionPlan, spellings: CatalogSpellings = _NO_SPELLINGS) -> tuple[str, ...]:
     """
     Compile an :class:`ActionPlan` into SQL statements, in plan order.
 
     The plan supplies both the qualified table target and the relation kind
     selecting the ALTER dialect. Non-ALTER statements (CREATE TABLE, COMMENT
     ON) use the same plan target but are unaffected by the relation kind.
+
+    Before rendering, every column reference is respelled to the catalog's
+    spelling through ``spellings`` (declared spelling where the catalog has
+    none); the plan itself is left untouched. See
+    :mod:`delta_engine.adapters.databricks.sql.respell`.
     """
+    plan = respell_plan(plan, spellings)
     target = _Target(qualified_name=plan.target, kind=plan.kind)
     return tuple(_compile_action(action, target) for action in plan)
 
