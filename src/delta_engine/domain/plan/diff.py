@@ -49,6 +49,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.unresolvable import (
+    ColumnCaseDrift,
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
@@ -138,6 +139,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         observed.supported_features,
     )
     column_actions = _diff_columns(desired.columns, renames.columns)
+    case_drift = _column_case_drift(desired, observed, renames)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
     constraint_actions = _diff_primary_key(desired, observed)
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
@@ -155,6 +157,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         ),
         unresolvable=(
             *renames.conflicts,
+            *case_drift,
             *metadata_unresolvable,
             *layout_unresolvable,
         ),
@@ -334,6 +337,37 @@ def _align_columns(
         removed=removed,
         matched=matched,
     )
+
+
+def _column_case_drift(
+    desired: DesiredTable,
+    observed: ObservedTable,
+    renames: _RenameResolution,
+) -> tuple[ColumnCaseDrift, ...]:
+    """
+    Return every reference to an existing column whose spelling disagrees.
+
+    Matched columns compare against the rename-projected frame, so a renamed
+    column wears its declared target spelling and never drifts. A
+    ``renamed_from`` hint names a catalog column directly and compares against
+    the raw observed frame. New columns and rename targets have no catalog
+    counterpart, so nothing compares for them: what a declaration creates, it
+    spells freely.
+    """
+    projected_by_name = {column.name: column for column in renames.columns}
+    observed_by_name = {column.name: column for column in observed.columns}
+    drift: list[ColumnCaseDrift] = []
+    for column in desired.columns:
+        matched = projected_by_name.get(column.name)
+        if matched is not None and str(column.name) != str(matched.name):
+            drift.append(ColumnCaseDrift(declared_name=column.name, observed_name=matched.name))
+        source = column.renamed_from
+        if source is None:
+            continue
+        observed_source = observed_by_name.get(source)
+        if observed_source is not None and str(source) != str(observed_source.name):
+            drift.append(ColumnCaseDrift(declared_name=source, observed_name=observed_source.name))
+    return tuple(drift)
 
 
 def _actions_for_added_column(desired: DesiredColumn) -> tuple[Action, ...]:
