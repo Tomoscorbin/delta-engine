@@ -14,7 +14,7 @@ from delta_engine.application.ports import (
     ExecutionSummary,
     TablePresent,
 )
-from delta_engine.application.relationships import ResolutionSucceeded
+from delta_engine.application.relationships import TableResolution
 from delta_engine.application.rendering import (
     render_diff,
     render_diff_block,
@@ -356,7 +356,7 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
             (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
         ),
         planned_sql_statements=(),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        resolution=TableResolution(qualified_name, (), ()),
         execution_outcome=None,
     )
 
@@ -436,7 +436,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
         read=failure,
         planning=None,
         planned_sql_statements=(),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        resolution=TableResolution(qualified_name, (), ()),
         execution_outcome=None,
     )
 
@@ -471,7 +471,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
         planned_sql_statements=tuple(
             f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
         ),
-        resolution=ResolutionSucceeded(qualified_name, ()),
+        resolution=TableResolution(qualified_name, (), ()),
         execution_outcome=execution,
     )
 

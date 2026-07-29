@@ -35,6 +35,7 @@ is skipped by execution, so all tables are attempted and the report is always
 complete.
 """
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -46,7 +47,12 @@ from delta_engine.application.errors import (
     ReadError,
     SyncFailedError,
 )
-from delta_engine.application.failures import ExecutionFailure, ReadFailure
+from delta_engine.application.failures import (
+    ExecutionFailure,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
+    ReadFailure,
+)
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningResult,
@@ -64,13 +70,7 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-    TableSnapshot,
-    resolve,
-)
+from delta_engine.application.relationships import TableResolution, resolve
 from delta_engine.application.report import (
     ExecutionBlockedByDependency,
     ExecutionOutcome,
@@ -158,7 +158,7 @@ class _TableRun:
         return (
             isinstance(self.read, ReadFailure)
             or isinstance(self.planning, PlanningFailed)
-            or isinstance(self.resolution, ResolutionFailed)
+            or bool(self.resolution.structural_failures)
             or isinstance(self.execution, ExecutionBlockedByDependency)
             or (isinstance(self.execution, ExecutionSummary) and self.execution.failed)
         )
@@ -175,18 +175,20 @@ class _TableRun:
         )
 
 
-def _successful_resolution(run: _TableRun) -> ResolutionSucceeded:
-    """
-    Narrow a gate-eligible run's resolution to the successful variant.
-
-    Runs with a failed resolution carry that failure and are skipped before
-    this is called, so a failed variant here is an engine sequencing bug, not
-    a table outcome.
-    """
-    resolution = run.resolution
-    if not isinstance(resolution, ResolutionSucceeded):
-        raise RuntimeError(f"Executable table was not successfully resolved: {run.qualified_name}")
-    return resolution
+def _blocking_failures(
+    run: _TableRun, failed: AbstractSet[QualifiedName]
+) -> tuple[ForeignKeyFailure, ...]:
+    """Return the failures blocking this run, given tables that will not converge."""
+    return tuple(
+        ForeignKeyFailure(
+            table=run.qualified_name,
+            local_columns=dependency.local_columns,
+            references=dependency.referenced_table,
+            reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        )
+        for dependency in run.resolution.dependencies
+        if dependency.referenced_table in failed
+    )
 
 
 class Engine:
@@ -276,9 +278,11 @@ class Engine:
 
         return report
 
-    def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[TableSnapshot, ...]:
+    def _read(
+        self, tables: tuple[DesiredTable, ...]
+    ) -> tuple[tuple[DesiredTable, ReadResult], ...]:
         """Fetch the current catalog state of every table, as (desired, read) pairs."""
-        snapshots: list[TableSnapshot] = []
+        snapshots: list[tuple[DesiredTable, ReadResult]] = []
         for desired in tables:
             read: ReadResult
             try:
@@ -366,17 +370,19 @@ class Engine:
                 run.qualified_name,
             )
 
-    def _resolve(self, snapshots: tuple[TableSnapshot, ...]) -> tuple[_TableRun, ...]:
+    def _resolve(
+        self, snapshots: tuple[tuple[DesiredTable, ReadResult], ...]
+    ) -> tuple[_TableRun, ...]:
         """
         Birth one run per table, dependency-first, with its resolution outcome.
 
-        Resolution is structural: it judges declared relationships against the
-        read snapshots and plans their actions. Whether a table is *blocked*
+        Resolution is structural: it judges the declarations against each
+        other, with no catalog state involved. Whether a table is *blocked*
         by another's failure is decided later, by the gating walk in
         ``_gate``. Every run carries a resolution from birth, so no later
         phase has to consider a half-resolved table.
         """
-        ordered_resolutions = resolve(snapshots)
+        ordered_resolutions = resolve(tuple(desired for desired, _ in snapshots))
 
         snapshot_by_name = {desired.qualified_name: (desired, read) for desired, read in snapshots}
 
@@ -386,7 +392,7 @@ class Engine:
             desired, read = snapshot_by_name[resolution.qualified_name]
             runs.append(_TableRun(desired=desired, read=read, resolution=resolution))
 
-            if isinstance(resolution, ResolutionFailed):
+            if resolution.structural_failures:
                 logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
 
         return tuple(runs)
@@ -409,7 +415,7 @@ class Engine:
             if run.has_failures:
                 continue
 
-            blocking_failures = _successful_resolution(run).blocking_failures(failed)
+            blocking_failures = _blocking_failures(run, failed)
             if blocking_failures:
                 run.execution = ExecutionBlockedByDependency(blocking_failures)
                 failed.add(run.qualified_name)
@@ -438,9 +444,7 @@ class Engine:
             if run.has_failures:
                 continue
 
-            blocking_failures = _successful_resolution(run).blocking_failures(
-                failed_during_execution
-            )
+            blocking_failures = _blocking_failures(run, failed_during_execution)
             if blocking_failures:
                 run.execution = ExecutionBlockedByDependency(blocking_failures)
                 failed_during_execution.add(run.qualified_name)

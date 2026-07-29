@@ -21,10 +21,7 @@ from delta_engine.application.ports import (
     ReadResult,
     TableAbsent,
 )
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
+from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
@@ -78,10 +75,10 @@ def _table_report(
         if planning_failures
         else PlanningSucceeded(ActionPlan(target=desired.qualified_name))
     )
-    resolution = (
-        ResolutionFailed(desired.qualified_name, resolution_failures)
-        if resolution_failures
-        else ResolutionSucceeded(desired.qualified_name, ())
+    resolution = TableResolution(
+        qualified_name=desired.qualified_name,
+        dependencies=(),
+        structural_failures=resolution_failures,
     )
 
     return TableRunReport(

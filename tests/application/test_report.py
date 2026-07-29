@@ -19,10 +19,7 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
+from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     ExecutionBlockedByDependency,
     SyncReport,
@@ -133,10 +130,10 @@ def _report(
         assert isinstance(report_plan, ActionPlan)
         planning = PlanningSucceeded(report_plan)
 
-    resolution = (
-        ResolutionFailed(desired.qualified_name, resolution_failures)
-        if resolution_failures and not execution_blocked
-        else ResolutionSucceeded(desired.qualified_name, ())
+    resolution = TableResolution(
+        qualified_name=desired.qualified_name,
+        dependencies=(),
+        structural_failures=() if execution_blocked else resolution_failures,
     )
     execution_outcome = (
         ExecutionBlockedByDependency(resolution_failures) if execution_blocked else execution
@@ -421,7 +418,7 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
             read=ReadFailure("IOError", "boom"),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=(),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            resolution=TableResolution(desired.qualified_name, (), ()),
             execution_outcome=None,
         )
 
@@ -441,7 +438,7 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("SQL",),
-            resolution=ResolutionFailed(desired.qualified_name, (failure,)),
+            resolution=TableResolution(desired.qualified_name, (), (failure,)),
             execution_outcome=ExecutionSummary((_ok_exec(0, "SQL"),)),
         )
 
@@ -455,7 +452,7 @@ def test_table_run_report_rejects_execution_unrelated_to_planned_sql():
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("PLANNED SQL",),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            resolution=TableResolution(desired.qualified_name, (), ()),
             execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
         )
 

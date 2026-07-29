@@ -4,24 +4,17 @@ Unit tests for relationships.resolve().
 These tests exercise the public resolver API rather than the graph traversal
 implementation details. They cover dependency-first ordering, structural FK
 failure classification, cycle detection, self-reference handling, and the
-planned foreign-key actions carried on each resolution. Blocking dependents
-of failed tables is the engine's gating walk, tested with the engine.
+dependency edges each resolution retains. The resolver is pure declaration
+analysis — the world is consulted later, and blocking is inherited at
+enactment along the retained edges by the engine's gating walk, tested with
+the engine.
 """
 
-import pytest
-
-from delta_engine.application.failures import ForeignKeyFailureReason, ReadFailure
-from delta_engine.application.ports import TableAbsent, TablePresent
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    ResolveResult,
-    resolve,
-)
-from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName
+from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.application.relationships import TableResolution, resolve
+from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.model.constraints import ForeignKeyConstraint, PrimaryKeyConstraint
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import DropForeignKey, SetForeignKey
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, Self, String
 
 
@@ -172,50 +165,46 @@ def _tag_scoped_table_with_fk(fqn: str, references: str) -> DesiredTable:
     ).to_desired_table()
 
 
-def _names(result: ResolveResult) -> list[str]:
+def _names(result: tuple[TableResolution, ...]) -> list[str]:
     return [str(resolution.qualified_name) for resolution in result]
 
 
-def _failures_for(result: ResolveResult, fqn: str) -> tuple:
+def _resolution_for(result: tuple[TableResolution, ...], fqn: str) -> TableResolution:
     qualified_name = _qualified_name(fqn)
     for resolution in result:
-        if resolution.qualified_name != qualified_name:
-            continue
-        if isinstance(resolution, ResolutionFailed):
-            return resolution.failures
-        return ()
-    raise AssertionError(f"No resolution for {qualified_name}")
-
-
-def _failed_resolutions(result: ResolveResult) -> tuple[ResolutionFailed, ...]:
-    return tuple(resolution for resolution in result if isinstance(resolution, ResolutionFailed))
-
-
-def _successful_resolution(result: ResolveResult, fqn: str) -> ResolutionSucceeded:
-    qualified_name = _qualified_name(fqn)
-    for resolution in result:
-        if resolution.qualified_name != qualified_name:
-            continue
-        if isinstance(resolution, ResolutionSucceeded):
+        if resolution.qualified_name == qualified_name:
             return resolution
-        raise AssertionError(f"Expected successful resolution for {qualified_name}")
     raise AssertionError(f"No resolution for {qualified_name}")
+
+
+def _failures_for(result: tuple[TableResolution, ...], fqn: str) -> tuple[ForeignKeyFailure, ...]:
+    return _resolution_for(result, fqn).structural_failures
+
+
+def _failed_resolutions(result: tuple[TableResolution, ...]) -> tuple[TableResolution, ...]:
+    return tuple(resolution for resolution in result if resolution.structural_failures)
+
+
+def _sound_resolution(result: tuple[TableResolution, ...], fqn: str) -> TableResolution:
+    resolution = _resolution_for(result, fqn)
+    assert resolution.structural_failures == ()
+    return resolution
 
 
 def _failure_reasons_for(
-    result: ResolveResult,
+    result: tuple[TableResolution, ...],
     fqn: str,
 ) -> list[ForeignKeyFailureReason]:
     return [failure.reason for failure in _failures_for(result, fqn)]
 
 
-def _assert_before(result: ResolveResult, parent: str, child: str) -> None:
+def _assert_before(result: tuple[TableResolution, ...], parent: str, child: str) -> None:
     names = _names(result)
     assert names.index(parent) < names.index(child)
 
 
 def _assert_has_failure(
-    result: ResolveResult,
+    result: tuple[TableResolution, ...],
     fqn: str,
     *,
     reason: ForeignKeyFailureReason,
@@ -241,29 +230,13 @@ def _assert_has_failure(
     assert matching_failures
 
 
-def _resolve_declared(tables: tuple[DesiredTable, ...]) -> ResolveResult:
-    """Resolve declarations as if every table were absent from the catalog."""
-    return resolve(tuple((table, TableAbsent()) for table in tables))
-
-
 def test_resolve_with_empty_tables_returns_empty_result():
     # Given no registered tables
     # When resolving dependencies
-    result = _resolve_declared(())
+    result = resolve(())
 
     # Then the result is empty
     assert result == ()
-
-
-def test_resolution_failed_requires_at_least_one_failure():
-    with pytest.raises(
-        ValueError,
-        match="ResolutionFailed requires at least one foreign-key failure",
-    ):
-        ResolutionFailed(
-            qualified_name=_qualified_name("cat.sch.orders"),
-            failures=(),
-        )
 
 
 def test_resolve_with_no_fks_preserves_prepared_input_order():
@@ -275,11 +248,11 @@ def test_resolve_with_no_fks_preserves_prepared_input_order():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then the independent tables stay in prepared input order
     assert _names(result) == ["cat.sch.a", "cat.sch.b", "cat.sch.c"]
-    assert all(isinstance(resolution, ResolutionSucceeded) for resolution in result)
+    assert not _failed_resolutions(result)
 
 
 def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
@@ -287,7 +260,7 @@ def test_resolve_ignores_foreign_keys_on_tag_scoped_declarations():
     tables = (_tag_scoped_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then the carried FK does not produce an unresolvable-reference failure
     assert _names(result) == ["cat.sch.orders"]
@@ -302,7 +275,7 @@ def test_resolve_does_not_order_by_unmanaged_foreign_keys():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then the unmanaged FK does not impose parent-before-child ordering
     assert _names(result) == ["cat.sch.orders", "cat.sch.customers"]
@@ -317,19 +290,16 @@ def test_resolve_orders_referenced_table_before_dependent():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then customers appears before orders
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
     assert not _failed_resolutions(result)
 
-    # And orders retains the resolved edge needed during execution
-    [dependency] = _successful_resolution(result, "cat.sch.orders").dependencies
+    # And orders retains the dependency edge — the declared constraint itself
+    [dependency] = _sound_resolution(result, "cat.sch.orders").dependencies
     assert dependency.referenced_table == _qualified_name("cat.sch.customers")
-    assert dependency.blocked_failure.table == _qualified_name("cat.sch.orders")
-    assert dependency.blocked_failure.local_columns == ("ref_id",)
-    assert dependency.blocked_failure.references == _qualified_name("cat.sch.customers")
-    assert dependency.blocked_failure.reason is ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    assert tuple(str(column) for column in dependency.local_columns) == ("ref_id",)
 
 
 def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
@@ -356,7 +326,7 @@ def test_resolve_orders_referenced_tag_scoped_table_before_dependent():
     tables = (orders, customers.to_desired_table())
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then the referenced tag-scoped table is ordered before its managed dependent
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
@@ -372,7 +342,7 @@ def test_resolve_handles_chain_of_dependencies():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then dependencies are ordered before their dependents
     _assert_before(result, "cat.sch.a", "cat.sch.b")
@@ -389,7 +359,7 @@ def test_resolve_orders_table_after_all_fk_parents():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then both parent tables appear before the dependent table
     _assert_before(result, "cat.sch.orders", "cat.sch.order_items")
@@ -402,7 +372,7 @@ def test_resolve_fails_table_with_unresolvable_reference():
     tables = (_table_with_fk("cat.sch.orders", "cat.sch.customers"),)
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then orders has one unresolvable-reference failure with the FK details
     failures = _failures_for(result, "cat.sch.orders")
@@ -422,7 +392,7 @@ def test_resolve_records_one_failure_per_unresolvable_fk():
     shipments = _table_with_fks("cat.sch.shipments", "cat.sch.orders", "cat.sch.customers")
 
     # When resolving dependencies
-    result = _resolve_declared((shipments,))
+    result = resolve((shipments,))
 
     # Then both failed FK relationships are reported
     failures = _failures_for(result, "cat.sch.shipments")
@@ -451,7 +421,7 @@ def test_resolve_fails_both_members_of_a_mutual_cycle_and_still_orders_them():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then both cycle members fail and both still appear in the ordering
     _assert_has_failure(
@@ -478,7 +448,7 @@ def test_resolve_fails_all_members_of_three_table_cycle():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then every cycle member fails with a cycle failure
     for table_name in ("cat.sch.a", "cat.sch.b", "cat.sch.c"):
@@ -500,7 +470,7 @@ def test_resolve_records_cycle_failure_only_for_fk_inside_the_cycle():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then a's FK into the cycle fails, but its FK to the healthy table does not
     failures_for_a = _failures_for(result, "cat.sch.a")
@@ -561,7 +531,7 @@ def test_resolve_reports_invalid_fk_target_over_cycle_for_the_same_fk():
     )
 
     # When resolving dependencies
-    result = _resolve_declared((a, b))
+    result = resolve((a, b))
 
     # Then a's single failure is the invalid FK target, not a cycle failure
     _assert_has_failure(
@@ -584,7 +554,7 @@ def test_resolve_does_not_fail_an_unrelated_sibling():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then only orders fails
     _assert_has_failure(
@@ -616,12 +586,12 @@ def test_resolve_treats_self_referential_fk_as_applicable():
     ).to_desired_table()
 
     # When resolving dependencies
-    result = _resolve_declared((employees,))
+    result = resolve((employees,))
 
     # Then the self-reference does not prevent the table from executing
     assert _names(result) == ["cat.sch.employees"]
     assert _failures_for(result, "cat.sch.employees") == ()
-    assert _successful_resolution(result, "cat.sch.employees").dependencies == ()
+    assert _resolution_for(result, "cat.sch.employees").dependencies == ()
 
 
 def test_resolve_fails_when_referenced_table_has_no_primary_key():
@@ -634,7 +604,7 @@ def test_resolve_fails_when_referenced_table_has_no_primary_key():
     orders = _table_with_fk("cat.sch.orders", "cat.sch.customers")
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then orders fails because its FK does not target the parent's primary key
     _assert_has_failure(
@@ -678,7 +648,7 @@ def test_resolve_fails_fk_whose_referenced_columns_are_not_the_pk():
     )
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then orders is rejected because email is not customers' primary key
     _assert_has_failure(
@@ -711,7 +681,7 @@ def test_resolve_fails_fk_whose_types_mismatch_the_registered_parent():
     customers = _long_id_table("cat.sch.customers")
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then orders fails because ref_id's type does not match the registered
     # customers' primary key type, and customers itself is unaffected
@@ -749,7 +719,7 @@ def test_resolve_reports_type_mismatch_over_cycle_for_the_same_fk():
     ).to_desired_table()
 
     # When resolving dependencies
-    result = _resolve_declared((a, b))
+    result = resolve((a, b))
 
     # Then a's single failure is the type mismatch, not a cycle failure,
     # while b's FK back into the cycle still fails as a cycle
@@ -780,7 +750,7 @@ def test_resolve_valid_chain_where_middle_table_has_pk_and_fk_executes():
     )
 
     # When resolving dependencies
-    result = _resolve_declared(tables)
+    result = resolve(tables)
 
     # Then the whole chain is valid and dependency-first ordered
     _assert_before(result, "cat.sch.b", "cat.sch.a")
@@ -802,7 +772,7 @@ def test_resolve_passes_when_fk_targets_composite_primary_key():
     )
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then the composite-key FK is valid
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
@@ -834,7 +804,7 @@ def test_resolve_fails_when_fk_references_only_part_of_composite_primary_key():
     )
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then the FK is rejected because it does not target the full parent PK
     _assert_has_failure(
@@ -872,227 +842,30 @@ def test_resolve_treats_composite_pk_referenced_column_order_as_irrelevant():
     )
 
     # When resolving dependencies
-    result = _resolve_declared((orders, customers))
+    result = resolve((orders, customers))
 
     # Then the FK is valid because the referenced column set is the parent's PK
     _assert_before(result, "cat.sch.customers", "cat.sch.orders")
     assert not _failed_resolutions(result)
 
 
-# ---------- resolve(): planned FK actions over read snapshots ----------
+# ---------- resolve(): dependency edges over declarations ----------
 
 
-def _absent(desired: DesiredTable) -> tuple[DesiredTable, TableAbsent]:
-    return (desired, TableAbsent())
-
-
-def _present(desired: DesiredTable, observed: ObservedTable) -> tuple[DesiredTable, TablePresent]:
-    return (desired, TablePresent(table=observed))
-
-
-def _unreadable(desired: DesiredTable) -> tuple[DesiredTable, ReadFailure]:
-    return (desired, ReadFailure(exception_type="ReadError", message="boom"))
-
-
-def _observed(
-    fqn: str,
-    column_names: tuple[str, ...],
-    foreign_keys: tuple[ForeignKeyConstraint, ...] = (),
-) -> ObservedTable:
-    return ObservedTable(
-        qualified_name=_qualified_name(fqn),
-        columns=tuple(ObservedColumn(name, String()) for name in column_names),
-        foreign_keys=foreign_keys,
-    )
-
-
-def test_absent_table_plans_every_declared_foreign_key():
-    # Given a child declaring one FK, with both tables absent from the catalog
+def test_every_table_contributes_edges_regardless_of_catalog_state():
+    # Given a child declaring an FK — resolve sees only declarations, so no
+    # catalog state can add or remove an edge
     parent = _referenced_table("dev.silver.customers").to_desired_table()
     child = _table_with_fk("dev.silver.orders", "dev.silver.customers")
 
     # When resolved
-    resolutions = resolve((_absent(parent), _absent(child)))
+    resolutions = resolve((parent, child))
 
-    # Then the child's resolution plans the declared FK
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    assert [type(action) for action in child_resolution.actions] == [SetForeignKey]
-
-
-def test_present_table_diffs_foreign_keys_by_signature():
-    # Given a child declaring FKs to customers and products, while the catalog
-    # holds the customers FK (under a legacy name) plus one undeclared FK
-    customers = _referenced_table("dev.silver.customers").to_desired_table()
-    products = _referenced_table("dev.silver.products").to_desired_table()
-    child = _table_with_fks("dev.silver.orders", "dev.silver.customers", "dev.silver.products")
-    child_observed = _observed(
-        "dev.silver.orders",
-        ("id", "customers_id", "products_id", "legacy_ref"),
-        foreign_keys=(
-            ForeignKeyConstraint(
-                local_columns=("customers_id",),
-                referenced_table=_qualified_name("dev.silver.customers"),
-                referenced_columns=("id",),
-                constraint_name="legacy_customers_fk",
-            ),
-            ForeignKeyConstraint(
-                local_columns=("legacy_ref",),
-                referenced_table=_qualified_name("dev.silver.archive"),
-                referenced_columns=("id",),
-                constraint_name="legacy_archive_fk",
-            ),
-        ),
-    )
-
-    # When resolved
-    resolutions = resolve((_absent(customers), _absent(products), _present(child, child_observed)))
-
-    # Then the declared-and-present FK yields no action, the declared-but-absent
-    # FK yields SetForeignKey, and the undeclared observed FK yields DropForeignKey
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    set_actions = [a for a in child_resolution.actions if isinstance(a, SetForeignKey)]
-    drop_actions = [a for a in child_resolution.actions if isinstance(a, DropForeignKey)]
-    assert [str(a.constraint.referenced_table) for a in set_actions] == ["dev.silver.products"]
-    assert [a.constraint.constraint_name for a in drop_actions] == ["legacy_archive_fk"]
-
-
-def test_set_foreign_key_carries_the_declared_spelling_on_both_sides():
-    # Given child declares local column "customerId" that the catalog spells
-    # "customerid", referencing parent column "Id" that the catalog spells "id"
-    parent = _referenced_table(
-        "dev.silver.customers", primary_key_columns=("Id",)
-    ).to_desired_table()
-    child = _table_with_fk(
-        "dev.silver.orders",
-        "dev.silver.customers",
-        local_columns=("customerId",),
-        referenced_primary_key_columns=("Id",),
-    )
-    parent_observed = _observed("dev.silver.customers", ("id",))
-    child_observed = _observed("dev.silver.orders", ("id", "customerid"))
-
-    # When resolved
-    resolutions = resolve((_present(parent, parent_observed), _present(child, child_observed)))
-
-    # Then the emitted SetForeignKey is a semantic value wearing the declared
-    # spellings; each table's case drift is rejected by validation separately
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    (action,) = child_resolution.actions
-    assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.local_columns) == ("customerId",)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
-
-
-def test_referenced_spelling_of_a_parent_created_this_sync_is_the_declared_one():
-    # Given the referenced parent does not exist yet, so its declared spelling
-    # is the only spelling there is
-    parent = _referenced_table(
-        "dev.silver.customers", primary_key_columns=("Id",)
-    ).to_desired_table()
-    child = _table_with_fk(
-        "dev.silver.orders",
-        "dev.silver.customers",
-        referenced_primary_key_columns=("Id",),
-    )
-
-    # When resolved
-    resolutions = resolve((_absent(parent), _absent(child)))
-
-    # Then the referenced side keeps the declared spelling
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    (action,) = child_resolution.actions
-    assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("Id",)
-
-
-def test_self_referencing_foreign_key_keeps_its_declared_spelling():
-    # Given a self-referencing key declared lowercase against camelCase catalog columns
-    employees = DeltaTable(
-        "dev",
-        "silver",
-        "employees",
-        columns=(
-            Column("id", String(), nullable=False),
-            Column("managerid", String()),
-        ),
-        primary_key=["id"],
-        foreign_keys=[ForeignKey(columns={"managerid": "id"}, references=Self)],
-    ).to_desired_table()
-    observed = _observed("dev.silver.employees", ("Id", "ManagerId"))
-
-    # When resolved
-    resolutions = resolve((_present(employees, observed),))
-
-    # Then both sides wear the declared spelling; the columns' case drift is
-    # rejected by validation separately
-    employees_resolution = _successful_resolution(resolutions, "dev.silver.employees")
-    (action,) = employees_resolution.actions
-    assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.local_columns) == ("managerid",)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("id",)
-
-
-def test_foreign_key_to_a_renamed_parent_key_keeps_the_new_declared_name():
-    # Given a parent renaming its key column — the catalog still spells the old
-    # name — and a child referencing the declared new name
-    parent = _referenced_table(
-        "dev.silver.customers", primary_key_columns=("orderNumber",)
-    ).to_desired_table()
-    child = _table_with_fk(
-        "dev.silver.orders",
-        "dev.silver.customers",
-        referenced_primary_key_columns=("orderNumber",),
-    )
-    parent_observed = _observed("dev.silver.customers", ("OrderId",))
-    child_observed = _observed("dev.silver.orders", ("id", "ref_id"))
-
-    # When resolved
-    resolutions = resolve((_present(parent, parent_observed), _present(child, child_observed)))
-
-    # Then the reference keeps the declared post-rename name, not the observed old one
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    (action,) = child_resolution.actions
-    assert isinstance(action, SetForeignKey)
-    assert tuple(str(column) for column in action.constraint.referenced_columns) == ("orderNumber",)
-
-
-def test_unreadable_table_contributes_edges_but_no_actions():
-    # Given a child declaring an FK whose own catalog state could not be read
-    parent = _referenced_table("dev.silver.customers").to_desired_table()
-    child = _table_with_fk("dev.silver.orders", "dev.silver.customers")
-
-    # When resolved
-    resolutions = resolve((_absent(parent), _unreadable(child)))
-
-    # Then no actions are planned against unknown state, but the dependency
-    # edge still exists so gating can block on the parent's outcome
-    child_resolution = _successful_resolution(resolutions, "dev.silver.orders")
-    assert child_resolution.actions == ()
+    # Then the dependency edge exists for the gating walk to block on later
+    child_resolution = _sound_resolution(resolutions, "dev.silver.orders")
     assert [str(d.referenced_table) for d in child_resolution.dependencies] == [
         "dev.silver.customers"
     ]
-    blocking = child_resolution.blocking_failures({_qualified_name("dev.silver.customers")})
-    assert [failure.reason for failure in blocking] == [
-        ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-    ]
-    assert child_resolution.blocking_failures(frozenset()) == ()
-
-
-def test_structural_failure_still_carries_planned_actions_for_the_preview():
-    # Given a child whose FK references an unregistered table
-    child = _table_with_fk("dev.silver.orders", "dev.silver.archive")
-
-    # When resolved
-    resolutions = resolve((_absent(child),))
-
-    # Then the failure is structural and the planned action is still stated,
-    # declared-spelled, for the report preview
-    (resolution,) = resolutions
-    assert isinstance(resolution, ResolutionFailed)
-    assert [failure.reason for failure in resolution.failures] == [
-        ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
-    ]
-    assert [type(action) for action in resolution.actions] == [SetForeignKey]
 
 
 def test_resolutions_come_dependency_first():
@@ -1101,31 +874,30 @@ def test_resolutions_come_dependency_first():
     child = _table_with_fk("dev.silver.orders", "dev.silver.customers")
 
     # When resolved with the child first
-    resolutions = resolve((_absent(child), _absent(parent)))
+    resolutions = resolve((child, parent))
 
     # Then the parent still precedes the child
     _assert_before(resolutions, "dev.silver.customers", "dev.silver.orders")
 
 
-def test_unmanaged_foreign_keys_create_no_edges_but_actions_are_still_stated():
+def test_unmanaged_foreign_keys_create_no_edges():
     # Given a tag-scoped table declaring an FK it does not manage
     table = _tag_scoped_table_with_fk("dev.silver.orders", "dev.silver.customers")
 
     # When resolved
-    resolutions = resolve((_absent(table),))
+    resolutions = resolve((table,))
 
-    # Then no dependency edge exists and nothing failed structurally, but the
-    # action is still stated for validation's scope gate to judge
+    # Then no dependency edge exists and nothing failed structurally; the FK
+    # difference itself is the differ's to state and the scope gate's to judge
     (resolution,) = resolutions
-    assert isinstance(resolution, ResolutionSucceeded)
+    assert resolution.structural_failures == ()
     assert resolution.dependencies == ()
-    assert [type(action) for action in resolution.actions] == [SetForeignKey]
 
 
 def test_resolve_classifies_the_four_structural_reasons():
     # Unresolvable reference: the parent is not registered in this sync
     orphan = _table_with_fk("dev.silver.orders", "dev.silver.archive")
-    result = resolve((_absent(orphan),))
+    result = resolve((orphan,))
     _assert_has_failure(
         result, "dev.silver.orders", reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE
     )
@@ -1135,7 +907,7 @@ def test_resolve_classifies_the_four_structural_reasons():
     odd_parent = _referenced_table(
         "dev.silver.customers", primary_key_columns=("customer_key",)
     ).to_desired_table()
-    result = resolve((_absent(child), _absent(odd_parent)))
+    result = resolve((child, odd_parent))
     _assert_has_failure(
         result, "dev.silver.orders", reason=ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY
     )
@@ -1149,7 +921,7 @@ def test_resolve_classifies_the_four_structural_reasons():
         columns=(Column("id", Long(), nullable=False),),
         primary_key=["id"],
     ).to_desired_table()
-    result = resolve((_absent(child), _absent(long_parent)))
+    result = resolve((child, long_parent))
     _assert_has_failure(
         result,
         "dev.silver.orders",
@@ -1159,7 +931,7 @@ def test_resolve_classifies_the_four_structural_reasons():
     # Cycle: two tables reference each other
     invoices = _table_with_fk("dev.silver.invoices", "dev.silver.ledger")
     ledger = _table_with_fk("dev.silver.ledger", "dev.silver.invoices")
-    result = resolve((_absent(invoices), _absent(ledger)))
+    result = resolve((invoices, ledger))
     _assert_has_failure(result, "dev.silver.invoices", reason=ForeignKeyFailureReason.CYCLE)
     _assert_has_failure(result, "dev.silver.ledger", reason=ForeignKeyFailureReason.CYCLE)
 
@@ -1177,13 +949,11 @@ def test_foreign_key_referenced_column_case_must_match_the_registered_declaratio
     )
 
     # When resolved
-    resolutions = resolve((_absent(parent), _absent(child)))
+    resolutions = resolve((parent, child))
 
     # Then the FK fails structurally: ADD CONSTRAINT resolves case-sensitively,
     # so the reference must wear the registered declaration's exact spelling
-    [child_resolution] = [r for r in resolutions if str(r.qualified_name) == "dev.silver.orders"]
-    assert isinstance(child_resolution, ResolutionFailed)
-    assert [failure.reason for failure in child_resolution.failures] == [
+    assert _failure_reasons_for(resolutions, "dev.silver.orders") == [
         ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH
     ]
 
@@ -1199,6 +969,6 @@ def test_foreign_key_referenced_spelling_matching_exactly_is_sound():
         referenced_primary_key_columns=("OrderId",),
     )
 
-    resolutions = resolve((_absent(parent), _absent(child)))
+    resolutions = resolve((parent, child))
 
-    assert _successful_resolution(resolutions, "dev.silver.orders")
+    _sound_resolution(resolutions, "dev.silver.orders")
