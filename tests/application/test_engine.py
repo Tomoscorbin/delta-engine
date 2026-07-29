@@ -21,7 +21,9 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
+from delta_engine.application.relationships import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.report import (
+    ExecutionBlockedByDependency,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -777,9 +779,10 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     with pytest.raises(SyncFailedError) as exc_info:
         engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
 
-    # Then orders is FK-failed and not executed
+    # Then orders is FK-failed on the resolution slot and not executed
     [orders] = list(exc_info.value.report)
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert isinstance(orders.resolution, ResolutionFailed)
     assert orders.execution is None
     assert executor.executed_names == []
 
@@ -808,11 +811,13 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.b", "cat.sch.a"),
         )
 
-    # Then b is blocked and neither table executes
+    # Then b is blocked at the execution gate and neither table executes
     report = exc_info.value.report
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.READ_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
+    assert isinstance(table_b.resolution, ResolutionSucceeded)
+    assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
     _assert_has_fk_failure(
         table_b,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -842,7 +847,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
         )
 
-    # Then orders is blocked before execution
+    # Then orders is blocked at the execution gate, before any statement runs
     report = exc_info.value.report
     customers = _assert_status(
         report,
@@ -855,6 +860,8 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
         TableRunStatus.FOREIGN_KEY_FAILED,
     )
 
+    assert isinstance(orders.resolution, ResolutionSucceeded)
+    assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
     _assert_has_fk_failure(
         orders,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -1268,8 +1275,9 @@ def test_failed_table_records_no_planned_sql():
 
 def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
     # Given an absent table whose FK references a table not in the sync.
-    # FK resolution runs after planning and compilation, so the plan and its
-    # SQL are already legitimate facts — only the dependency check failed.
+    # A failed resolution still carries its planned FK actions, and planning
+    # and compilation still run, so the plan and its SQL remain legitimate
+    # facts — only the structural judgment failed.
     reader = _RecordingReader()
     executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
@@ -1333,6 +1341,53 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
         reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
         references="cat.sch.customers",
     )
+
+
+def test_dry_run_records_dependency_blocking_for_dependents_of_failed_tables():
+    # Given a parent that fails validation and a child declaring an FK to it
+    reader = _RecordingReader(
+        {
+            "cat.sch.customers": _existing_id_table("cat.sch.customers"),
+            "cat.sch.orders": TableAbsent(),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(
+        _spec_adding_not_null("cat.sch.customers"),
+        _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+        dry_run=True,
+    )
+
+    # Then the dry run keeps blocking visible without executing anything
+    _assert_status(report, "cat.sch.customers", TableRunStatus.PLANNING_FAILED)
+    orders = _assert_status(report, "cat.sch.orders", TableRunStatus.FOREIGN_KEY_FAILED)
+    assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
+    _assert_has_fk_failure(
+        orders,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.customers",
+    )
+    assert executor.executed_names == []
+
+
+def test_foreign_key_failed_table_still_carries_its_planned_sql():
+    # Given a child whose FK references an unregistered table
+    reader = _RecordingReader()
+    executor = _SqlRecordingExecutor()
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"), dry_run=True)
+
+    # Then resolution failed but the preview still includes the constraint SQL
+    [orders] = list(report)
+    assert isinstance(orders.resolution, ResolutionFailed)
+    assert orders.planned_sql_statements != ()
+    assert any("ADD CONSTRAINT" in statement for statement in orders.planned_sql_statements)
+    assert executor.executed_statements == []
 
 
 # ---------------------------------------------------------------------------

@@ -21,13 +21,17 @@ cross-table dependency checks decide whether it may execute. A later FK failure
 therefore does not erase a valid preview or force compilation to understand
 resolution failures.
 
-Running `resolve()` after validation means a table that fails validation
-blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
-with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). Execution
-applies the same rule as it walks the dependency-ordered runs: a run whose
-dependency fails during execution is blocked rather than executed. The rule
-is uniform: if a dependency won't reach desired state this sync, its
-dependents don't execute either.
+Resolution is a pure structural judgment of the declarations and their read
+snapshots (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
+by another table's failure is decided later, at the execution gate: walking
+the dependency-ordered runs, a run whose resolved dependency will not reach
+desired state this sync — a failed read, a rejected plan, a failed
+resolution, an execution failure, or a block of its own — is blocked with
+BLOCKED_BY_FAILED_DEPENDENCY rather than executed, so the block propagates
+along FK chains. The rule is uniform: if a dependency won't reach desired
+state this sync, its dependents don't execute either. A dry run applies the
+same gate without attempting statements, so blocking stays visible in
+previews.
 
 A table that fails an early phase carries that failure forward on its run and
 is skipped by execution, so all tables are attempted and the report is always
@@ -39,12 +43,6 @@ from datetime import UTC, datetime
 import logging
 from typing import assert_never
 
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-    resolve_with_blocking,
-)
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -68,6 +66,12 @@ from delta_engine.application.ports import (
     ReadResult,
     TableAbsent,
     TablePresent,
+)
+from delta_engine.application.relationships import (
+    ResolutionFailed,
+    ResolutionSucceeded,
+    TableResolution,
+    resolve,
 )
 from delta_engine.application.report import (
     ExecutionBlockedByDependency,
@@ -209,12 +213,14 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, run read → diff → plan → compile → resolve
-                but skip execution (zero catalog mutations). Every run's
-                ``execution`` stays ``None`` while its ``plan`` still records
-                the actions compiled from the observed snapshot, and the report
-                is returned instead of raising ``SyncFailedError`` when a
-                pre-execution phase fails.
+            dry_run: When True, run every phase but attempt no statements
+                (zero catalog mutations). The execution gate still records
+                dependency blocking, so a dependent of a failed table reports
+                BLOCKED_BY_FAILED_DEPENDENCY in the preview; no run retains
+                attempted statement results, while its ``plan`` still records
+                the actions compiled from the observed snapshot. The report is
+                returned instead of raising ``SyncFailedError`` when a table
+                fails.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -237,9 +243,7 @@ class Engine:
         self._plan(runs)
         self._compile(runs)
         runs = self._resolve(runs)
-
-        if not dry_run:
-            self._execute(runs)
+        self._execute(runs, dry_run=dry_run)
 
         report = SyncReport(
             started_at=run_started,
@@ -357,16 +361,12 @@ class Engine:
         """
         Order runs by FK dependency and retain each table's resolution outcome.
 
-        Runs that already carry a failure (read or planning) seed the
-        failed-name set, so their FK dependents are blocked with
-        BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
+        Resolution judges each declared foreign key structurally against the
+        read snapshots; failures from earlier phases are not folded in here —
+        the execution gate blocks their dependents. Returns the runs in
+        dependency-first order.
         """
-        failed_names = {run.qualified_name for run in runs if run.has_failures}
-
-        ordered_resolutions = resolve_with_blocking(
-            tables=tuple(run.desired for run in runs),
-            failed_names=failed_names,
-        )
+        ordered_resolutions = resolve(tuple((run.desired, run.read) for run in runs))
 
         runs_by_name = {run.qualified_name: run for run in runs}
 
@@ -382,20 +382,22 @@ class Engine:
 
         return tuple(ordered_runs)
 
-    def _execute(self, runs: tuple[_TableRun, ...]) -> None:
+    def _execute(self, runs: tuple[_TableRun, ...], *, dry_run: bool) -> None:
         """
-        Execute the plan of every run with no failures and a non-empty plan.
+        Gate every run on its dependencies, then execute the executable plans.
 
-        Walks the resolved runs in dependency-first order, tracking tables that
-        fail during execution. A run whose resolved dependency references one is
-        blocked with BLOCKED_BY_FAILED_DEPENDENCY instead of executed, so an
-        execution failure in a parent blocks its FK dependents in the same
-        sync — even dependents with no work of their own. A run with an empty
-        plan and no blocking failures is skipped and counts as a healthy
-        parent. The execution outcome remains the sole source of execution or
-        runtime dependency failures.
+        Walks the resolved runs in dependency-first order, tracking tables
+        that will not reach desired state this sync: those that failed an
+        earlier phase and those that fail while executing. A run whose
+        resolved dependency references one is blocked with
+        BLOCKED_BY_FAILED_DEPENDENCY instead of executed and blocks its own
+        dependents in turn — even dependents with no work of their own. A run
+        with an empty plan and no blocking failures is skipped and counts as
+        a healthy parent. A dry run applies the same gate — blocking is part
+        of the preview — but attempts no statements. The execution outcome
+        remains the sole source of execution or runtime dependency failures.
         """
-        failed_during_execution: set[QualifiedName] = set()
+        failed: set[QualifiedName] = {run.qualified_name for run in runs if run.has_failures}
 
         for run in runs:
             if run.has_failures:
@@ -407,19 +409,18 @@ class Engine:
                     f"Executable table was not successfully resolved: {run.qualified_name}"
                 )
 
-            blocking_failures = tuple(
-                dependency.blocked_failure
-                for dependency in resolution.dependencies
-                if dependency.referenced_table in failed_during_execution
-            )
+            blocking_failures = resolution.blocking_failures(failed)
             if blocking_failures:
                 run.execution = ExecutionBlockedByDependency(blocking_failures)
-                failed_during_execution.add(run.qualified_name)
+                failed.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",
                     run.qualified_name,
                     len(blocking_failures),
                 )
+                continue
+
+            if dry_run:
                 continue
 
             # A no-op table must still be blocked when its dependency failed.
@@ -433,7 +434,7 @@ class Engine:
             run.execution = summary
 
             if summary.failed:
-                failed_during_execution.add(run.qualified_name)
+                failed.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
