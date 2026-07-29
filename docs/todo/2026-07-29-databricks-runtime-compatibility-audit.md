@@ -70,7 +70,7 @@ be confusing or could occur after earlier statements have already changed a tabl
 | Area | Current evidence | What it proves |
 | --- | --- | --- |
 | Base distribution | Installed-wheel and lazy-import tests | Declarations and planning import without backend packages |
-| Python | CI runs Python 3.12 | The declared floor works; the latest stable endpoint is not continuously verified |
+| Python | CI runs the full suite on Python 3.12 and 3.14 | The minimum supported and latest stable endpoints work; intermediate 3.13 has no distinct compatibility path |
 | Local Spark/Delta | OSS Spark and Delta with a test-only native reader | Engine lifecycle and adapter internals, not production Databricks metadata reads |
 | SQL warehouse | Weekly credentialed suite against one configured endpoint | Shared SQL core and warehouse adapter behaviour on that endpoint |
 | Numbered DBR Spark | None | No numbered runtime can currently be called live-tested |
@@ -240,7 +240,7 @@ For new metadata, use a simple rule:
 This parser policy and a live smoke test are more valuable than a general runtime
 capability registry.
 
-### 5. Dedicated (`SINGLE_USER`) is a concrete defect to investigate
+### 5. Dedicated (`SINGLE_USER`) is currently unsupported
 
 A user-observed Spark deployment fails when compute uses the `data_security_mode` value
 `SINGLE_USER`. Databricks now calls this Dedicated access mode; `SINGLE_USER` remains the
@@ -249,8 +249,9 @@ API and system-table value. See the
 and
 [access-mode value reference](https://docs.databricks.com/aws/en/admin/system-tables/compute#access-mode-reference).
 
-This should not motivate a general access-mode framework before the failure is
-understood. The focused investigation is:
+Investigation is deliberately deferred. This should not motivate a general access-mode
+framework before the failure is understood. When Dedicated support becomes a priority,
+keep the investigation focused:
 
 1. install the same Delta Engine wheel on Standard and Dedicated compute using the same
    DBR and equivalent Unity Catalog permissions;
@@ -261,8 +262,8 @@ understood. The focused investigation is:
 5. add the minimal reproduction as a live regression before changing the support
    statement.
 
-Until then, document Dedicated (`SINGLE_USER`) as unsupported. A Standard result neither
-explains nor clears this failure.
+Until the todo is completed, document Dedicated (`SINGLE_USER`) as unsupported. A
+Standard result neither explains nor clears this failure.
 
 ### 6. The missing assurance is a thin exact-wheel notebook smoke test
 
@@ -368,18 +369,22 @@ triggered canary is enough for the expected release rate and risk.
 
 ### P0 — establish the missing evidence
 
-- [ ] Run the core suite on the minimum supported and latest stable Python versions
+- [x] Run the core suite on the minimum supported and latest stable Python versions
       (currently 3.12 and 3.14); keep intermediate 3.13 supported without a dedicated
       job while it has no distinct compatibility path. Smoke-test each exact built wheel
-      once on the Python floor.
-- [ ] Reproduce the Dedicated (`SINGLE_USER`) failure against Standard on the same DBR,
-      identify the first differing operation, and retain a live regression.
+      once on the Python floor. Implemented in PR #294.
 - [ ] Add the exact-wheel production Spark smoke on the oldest maintained and current
       LTS runtimes using Standard access mode.
-- [ ] Add Dedicated coverage on the current LTS after the known failure is fixed.
 - [ ] Report the exact artifact and minimal sanitized runtime identity in smoke output.
 - [ ] Keep user-facing language clear that DBR 16.2 is a technical floor, while the
       tested list is evidence and not an allowlist.
+
+### Deferred — Dedicated access mode
+
+- [ ] When Dedicated support becomes a priority, reproduce the `SINGLE_USER` failure
+      against Standard on the same DBR, identify the first differing operation, and
+      retain a live regression for any fix.
+- [ ] Add Dedicated coverage on the current LTS only after the known failure is fixed.
 
 ### P1 — strengthen the real compatibility boundaries
 

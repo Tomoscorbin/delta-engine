@@ -471,8 +471,9 @@ Strengthen the runtime guard by:
 
 ### Compatibility infrastructure
 
-- [ ] Test the minimum supported and latest stable Python versions in CI (currently 3.12
+- [x] Test the minimum supported and latest stable Python versions in CI (currently 3.12
       and 3.14); add intermediate minors only for a distinct compatibility path.
+      Implemented in PR #294.
 - [ ] Refresh the dependency lock periodically and validate updates with the normal
       suite; do not add separate minimum, maximum, or newest-compatible matrices.
 - [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than
