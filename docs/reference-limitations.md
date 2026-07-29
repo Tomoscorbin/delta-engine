@@ -146,8 +146,7 @@ environment until Spark-runtime smoke coverage is published.
 
 The Spark backend does not currently work on Dedicated access-mode compute
 (`data_security_mode` value `SINGLE_USER`, formerly called single-user access mode).
-Treat this mode as unsupported. Adding support is tracked in the
-[Databricks runtime compatibility audit](https://github.com/Tomoscorbin/delta-engine/blob/main/docs/todo/2026-07-29-databricks-runtime-compatibility-audit.md).
+Treat this mode as unsupported.
 
 ## Delta table features
 
