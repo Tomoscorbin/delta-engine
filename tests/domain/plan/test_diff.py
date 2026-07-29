@@ -742,7 +742,7 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     )
 
 
-def test_set_primary_key_adopts_the_catalog_column_spelling():
+def test_set_primary_key_carries_the_declared_spelling():
     # Given a PK declared camelCase over a column the catalog spells lowercase
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
@@ -753,10 +753,12 @@ def test_set_primary_key_adopts_the_catalog_column_spelling():
     # When the table is diffed
     drift = diff_table(desired, observed)
 
-    # Then ADD CONSTRAINT will carry the catalog's spelling
+    # Then the action is a semantic value carrying the declaration verbatim;
+    # the case drift itself is stated separately and rejected by validation
     set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
     assert len(set_actions) == 1
-    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderid",)
+    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
+    assert any(isinstance(u, ColumnCaseDrift) for u in drift.unresolvable)
 
 
 def test_set_primary_key_keeps_declared_spelling_for_new_columns():
