@@ -46,7 +46,9 @@ Databricks provides Spark and Delta at runtime, so the base package is all you
 need there. Do not install `pyspark` or `delta-spark` over the runtime's
 mutually compatible versions. Delta Engine deliberately has no `spark` extra:
 its production Spark reader depends on Databricks Runtime and Unity Catalog
-features that local open-source Spark does not provide.
+features that local open-source Spark does not provide. See
+[runtime compatibility](explanation-runtime-compatibility.md) for how the
+project handles new Python and Databricks Runtime versions.
 
 ## Syncing through a SQL warehouse
 

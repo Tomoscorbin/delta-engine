@@ -4,6 +4,13 @@
 **Status:** Review record. Recommendations below are not implemented unless described as
 existing behaviour.
 
+**Runtime-policy update, 2026-07-29:** The broad runtime-matrix and capability-framework
+recommendations in this dated review are superseded by the
+[runtime compatibility policy](../explanation-runtime-compatibility.md) and the focused
+[runtime audit](2026-07-29-databricks-runtime-compatibility-audit.md). Current policy
+treats named tested environments as evidence rather than an allowlist and adds targeted
+machinery only after a demonstrated need.
+
 **Distribution decision, 2026-07-23:** The published `spark` extra was removed. Shipped
 code never imports `delta-spark`, and the production Spark reader requires Databricks
 Runtime and Unity Catalog features that local open-source Spark does not provide.
@@ -478,15 +485,14 @@ Strengthen the runtime guard by:
       suite; do not add separate minimum, maximum, or newest-compatible matrices.
 - [x] Keep local Spark/Delta coverage as an internal locked integration suite rather than
       a published compatibility promise.
-- [ ] Add live Spark-backend smoke tests for the documented Databricks Runtime matrix.
-- [ ] Publish supported, tested, and experimental runtime statuses in user-facing docs.
-- [ ] Define the supported-LTS window, deprecation notice, and maintenance period for the
-      final package line supporting a retired runtime.
-- [ ] Add an adapter-private runtime context and a clear baseline incompatibility error;
-      keep it out of base-package import paths.
+- [ ] Add exact-wheel live Spark-backend smoke coverage on the oldest maintained and
+      current LTS runtimes using Standard access mode.
+- [ ] Publish the environments exercised by live Spark coverage as evidence, not as a
+      runtime allowlist.
 - [ ] Define feature-level runtime requirements where a reliable preflight prevents
       partial execution; do not raise the global baseline for optional features.
-- [ ] Review each new Databricks Runtime before claiming support.
+- [ ] Test an exact existing wheel on each new Databricks Runtime before adding that
+      environment to the published evidence.
 
 ### Later decisions
 
