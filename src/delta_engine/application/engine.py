@@ -97,14 +97,16 @@ from delta_engine.domain.plan import (
 logger = logging.getLogger(__name__)
 
 
-def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+def lower_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
     """
     Lower table specifications into domain tables for the phase chain.
 
     Converts each source via ``to_desired_table()``, rejects duplicate
     qualified names, and returns the tables in deterministic qualified-name
     order so a sync's report and execution order never depend on the order
-    tables were passed. Passing no tables yields an empty tuple.
+    tables were passed. Passing no tables yields an empty tuple. The system
+    lowers at both edges: specifications into domain tables here, and plans
+    into SQL at translation.
 
     Public so drivers such as the CLI can run the same duplicate check
     before acquiring a backend connection; the rule lives only here.
@@ -251,7 +253,7 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = prepare_desired_tables(*tables)
+        desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
         snapshots = self._read(desired)
