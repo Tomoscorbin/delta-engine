@@ -84,10 +84,7 @@ class _Target:
         return f"{_ALTER_CLAUSES[self.kind]} {self.name}"
 
 
-_NO_SPELLINGS: Final[CatalogSpellings] = CatalogSpellings(())
-
-
-def compile_plan(plan: ActionPlan, spellings: CatalogSpellings = _NO_SPELLINGS) -> tuple[str, ...]:
+def compile_plan(plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
     """
     Compile an :class:`ActionPlan` into SQL statements, in plan order.
 

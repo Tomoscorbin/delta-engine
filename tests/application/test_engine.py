@@ -16,6 +16,7 @@ from delta_engine.application.failures import (
     ReadFailure,
 )
 from delta_engine.application.ports import (
+    CatalogSpellings,
     CatalogState,
     ExecutionSucceeded,
     TableAbsent,
@@ -269,7 +270,7 @@ class _RecordingExecutor:
         self._per_table_errors = None if per_table_errors is None else list(per_table_errors)
         self._active_table: str | None = None
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
         return tuple(
             f"STATEMENT {index} AS {plan.kind.name} FOR {plan.target}" for index in range(len(plan))
         )
@@ -305,8 +306,8 @@ class _SqlRecordingExecutor:
     def __init__(self) -> None:
         self.executed_statements: list[str] = []
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-        return compile_plan(plan)
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
+        return compile_plan(plan, spellings)
 
     def execute(self, statement: str) -> None:
         self.executed_statements.append(statement)
@@ -318,7 +319,7 @@ class _FailingMultiStatementExecutor:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
         return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(3))
 
     def execute(self, statement: str) -> None:
@@ -567,7 +568,7 @@ def test_all_reads_complete_before_execution_and_a_read_failure_blocks_only_its_
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
             # The name is embedded so execute can recover the target table.
             return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
 
@@ -734,7 +735,7 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 
 def test_unexpected_executor_exception_propagates():
     class BuggyExecutor:
-        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
             return (f"STATEMENT FOR {plan.target}",)
 
         def execute(self, _statement: str) -> None:
@@ -1678,3 +1679,38 @@ def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
         "FOREIGN KEY (`orderRef`) REFERENCES `c`.`s`.`parent` (`OrderId`)" in statement
         for statement in child_report.planned_sql_statements
     )
+
+
+class _SpellingsRecordingExecutor:
+    """Record the spellings value crossing the compile boundary."""
+
+    def __init__(self) -> None:
+        self.spellings: CatalogSpellings | None = None
+
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
+        self.spellings = spellings
+        return ()
+
+    def execute(self, statement: str) -> None:
+        raise AssertionError("dry run must not execute")
+
+
+def test_compile_receives_catalog_spellings_built_from_every_run():
+    # Given a present table whose catalog spells "id" as "ID", and an absent table
+    observed = ObservedTable(
+        qualified_name=_qualified_name("dev.silver.orders"),
+        columns=(ObservedColumn("ID", String(), nullable=False),),
+    )
+    reader = _RecordingReader({"dev.silver.orders": TablePresent(observed)})
+    executor = _SpellingsRecordingExecutor()
+
+    # When synced
+    Engine(reader, executor).sync(
+        _spec("dev.silver.orders"), _spec("dev.silver.customers"), dry_run=True
+    )
+
+    # Then one spellings view crosses the boundary: catalog spelling for the
+    # observed column, declared spelling for the absent table's column
+    assert executor.spellings is not None
+    assert str(executor.spellings.spelling(_qualified_name("dev.silver.orders"), "id")) == "ID"
+    assert str(executor.spellings.spelling(_qualified_name("dev.silver.customers"), "id")) == "id"

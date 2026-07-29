@@ -8,10 +8,12 @@ from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.executor import WarehouseExecutor
 from delta_engine.application.errors import ExecutionError
+from delta_engine.application.ports import CatalogSpellings
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan, SetTableComment
 
 QN = QualifiedName("cat", "sch", "tbl")
+_NO_SPELLINGS = CatalogSpellings(())
 
 
 def _executor(connection) -> WarehouseExecutor:
@@ -107,9 +109,9 @@ def test_compile_returns_backend_statements_without_touching_connection():
         actions=(SetTableComment(desired_comment="hello", observed_comment=""),),
     )
 
-    statements = executor.compile(plan)
+    statements = executor.compile(plan, _NO_SPELLINGS)
 
-    assert statements == compile_plan(plan)
+    assert statements == compile_plan(plan, _NO_SPELLINGS)
     assert len(statements) == 1
     assert connection.cursor_requests == 0
 
@@ -117,7 +119,7 @@ def test_compile_returns_backend_statements_without_touching_connection():
 def test_compile_of_empty_plan_returns_no_statements():
     connection = FakeConnection()
 
-    statements = _executor(connection).compile(ActionPlan(target=QN))
+    statements = _executor(connection).compile(ActionPlan(target=QN), _NO_SPELLINGS)
 
     assert statements == ()
     assert connection.cursor_requests == 0

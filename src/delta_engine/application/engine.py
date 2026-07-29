@@ -61,6 +61,7 @@ from delta_engine.application.planning import (
     plan_diff,
 )
 from delta_engine.application.ports import (
+    CatalogSpellings,
     CatalogStateReader,
     DesiredTableSource,
     ExecutionResult,
@@ -357,15 +358,22 @@ class Engine:
         Compilation is a distinct backend boundary after planning: a dry run
         reports these statements, while a real run passes the same tuple to
         execution. Runs rejected by an earlier phase carry no compiled SQL.
+        Statements are rendered against the catalog's column spellings: one
+        :class:`CatalogSpellings` view is built over every run's declared and
+        observed columns and crosses the boundary with each plan, so the
+        dialect can respell rendered references while stored plans keep their
+        declared spellings.
         """
+        spellings = CatalogSpellings(
+            (run.desired, run.read.table if isinstance(run.read, TablePresent) else None)
+            for run in runs
+        )
         for run in runs:
             plan = run.plan
             if plan is None:
                 continue
 
-            run.planned_sql_statements = self.executor.compile(
-                plan,
-            )
+            run.planned_sql_statements = self.executor.compile(plan, spellings)
             logger.info(
                 "Compiled %d statement(s) for %s",
                 len(run.planned_sql_statements),

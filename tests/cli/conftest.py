@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from delta_engine.application.engine import Engine
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import (
+    CatalogSpellings,
     CatalogState,
     TableAbsent,
     TablePresent,
@@ -51,7 +52,7 @@ class FakeReader:
 class FakeExecutor:
     """Executor that compiles one pseudo-statement per action and always succeeds."""
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
         return tuple(f"-- {plan.target}: {type(action).__name__}" for action in plan)
 
     def execute(self, statement: str) -> None:

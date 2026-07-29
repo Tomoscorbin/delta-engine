@@ -3,6 +3,7 @@ import pyspark.sql.types as T
 from delta_engine.adapters.databricks.spark._runner import SparkSqlRunner
 from delta_engine.adapters.databricks.spark.executor import SparkExecutor
 from delta_engine.adapters.databricks.sql import compile_plan
+from delta_engine.application.ports import CatalogSpellings
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -24,6 +25,8 @@ from tests.config import TEST_CATALOG
 
 # ----------- Test helpers
 
+_NO_SPELLINGS = CatalogSpellings(())
+
 
 def _dummy_qualified_name() -> QualifiedName:
     return QualifiedName("cat", "sch", "tbl")
@@ -32,7 +35,7 @@ def _dummy_qualified_name() -> QualifiedName:
 def _apply(spark, plan: ActionPlan) -> None:
     """Compile and execute each statement, as the engine drives the adapter."""
     executor = SparkExecutor(SparkSqlRunner(spark))
-    for statement in executor.compile(plan):
+    for statement in executor.compile(plan, _NO_SPELLINGS):
         executor.execute(statement)
 
 
@@ -277,10 +280,10 @@ def test_compile_returns_the_statements_execute_would_run():
     executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
 
     # When compiling without executing
-    statements = executor.compile(plan)
+    statements = executor.compile(plan, _NO_SPELLINGS)
 
     # Then the statements match the SQL compiler's output, in plan order
-    assert statements == compile_plan(plan)
+    assert statements == compile_plan(plan, _NO_SPELLINGS)
     assert len(statements) == 1
     assert "COMMENT" in statements[0].upper()
 
@@ -288,4 +291,4 @@ def test_compile_returns_the_statements_execute_would_run():
 def test_compile_of_empty_plan_returns_no_statements():
     executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
     plan = ActionPlan(target=QualifiedName("cat", "schema", "tbl"))
-    assert executor.compile(plan) == ()
+    assert executor.compile(plan, _NO_SPELLINGS) == ()

@@ -202,13 +202,18 @@ class PlanExecutor(Protocol):
     :class:`ExecutionFailure`; unexpected programming errors still propagate.
     """
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan, spellings: CatalogSpellings) -> tuple[str, ...]:
         """
         Return the statements that apply ``plan``, in execution order.
 
         The plan carries the qualified table target and relation kind its
         actions lower against (``plan.target`` and ``plan.kind``). Backends
         read both from the plan rather than accepting parallel context.
+
+        ``spellings`` carries the catalog's column spellings for every table
+        in the sync: a dialect with case-sensitive DDL paths respells its
+        rendered column references through it, and a dialect that does not
+        care ignores it.
 
         The ordering is the plan's own deterministic order, which is the order
         the application passes statements to ``execute``. An empty plan compiles
