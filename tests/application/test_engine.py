@@ -873,6 +873,35 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     assert executor.executed_names == []
 
 
+def test_structural_fk_failure_in_upstream_blocks_fk_dependent():
+    # Given b depends on a, whose own FK references a table not in the sync
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.a", "cat.sch.missing"),
+            _spec_with_fk("cat.sch.b", "cat.sch.a"),
+        )
+
+    # Then a fails resolution structurally and b is blocked at the execution gate
+    report = exc_info.value.report
+    table_a = _assert_status(report, "cat.sch.a", TableRunStatus.FOREIGN_KEY_FAILED)
+    table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    assert isinstance(table_a.resolution, ResolutionFailed)
+    assert isinstance(table_b.resolution, ResolutionSucceeded)
+    assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
+    _assert_has_fk_failure(
+        table_b,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.a",
+    )
+    assert executor.executed_names == []
+
+
 def test_sync_fails_fk_that_does_not_reference_a_primary_key():
     # Given orders references customers, but customers has no primary key
     reader = _RecordingReader()

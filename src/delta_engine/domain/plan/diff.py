@@ -1,9 +1,10 @@
 """
 Compare desired and observed table state.
 
-The differ reports every discrepancy as either an executable action or an
-unresolvable difference. Validation, safety policy, execution ordering, and
-backend compilation live elsewhere.
+The differ reports every single-table discrepancy as either an executable
+action or an unresolvable difference. Cross-table relationships (foreign
+keys) are planned by ``application/relationships.py``; validation, safety
+policy, execution ordering, and backend compilation live elsewhere.
 """
 
 from collections.abc import Iterable, Mapping
@@ -33,14 +34,12 @@ from delta_engine.domain.plan.actions import (
     AlterColumnType,
     CreateTable,
     DropColumn,
-    DropForeignKey,
     DropPrimaryKey,
     EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -140,7 +139,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
     )
     column_actions = _diff_columns(desired.columns, renames.columns)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
-    constraint_actions = _diff_constraints(desired, observed)
+    constraint_actions = _diff_primary_key(desired, observed)
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
     return TableDrift(
@@ -197,7 +196,8 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
     Return every action needed to realize a missing table.
 
     CREATE TABLE establishes columns, comment, properties, layout, and the
-    primary key. Unity Catalog tags and foreign keys require follow-up actions.
+    primary key. Unity Catalog tags require follow-up actions; foreign keys
+    are planned by the relationship resolver.
     """
     table_tag_actions = tuple(
         SetTableTag(name=name, desired_value=value, observed_value=None)
@@ -213,14 +213,10 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
         for column in desired.columns
         for name, value in column.tags.items()
     )
-    foreign_key_actions = tuple(
-        SetForeignKey(constraint=constraint) for constraint in desired.foreign_keys
-    )
     return (
         CreateTable(desired),
         *table_tag_actions,
         *column_tag_actions,
-        *foreign_key_actions,
     )
 
 
@@ -448,22 +444,6 @@ def _diff_layout(
     return actions, unresolvable
 
 
-def _diff_constraints(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[DropPrimaryKey | SetPrimaryKey | SetForeignKey | DropForeignKey, ...]:
-    """
-    Return primary- and foreign-key actions against raw observed names.
-
-    Renaming a constrained column drops its constraints, so a renamed key must
-    surface as an explicit drop and set rather than compare in the projected
-    name frame used by columns and physical layout.
-    """
-    return (
-        *_diff_primary_key(desired, observed),
-        *_diff_foreign_keys(desired, observed),
-    )
-
-
 def _diff_primary_key(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
@@ -471,9 +451,12 @@ def _diff_primary_key(
     Return primary-key actions; a changed key becomes a drop and a set.
 
     A primary key is identified by its column set, with absence its own
-    identity. ``SetPrimaryKey`` respells its columns from the observed table:
-    ADD CONSTRAINT resolves column names case-sensitively, so existing columns
-    must wear the catalog's spelling.
+    identity. The comparison runs against raw observed names, not the
+    rename-projected frame used by columns and layout: renaming a constrained
+    column drops the constraint, so a renamed key must surface as an explicit
+    drop and set. ``SetPrimaryKey`` respells its columns from the observed
+    table: ADD CONSTRAINT resolves column names case-sensitively, so existing
+    columns must wear the catalog's spelling.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -500,22 +483,6 @@ def _respell_primary_key(
         primary_key,
         columns=tuple(spellings.get(name, name) for name in primary_key.columns),
     )
-
-
-def _diff_foreign_keys(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[SetForeignKey | DropForeignKey, ...]:
-    """Return foreign-key actions matched by content signature."""
-    desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
-    observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
-    actions: list[SetForeignKey | DropForeignKey] = []
-    for signature, constraint in desired_by_signature.items():
-        if signature not in observed_by_signature:
-            actions.append(SetForeignKey(constraint=constraint))
-    for signature, constraint in observed_by_signature.items():
-        if signature not in desired_by_signature:
-            actions.append(DropForeignKey(constraint=constraint))
-    return tuple(actions)
 
 
 def _diff_table_metadata(

@@ -170,8 +170,11 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
         foreign_keys=(foreign_key,),
     )
 
-    # When planning
-    result = plan_diff(diff_table(desired, None))
+    # When planning with the resolver's FK action
+    result = plan_diff(
+        diff_table(desired, None),
+        relationship_actions=(SetForeignKey(constraint=foreign_key),),
+    )
 
     # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningSucceeded)
@@ -293,8 +296,14 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
         columns=(ObservedColumn("parent", Integer()),), foreign_keys=(observed_key,)
     )
 
-    # When planning
-    result = plan_diff(diff_table(desired, observed))
+    # When planning with the resolver's replacement actions
+    result = plan_diff(
+        diff_table(desired, observed),
+        relationship_actions=(
+            SetForeignKey(constraint=desired_key),
+            DropForeignKey(constraint=observed_key),
+        ),
+    )
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -331,8 +340,14 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
         foreign_keys=(observed_key,),
     )
 
-    # When planning
-    result = plan_diff(diff_table(desired, observed))
+    # When planning with the resolver's replacement actions
+    result = plan_diff(
+        diff_table(desired, observed),
+        relationship_actions=(
+            SetForeignKey(constraint=desired_key),
+            DropForeignKey(constraint=observed_key),
+        ),
+    )
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -362,8 +377,11 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
         foreign_keys=(unrelated_key,),
     )
 
-    # When planning
-    result = plan_diff(diff_table(desired, observed))
+    # When planning with the resolver's drop
+    result = plan_diff(
+        diff_table(desired, observed),
+        relationship_actions=(DropForeignKey(constraint=unrelated_key),),
+    )
 
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningSucceeded)
@@ -433,8 +451,8 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
     )
     diff = diff_table(desired, _observed())
 
-    # When planning
-    result = plan_diff(diff)
+    # When planning with the resolver's FK action
+    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=constraint),))
 
     # Then the referenced spelling passes through planning untouched
     assert isinstance(result, PlanningSucceeded)

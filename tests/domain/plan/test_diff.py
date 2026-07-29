@@ -27,14 +27,12 @@ from delta_engine.domain.plan.actions import (
     AlterColumnType,
     CreateTable,
     DropColumn,
-    DropForeignKey,
     DropPrimaryKey,
     EnableTableFeature,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
     SetColumnTag,
-    SetForeignKey,
     SetPrimaryKey,
     SetProperty,
     SetTableComment,
@@ -689,28 +687,20 @@ def test_equal_primary_keys_by_column_set_produce_no_change():
     assert diff.unresolvable == ()
 
 
-# ---------- foreign key changes
+# ---------- constraint changes
 
 
-def test_desired_only_foreign_key_produces_added_change():
-    fk = _foreign_key()
-    diff = diff_table(_desired(foreign_keys=(fk,)), _observed())
-
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == (SetForeignKey(constraint=fk),)
-
-
-def test_equal_foreign_keys_by_signature_produce_no_change():
-    # Given the same FK relationship under different constraint names
+def test_foreign_keys_are_not_the_differs_concern():
+    # Given declared and observed foreign keys that disagree
     diff = diff_table(
-        _desired(foreign_keys=(_foreign_key("engine_name"),)),
-        _observed(foreign_keys=(_foreign_key("external_name"),)),
+        _desired(foreign_keys=(_foreign_key("declared_fk"),)),
+        _observed(),
     )
 
-    # Then identity is the content signature — no change, sync stays idempotent
+    # Then the differ states no FK action — relationships are planned by the
+    # resolver, the one module holding both endpoints
     assert isinstance(diff, TableDrift)
     assert diff.actions == ()
-    assert diff.unresolvable == ()
 
 
 def test_observed_only_primary_key_produces_removed_change():
@@ -783,45 +773,6 @@ def test_set_primary_key_keeps_declared_spelling_for_new_columns():
     set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
     assert len(set_actions) == 1
     assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
-
-
-def test_observed_only_foreign_key_produces_removed_change():
-    # Given a catalog foreign key that is absent from the declaration
-    foreign_key = _foreign_key("legacy_fk")
-
-    # When diffing
-    diff = diff_table(
-        _desired(),
-        _observed(foreign_keys=(foreign_key,)),
-    )
-
-    # Then the foreign key is marked for removal
-    assert isinstance(diff, TableDrift)
-    assert diff.actions == (DropForeignKey(constraint=foreign_key),)
-
-
-def test_changed_foreign_key_signature_produces_remove_and_add_changes():
-    # Given a declared FK and an observed FK with different relationship signatures
-    desired_foreign_key = _foreign_key("desired_fk")
-    observed_foreign_key = ForeignKeyConstraint(
-        local_columns=("id",),
-        referenced_table=QualifiedName("dev", "silver", "different_parent"),
-        referenced_columns=("id",),
-        constraint_name="legacy_fk",
-    )
-
-    # When diffing
-    diff = diff_table(
-        _desired(foreign_keys=(desired_foreign_key,)),
-        _observed(foreign_keys=(observed_foreign_key,)),
-    )
-
-    # Then the observed relationship is removed and the desired relationship is added
-    assert isinstance(diff, TableDrift)
-    assert set(diff.actions) == {
-        SetForeignKey(constraint=desired_foreign_key),
-        DropForeignKey(constraint=observed_foreign_key),
-    }
 
 
 def test_observed_only_column_tags_are_unset_before_the_column_is_removed():
@@ -994,104 +945,6 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         DropPrimaryKey(primary_key=observed_key),
         SetPrimaryKey(primary_key=desired_key),
-    }
-
-
-def test_diff_rename_and_foreign_key_replacement_are_direct_actions():
-    # Given a foreign key whose local column is being renamed
-    parent = QualifiedName("dev", "silver", "parent")
-    desired_key = ForeignKeyConstraint(
-        local_columns=("parent_id",),
-        referenced_table=parent,
-        referenced_columns=("id",),
-        constraint_name="test_parent_id_fk",
-    )
-    observed_key = ForeignKeyConstraint(
-        local_columns=("parent",),
-        referenced_table=parent,
-        referenced_columns=("id",),
-        constraint_name="legacy_fk",
-    )
-    desired = _desired(
-        columns=(DesiredColumn("parent_id", Integer(), renamed_from="parent"),),
-        foreign_keys=(desired_key,),
-    )
-    observed = _observed(
-        columns=(DesiredColumn("parent", Integer()),),
-        foreign_keys=(observed_key,),
-    )
-
-    drift = diff_table(desired, observed)
-
-    # Then the rename plus an explicit key drop-and-set are direct actions
-    assert set(drift.actions) == {
-        RenameColumn(old_name="parent", new_name="parent_id"),
-        SetForeignKey(constraint=desired_key),
-        DropForeignKey(constraint=observed_key),
-    }
-
-
-def test_diff_rename_and_self_referenced_foreign_key_replacement_are_direct_actions():
-    # Given a self-referencing key whose referenced column is being renamed
-    desired_key = ForeignKeyConstraint(
-        local_columns=("manager_id",),
-        referenced_table=_QUALIFIED_NAME,
-        referenced_columns=("employee_id",),
-        constraint_name="test_manager_id_fk",
-    )
-    observed_key = ForeignKeyConstraint(
-        local_columns=("manager_id",),
-        referenced_table=_QUALIFIED_NAME,
-        referenced_columns=("id",),
-        constraint_name="legacy_fk",
-    )
-    desired = _desired(
-        columns=(
-            DesiredColumn("employee_id", Integer(), renamed_from="id"),
-            DesiredColumn("manager_id", Integer()),
-        ),
-        foreign_keys=(desired_key,),
-    )
-    observed = _observed(
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("manager_id", Integer())),
-        foreign_keys=(observed_key,),
-    )
-
-    drift = diff_table(desired, observed)
-
-    # Then the rename plus an explicit key drop-and-set are direct actions
-    assert set(drift.actions) == {
-        RenameColumn(old_name="id", new_name="employee_id"),
-        SetForeignKey(constraint=desired_key),
-        DropForeignKey(constraint=observed_key),
-    }
-
-
-def test_diff_keeps_an_unrelated_foreign_key_drop_alongside_a_rename():
-    # Given an observed-only foreign key unrelated to the rename
-    unrelated_key = ForeignKeyConstraint(
-        local_columns=("id",),
-        referenced_table=QualifiedName("dev", "silver", "parent"),
-        referenced_columns=("id",),
-        constraint_name="legacy_fk",
-    )
-    desired = _desired(
-        columns=(
-            DesiredColumn("id", Integer()),
-            DesiredColumn("customer_name", String(), renamed_from="customer_nm"),
-        )
-    )
-    observed = _observed(
-        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_nm", String())),
-        foreign_keys=(unrelated_key,),
-    )
-
-    drift = diff_table(desired, observed)
-
-    # Then the drop still accompanies the rename
-    assert set(drift.actions) == {
-        RenameColumn(old_name="customer_nm", new_name="customer_name"),
-        DropForeignKey(constraint=unrelated_key),
     }
 
 

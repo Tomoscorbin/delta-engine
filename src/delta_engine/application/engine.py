@@ -9,17 +9,20 @@ formatted summary.
 
 The phases are:
   1. Read     — fetch current catalog state and create one run per table
-  2. Diff     — compute direct actions and non-action differences in place
-  3. Plan     — retain an accepted plan or rejected planning outcome in place
-  4. Compile  — retain the exact backend statements for every accepted plan
-  5. Resolve  — return the runs in FK dependency order with resolution outcomes
+  2. Resolve  — order the runs FK-dependency-first with structural verdicts
+                and planned foreign-key actions
+  3. Diff     — compute direct actions and non-action differences in place
+  4. Plan     — retain an accepted plan of the merged diff and relationship
+                stream, or the rejected planning outcome
+  5. Compile  — retain the exact backend statements for every accepted plan
   6. Execute  — retain attempted statement results or dependency blocking
 
-Compilation deliberately precedes resolution. An accepted plan is a
-table-local fact, so it receives the exact SQL exposed on the report before
-cross-table dependency checks decide whether it may execute. A later FK failure
-therefore does not erase a valid preview or force compilation to understand
-resolution failures.
+Resolution deliberately precedes planning. The resolver plans each table's
+foreign-key actions, and the validated planning boundary must judge those
+merged with the table's own diff — the PK-drop exemption has to see this
+table's foreign-key drops wherever they were planned. Planning and
+compilation still run for resolution-failed tables, so a resolution failure
+does not erase a valid preview.
 
 Resolution is a pure structural judgment of the declarations and their read
 snapshots (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
@@ -81,13 +84,11 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import (
     DesiredTable,
-    ObservedTable,
     QualifiedName,
 )
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
-    adopt_catalog_spellings,
     diff_table,
 )
 
@@ -125,8 +126,8 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the read phase, it accretes its diff, planning outcome, compiled
-    SQL, resolution outcome, and execution outcome as the phases proceed, then is
+    Born in the read phase, it accretes its resolution, diff, planning
+    outcome, compiled SQL, and execution outcome as the phases proceed, then is
     frozen into a public :class:`TableRunReport` once complete. Kept private to
     the engine so the published report stays immutable while the phases mutate
     in place.
@@ -201,10 +202,10 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs read → diff → plan → compile → resolve → execute. The read phase
-        creates private table runs, the middle phases enrich them, resolution
-        changes their order, and the completed outcomes are finally frozen into
-        ``TableRunReport`` values.
+        Runs read → resolve → diff → plan → compile → execute. The read phase
+        creates private table runs, resolution orders them dependency-first,
+        the middle phases enrich them, and the completed outcomes are finally
+        frozen into ``TableRunReport`` values.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -239,10 +240,10 @@ class Engine:
         logger.info("Starting sync for %d table(s)", len(desired))
 
         runs = self._read(desired)
+        runs = self._resolve(runs)
         self._diff(runs)
         self._plan(runs)
         self._compile(runs)
-        runs = self._resolve(runs)
         self._execute(runs, dry_run=dry_run)
 
         report = SyncReport(
@@ -296,35 +297,36 @@ class Engine:
         return tuple(runs)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
-        """Adopt catalog spellings, then diff each run; read-failed runs carry no diff."""
-        diffable: list[tuple[_TableRun, ObservedTable | None]] = []
+        """Diff each readable run; read-failed runs carry no diff."""
         for run in runs:
             match run.read:
                 case ReadFailure():
                     continue
                 case TablePresent(table=observed_table):
-                    diffable.append((run, observed_table))
+                    run.diff = diff_table(run.desired, observed_table)
                 case TableAbsent():
-                    diffable.append((run, None))
+                    run.diff = diff_table(run.desired, None)
                 case _ as unreachable:
                     assert_never(unreachable)
-
-        adopted = adopt_catalog_spellings((run.desired, observed) for run, observed in diffable)
-        for run, observed in diffable:
-            run.diff = diff_table(adopted[run.qualified_name], observed)
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> None:
         """
         Accept or reject each diff according to the default planning policy.
 
-        Rejected runs retain ``PlanningFailed``; accepted runs retain
-        ``PlanningSucceeded`` with the validated action plan.
+        The diff is judged merged with the resolver's relationship actions, so
+        validation sees one complete stream. Rejected runs retain
+        ``PlanningFailed``; accepted runs retain ``PlanningSucceeded`` with the
+        validated action plan.
         """
         for run in runs:
             if run.diff is None:
                 continue
 
-            planning = plan_diff(run.diff)
+            resolution = run.resolution
+            if resolution is None:
+                raise RuntimeError(f"Diffed table run was not resolved: {run.qualified_name}")
+
+            planning = plan_diff(run.diff, relationship_actions=resolution.actions)
             run.planning = planning
 
             match planning:
@@ -359,12 +361,12 @@ class Engine:
 
     def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
         """
-        Order runs by FK dependency and retain each table's resolution outcome.
+        Order runs dependency-first and retain each table's resolution outcome.
 
-        Resolution judges each declared foreign key structurally against the
-        read snapshots; failures from earlier phases are not folded in here —
-        the execution gate blocks their dependents. Returns the runs in
-        dependency-first order.
+        Resolution is structural: it judges declared relationships against the
+        read snapshots and plans their actions. Whether a table is *blocked*
+        by another's failure is decided later, by the gating walk in
+        ``_execute``.
         """
         ordered_resolutions = resolve(tuple((run.desired, run.read) for run in runs))
 
