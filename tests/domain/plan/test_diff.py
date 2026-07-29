@@ -5,6 +5,7 @@ from delta_engine.domain.model import (
     Array,
     DesiredColumn,
     DesiredTable,
+    Identifier,
     Integer,
     Long,
     Map,
@@ -47,6 +48,7 @@ from delta_engine.domain.plan.diff import (
     diff_table,
 )
 from delta_engine.domain.plan.unresolvable import (
+    ColumnCaseDrift,
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
@@ -741,7 +743,7 @@ def test_changed_primary_key_produces_drop_and_set_actions():
     )
 
 
-def test_set_primary_key_adopts_the_catalog_column_spelling():
+def test_set_primary_key_carries_the_declared_spelling():
     # Given a PK declared camelCase over a column the catalog spells lowercase
     desired = _desired(
         columns=(DesiredColumn("orderId", String(), nullable=False),),
@@ -752,10 +754,12 @@ def test_set_primary_key_adopts_the_catalog_column_spelling():
     # When the table is diffed
     drift = diff_table(desired, observed)
 
-    # Then ADD CONSTRAINT will carry the catalog's spelling
+    # Then the action is a semantic value carrying the declaration verbatim;
+    # the case drift itself is stated separately and rejected by validation
     set_actions = [a for a in drift.actions if isinstance(a, SetPrimaryKey)]
     assert len(set_actions) == 1
-    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderid",)
+    assert tuple(str(c) for c in set_actions[0].primary_key.columns) == ("orderId",)
+    assert any(isinstance(u, ColumnCaseDrift) for u in drift.unresolvable)
 
 
 def test_set_primary_key_keeps_declared_spelling_for_new_columns():
@@ -986,7 +990,9 @@ def test_drift_against_an_ordinary_table_carries_the_table_kind():
     assert diff.observed.kind is TableKind.TABLE
 
 
-def test_case_only_column_difference_is_not_drift():
+def test_case_only_column_difference_produces_no_actions_but_states_the_drift():
+    # A case variant is the same column, so nothing is actionable — but the
+    # spelling disagreement itself is stated for validation to judge.
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1000,10 +1006,13 @@ def test_case_only_column_difference_is_not_drift():
     diff = diff_table(desired, observed)
 
     assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert diff.unresolvable == (ColumnCaseDrift("requestid", "requestId"),)
 
 
-def test_case_only_layout_and_key_differences_are_not_drift():
+def test_case_only_layout_and_key_differences_produce_no_actions():
+    # Layout and key identities are case-insensitive, so no constraint or
+    # clustering action fires; the one stated difference is the column's own
+    # spelling disagreement.
     qualified_name = QualifiedName("cat", "sch", "t")
     desired = DesiredTable(
         qualified_name=qualified_name,
@@ -1021,7 +1030,7 @@ def test_case_only_layout_and_key_differences_are_not_drift():
     diff = diff_table(desired, observed)
 
     assert diff.actions == ()
-    assert diff.unresolvable == ()
+    assert diff.unresolvable == (ColumnCaseDrift("requestId", "requestid"),)
 
 
 def test_case_only_struct_field_difference_is_not_drift():
@@ -1088,3 +1097,73 @@ def test_rename_source_uses_observed_spelling_when_hint_casing_differs():
     assert isinstance(action, RenameColumn)
     assert str(action.old_name) == "OldName"
     assert str(action.new_name) == "newName"
+
+
+# ---------- column case drift
+
+
+def test_column_case_drift_requires_a_real_spelling_difference():
+    with pytest.raises(ValueError, match="carries no difference"):
+        ColumnCaseDrift(declared_name="orderid", observed_name="orderid")
+
+
+def test_column_case_drift_requires_the_same_identifier():
+    with pytest.raises(ValueError, match="different columns"):
+        ColumnCaseDrift(declared_name="orderid", observed_name="customer_id")
+
+
+def test_column_case_drift_equality_is_exact_even_when_built_from_identifiers():
+    # Given a drift built from Identifier names, as the differ builds them
+    drift = ColumnCaseDrift(Identifier("OrderId"), Identifier("orderid"))
+
+    # Then the record compares by exact spelling, not case-insensitively
+    assert drift == ColumnCaseDrift("OrderId", "orderid")
+    assert drift != ColumnCaseDrift("ORDERID", "orderid")
+
+
+def test_matched_column_case_drift_is_stated_as_unresolvable():
+    # Given a declared column whose catalog counterpart is spelled differently
+    desired = _desired(columns=(DesiredColumn("OrderId", String()),))
+    observed = _observed(columns=(ObservedColumn("orderid", String()),))
+
+    # When the table is diffed
+    drift = diff_table(desired, observed)
+
+    # Then the disagreement is stated with both spellings, verbatim
+    assert isinstance(drift, TableDrift)
+    drifts = [u for u in drift.unresolvable if isinstance(u, ColumnCaseDrift)]
+    assert [(d.declared_name, d.observed_name) for d in drifts] == [("OrderId", "orderid")]
+
+
+def test_agreeing_column_case_states_no_drift():
+    # Given declared and observed spellings that agree exactly
+    desired = _desired(columns=(DesiredColumn("order_id", String()),))
+    observed = _observed(columns=(ObservedColumn("order_id", String()),))
+
+    drift = diff_table(desired, observed)
+
+    assert not any(isinstance(u, ColumnCaseDrift) for u in drift.unresolvable)
+
+
+def test_renamed_from_with_wrong_case_is_stated_as_case_drift():
+    # Given a rename hint spelling the catalog column differently
+    desired = _desired(columns=(DesiredColumn("newName", String(), renamed_from="oldname"),))
+    observed = _observed(columns=(ObservedColumn("OldName", String()),))
+
+    drift = diff_table(desired, observed)
+
+    # Then the hint's reference to the existing column is flagged; the rename
+    # action itself still carries the observed spelling (differ mechanics)
+    drifts = [u for u in drift.unresolvable if isinstance(u, ColumnCaseDrift)]
+    assert [(d.declared_name, d.observed_name) for d in drifts] == [("oldname", "OldName")]
+
+
+def test_rename_with_exact_source_spelling_states_no_drift():
+    # Given a rename whose hint matches the catalog spelling exactly —
+    # the target is a new name and new names are spelled freely
+    desired = _desired(columns=(DesiredColumn("newName", String(), renamed_from="OldName"),))
+    observed = _observed(columns=(ObservedColumn("OldName", String()),))
+
+    drift = diff_table(desired, observed)
+
+    assert not any(isinstance(u, ColumnCaseDrift) for u in drift.unresolvable)

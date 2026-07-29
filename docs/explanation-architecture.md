@@ -308,8 +308,9 @@ phases:
    `DesiredTable` values and reject duplicate qualified names.
 2. **Read**: ask the reader port for the current catalog state of each table.
 3. **Resolve**: order tables dependency-first with `relationships.resolve`,
-   judging each declared foreign key structurally and planning the
-   catalog-spelled set/drop actions that converge it.
+   judging each declared foreign key structurally (referenced spelling
+   included) and planning the set/drop actions — declared spellings
+   verbatim — that converge it.
 4. **Diff**: compute the typed `TableDiff` with `diff_table`.
 5. **Plan**: call the total `plan_diff` boundary with the diff and the
    resolver's relationship actions; validation always applies the default
@@ -803,7 +804,7 @@ dependency cost.
 | Add a safety rule                 | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and unresolvable differences and return `ValidationFailure` values.                                                                                                                               |
 | Add a data type                   | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                |
 | Change public declarations        | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                     |
-| Change FK planning, ordering, or blocking | `delta_engine.application.relationships` (blocking gate: `Engine._gate`) | Cross-table relationship policy — FK existence diffing, spelling, structural validation, ordering — lives in the application layer, not in the domain plan or SQL compiler.                                                                  |
+| Change FK planning, ordering, or blocking | `delta_engine.application.relationships` (blocking gate: `Engine._gate`) | Cross-table relationship policy — FK existence diffing, structural validation, ordering — lives in the application layer, not in the domain plan or SQL compiler.                                                                  |
 | Change report output              | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                              |
 | Change Databricks SQL             | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                       |
 | Change CLI commands or output     | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                     |
@@ -822,9 +823,9 @@ dependency cost.
   and `Column.tags` copy what the user passed, so mutating the original
   mapping later does not alter the declaration.
 - Put orchestration, safety policy, relationship resolution, and failure
-  propagation in the application layer. Constraint planning and spelling are
-  cross-table policy and live in `application/relationships.py`, consistent
-  with this rule.
+  propagation in the application layer. Constraint planning is cross-table
+  policy and lives in `application/relationships.py`, consistent with this
+  rule.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog,
   schema, and table-name parts, parsing Spark types, and quoting SQL. Preserve
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
@@ -836,13 +837,17 @@ dependency cost.
   clustering, primary-key, and foreign-key references resolve to their actual
   desired `Column.name` while lowering; domain table snapshots require local
   references to carry that spelling and never rewrite their contents.
-- Spell constraint SQL as the catalog does, at the two emission sites that
-  hold the right observed objects: the resolver respells `SetForeignKey`
-  through the owner's and the parent's effective spellings, and
-  `_diff_primary_key` respells `SetPrimaryKey` from its own observed table.
-  Existing columns wear the catalog's exact spelling; new or renamed columns
-  keep the declared spelling. Comparisons never need respelling —
-  `Identifier` equality already makes case invisible to matching.
+- Spelling is exact by law: a declaration names existing columns with the
+  catalog's exact spelling, checked where each reference lives —
+  declaration-internal references at construction, declared-vs-observed
+  columns at diff and validation (`ColumnCaseDrift` →
+  `ColumnSpellingMustMatchCatalog`), and foreign-key referenced columns
+  against the registered parent's declaration at resolve
+  (`REFERENCED_COLUMN_CASE_MISMATCH`). Nothing rewrites a spelling: emitted
+  SQL renders declarations verbatim, correct because validation has already
+  required agreement. Matching stays case-insensitive — `Identifier`
+  equality is what recognises "same column, wrong case" so it can be
+  rejected precisely instead of misread as an add and a drop.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to
