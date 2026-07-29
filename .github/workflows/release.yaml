@@ -46,11 +46,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Set up Python endpoints
+        run: uv python install 3.12 3.14
 
       - name: Install dev dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --group dev --python 3.12
 
       - name: Determine mode
         id: mode
@@ -108,16 +108,24 @@ jobs:
 
       - name: Build sdist and wheel
         if: steps.mode.outputs.publish == 'true'
-        run: uv build
+        run: uv build --python 3.12
 
       - name: Check distribution metadata
         if: steps.mode.outputs.publish == 'true'
         run: uvx twine check --strict dist/*
 
-      - name: Smoke-test wheel
+      - name: Smoke-test wheel on minimum Python
         if: steps.mode.outputs.publish == 'true'
         run: |
           uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py \
+            --expected-version "${{ steps.notes.outputs.version }}"
+
+      - name: Smoke-test wheel on latest stable Python
+        # Existing tags retain the compatibility validation from their own release.
+        if: steps.mode.outputs.publish == 'true' && inputs.tag == ''
+        run: |
+          uv run --isolated --no-project --python 3.14 --with ./dist/*.whl \
             python -I tests/distribution/smoke_test.py \
             --expected-version "${{ steps.notes.outputs.version }}"
 

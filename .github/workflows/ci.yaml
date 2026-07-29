@@ -97,6 +97,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v5
 
@@ -107,13 +111,13 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install "${{ matrix.python-version }}"
 
       - name: Install dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
 
       - name: Test
-        run: uv run pytest -q
+        run: uv run --python "${{ matrix.python-version }}" pytest -q
 
   docs:
     runs-on: ubuntu-latest
@@ -148,18 +152,23 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Set up Python
-        run: uv python install 3.12
+      - name: Set up Python endpoints
+        run: uv python install 3.12 3.14
 
       - name: Build sdist and wheel
-        run: uv build
+        run: uv build --python 3.12
 
       - name: Check distribution metadata
         run: uvx twine check --strict dist/*
 
-      - name: Smoke-test wheel
+      - name: Smoke-test wheel on minimum Python
         run: |
           uv run --isolated --no-project --python 3.12 --with ./dist/*.whl \
+            python -I tests/distribution/smoke_test.py
+
+      - name: Smoke-test wheel on latest stable Python
+        run: |
+          uv run --isolated --no-project --python 3.14 --with ./dist/*.whl \
             python -I tests/distribution/smoke_test.py
 
       - name: Smoke-test minimum CLI dependencies
