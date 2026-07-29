@@ -404,8 +404,9 @@ def _classify_structural_failures(
     A foreign key fails structurally when it references an unregistered table
     (UNRESOLVABLE_REFERENCE), targets columns that are not the registered
     table's primary key (REFERENCED_COLUMNS_NOT_A_KEY), disagrees with the
-    registered table's column types (REFERENCED_COLUMN_TYPE_MISMATCH), or
-    points into the owning table's own dependency cycle (CYCLE).
+    registered table's column types (REFERENCED_COLUMN_TYPE_MISMATCH), spells
+    the registered table's key differently (REFERENCED_COLUMN_CASE_MISMATCH),
+    or points into the owning table's own dependency cycle (CYCLE).
     """
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
@@ -426,6 +427,17 @@ def _classify_structural_failures(
     # aligned to local_columns, not PK order.
     primary_key_by_name = {
         table.qualified_name: table.primary_key.signature if table.primary_key else frozenset()
+        for table in tables
+    }
+
+    # Exact spelling of every registered primary key. The signature map above
+    # judges the key case-insensitively; this map lets the case arm state
+    # drift between two declarations precisely.
+    primary_key_spellings_by_name = {
+        table.qualified_name: frozenset(
+            str(column)
+            for column in (table.primary_key.columns if table.primary_key is not None else ())
+        )
         for table in tables
     }
 
@@ -461,6 +473,16 @@ def _classify_structural_failures(
                 referenced_types=column_types_by_name[referenced_table],
             ):
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH)
+            elif {
+                str(column) for column in foreign_key.referenced_columns
+            } != primary_key_spellings_by_name[referenced_table]:
+                # The NOT_A_KEY arm proved these columns ARE the key
+                # case-insensitively, so an exact-set mismatch is precisely a
+                # case drift between the declaration the FK was built against
+                # and the registered one. ADD CONSTRAINT resolves
+                # case-sensitively, and the registered declaration is what
+                # validation requires to equal the catalog.
+                record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH)
             elif referenced_table in cycle_partners_by_table.get(table_name, frozenset()):
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
 

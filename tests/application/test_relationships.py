@@ -1160,3 +1160,43 @@ def test_resolve_classifies_the_four_structural_reasons():
     result = resolve((_absent(invoices), _absent(ledger)))
     _assert_has_failure(result, "dev.silver.invoices", reason=ForeignKeyFailureReason.CYCLE)
     _assert_has_failure(result, "dev.silver.ledger", reason=ForeignKeyFailureReason.CYCLE)
+
+
+def test_foreign_key_referenced_column_case_must_match_the_registered_declaration():
+    # Given a registered parent declaring its key as "OrderId", and a child whose
+    # FK was declared against a parent object spelling the same key "ORDERID"
+    parent = _referenced_table(
+        "dev.silver.customers", primary_key_columns=("OrderId",)
+    ).to_desired_table()
+    child = _table_with_fk(
+        "dev.silver.orders",
+        "dev.silver.customers",
+        referenced_primary_key_columns=("ORDERID",),
+    )
+
+    # When resolved
+    resolutions = resolve((_absent(parent), _absent(child)))
+
+    # Then the FK fails structurally: ADD CONSTRAINT resolves case-sensitively,
+    # so the reference must wear the registered declaration's exact spelling
+    [child_resolution] = [r for r in resolutions if str(r.qualified_name) == "dev.silver.orders"]
+    assert isinstance(child_resolution, ResolutionFailed)
+    assert [failure.reason for failure in child_resolution.failures] == [
+        ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH
+    ]
+
+
+def test_foreign_key_referenced_spelling_matching_exactly_is_sound():
+    # Given the same shape with the reference spelled exactly as registered
+    parent = _referenced_table(
+        "dev.silver.customers", primary_key_columns=("OrderId",)
+    ).to_desired_table()
+    child = _table_with_fk(
+        "dev.silver.orders",
+        "dev.silver.customers",
+        referenced_primary_key_columns=("OrderId",),
+    )
+
+    resolutions = resolve((_absent(parent), _absent(child)))
+
+    assert _successful_resolution(resolutions, "dev.silver.orders")
