@@ -71,6 +71,7 @@ for what is and isn't backend-neutral, and
 | Declare keys, properties, tags, or comments    | The how-to guides in the sidebar                                                |
 | See why a change was rejected                  | [Safe-change rules](reference-safe-change-rules.md)                             |
 | Understand the internals or add a backend      | [Architecture](explanation-architecture.md)                                     |
+| Understand the environment support policy      | [Runtime compatibility](explanation-runtime-compatibility.md)                   |
 
 ```{toctree}
 :hidden:
@@ -86,6 +87,7 @@ tutorial-getting-started
 
 explanation-sync-lifecycle
 explanation-safety-model
+explanation-runtime-compatibility
 ```
 
 ```{toctree}

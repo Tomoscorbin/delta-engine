@@ -361,8 +361,9 @@ triggered canary is enough for the expected release rate and risk.
 - [ ] Add the exact-wheel production Spark smoke on the oldest maintained and current
       LTS runtimes using Standard access mode.
 - [ ] Report the exact artifact and minimal sanitized runtime identity in smoke output.
-- [ ] Keep user-facing language clear that DBR 16.2 is a technical floor, while the
-      tested list is evidence and not an allowlist.
+- [x] Keep user-facing language clear that DBR 16.2 is a technical floor, while the
+      tested list is evidence and not an allowlist. Recorded in the
+      [runtime compatibility policy](../explanation-runtime-compatibility.md).
 
 ### Deferred — Dedicated access mode
 

@@ -139,10 +139,12 @@ runtime new enough to read a table can also observe its keys. As with every
 other runtime feature, delta-engine documents this floor rather than
 preflighting it — an unsupported runtime surfaces as a read failure.
 
-This project does not yet publish a complete tested Spark-backend runtime
-matrix. The recurring live suite exercises the SQL warehouse backend; treat
-other Databricks Runtime versions as requiring validation in your own
-environment until Spark-runtime smoke coverage is published.
+This project does not yet have live Spark-backend evidence for a numbered
+Databricks Runtime. The recurring live suite exercises the SQL warehouse
+backend; validate the Spark path in your own production environment until
+Spark-runtime evidence is published. Databricks Runtime 16.2 is a technical
+floor, not a runtime allowlist, and compatible newer runtimes remain allowed.
+See the [runtime compatibility policy](explanation-runtime-compatibility.md).
 
 The Spark backend does not currently work on Dedicated access-mode compute
 (`data_security_mode` value `SINGLE_USER`, formerly called single-user access mode).
