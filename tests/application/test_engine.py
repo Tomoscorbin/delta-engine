@@ -14,6 +14,7 @@ from delta_engine.application.failures import (
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
+    ValidationFailure,
 )
 from delta_engine.application.ports import (
     CatalogState,
@@ -1589,14 +1590,14 @@ def test_created_tables_compile_as_ordinary_tables():
     )
 
 
-def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
-    # Given a live table whose physical column spelling differs from the declaration
+def test_executed_sql_is_byte_for_byte_the_planned_sql_for_constraint_ddl():
+    # Given a live table missing its declared primary key
     fqn = "c.s.mixed_case"
     catalog, schema, table_name = _split_fqn(fqn)
     observed = TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(ObservedColumn("requestId", String(), nullable=False),),
+            columns=(ObservedColumn("requestid", String(), nullable=False),),
         )
     )
     spec = DeltaTable(
@@ -1617,17 +1618,52 @@ def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
     Engine(reader=_RecordingReader({fqn: observed}), executor=executor).sync(spec)
 
     # Then the executed SQL is byte-for-byte the planned SQL, with the
-    # primary-key action carrying the physical name
+    # primary-key action carrying the declared name
     [table_report] = list(dry_report)
     assert tuple(executor.executed_statements) == table_report.planned_sql_statements
     assert any(
-        "PRIMARY KEY (`requestId`)" in statement for statement in executor.executed_statements
+        "PRIMARY KEY (`requestid`)" in statement for statement in executor.executed_statements
     )
 
 
-def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
-    # Given a child and parent declared with different reference spelling than
-    # the columns already present in the catalog
+def test_case_drifted_declaration_is_rejected_with_no_sql():
+    # Given a declaration whose column case disagrees with the catalog
+    fqn = "c.s.mixed_case"
+    catalog, schema, table_name = _split_fqn(fqn)
+    observed = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, table_name),
+            columns=(ObservedColumn("requestId", String(), nullable=False),),
+        )
+    )
+    spec = DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
+    )
+
+    # When syncing as a dry run
+    report = Engine(
+        reader=_RecordingReader({fqn: observed}),
+        executor=_SqlRecordingExecutor(),
+    ).sync(spec, dry_run=True)
+
+    # Then the sync rejects the declaration by name and plans no SQL
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
+    assert table_report.planned_sql_statements == ()
+    assert any(
+        failure.rule_name == "ColumnSpellingMustMatchCatalog"
+        for failure in table_report.failures
+        if isinstance(failure, ValidationFailure)
+    )
+
+
+def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
+    # Given a child whose FK mapping is spelled loudly; the API resolves it to
+    # the declared column spellings, which the catalog agrees with
     parent = DeltaTable(
         "c",
         "s",
@@ -1652,14 +1688,14 @@ def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
             "c.s.parent": TablePresent(
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "parent"),
-                    columns=(ObservedColumn("OrderId", String(), nullable=False),),
-                    primary_key=PrimaryKeyConstraint(("OrderId",), "parent_pk"),
+                    columns=(ObservedColumn("orderid", String(), nullable=False),),
+                    primary_key=PrimaryKeyConstraint(("orderid",), "parent_pk"),
                 )
             ),
             "c.s.child": TablePresent(
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "child"),
-                    columns=(ObservedColumn("orderRef", String()),),
+                    columns=(ObservedColumn("orderref", String()),),
                 )
             ),
         }
@@ -1672,9 +1708,10 @@ def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
         dry_run=True,
     )
 
-    # Then the FK statement uses the catalog's exact name on each side
+    # Then the FK statement wears the declared names, which validation has
+    # required to equal the catalog's
     child_report = _reports_by_name(report)["c.s.child"]
     assert any(
-        "FOREIGN KEY (`orderRef`) REFERENCES `c`.`s`.`parent` (`OrderId`)" in statement
+        "FOREIGN KEY (`orderref`) REFERENCES `c`.`s`.`parent` (`orderid`)" in statement
         for statement in child_report.planned_sql_statements
     )

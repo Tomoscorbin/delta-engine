@@ -29,6 +29,7 @@ from delta_engine.domain.model import (
 from delta_engine.domain.plan import (
     AddColumn,
     AlterColumnType,
+    ColumnCaseDrift,
     ColumnRenameConflict,
     DropColumn,
     DropForeignKey,
@@ -411,6 +412,27 @@ class AmbiguousColumnRename:
         )
 
 
+class ColumnSpellingMustMatchCatalog:
+    """Disallow a declaration whose column case disagrees with the catalog."""
+
+    name: ClassVar[str] = "ColumnSpellingMustMatchCatalog"
+
+    def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
+        """Flag every column reference spelled differently from the catalog."""
+        return tuple(
+            ValidationFailure(
+                rule_name=self.name,
+                message=(
+                    f"Column '{unresolvable.declared_name}' is spelled"
+                    f" '{unresolvable.observed_name}' in the catalog. Update the"
+                    " declaration to match the catalog's spelling exactly."
+                ),
+            )
+            for unresolvable in drift.unresolvable
+            if isinstance(unresolvable, ColumnCaseDrift)
+        )
+
+
 class PrimaryKeyReferencedByForeignKeys:
     """
     Disallow dropping or changing a primary key while foreign keys reference it.
@@ -610,6 +632,7 @@ DEFAULT_SAFETY_RULES: Final[tuple[SafetyRule, ...]] = (
     PropertyMustBeDeclared(DELTA_PROPERTY_POLICY),
     ColumnMappingRequiredForDrop(),
     AmbiguousColumnRename(),
+    ColumnSpellingMustMatchCatalog(),
     PrimaryKeyReferencedByForeignKeys(),
 )
 

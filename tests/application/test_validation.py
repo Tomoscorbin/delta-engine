@@ -47,7 +47,7 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     diff_table,
 )
-from delta_engine.domain.plan.unresolvable import ColumnRenameConflict
+from delta_engine.domain.plan.unresolvable import ColumnCaseDrift, ColumnRenameConflict
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
@@ -171,6 +171,7 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
         "AmbiguousColumnRename",
+        "ColumnSpellingMustMatchCatalog",
         "PrimaryKeyReferencedByForeignKeys",
     )
 
@@ -1022,6 +1023,37 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
     result = validate_diff(drift)
 
     assert not any(f.rule_name == "AmbiguousColumnRename" for f in result.failures)
+
+
+# ---- ColumnSpellingMustMatchCatalog
+
+
+def test_column_case_drift_fails_validation_naming_both_spellings():
+    # Given a diff stating a column spelled differently from the catalog
+    drift = TableDrift(
+        desired=_desired_table(columns=(DesiredColumn("OrderId", String()),)),
+        observed=_observed_table(columns=(ObservedColumn("orderid", String()),)),
+        unresolvable=(ColumnCaseDrift(declared_name="OrderId", observed_name="orderid"),),
+    )
+
+    # When the diff is validated
+    result = validate_diff(drift)
+
+    # Then the rejection names the rule and both spellings
+    failures = [f for f in result.failures if f.rule_name == "ColumnSpellingMustMatchCatalog"]
+    assert len(failures) == 1
+    assert "'OrderId'" in failures[0].message
+    assert "'orderid'" in failures[0].message
+
+
+def test_agreeing_spelling_passes_the_case_rule():
+    # Given declared and observed spellings that agree exactly, end to end
+    desired = _desired_table(columns=(DesiredColumn("order_id", String()),))
+    observed = _observed_table(columns=(ObservedColumn("order_id", String()),))
+
+    result = validate_diff(diff_table(desired, observed))
+
+    assert not any(f.rule_name == "ColumnSpellingMustMatchCatalog" for f in result.failures)
 
 
 # ---- streaming tables
