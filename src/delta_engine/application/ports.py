@@ -104,10 +104,10 @@ class ExecutionSummary:
     """
     The outcome of running a plan's compiled statements.
 
-    A frozen container over the phase's raw results that answers ``failed``
-    and exposes its ``failures``. It owns the single pass that separates
-    failed statements from successful ones, so callers read a property
-    instead of re-deriving the split with ``isinstance``.
+    A frozen container over the phase's raw results that owns the single pass
+    separating failed statements from successful ones, so callers read
+    ``failures`` instead of re-deriving the split with ``isinstance``. The
+    executor stops at the first failure, so ``failures`` holds at most one.
     """
 
     results: tuple[ExecutionResult, ...] = ()
@@ -121,24 +121,14 @@ class ExecutionSummary:
                 raise ValueError("Execution cannot continue after a failure")
 
     @property
-    def failed(self) -> bool:
-        """True when any statement failed."""
-        return any(isinstance(result, ExecutionFailure) for result in self.results)
-
-    @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
         """The failure detail from each failed statement, in execution order."""
         return tuple(result for result in self.results if isinstance(result, ExecutionFailure))
 
     @property
-    def failed_count(self) -> int:
-        """How many statements failed."""
-        return len(self.failures)
-
-    @property
     def applied_count(self) -> int:
         """How many statements ran successfully."""
-        return len(self.results) - self.failed_count
+        return len(self.results) - len(self.failures)
 
 
 class PlanExecutor(Protocol):

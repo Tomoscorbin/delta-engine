@@ -167,7 +167,7 @@ class _TableRun:
             or isinstance(self.planning, PlanningFailed)
             or bool(self.resolution.structural_failures)
             or isinstance(self.execution, ExecutionBlockedByDependency)
-            or (isinstance(self.execution, ExecutionSummary) and self.execution.failed)
+            or (isinstance(self.execution, ExecutionSummary) and bool(self.execution.failures))
         )
 
     def to_report(self) -> TableRunReport:
@@ -445,14 +445,14 @@ class Engine:
             summary = self._execute_statements(run.planned_sql_statements)
             run.execution = summary
 
-            if summary.failed:
+            if summary.failures:
                 failed_during_execution.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
                 run.qualified_name,
-                summary.failed_count,
+                len(summary.failures),
             )
 
     def _execute_statements(self, statements: tuple[str, ...]) -> ExecutionSummary:
