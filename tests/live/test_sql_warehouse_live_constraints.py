@@ -4,6 +4,11 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
+from delta_engine import (
+    SyncFailedError,
+    TableRunStatus,
+    ValidationFailure,
+)
 from delta_engine.databricks import build_sql_engine
 from delta_engine.schema import (
     Column,
@@ -242,27 +247,31 @@ def test_primary_key_drop_is_not_blocked_by_unique_backed_foreign_keys(
     )
 
 
-def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tables):
-    """A primary key declared lowercase compiles with the catalog's camelCase spelling."""
-    # The managed-constraint path is case-sensitive about physical column
-    # spelling, unlike ordinary ALTER COLUMN, so the key action uses the
-    # observed column name. Declared-lowercase against a live
-    # camelCase column is the production shape that surfaced this.
+def _camel_case_pk_declaration(table_name, column_name, key_column):
+    return DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=table_name,
+        columns=(Column(column_name, String(), nullable=False),),
+        primary_key=(key_column,),
+        scope="metadata",
+    )
 
-    # Given a camelCase catalog column declared lowercase
+
+def test_primary_key_on_a_camel_case_column_converges(live_connection, live_tables):
+    """A primary key declared with the catalog's exact camelCase spelling applies and settles."""
+    # The managed-constraint path is case-sensitive about physical column
+    # spelling, unlike ordinary ALTER COLUMN (pinned in
+    # test_sql_warehouse_live_platform_assumptions.py), so a camelCase column
+    # needs live proof that the key compiles and executes with that spelling.
+
+    # Given a camelCase catalog column declared with the same spelling
     table_name = live_tables("column_case_add_primary_key")
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
     )
-    declaration = DeltaTable(
-        catalog=live_catalog(),
-        schema=live_schema(),
-        name=table_name,
-        columns=(Column("requestid", String(), nullable=False),),
-        primary_key=("requestid",),
-        scope="metadata",
-    )
+    declaration = _camel_case_pk_declaration(table_name, "requestId", "requestId")
     engine = build_sql_engine(live_connection)
 
     # When syncing
@@ -282,12 +291,61 @@ def test_primary_key_uses_the_catalog_column_spelling(live_connection, live_tabl
     assert engine.sync(declaration).has_changes is False
 
 
-def test_foreign_key_uses_catalog_column_spelling_on_both_sides(live_connection, live_tables):
-    """An FK action uses the existing child and parent columns' exact spelling."""
-    # Given camelCase child and parent columns in the catalog, declared with
-    # scrambled casing throughout the model
-    parent_name = live_tables("column_case_fk_parent")
-    child_name = live_tables("column_case_fk_child")
+def test_primary_key_declared_in_the_wrong_case_is_rejected(live_connection, live_tables):
+    """Declaring a camelCase column lowercase is rejected without touching the catalog."""
+    # Exact spelling is a law, not a suppressible rule, and it holds at every
+    # scope: a metadata-scoped declaration still names the columns it keys, so
+    # a misspelled name is a defect in the declaration rather than unmanaged
+    # column-structure drift. This is the production shape — adding a key to a
+    # table someone else created, whose camelCase spelling is easy to get wrong.
+
+    # Given a camelCase catalog column declared lowercase
+    table_name = live_tables("column_case_wrong_case_pk")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} (`requestId` STRING NOT NULL) USING DELTA",
+    )
+    declaration = _camel_case_pk_declaration(table_name, "requestid", "requestid")
+    before = read_live_table(live_connection, table_name)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as error:
+        build_sql_engine(live_connection).sync(declaration)
+
+    # Then the rejection names the rule and both spellings, nothing was
+    # planned, and the live table is untouched
+    [table_report] = error.value.report.table_reports
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
+    [failure] = table_report.failures
+    assert isinstance(failure, ValidationFailure)
+    assert failure.rule_name == "ColumnSpellingMustMatchCatalog"
+    assert "'requestid'" in failure.message
+    assert "'requestId'" in failure.message
+    assert table_report.planned_sql_statements == ()
+    assert read_live_table(live_connection, table_name) == before
+
+
+def _camel_case_fk_pair(parent_name, child_name, *, parent_column, child_column):
+    parent = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=parent_name,
+        columns=(Column(parent_column, String(), nullable=False),),
+        primary_key=(parent_column,),
+        scope="metadata",
+    )
+    child = DeltaTable(
+        catalog=live_catalog(),
+        schema=live_schema(),
+        name=child_name,
+        columns=(Column(child_column, String()),),
+        foreign_keys=(ForeignKey(columns={child_column: parent_column}, references=parent),),
+        scope="metadata",
+    )
+    return parent, child
+
+
+def _create_camel_case_fk_tables(live_connection, parent_name, child_name):
     execute_sql(
         live_connection,
         f"CREATE TABLE {qualified_table(parent_name)} "
@@ -298,26 +356,17 @@ def test_foreign_key_uses_catalog_column_spelling_on_both_sides(live_connection,
         live_connection,
         f"CREATE TABLE {qualified_table(child_name)} (`orderRef` STRING) USING DELTA",
     )
-    parent = DeltaTable(
-        catalog=live_catalog(),
-        schema=live_schema(),
-        name=parent_name,
-        columns=(Column("orderid", String(), nullable=False),),
-        primary_key=("ORDERID",),
-        scope="metadata",
-    )
-    child = DeltaTable(
-        catalog=live_catalog(),
-        schema=live_schema(),
-        name=child_name,
-        columns=(Column("orderref", String()),),
-        foreign_keys=(
-            ForeignKey(
-                columns={"ORDERREF": "ORDERID"},
-                references=parent,
-            ),
-        ),
-        scope="metadata",
+
+
+def test_foreign_key_on_camel_case_columns_converges(live_connection, live_tables):
+    """An FK across camelCase columns applies and settles when both sides are spelled exactly."""
+    # Given camelCase child and parent columns in the catalog, declared with
+    # the same spelling on both sides
+    parent_name = live_tables("column_case_fk_parent")
+    child_name = live_tables("column_case_fk_child")
+    _create_camel_case_fk_tables(live_connection, parent_name, child_name)
+    parent, child = _camel_case_fk_pair(
+        parent_name, child_name, parent_column="orderId", child_column="orderRef"
     )
     engine = build_sql_engine(live_connection)
 
@@ -336,3 +385,40 @@ def test_foreign_key_uses_catalog_column_spelling_on_both_sides(live_connection,
         (f"{child_name}_orderref_fk", "orderRef", parent_name, "orderId"),
     )
     assert engine.sync(child, parent).has_changes is False
+
+
+def test_foreign_key_declared_in_the_wrong_case_is_rejected(live_connection, live_tables):
+    """Scrambled casing on either side of an FK is rejected without touching the catalog."""
+    # Both tables are judged independently, so both name their own misspelling;
+    # neither reaches execution, so neither constraint is created.
+
+    # Given camelCase child and parent columns declared with scrambled casing
+    parent_name = live_tables("column_case_wrong_case_fk_parent")
+    child_name = live_tables("column_case_wrong_case_fk_child")
+    _create_camel_case_fk_tables(live_connection, parent_name, child_name)
+    parent, child = _camel_case_fk_pair(
+        parent_name, child_name, parent_column="orderid", child_column="orderref"
+    )
+    parent_before = read_live_table(live_connection, parent_name)
+    child_before = read_live_table(live_connection, child_name)
+
+    # When syncing both tables
+    with pytest.raises(SyncFailedError) as error:
+        build_sql_engine(live_connection).sync(child, parent)
+
+    # Then each table names its own spelling defect and no DDL ran
+    reports = {str(report.qualified_name): report for report in error.value.report.table_reports}
+    for name, declared, observed in (
+        (parent_name, "orderid", "orderId"),
+        (child_name, "orderref", "orderRef"),
+    ):
+        table_report = reports[f"{live_catalog()}.{live_schema()}.{name}"]
+        assert table_report.status is TableRunStatus.PLANNING_FAILED
+        [failure] = table_report.failures
+        assert isinstance(failure, ValidationFailure)
+        assert failure.rule_name == "ColumnSpellingMustMatchCatalog"
+        assert f"'{declared}'" in failure.message
+        assert f"'{observed}'" in failure.message
+        assert table_report.planned_sql_statements == ()
+    assert read_live_table(live_connection, parent_name) == parent_before
+    assert read_live_table(live_connection, child_name) == child_before
