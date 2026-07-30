@@ -901,7 +901,7 @@ def test_unmanaged_foreign_keys_create_no_edges():
     resolutions = resolve((table,))
 
     # Then no dependency edge exists and nothing failed structurally; the FK
-    # difference itself is the differ's to state and the scope gate's to judge
+    # difference itself is the differ's to state and validation's to judge
     (resolution,) = resolutions
     assert resolution.structural_failures == ()
     assert resolution.dependencies == ()

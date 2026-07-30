@@ -90,7 +90,7 @@ class TableDrift:
     operation that closes its gap. ``unresolvable`` are differences no action
     can close; they exist to be judged by validation. Both state every
     difference regardless of scope; deciding which the declaration is
-    allowed to make is validation's scope gate, not the diff's concern.
+    allowed to make is validation's eligibility check, not the diff's concern.
     ``desired`` and ``observed`` are the two endpoints the differences
     separate, carried as judging context: the declaration's side (managed
     aspects, declared properties) and the catalog's side (observed facts such

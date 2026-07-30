@@ -347,7 +347,7 @@ def test_partitioning_changed_rejects_no_difference():
 
 
 def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
-    # The streaming-table scope gate admits only the tag aspects, so the
+    # The streaming-table eligibility check admits only the tag aspects, so the
     # actions carrying them are the complete set of statements the engine can
     # aim at a streaming table. Growing this set is a policy decision, not a
     # side effect: an action added with a tag aspect flows to streaming

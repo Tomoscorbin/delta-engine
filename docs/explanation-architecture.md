@@ -495,17 +495,18 @@ properties diff runs only when the declaration manages `PROPERTIES` (see
 Diff-first planning). The `TableDrift` it produces carries the `desired`
 table itself (symmetric with `TableMissing`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in
-validation, as a gate rather than an optional rule. Before any safety rule
-runs, `validate_diff` fails the sync once per unmanaged aspect that has
-drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
+validation, as an eligibility check rather than an optional rule. Before any
+safety rule runs, `validate_diff` fails the sync once per unmanaged aspect that
+has drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
 difference produces exactly the scope failure rather than also tripping
 safety rules for differences the user never requested. Column spelling is
-gated alongside it (`ColumnSpellingMustMatchCatalog`) and reported first: a
+checked alongside it (`ColumnSpellingMustMatchCatalog`) and reported first: a
 misspelled reference is a defect in the declaration rather than drift in an
 aspect, so it is judged at every scope, and a diff whose column references
-disagree with the catalog is not worth safety judgement yet. Because the gate
-runs first, the safety rules only ever see a fully in-scope diff and read
-`drift.actions` and `drift.unresolvable` directly. If planning succeeds, every
+disagree with the catalog is not worth safety judgement yet. Because the
+eligibility checks run first, the safety rules only ever see a diff that is
+fully in scope and correctly spelled, and read `drift.actions` and
+`drift.unresolvable` directly. If planning succeeds, every
 difference belongs to a managed aspect and the plan holds executable actions
 only.
 
@@ -542,9 +543,9 @@ removals produce `UnsetTableTag`, and foreign-key additions produce
 `SetForeignKey`. Unsupported or ambiguous states use one of the three
 unresolvable difference types, which the current default policy rejects.
 
-`validate_diff` is where policy lives. `MANDATORY_SCOPE_GATES` lists the scope
-checks that always run, and `DEFAULT_SAFETY_RULES` lists the configurable
-safety checks that run only after those gates pass. A missing table passes when
+`validate_diff` is where policy lives. `ELIGIBILITY_CHECKS` lists the laws that
+always run, and `DEFAULT_SAFETY_RULES` lists the configurable
+safety checks that run only after those pass. A missing table passes when
 the declaration manages table existence because creating it from the full
 declaration is safe. An eligible drift is evaluated by every default safety rule.
 The authoritative list and resolution for every current rule lives in
@@ -641,9 +642,9 @@ pointing into it — whatever phase failed each of those tables, be it a read
 failure, validation failure, structural FK failure, or an execution failure in
 the same run.
 
-Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
+Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`
@@ -861,7 +862,7 @@ dependency cost.
   against the registered parent's declaration at resolve
   (`REFERENCED_COLUMN_CASE_MISMATCH`). Both catalog-facing checks are laws in
   the same sense: the resolver verdict is structural, and the validation one is
-  a mandatory gate rather than a suppressible safety rule, so neither depends on
+  an eligibility check rather than a suppressible safety rule, so neither depends on
   the declaration's scope or on the rule set in force. Nothing rewrites a spelling: emitted
   SQL renders declarations verbatim, correct because validation has already
   required agreement. Matching stays case-insensitive — `Identifier`

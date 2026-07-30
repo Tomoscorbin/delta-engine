@@ -524,7 +524,7 @@ def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
     assert [type(action) for action in result.plan.actions] == [DropForeignKey, DropPrimaryKey]
 
 
-def test_foreign_key_drift_on_an_unmanaged_aspect_fails_the_scope_gate():
+def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
     # Given a declaration that does not manage foreign keys but declares one
     fk = _foreign_key(
         local_columns=("customer_id",),
@@ -546,7 +546,7 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_the_scope_gate():
     # When planning
     result = plan_diff(diff)
 
-    # Then the scope gate rejects the unmanaged work
+    # Then the eligibility check rejects the unmanaged work
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
 

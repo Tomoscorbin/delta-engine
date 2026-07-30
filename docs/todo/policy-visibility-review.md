@@ -15,7 +15,7 @@ reader can quickly find where policy decisions are made.
 The code already has several good policy homes:
 
 - `ActionPhase` is the visible owner of action precedence.
-- `MANDATORY_SCOPE_GATES` and `DEFAULT_SAFETY_RULES` together expose the
+- `ELIGIBILITY_CHECKS` and `DEFAULT_SAFETY_RULES` together expose the
   complete validation policy.
 - `Engine` owns run ordering, dependency blocking, and failure propagation.
 - `diff.py` owns desired/observed comparison semantics.
@@ -61,14 +61,14 @@ not property-policy ownership.
 Validation composition is now explicit in `application/validation.py` through
 two adjacent values:
 
-- `MANDATORY_SCOPE_GATES` lists the scope checks that always run; and
+- `ELIGIBILITY_CHECKS` lists the laws that always run; and
 - `DEFAULT_SAFETY_RULES` lists the safety rules callers may replace at the
   lower-level validation boundary.
 
-Every scope gate implements `ScopeGate` over the complete `TableDiff` union,
+Every check implements `EligibilityCheck` over the complete `TableDiff` union,
 returning no failures for an irrelevant diff arm. `validate_diff` evaluates
-all mandatory gates in declaration order and returns their accumulated
-failures before any safety rule runs. Once the gates pass, a `TableMissing`
+all eligibility checks in declaration order and returns their accumulated
+failures before any safety rule runs. Once they pass, a `TableMissing`
 needs no further judgement, while a `TableDrift` is evaluated by every
 configured `SafetyRule`. The adjacent tuples therefore show every validation
 mechanism and its deterministic evaluation order in one short block.
