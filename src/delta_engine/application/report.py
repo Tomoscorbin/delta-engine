@@ -6,7 +6,7 @@ engine run; `SyncReport` aggregates those table snapshots.
 """
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
@@ -121,6 +121,9 @@ class TableRunReport:
     planned no-op retains an empty, target-bearing plan.
     ``planned_sql_statements`` is populated on dry and real runs so planned
     changes remain inspectable even when execution is skipped or blocked.
+    ``blocked_failures`` is the derived consequence of other tables' fates,
+    baked in at assembly — a blocked table records no execution outcome of its
+    own.
     """
 
     read: ReadResult
@@ -128,6 +131,7 @@ class TableRunReport:
     planned_sql_statements: tuple[str, ...]
     resolution: TableResolution
     execution_outcome: ExecutionOutcome | None
+    blocked_failures: tuple[ForeignKeyFailure, ...] = ()
 
     def __post_init__(self) -> None:
         read_failed = isinstance(self.read, ReadFailure)
@@ -150,6 +154,14 @@ class TableRunReport:
             raise ValueError("Execution cannot follow a failed earlier phase")
         if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and resolution_failed:
             raise ValueError("Execution blocking requires a structurally sound resolution")
+        if self.blocked_failures:
+            if self.execution_outcome is not None:
+                raise ValueError("A blocked table records no execution outcome")
+            if any(
+                failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+                for failure in self.blocked_failures
+            ):
+                raise ValueError("Blocked failures must carry the dependency-blocking reason")
 
         execution = self.execution
         if execution is not None:
@@ -184,7 +196,9 @@ class TableRunReport:
         """
         Flatten canonical phase outcomes for callers.
 
-        Lifecycle order: structural, read, planning, execution.
+        Lifecycle order: structural, read, planning, execution — derived
+        blocking sits at the execution position, where the run it replaced
+        would have been.
         """
         failures: list[Failure] = []
 
@@ -203,6 +217,7 @@ class TableRunReport:
                 pass
             case _ as unreachable:
                 assert_never(unreachable)
+        failures.extend(self.blocked_failures)
 
         return tuple(failures)
 
@@ -267,6 +282,43 @@ class SyncReport:
     ended_at: datetime
     table_reports: tuple[TableRunReport, ...]
     dry_run: bool = False
+
+    @classmethod
+    def assemble(
+        cls,
+        *,
+        started_at: datetime,
+        ended_at: datetime,
+        table_reports: tuple[TableRunReport, ...],
+        dry_run: bool,
+    ) -> "SyncReport":
+        """
+        Assemble the run report, deriving dependency blocking from the graph.
+
+        Folds the blocking rule over the reports in dependency order: a table
+        that did not converge — own failures, or a dependency that did not —
+        marks its name, and a sound table its resolution reports as blocked is
+        replaced by a copy carrying those failures. The run recorded nothing
+        about blocking; this projection is where the consequence becomes
+        visible, dry and real runs alike.
+        """
+        not_converged: set[QualifiedName] = set()
+        derived: list[TableRunReport] = []
+        for report in table_reports:
+            if report.has_failures:
+                not_converged.add(report.qualified_name)
+                derived.append(report)
+                continue
+            blocking = report.resolution.blocked_by(not_converged)
+            if blocking:
+                not_converged.add(report.qualified_name)
+            derived.append(replace(report, blocked_failures=blocking) if blocking else report)
+        return cls(
+            started_at=started_at,
+            ended_at=ended_at,
+            table_reports=tuple(derived),
+            dry_run=dry_run,
+        )
 
     @property
     def has_failures(self) -> bool:
