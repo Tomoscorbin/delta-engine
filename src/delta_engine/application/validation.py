@@ -642,6 +642,10 @@ class StreamingTableTagsOnly:
                 )
 
 
+# Position is report order, so a root defect leads what it causes: spelling
+# before the two it can co-fire with, then StreamingTableTagsOnly before
+# UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
+# TableMissing, so it never co-fires.
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     MissingTableUnmanaged(),
