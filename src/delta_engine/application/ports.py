@@ -104,11 +104,10 @@ class ExecutionSummary:
     """
     The outcome of running a plan's compiled statements.
 
-    Mirrors :class:`ValidationResult`: a frozen container over the phase's raw
-    results that answers ``failed`` and exposes its ``failures``. It owns the
-    single pass that separates failed statements from successful ones, so
-    callers read a property instead of re-deriving the split with
-    ``isinstance``.
+    A frozen container over the phase's raw results that answers ``failed``
+    and exposes its ``failures``. It owns the single pass that separates
+    failed statements from successful ones, so callers read a property
+    instead of re-deriving the split with ``isinstance``.
     """
 
     results: tuple[ExecutionResult, ...] = ()
