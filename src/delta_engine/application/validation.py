@@ -74,18 +74,6 @@ _DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingP
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ValidationResult:
-    """Outcome of diff validation."""
-
-    failures: tuple[ValidationFailure, ...] = ()
-
-    @property
-    def failed(self) -> bool:
-        """True when any validation failures are present."""
-        return bool(self.failures)
-
-
 class ScopeGate(Protocol):
     """
     Mandatory check over any diff.
@@ -640,9 +628,9 @@ DEFAULT_SAFETY_RULES: Final[tuple[SafetyRule, ...]] = (
 def validate_diff(
     diff: TableDiff,
     rules: tuple[SafetyRule, ...] = DEFAULT_SAFETY_RULES,
-) -> ValidationResult:
+) -> tuple[ValidationFailure, ...]:
     """
-    Evaluate a table diff and return the verdict.
+    Evaluate a table diff and return its failures, empty when it is valid.
 
     Scope is a gate, checked before any safety rule. An out-of-scope
     difference — a drifted aspect the declaration does not manage, a missing
@@ -662,14 +650,12 @@ def validate_diff(
     )
 
     if gate_failures:
-        return ValidationResult(failures=gate_failures)
+        return gate_failures
 
     match diff:
         case TableMissing():
-            return ValidationResult()
+            return ()
         case TableDrift() as drift:
-            return ValidationResult(
-                failures=tuple(failure for rule in rules for failure in rule.evaluate(drift))
-            )
+            return tuple(failure for rule in rules for failure in rule.evaluate(drift))
         case _ as unreachable:
             assert_never(unreachable)

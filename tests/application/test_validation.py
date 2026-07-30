@@ -4,7 +4,6 @@ from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
     MANDATORY_SCOPE_GATES,
-    ValidationResult,
     validate_diff,
 )
 from delta_engine.domain.model import (
@@ -118,7 +117,7 @@ def _validate(
     observed: ObservedTable | None,
     *,
     rules=DEFAULT_SAFETY_RULES,
-) -> ValidationResult:
+) -> tuple[ValidationFailure, ...]:
     return validate_diff(diff_table(desired, observed), rules=rules)
 
 
@@ -128,19 +127,6 @@ def _type_drift(column_name: str = "id") -> AlterColumnType:
         desired_type=Long(),
         observed_type=Integer(),
     )
-
-
-# ---- ValidationResult
-
-
-def test_validation_result_failed_property():
-    # Given a result with one failure and a result with no failures
-    failing = ValidationResult(failures=(ValidationFailure(rule_name="X", message="broken"),))
-    passing = ValidationResult()
-
-    # Then failed reflects whether any failures are present
-    assert failing.failed is True
-    assert passing.failed is False
 
 
 # ---- validation composition
@@ -187,11 +173,10 @@ def test_validate_diff_uses_default_rules_when_rules_are_not_supplied():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating without explicit rules
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then the default rules are applied
-    assert result.failed is True
-    assert result.failures[0].rule_name == "NonNullableColumnAdd"
+    assert failures[0].rule_name == "NonNullableColumnAdd"
 
 
 def test_validate_diff_allows_safety_rules_to_be_suppressed():
@@ -205,10 +190,10 @@ def test_validate_diff_allows_safety_rules_to_be_suppressed():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating with no safety rules
-    result = _validate(desired, observed, rules=())
+    failures = _validate(desired, observed, rules=())
 
     # Then safety-rule failures are suppressed
-    assert result.failed is False
+    assert not failures
 
 
 def test_validate_diff_applies_supplied_rules_to_drift():
@@ -225,11 +210,10 @@ def test_validate_diff_applies_supplied_rules_to_drift():
             )
 
     # When validating a harmless drift with that rule
-    result = validate_diff(_drift(), rules=(AlwaysFail(),))
+    failures = validate_diff(_drift(), rules=(AlwaysFail(),))
 
     # Then the custom rule contributes its failure
-    assert result.failed is True
-    assert result.failures == (
+    assert failures == (
         ValidationFailure(rule_name="AlwaysFail", message="checked dev.silver.test"),
     )
 
@@ -248,20 +232,18 @@ def test_validation_passes_when_no_rule_is_broken():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then validation passes
-    assert result.failed is False
-    assert result.failures == ()
+    assert not failures
 
 
 def test_empty_drift_produces_no_failures():
     # Given an empty drift
-    result = validate_diff(_drift())
+    failures = validate_diff(_drift())
 
     # Then validation passes
-    assert result.failed is False
-    assert result.failures == ()
+    assert not failures
 
 
 # ---- missing table validation
@@ -275,7 +257,7 @@ def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_
     )
 
     # Then creating the table is safe
-    assert validate_diff(diff_table(desired, None)).failed is False
+    assert not validate_diff(diff_table(desired, None))
 
 
 def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
@@ -285,12 +267,11 @@ def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
     )
 
     # When validating
-    result = validate_diff(diff_table(desired, None))
+    failures = validate_diff(diff_table(desired, None))
 
     # Then the missing table cannot be created
-    assert result.failed is True
-    assert result.failures[0].rule_name == "MissingTableUnmanaged"
-    assert "does not exist" in result.failures[0].message
+    assert failures[0].rule_name == "MissingTableUnmanaged"
+    assert "does not exist" in failures[0].message
 
 
 def test_validate_diff_passes_table_missing_when_table_existence_managed():
@@ -298,11 +279,10 @@ def test_validate_diff_passes_table_missing_when_table_existence_managed():
     desired = _desired_table(managed_aspects=ALL_ASPECTS)
 
     # When validating
-    result = validate_diff(diff_table(desired, None))
+    failures = validate_diff(diff_table(desired, None))
 
     # Then creation is allowed
-    assert result.failed is False
-    assert result.failures == ()
+    assert not failures
 
 
 def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
@@ -312,11 +292,10 @@ def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
     )
 
     # When validating with no safety rules
-    result = validate_diff(diff_table(desired, None), rules=())
+    failures = validate_diff(diff_table(desired, None), rules=())
 
     # Then the scope invariant still fails
-    assert result.failed is True
-    assert result.failures[0].rule_name == "MissingTableUnmanaged"
+    assert failures[0].rule_name == "MissingTableUnmanaged"
 
 
 # ---- non-nullable column additions
@@ -334,16 +313,15 @@ def test_rejects_adding_non_nullable_columns_to_existing_table():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then each unsafe column addition is reported
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == [
+    assert [failure.rule_name for failure in failures] == [
         "NonNullableColumnAdd",
         "NonNullableColumnAdd",
     ]
-    assert "a" in result.failures[0].message
-    assert "b" in result.failures[1].message
+    assert "a" in failures[0].message
+    assert "b" in failures[1].message
 
 
 def test_allows_adding_nullable_column_to_existing_table():
@@ -357,7 +335,7 @@ def test_allows_adding_nullable_column_to_existing_table():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # Then validation passes
-    assert _validate(desired, observed).failed is False
+    assert not _validate(desired, observed)
 
 
 # ---- nullability changes
@@ -379,16 +357,15 @@ def test_rejects_tightening_existing_columns_to_not_null():
     )
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then each tightening is rejected
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == [
+    assert [failure.rule_name for failure in failures] == [
         "NullabilityTighteningOnExistingColumn",
         "NullabilityTighteningOnExistingColumn",
     ]
-    assert "id" in result.failures[0].message
-    assert "email" in result.failures[1].message
+    assert "id" in failures[0].message
+    assert "email" in failures[1].message
 
 
 def test_allows_loosening_existing_column_to_nullable():
@@ -397,7 +374,7 @@ def test_allows_loosening_existing_column_to_nullable():
     observed = _observed_table(columns=(DesiredColumn("id", Integer(), nullable=False),))
 
     # Then validation passes
-    assert _validate(desired, observed).failed is False
+    assert not _validate(desired, observed)
 
 
 # ---- unsupported structural changes
@@ -409,14 +386,13 @@ def test_rejects_widening_type_change_without_type_widening_declared():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then the widen is rejected pending the enabling property
-    assert result.failed is True
-    assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
-    assert "id" in result.failures[0].message
-    assert "delta.enableTypeWidening" in result.failures[0].message
+    assert len(failures) == 1
+    assert failures[0].rule_name == "TypeWideningRequiredForTypeChange"
+    assert "id" in failures[0].message
+    assert "delta.enableTypeWidening" in failures[0].message
 
 
 def test_widening_type_change_passes_with_type_widening_declared():
@@ -428,10 +404,10 @@ def test_widening_type_change_passes_with_type_widening_declared():
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
     # When validating
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then the widen is permitted (SET_PROPERTY phases before ALTER_COLUMN_TYPE)
-    assert result.failed is False
+    assert not failures
 
 
 def test_rejects_non_widening_type_change_even_with_type_widening_declared():
@@ -442,11 +418,10 @@ def test_rejects_non_widening_type_change_even_with_type_widening_declared():
     )
     observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
 
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
-    assert result.failed is True
-    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
-    assert "recreate the table" in result.failures[0].message
+    assert failures[0].rule_name == "NonWideningColumnTypeChange"
+    assert "recreate the table" in failures[0].message
 
 
 def test_rejects_narrowing_type_change():
@@ -457,13 +432,14 @@ def test_rejects_narrowing_type_change():
     )
     observed = _observed_table(columns=(DesiredColumn("id", Long()),))
 
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
-    assert result.failed is True
-    assert result.failures[0].rule_name == "NonWideningColumnTypeChange"
+    assert failures[0].rule_name == "NonWideningColumnTypeChange"
 
 
-def _widening_result(desired_type: DataType, observed_type: DataType) -> ValidationResult:
+def _widening_failures(
+    desired_type: DataType, observed_type: DataType
+) -> tuple[ValidationFailure, ...]:
     """Validate a single-column type change with type widening declared."""
     desired = _desired_table(
         columns=(DesiredColumn("c", desired_type),),
@@ -475,46 +451,44 @@ def _widening_result(desired_type: DataType, observed_type: DataType) -> Validat
 
 def test_decimal_widening_keeps_integer_digits_and_never_shrinks_scale():
     # Then precision growth at unchanged scale passes
-    assert _widening_result(Decimal(12, 2), Decimal(10, 2)).failed is False
+    assert not _widening_failures(Decimal(12, 2), Decimal(10, 2))
     # And scale growth passes when precision grows with it (integer digits kept)
-    assert _widening_result(Decimal(12, 3), Decimal(10, 1)).failed is False
+    assert not _widening_failures(Decimal(12, 3), Decimal(10, 1))
     # And scale growth that eats into integer digits is blocked
-    assert _widening_result(Decimal(10, 3), Decimal(10, 2)).failures[0].rule_name == (
+    assert _widening_failures(Decimal(10, 3), Decimal(10, 2))[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
     # And a precision shrink is blocked
-    assert _widening_result(Decimal(8, 2), Decimal(10, 2)).failures[0].rule_name == (
+    assert _widening_failures(Decimal(8, 2), Decimal(10, 2))[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
     # And a scale shrink is blocked even though integer digits grow
-    assert _widening_result(Decimal(12, 1), Decimal(10, 2)).failures[0].rule_name == (
+    assert _widening_failures(Decimal(12, 1), Decimal(10, 2))[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
 
 
 def test_integer_to_decimal_widening_requires_enough_integer_digits():
     # Given Databricks' minimums: DECIMAL(10,0) for Byte/Short/Integer, DECIMAL(20,0) for Long
-    assert _widening_result(Decimal(10, 0), Integer()).failed is False
-    assert _widening_result(Decimal(12, 2), Byte()).failed is False
-    assert _widening_result(Decimal(20, 0), Long()).failed is False
+    assert not _widening_failures(Decimal(10, 0), Integer())
+    assert not _widening_failures(Decimal(12, 2), Byte())
+    assert not _widening_failures(Decimal(20, 0), Long())
 
     # Then a decimal without room for every source value is blocked
-    assert _widening_result(Decimal(9, 0), Integer()).failures[0].rule_name == (
+    assert _widening_failures(Decimal(9, 0), Integer())[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
-    assert _widening_result(Decimal(11, 2), Short()).failures[0].rule_name == (
+    assert _widening_failures(Decimal(11, 2), Short())[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
-    assert _widening_result(Decimal(19, 0), Long()).failures[0].rule_name == (
+    assert _widening_failures(Decimal(19, 0), Long())[0].rule_name == (
         "NonWideningColumnTypeChange"
     )
 
 
 def test_long_cannot_widen_to_double():
     # Given Long → Double — absent from the Delta matrix (Double cannot hold every Long)
-    assert _widening_result(Double(), Long()).failures[0].rule_name == (
-        "NonWideningColumnTypeChange"
-    )
+    assert _widening_failures(Double(), Long())[0].rule_name == "NonWideningColumnTypeChange"
 
 
 def test_every_widening_matrix_entry_is_permitted():
@@ -533,7 +507,7 @@ def test_every_widening_matrix_entry_is_permitted():
         (TimestampNtz(), Date()),
     )
     for desired_type, observed_type in cases:
-        assert _widening_result(desired_type, observed_type).failed is False, (
+        assert not _widening_failures(desired_type, observed_type), (
             observed_type,
             desired_type,
         )
@@ -547,12 +521,11 @@ def test_rejects_partitioning_change():
     observed = _observed_table(columns=columns)
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then the partitioning change is rejected
-    assert result.failed is True
-    assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "PartitioningChangeNotSupported"
+    assert len(failures) == 1
+    assert failures[0].rule_name == "PartitioningChangeNotSupported"
 
 
 def test_allows_clustering_change():
@@ -564,10 +537,10 @@ def test_allows_clustering_change():
     observed = _observed_table(columns=columns)
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then it passes — clustering is an allowed in-place change
-    assert result.failed is False
+    assert not failures
 
 
 def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
@@ -578,11 +551,10 @@ def test_validate_diff_collects_both_unsupported_drift_and_rule_failures():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then both failures are returned in one pass
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == [
+    assert [failure.rule_name for failure in failures] == [
         "NonNullableColumnAdd",
         "TypeWideningRequiredForTypeChange",
     ]
@@ -599,12 +571,12 @@ def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then one failure names the unmanaged aspect
-    assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
-    assert "column structure" in result.failures[0].message.lower()
+    assert len(failures) == 1
+    assert failures[0].rule_name == "UnmanagedAspectDrift"
+    assert "column structure" in failures[0].message.lower()
 
 
 def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspect():
@@ -617,12 +589,12 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then one failure is produced per aspect, not per change
-    assert len(result.failures) == 2
-    assert "column structure" in result.failures[0].message.lower()
-    assert "table comment" in result.failures[1].message.lower()
+    assert len(failures) == 2
+    assert "column structure" in failures[0].message.lower()
+    assert "table comment" in failures[1].message.lower()
 
 
 def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
@@ -633,11 +605,10 @@ def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
     )
 
     # When validating
-    result = validate_diff(diff, rules=())
+    failures = validate_diff(diff, rules=())
 
     # Then the scope invariant still fires
-    assert result.failed is True
-    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+    assert failures[0].rule_name == "UnmanagedAspectDrift"
 
 
 def test_unmanaged_drift_does_not_also_trip_safety_rules():
@@ -648,11 +619,11 @@ def test_unmanaged_drift_does_not_also_trip_safety_rules():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the single failure is the scope violation, not the type-change rule
-    assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+    assert len(failures) == 1
+    assert failures[0].rule_name == "UnmanagedAspectDrift"
 
 
 def test_managed_drift_still_trips_safety_rules():
@@ -660,11 +631,11 @@ def test_managed_drift_still_trips_safety_rules():
     diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS)
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the safety rule fires
-    assert len(result.failures) == 1
-    assert result.failures[0].rule_name == "TypeWideningRequiredForTypeChange"
+    assert len(failures) == 1
+    assert failures[0].rule_name == "TypeWideningRequiredForTypeChange"
 
 
 def test_out_of_scope_drift_short_circuits_safety_rules():
@@ -677,10 +648,10 @@ def test_out_of_scope_drift_short_circuits_safety_rules():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the scope violation is reported alone; the safety rule never runs
-    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
 
 
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
@@ -691,7 +662,7 @@ def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
     )
 
     # Then validation passes
-    assert validate_diff(diff).failed is False
+    assert not validate_diff(diff)
 
 
 def test_drift_passes_when_all_aspects_managed():
@@ -699,7 +670,7 @@ def test_drift_passes_when_all_aspects_managed():
     diff = _drift(AddColumn(DesiredColumn("extra", Integer())), managed_aspects=ALL_ASPECTS)
 
     # Then validation passes
-    assert validate_diff(diff).failed is False
+    assert not validate_diff(diff)
 
 
 def test_unmanaged_column_drop_does_not_require_column_mapping():
@@ -710,11 +681,10 @@ def test_unmanaged_column_drop_does_not_require_column_mapping():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then validation reports only the scope failure, not the drop precondition
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
 
 
 def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
@@ -732,10 +702,10 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
     )
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then both tag aspects are managed, so the drift is allowed
-    assert result.failed is False
+    assert not failures
 
 
 def test_tag_only_scope_fails_when_table_comment_drifts():
@@ -746,12 +716,11 @@ def test_tag_only_scope_fails_when_table_comment_drifts():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then table comments are outside this declaration's responsibility
-    assert result.failed is True
-    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
-    assert "table comment" in result.failures[0].message
+    assert failures[0].rule_name == "UnmanagedAspectDrift"
+    assert "table comment" in failures[0].message
 
 
 def test_tag_only_scope_fails_when_column_comment_drifts():
@@ -763,11 +732,10 @@ def test_tag_only_scope_fails_when_column_comment_drifts():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then managed tag drift does not hide unmanaged comment drift
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
 
 
 def test_tag_only_scope_fails_when_column_structure_drifts():
@@ -781,11 +749,10 @@ def test_tag_only_scope_fails_when_column_structure_drifts():
     )
 
     # When validating the diff
-    result = _validate(desired, observed)
+    failures = _validate(desired, observed)
 
     # Then unmanaged column-structure drift fails before any tag SQL runs
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
 
 
 # ---- property transition rules
@@ -793,72 +760,70 @@ def test_tag_only_scope_fails_when_column_structure_drifts():
 
 def test_blocks_column_mapping_downgrade():
     # Given a declaration downgrading column mapping from name to none
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.columnMapping.mode": "none"}),
         _observed_table(properties={"delta.columnMapping.mode": "name"}),
     )
 
     # Then validation rejects the transition
-    assert result.failed is True
-    assert result.failures[0].rule_name == "PropertyTransitionNotSupported"
-    assert "delta.columnMapping.mode" in result.failures[0].message
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "delta.columnMapping.mode" in failures[0].message
 
 
 def test_allows_column_mapping_upgrade():
     # Given the permitted transition from none to name
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.columnMapping.mode": "name"}),
         _observed_table(properties={"delta.columnMapping.mode": "none"}),
     )
 
     # Then validation passes
-    assert result.failed is False
+    assert not failures
 
 
 def test_allows_first_write_of_restricted_key():
     # Given the restricted key is absent from the catalog
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.columnMapping.mode": "name"}),
         _observed_table(properties={}),
     )
 
     # Then validation passes
-    assert result.failed is False
+    assert not failures
 
 
 def test_ignores_value_changes_on_unrestricted_keys():
     # Given a value change on a property with no restricted transitions
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.enableChangeDataFeed": "false"}),
         _observed_table(properties={"delta.enableChangeDataFeed": "true"}),
     )
 
     # Then validation passes
-    assert result.failed is False
+    assert not failures
 
 
 def test_blocks_none_declaration_on_removal_forbidden_key():
     # Given a declaration trying to remove columnMapping.mode
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.columnMapping.mode": None}),
         _observed_table(properties={"delta.columnMapping.mode": "name"}),
     )
 
     # Then validation rejects the removal
-    assert result.failed is True
-    assert result.failures[0].rule_name == "PropertyTransitionNotSupported"
-    assert "cannot be removed" in result.failures[0].message
+    assert failures[0].rule_name == "PropertyTransitionNotSupported"
+    assert "cannot be removed" in failures[0].message
 
 
 def test_allows_none_declaration_on_unrestricted_key():
     # Given an absence assertion on an unrestricted key
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={"delta.logRetentionDuration": None}),
         _observed_table(properties={"delta.logRetentionDuration": "interval 30 days"}),
     )
 
     # Then validation passes
-    assert result.failed is False
+    assert not failures
 
 
 # ---- undeclared property rules
@@ -866,29 +831,27 @@ def test_allows_none_declaration_on_unrestricted_key():
 
 def test_fails_undeclared_unrestricted_property_and_suggests_none():
     # Given an observed managed property missing from the declaration
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={}),
         _observed_table(properties={"delta.enableChangeDataFeed": "true"}),
     )
 
     # Then validation tells the user to declare it or declare None
-    assert result.failed is True
-    assert result.failures[0].rule_name == "PropertyMustBeDeclared"
-    assert "None" in result.failures[0].message
+    assert failures[0].rule_name == "PropertyMustBeDeclared"
+    assert "None" in failures[0].message
 
 
 def test_fails_undeclared_removal_forbidden_property_without_suggesting_none():
     # Given columnMapping.mode is observed but missing from the declaration
-    result = _validate(
+    failures = _validate(
         _desired_table(properties={}),
         _observed_table(properties={"delta.columnMapping.mode": "name"}),
     )
 
     # Then validation fails without suggesting an impossible None declaration
-    assert result.failed is True
-    assert result.failures[0].rule_name == "PropertyMustBeDeclared"
-    assert "cannot be unset" in result.failures[0].message
-    assert "None" not in result.failures[0].message
+    assert failures[0].rule_name == "PropertyMustBeDeclared"
+    assert "cannot be unset" in failures[0].message
+    assert "None" not in failures[0].message
 
 
 # ---- column-drop precondition
@@ -899,13 +862,13 @@ def test_drop_without_column_mapping_fails_before_execution():
     diff = _drift(DropColumn(ObservedColumn("stale", Integer())))
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the drop precondition fails
     assert any(
         failure.rule_name == "ColumnMappingRequiredForDrop"
         and "delta.columnMapping.mode" in failure.message
-        for failure in result.failures
+        for failure in failures
     )
 
 
@@ -915,7 +878,7 @@ def test_drop_with_declared_column_mapping_passes():
     diff = _drift(DropColumn(ObservedColumn("stale", Integer())), desired=desired)
 
     # Then the column drop precondition passes
-    assert validate_diff(diff).failed is False
+    assert not validate_diff(diff)
 
 
 def test_multiple_column_drops_produce_one_column_mapping_failure():
@@ -926,10 +889,10 @@ def test_multiple_column_drops_produce_one_column_mapping_failure():
     )
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the precondition is reported once for the table
-    assert [failure.rule_name for failure in result.failures] == ["ColumnMappingRequiredForDrop"]
+    assert [failure.rule_name for failure in failures] == ["ColumnMappingRequiredForDrop"]
 
 
 # ---- primary key referenced by foreign keys
@@ -943,25 +906,24 @@ def test_primary_key_drop_blocked_while_foreign_keys_reference_it():
     )
     change = DropPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "customers_pk"))
 
-    result = validate_diff(
+    failures = validate_diff(
         _drift(change, observed=_observed_table(referencing_foreign_keys=(reference,)))
     )
 
     # Then validation fails naming the referencing constraint
-    assert result.failed
     assert any(
         failure.rule_name == "PrimaryKeyReferencedByForeignKeys"
         and "orders_customer_id_fk" in failure.message
-        for failure in result.failures
+        for failure in failures
     )
 
 
 def test_primary_key_drop_allowed_when_no_foreign_keys_reference_it():
     change = DropPrimaryKey(primary_key=PrimaryKeyConstraint(("id",), "customers_pk"))
 
-    result = validate_diff(_drift(change))
+    failures = validate_diff(_drift(change))
 
-    assert not result.failed
+    assert not failures
 
 
 def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_this_table():
@@ -981,11 +943,9 @@ def test_primary_key_drop_allowed_when_same_sync_drops_the_referencing_fk_on_thi
     fk_change = DropForeignKey(constraint=own_fk)
 
     observed = _observed_table(referencing_foreign_keys=(reference,))
-    result = validate_diff(_drift(pk_change, fk_change, observed=observed))
+    failures = validate_diff(_drift(pk_change, fk_change, observed=observed))
 
-    assert not any(
-        failure.rule_name == "PrimaryKeyReferencedByForeignKeys" for failure in result.failures
-    )
+    assert not any(failure.rule_name == "PrimaryKeyReferencedByForeignKeys" for failure in failures)
 
 
 # ---- AmbiguousColumnRename
@@ -1002,11 +962,12 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
         unresolvable=(ColumnRenameConflict(old_name="customer_nm", new_name="customer_name"),),
     )
 
-    result = validate_diff(drift)
+    failures = validate_diff(drift)
 
-    failures = [f for f in result.failures if f.rule_name == "AmbiguousColumnRename"]
-    assert len(failures) == 1
-    assert "customer_nm" in failures[0].message and "customer_name" in failures[0].message
+    rename_failures = [f for f in failures if f.rule_name == "AmbiguousColumnRename"]
+    assert len(rename_failures) == 1
+    message = rename_failures[0].message
+    assert "customer_nm" in message and "customer_name" in message
 
 
 def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
@@ -1020,9 +981,9 @@ def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
         actions=(DropColumn(column=ObservedColumn("old", String())),),
     )
 
-    result = validate_diff(drift)
+    failures = validate_diff(drift)
 
-    assert not any(f.rule_name == "AmbiguousColumnRename" for f in result.failures)
+    assert not any(f.rule_name == "AmbiguousColumnRename" for f in failures)
 
 
 # ---- ColumnSpellingMustMatchCatalog
@@ -1037,13 +998,13 @@ def test_column_case_drift_fails_validation_naming_both_spellings():
     )
 
     # When the diff is validated
-    result = validate_diff(drift)
+    failures = validate_diff(drift)
 
     # Then the rejection names the rule and both spellings
-    failures = [f for f in result.failures if f.rule_name == "ColumnSpellingMustMatchCatalog"]
-    assert len(failures) == 1
-    assert "'OrderId'" in failures[0].message
-    assert "'orderid'" in failures[0].message
+    spelling_failures = [f for f in failures if f.rule_name == "ColumnSpellingMustMatchCatalog"]
+    assert len(spelling_failures) == 1
+    assert "'OrderId'" in spelling_failures[0].message
+    assert "'orderid'" in spelling_failures[0].message
 
 
 def test_agreeing_spelling_passes_the_case_rule():
@@ -1051,9 +1012,9 @@ def test_agreeing_spelling_passes_the_case_rule():
     desired = _desired_table(columns=(DesiredColumn("order_id", String()),))
     observed = _observed_table(columns=(ObservedColumn("order_id", String()),))
 
-    result = validate_diff(diff_table(desired, observed))
+    failures = validate_diff(diff_table(desired, observed))
 
-    assert not any(f.rule_name == "ColumnSpellingMustMatchCatalog" for f in result.failures)
+    assert not any(f.rule_name == "ColumnSpellingMustMatchCatalog" for f in failures)
 
 
 # ---- streaming tables
@@ -1071,7 +1032,7 @@ def test_streaming_table_passes_when_the_declaration_manages_only_tags():
     )
 
     # Then the tag work is allowed
-    assert validate_diff(diff).failed is False
+    assert not validate_diff(diff)
 
 
 def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
@@ -1079,13 +1040,12 @@ def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
     diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
 
     # When validating
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
     # Then the declaration is rejected on kind alone: it claims authority the
     # engine must never exercise on a pipeline-owned table
-    assert result.failed is True
-    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
-    assert 'scope="tags"' in result.failures[0].message
+    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
+    assert 'scope="tags"' in failures[0].message
 
 
 def test_streaming_table_fails_a_metadata_scope_declaration():
@@ -1098,17 +1058,16 @@ def test_streaming_table_fails_a_metadata_scope_declaration():
     )
 
     # Then managing anything beyond tags is rejected
-    result = validate_diff(diff)
-    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+    failures = validate_diff(diff)
+    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
 
 
 def test_streaming_table_gate_cannot_be_suppressed_by_empty_rules():
     diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
 
-    result = validate_diff(diff, rules=())
+    failures = validate_diff(diff, rules=())
 
-    assert result.failed is True
-    assert result.failures[0].rule_name == "StreamingTableTagsOnly"
+    assert failures[0].rule_name == "StreamingTableTagsOnly"
 
 
 def test_streaming_table_gate_short_circuits_safety_rules():
@@ -1117,8 +1076,8 @@ def test_streaming_table_gate_short_circuits_safety_rules():
     diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
 
     # Then the kind violation is reported alone; no safety rule runs
-    result = validate_diff(diff)
-    assert [failure.rule_name for failure in result.failures] == ["StreamingTableTagsOnly"]
+    failures = validate_diff(diff)
+    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
 
 
 def test_streaming_table_gate_reports_before_unmanaged_aspect_drift():
@@ -1132,9 +1091,9 @@ def test_streaming_table_gate_reports_before_unmanaged_aspect_drift():
         kind=TableKind.STREAMING_TABLE,
     )
 
-    result = validate_diff(diff)
+    failures = validate_diff(diff)
 
-    assert [failure.rule_name for failure in result.failures] == [
+    assert [failure.rule_name for failure in failures] == [
         "StreamingTableTagsOnly",
         "UnmanagedAspectDrift",
     ]
@@ -1150,8 +1109,8 @@ def test_streaming_table_under_tags_scope_still_fails_unmanaged_drift():
 
     # Then the kind gate stays silent (tags scope is allowed here) and the
     # unmanaged comment drift is the failure
-    result = validate_diff(diff)
-    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+    failures = validate_diff(diff)
+    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
 
 
 def test_an_absent_streaming_table_under_tags_scope_still_fails_missing_table():
@@ -1160,10 +1119,10 @@ def test_an_absent_streaming_table_under_tags_scope_still_fails_missing_table():
     desired = _desired_table(managed_aspects=_TAG_ASPECTS_ONLY)
 
     # When validating the diff of a missing table
-    result = _validate(desired, None)
+    failures = _validate(desired, None)
 
     # Then tags scope does not manage existence; nothing streaming-specific fires
-    assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
+    assert [failure.rule_name for failure in failures] == ["MissingTableUnmanaged"]
 
 
 def test_scope_failure_prevents_safety_evaluation():
@@ -1178,7 +1137,6 @@ def test_scope_failure_prevents_safety_evaluation():
         managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
     )
 
-    result = validate_diff(diff, rules=(MustNotRun(),))
+    failures = validate_diff(diff, rules=(MustNotRun(),))
 
-    assert result.failed
-    assert result.failures[0].rule_name == "UnmanagedAspectDrift"
+    assert failures[0].rule_name == "UnmanagedAspectDrift"

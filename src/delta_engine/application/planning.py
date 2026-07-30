@@ -42,9 +42,9 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     actions lower against: the observed kind for drift, and the default
     ordinary kind for a creation.
     """
-    validation = validate_diff(diff)
-    if validation.failed:
-        return PlanningFailed(failures=validation.failures)
+    failures = validate_diff(diff)
+    if failures:
+        return PlanningFailed(failures=failures)
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
