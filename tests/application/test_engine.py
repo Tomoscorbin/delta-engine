@@ -22,7 +22,6 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
-from delta_engine.application.relationships import ResolutionFailed, ResolutionSucceeded
 from delta_engine.application.report import (
     ExecutionBlockedByDependency,
     SyncReport,
@@ -783,7 +782,7 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     # Then orders is FK-failed on the resolution slot and not executed
     [orders] = list(exc_info.value.report)
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert isinstance(orders.resolution, ResolutionFailed)
+    assert orders.resolution.structural_failures != ()
     assert orders.execution is None
     assert executor.executed_names == []
 
@@ -793,6 +792,26 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
         references="cat.sch.customers",
         local_columns=("ref_id",),
     )
+
+
+def test_structural_verdicts_are_recorded_even_when_every_read_fails():
+    # Given orders references a table that is not registered, and its read errors
+    reader = _RecordingReader(
+        {
+            "cat.sch.orders": ReadError("IOError", "cannot read"),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.ghost"), dry_run=True)
+
+    # Then the declaration was judged without consulting the world: the
+    # structural verdict and the read failure both stand on the run
+    [orders] = list(report)
+    assert orders.resolution.structural_failures != ()
+    assert isinstance(orders.read, ReadFailure)
 
 
 def test_read_failure_in_upstream_blocks_fk_dependent():
@@ -817,7 +836,7 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.READ_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
-    assert isinstance(table_b.resolution, ResolutionSucceeded)
+    assert table_b.resolution.structural_failures == ()
     assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
     _assert_has_fk_failure(
         table_b,
@@ -861,7 +880,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
         TableRunStatus.FOREIGN_KEY_FAILED,
     )
 
-    assert isinstance(orders.resolution, ResolutionSucceeded)
+    assert orders.resolution.structural_failures == ()
     assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
     _assert_has_fk_failure(
         orders,
@@ -892,8 +911,8 @@ def test_structural_fk_failure_in_upstream_blocks_fk_dependent():
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.FOREIGN_KEY_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
-    assert isinstance(table_a.resolution, ResolutionFailed)
-    assert isinstance(table_b.resolution, ResolutionSucceeded)
+    assert table_a.resolution.structural_failures != ()
+    assert table_b.resolution.structural_failures == ()
     assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
     _assert_has_fk_failure(
         table_b,
@@ -1414,7 +1433,7 @@ def test_foreign_key_failed_table_still_carries_its_planned_sql():
 
     # Then resolution failed but the preview still includes the constraint SQL
     [orders] = list(report)
-    assert isinstance(orders.resolution, ResolutionFailed)
+    assert orders.resolution.structural_failures != ()
     assert orders.planned_sql_statements != ()
     assert any("ADD CONSTRAINT" in statement for statement in orders.planned_sql_statements)
     assert executor.executed_statements == []

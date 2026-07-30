@@ -26,11 +26,7 @@ from delta_engine.application.planning import (
     PlanningSucceeded,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
-from delta_engine.application.relationships import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-)
+from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
@@ -137,7 +133,7 @@ class TableRunReport:
     def __post_init__(self) -> None:
         read_failed = isinstance(self.read, ReadFailure)
         planning_failed = isinstance(self.planning, PlanningFailed)
-        resolution_failed = isinstance(self.resolution, ResolutionFailed)
+        resolution_failed = bool(self.resolution.structural_failures)
 
         if self.resolution.qualified_name != self.qualified_name:
             raise ValueError("Resolution outcome must belong to the reported table")
@@ -155,10 +151,8 @@ class TableRunReport:
             read_failed or planning_failed or resolution_failed
         ):
             raise ValueError("Execution cannot follow a failed earlier phase")
-        if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and not isinstance(
-            self.resolution, ResolutionSucceeded
-        ):
-            raise ValueError("Execution blocking requires successful dependency resolution")
+        if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and resolution_failed:
+            raise ValueError("Execution blocking requires a structurally sound resolution")
 
         execution = self.execution
         if execution is not None:
@@ -190,15 +184,18 @@ class TableRunReport:
 
     @property
     def failures(self) -> tuple[Failure, ...]:
-        """Flatten canonical phase outcomes into lifecycle order for callers."""
+        """
+        Flatten canonical phase outcomes for callers.
+
+        Lifecycle order: structural, read, planning, execution.
+        """
         failures: list[Failure] = []
 
+        failures.extend(self.resolution.structural_failures)
         if isinstance(self.read, ReadFailure):
             failures.append(self.read)
         if isinstance(self.planning, PlanningFailed):
             failures.extend(self.planning.failures)
-        if isinstance(self.resolution, ResolutionFailed):
-            failures.extend(self.resolution.failures)
 
         match self.execution_outcome:
             case ExecutionSummary() as summary:

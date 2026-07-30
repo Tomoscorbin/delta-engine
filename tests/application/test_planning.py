@@ -170,11 +170,8 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
         foreign_keys=(foreign_key,),
     )
 
-    # When planning with the resolver's FK action
-    result = plan_diff(
-        diff_table(desired, None),
-        relationship_actions=(SetForeignKey(constraint=foreign_key),),
-    )
+    # When planning
+    result = plan_diff(diff_table(desired, None))
 
     # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningSucceeded)
@@ -296,14 +293,8 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
         columns=(ObservedColumn("parent", Integer()),), foreign_keys=(observed_key,)
     )
 
-    # When planning with the resolver's replacement actions
-    result = plan_diff(
-        diff_table(desired, observed),
-        relationship_actions=(
-            SetForeignKey(constraint=desired_key),
-            DropForeignKey(constraint=observed_key),
-        ),
-    )
+    # When planning
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -340,14 +331,8 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
         foreign_keys=(observed_key,),
     )
 
-    # When planning with the resolver's replacement actions
-    result = plan_diff(
-        diff_table(desired, observed),
-        relationship_actions=(
-            SetForeignKey(constraint=desired_key),
-            DropForeignKey(constraint=observed_key),
-        ),
-    )
+    # When planning
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -377,11 +362,8 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
         foreign_keys=(unrelated_key,),
     )
 
-    # When planning with the resolver's drop
-    result = plan_diff(
-        diff_table(desired, observed),
-        relationship_actions=(DropForeignKey(constraint=unrelated_key),),
-    )
+    # When planning
+    result = plan_diff(diff_table(desired, observed))
 
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningSucceeded)
@@ -451,8 +433,8 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
     )
     diff = diff_table(desired, _observed())
 
-    # When planning with the resolver's FK action
-    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=constraint),))
+    # When planning
+    result = plan_diff(diff)
 
     # Then the referenced spelling passes through planning untouched
     assert isinstance(result, PlanningSucceeded)
@@ -479,30 +461,38 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
 
 
-# ---------- relationship actions from the resolver ----------
+# ---------- foreign-key actions ----------
 
 
-def test_relationship_actions_join_the_validated_plan_in_phase_order():
-    # Given an in-scope drift with no single-table work and a resolver-supplied FK
+def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
+    # Given an in-scope drift whose only difference is a declared foreign key
     fk = _foreign_key(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
         constraint_name="orders_customers_fk",
     )
-    diff = diff_table(_desired(), _observed())
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+            foreign_keys=(fk,),
+        ),
+        _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
+        ),
+    )
 
-    # When planning with the relationship stream
-    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+    # When planning
+    result = plan_diff(diff)
 
-    # Then the accepted plan carries the resolver's action
+    # Then the accepted plan carries the foreign-key action
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (SetForeignKey(constraint=fk),)
 
 
-def test_pk_drop_exemption_sees_resolver_supplied_foreign_key_drops():
+def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
     # Given a drift dropping its PK while this table's own FK references it,
-    # and the resolver dropping that FK in the same sync
+    # with that FK dropped in the same diff
     reference = ForeignKeyReference(
         constraint_name="test_parent_id_fk",
         referencing_table=_NAME,
@@ -514,52 +504,69 @@ def test_pk_drop_exemption_sees_resolver_supplied_foreign_key_drops():
         constraint_name="test_parent_id_fk",
     )
     diff = diff_table(
-        _desired(),
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("parent_id", Integer())),
+        ),
         _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("parent_id", Integer())),
             primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
+            foreign_keys=(own_fk,),
             referencing_foreign_keys=(reference,),
         ),
     )
 
-    # When planning with the resolver's DropForeignKey
-    result = plan_diff(diff, relationship_actions=(DropForeignKey(constraint=own_fk),))
+    # When planning
+    result = plan_diff(diff)
 
-    # Then the exemption found the drop in the merged stream, and the plan
+    # Then the exemption found the drop in the same stream, and the plan
     # phases the FK drop before the PK drop
     assert isinstance(result, PlanningSucceeded)
     assert [type(action) for action in result.plan.actions] == [DropForeignKey, DropPrimaryKey]
 
 
-def test_relationship_actions_on_an_unmanaged_aspect_fail_the_scope_gate():
-    # Given a declaration that does not manage foreign keys
+def test_foreign_key_drift_on_an_unmanaged_aspect_fails_the_scope_gate():
+    # Given a declaration that does not manage foreign keys but declares one
     fk = _foreign_key(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
         constraint_name="orders_customers_fk",
     )
-    diff = diff_table(_desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT})), _observed())
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+            foreign_keys=(fk,),
+            managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+        ),
+        _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
+        ),
+    )
 
-    # When planning with a resolver-supplied SetForeignKey
-    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+    # When planning
+    result = plan_diff(diff)
 
     # Then the scope gate rejects the unmanaged work
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
 
 
-def test_missing_table_plan_appends_relationship_actions():
-    # Given a missing table and one resolver-supplied FK
+def test_missing_table_plan_contains_the_declared_foreign_keys():
+    # Given a missing table declaring one foreign key
     fk = _foreign_key(
         local_columns=("customer_id",),
         referenced_table=QualifiedName("dev", "silver", "customers"),
         referenced_columns=("id",),
         constraint_name="orders_customers_fk",
     )
-    diff = diff_table(_desired(), None)
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+    diff = diff_table(desired, None)
 
-    # When planning with the relationship stream
-    result = plan_diff(diff, relationship_actions=(SetForeignKey(constraint=fk),))
+    # When planning
+    result = plan_diff(diff)
 
     # Then the accepted plan creates the table and then adds the constraint
     assert isinstance(result, PlanningSucceeded)

@@ -18,9 +18,9 @@ from delta_engine.domain.model import QualifiedName
 class FailurePhase(IntEnum):
     """The sync phase that produced a failure. Ordered so the earliest wins."""
 
-    READ = 1
-    PLANNING = 2
-    FOREIGN_KEY = 3
+    FOREIGN_KEY = 1
+    READ = 2
+    PLANNING = 3
     EXECUTION = 4
 
 
