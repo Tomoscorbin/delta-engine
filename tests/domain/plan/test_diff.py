@@ -796,7 +796,7 @@ def test_foreign_key_drift_is_stated_even_when_unmanaged():
 
     drift = diff_table(desired, observed)
 
-    # Then the difference is stated; rejecting it is the scope gate's job
+    # Then the difference is stated; rejecting it is the eligibility check's job
     assert any(isinstance(a, SetForeignKey) for a in drift.actions)
 
 
@@ -1048,8 +1048,8 @@ def test_diff_rename_and_primary_key_replacement_are_direct_actions():
 
 
 def test_drift_carries_the_observed_table_it_was_computed_against():
-    # The drift's endpoints are judging context: validation's scope gate reads
-    # observed facts (the relation kind) off the observed side.
+    # The drift's endpoints are judging context: validation's eligibility checks
+    # read observed facts (the relation kind) off the observed side.
     qualified_name = QualifiedName("cat", "sch", "clicks")
     desired = DesiredTable(
         qualified_name=qualified_name,

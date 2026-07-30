@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 # tables, managed or external (existing external tables can be altered;
 # creating one is not yet supported — CREATE TABLE emits no LOCATION), and
 # streaming tables, which take the ALTER STREAMING TABLE dialect and admit
-# tag changes only — the reader states the kind; validation's scope gate
-# enforces the restriction. Anything else a catalog name can resolve to — a
+# tag changes only — the reader states the kind; validation's eligibility
+# checks enforce the restriction. Anything else a catalog name can resolve to — a
 # view, a materialized view, a foreign table, a non-Delta format — cannot be
 # represented as engine state, so the read admits exactly these kinds and
 # fails closed on everything else, including kinds Databricks adds in the

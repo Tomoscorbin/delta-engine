@@ -74,20 +74,21 @@ _DECIMAL_INTEGER_DIGITS_REQUIRED: Final[Mapping[type[DataType], int]] = MappingP
 )
 
 
-class ScopeGate(Protocol):
+class EligibilityCheck(Protocol):
     """
-    Mandatory check over any diff.
+    Decides whether a diff is fit for safety validation.
 
-    Gates establish whether the diff is eligible for safety validation: what a
-    declaration is allowed to govern, and whether it names the table's columns
-    the way the catalog does. Both are scope-independent laws rather than
-    policies, so no gate can be suppressed via ``rules``.
+    Eligibility concerns the declaration's authority and its reference to the
+    table — what it is allowed to govern, and whether it names the table's
+    columns the way the catalog does — not whether a given change is safe.
+    These are laws rather than policies: every check runs before any safety
+    rule, and none can be suppressed via ``rules``.
     """
 
     name: ClassVar[str]
 
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
-        """Return mandatory failures for this diff, or an empty tuple."""
+        """Return this check's failures for the diff, or an empty tuple."""
         ...
 
 
@@ -100,11 +101,11 @@ class SafetyRule(Protocol):
     ``drift.unresolvable`` for the differences to judge; ``drift.desired``
     and ``drift.observed`` are the endpoints, available as context (declared
     properties, observed relation kind) — the differences themselves are what
-    a rule judges. Because the scope gate runs first and short-circuits, a
-    rule is only ever evaluated on a fully in-scope diff, so its actions and
-    unresolvable differences are exactly the ones the declaration manages —
-    it does no scope filtering of its own. Never called for a
-    ``TableMissing`` diff.
+    a rule judges. Because the eligibility checks run first and short-circuit,
+    a rule is only ever evaluated on a diff that is fully in scope and spelled
+    as the catalog spells it, so its actions and unresolvable differences are
+    exactly the ones the declaration manages — it does no scope filtering of
+    its own. Never called for a ``TableMissing`` diff.
     """
 
     name: ClassVar[str]
@@ -464,9 +465,8 @@ class ColumnSpellingMustMatchCatalog:
     """
     Fail any declaration whose column case disagrees with the catalog.
 
-    The naming arm of the scope gate, peer to ``UnmanagedAspectDrift``,
-    ``MissingTableUnmanaged``, and ``StreamingTableTagsOnly``: it runs
-    unconditionally and cannot be suppressed via ``rules``. Exact spelling is a
+    One of the ``ELIGIBILITY_CHECKS``: it runs unconditionally and cannot be
+    suppressed via ``rules``. Exact spelling is a
     law rather than a safety policy, matching its foreign-key sibling
     ``REFERENCED_COLUMN_CASE_MISMATCH``, which is already a structural
     resolution verdict no caller can turn off.
@@ -477,7 +477,7 @@ class ColumnSpellingMustMatchCatalog:
     whatever else it declines to manage. This is why ``UnmanagedAspectDrift``
     passes over ``ColumnCaseDrift`` — were it not exempt, the narrow scopes most
     likely to meet case drift would report unmanaged column-structure drift
-    instead of the spelling that caused it. Reported first among the gates so
+    instead of the spelling that caused it. Reported first among the checks so
     the actionable root defect leads.
 
     A missing table has no catalog counterpart to disagree with: what a
@@ -514,7 +514,7 @@ class UnmanagedAspectDrift:
     """
     Fail once per unmanaged aspect that has drifted.
 
-    The drift arm of the scope gate: it defines what a declaration is allowed
+    One of the ``ELIGIBILITY_CHECKS``: it defines what a declaration is allowed
     to govern and runs before any safety rule, short-circuiting
     ``validate_diff``. It is not a member of ``DEFAULT_SAFETY_RULES`` and cannot be
     suppressed — the accepted planning boundary turns every validated action
@@ -522,7 +522,7 @@ class UnmanagedAspectDrift:
     aspect the declaration does not manage.
 
     It reads the diff's raw actions and unresolvable differences — its subject
-    is exactly the out-of-scope differences the gate exists to reject. dict.fromkeys
+    is exactly the out-of-scope differences it exists to reject. dict.fromkeys
     deduplicates the aspects while preserving first-seen order, so failure
     order follows diff order deterministically.
 
@@ -567,12 +567,11 @@ class MissingTableUnmanaged:
     """
     Fail creation of a table whose declaration does not manage table existence.
 
-    The scope invariant for the ``TableMissing`` arm, peer to
-    ``UnmanagedAspectDrift`` on the drift arm. It shares the naming shape of
-    a rule (its ``name`` supplies the failure's ``rule_name``) but not the
-    ``SafetyRule`` protocol — its subject is a missing table, which has no changes
-    to evaluate. Like the drift-arm invariant it runs unconditionally:
-    ``rules=()`` must not enable metadata-only creates.
+    One of the ``ELIGIBILITY_CHECKS``, and the only one that judges the
+    ``TableMissing`` arm. It shares the naming shape of a rule (its ``name``
+    supplies the failure's ``rule_name``) but not the ``SafetyRule`` protocol —
+    a missing table has no changes to evaluate. Like every eligibility check it
+    runs unconditionally: ``rules=()`` must not enable metadata-only creates.
     """
 
     name: ClassVar[str] = "MissingTableUnmanaged"
@@ -606,11 +605,10 @@ class StreamingTableTagsOnly:
     """
     Fail any declaration that manages more than tags on a streaming table.
 
-    The relation-kind arm of the scope gate, peer to ``UnmanagedAspectDrift``
-    and ``MissingTableUnmanaged``: it runs unconditionally and cannot be
+    One of the ``ELIGIBILITY_CHECKS``: it runs unconditionally and cannot be
     suppressed via ``rules``. A streaming table's definition is owned by its
     pipeline; Unity Catalog tags are the one aspect durably manageable from
-    outside it. The gate judges the declaration's claimed aspects against the
+    outside it. It judges the declaration's claimed aspects against the
     observed kind — not the drift — so it fires even when the table is
     currently in sync, and a dry run surfaces the misdeclaration immediately.
     ``TAG_ASPECTS`` is shared with the public ``"tags"`` scope so the two
@@ -644,7 +642,11 @@ class StreamingTableTagsOnly:
                 )
 
 
-MANDATORY_SCOPE_GATES: Final[tuple[ScopeGate, ...]] = (
+# Position is report order, so a root defect leads what it causes: spelling
+# before the two it can co-fire with, then StreamingTableTagsOnly before
+# UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
+# TableMissing, so it never co-fires.
+ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     MissingTableUnmanaged(),
     StreamingTableTagsOnly(),
@@ -672,28 +674,26 @@ def validate_diff(
     """
     Evaluate a table diff and return its failures, empty when it is valid.
 
-    Eligibility is a gate, checked before any safety rule. A column spelled
-    differently from the catalog, a drifted aspect the declaration does not
-    manage, a missing table it may not create, or a streaming table it claims
-    more than tags on all fail here and short-circuit, so the safety rules never
-    run on a diff the engine has already rejected. This is what makes an
-    unmanaged difference produce exactly the scope failure rather than also
-    tripping rules for work the user never requested, and a misspelled column
-    produce the spelling failure rather than safety verdicts on a diff whose
-    column references cannot be trusted. Gate failures are collected across all
-    gates and reported together, spelling first, so the actionable root defect
-    leads. No gate can be suppressed via ``rules``.
+    Eligibility is settled before any safety rule. A column spelled differently
+    from the catalog, a drifted aspect the declaration does not manage, a
+    missing table it may not create, or a streaming table it claims more than
+    tags on all fail here and short-circuit, so the safety rules never run on a
+    diff the engine has already rejected. This is what makes an unmanaged
+    difference produce exactly the scope failure rather than also tripping rules
+    for work the user never requested, and a misspelled column produce the
+    spelling failure rather than safety verdicts on a diff whose column
+    references cannot be trusted. Failures are collected across every check and
+    reported together, spelling first, so the actionable root defect leads. No
+    eligibility check can be suppressed via ``rules``.
 
-    Past the gate every difference is in scope, so the safety rules judge
-    the managed drift. A missing table that clears the gate is a
-    fully-managed create and needs no safety judgement.
+    Past that point every difference is in scope and spelled as the catalog
+    spells it, so the safety rules judge the managed drift. A missing table
+    that is eligible is a fully-managed create and needs no safety judgement.
     """
-    gate_failures = tuple(
-        failure for gate in MANDATORY_SCOPE_GATES for failure in gate.evaluate(diff)
-    )
+    ineligible = tuple(failure for check in ELIGIBILITY_CHECKS for failure in check.evaluate(diff))
 
-    if gate_failures:
-        return gate_failures
+    if ineligible:
+        return ineligible
 
     match diff:
         case TableMissing():

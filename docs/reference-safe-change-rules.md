@@ -67,7 +67,8 @@ the rename at execution.
 
 Four further checks are laws rather than rules — they define what a declaration
 is allowed to govern and how it must name the table's columns, and always run
-regardless of the rule set:
+regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
+`application/validation.py`, evaluated before any safety rule:
 
 | Law                              | What it blocks                                                                                          | How to resolve                                                                        |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |

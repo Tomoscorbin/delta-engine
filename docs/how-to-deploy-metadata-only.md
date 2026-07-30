@@ -63,7 +63,7 @@ metadata is applied.
   fails at validation (`MissingTableUnmanaged`) — a metadata-only declaration
   does not manage table existence, so it has no authority to create the table.
 
-Both failures are scope invariants, listed in
+Both failures are laws rather than rules, listed in
 [safe-change rules](reference-safe-change-rules.md).
 
 ## Tag a streaming table

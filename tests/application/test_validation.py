@@ -4,7 +4,7 @@ from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
-    MANDATORY_SCOPE_GATES,
+    ELIGIBILITY_CHECKS,
     validate_diff,
 )
 from delta_engine.domain.model import (
@@ -133,10 +133,10 @@ def _type_drift(column_name: str = "id") -> AlterColumnType:
 # ---- validation composition
 
 
-def test_mandatory_scope_gates_cover_all_scope_policies_in_evaluation_order():
-    gate_names = tuple(type(gate).__name__ for gate in MANDATORY_SCOPE_GATES)
+def test_eligibility_checks_cover_all_laws_in_evaluation_order():
+    check_names = tuple(type(check).__name__ for check in ELIGIBILITY_CHECKS)
 
-    assert gate_names == (
+    assert check_names == (
         "ColumnSpellingMustMatchCatalog",
         "MissingTableUnmanaged",
         "StreamingTableTagsOnly",
@@ -145,7 +145,7 @@ def test_mandatory_scope_gates_cover_all_scope_policies_in_evaluation_order():
 
 
 def test_default_rules_cover_all_safety_policies():
-    # Given the DEFAULT_SAFETY_RULES constant — scope invariants are not default rules
+    # Given the DEFAULT_SAFETY_RULES constant — eligibility checks are not default rules
     rule_names = tuple(type(rule).__name__ for rule in DEFAULT_SAFETY_RULES)
 
     # Then the expected safety policies are enabled in deterministic evaluation order
@@ -295,7 +295,7 @@ def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
     # When validating with no safety rules
     failures = validate_diff(diff_table(desired, None), rules=())
 
-    # Then the scope invariant still fails
+    # Then the eligibility check still fails
     assert failures[0].rule_name == "MissingTableUnmanaged"
 
 
@@ -608,7 +608,7 @@ def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
     # When validating
     failures = validate_diff(diff, rules=())
 
-    # Then the scope invariant still fires
+    # Then the eligibility check still fires
     assert failures[0].rule_name == "UnmanagedAspectDrift"
 
 
@@ -1060,9 +1060,9 @@ def test_column_spelling_gate_short_circuits_safety_rules():
     assert [failure.rule_name for failure in failures] == ["ColumnSpellingMustMatchCatalog"]
 
 
-def test_column_spelling_gate_reports_before_unmanaged_aspect_drift():
+def test_column_spelling_check_reports_before_unmanaged_aspect_drift():
     # Given a metadata-scoped declaration with both a misspelled column and
-    # genuinely unmanaged structural drift, so two gate arms fire
+    # genuinely unmanaged structural drift, so two eligibility checks fire
     drift = _drift(
         ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
         AddColumn(DesiredColumn("extra", Integer())),
@@ -1142,9 +1142,9 @@ def test_streaming_table_gate_short_circuits_safety_rules():
     assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
 
 
-def test_streaming_table_gate_reports_before_unmanaged_aspect_drift():
+def test_streaming_table_check_reports_before_unmanaged_aspect_drift():
     # Given a metadata-ish scope with structure drift on a streaming table —
-    # both scope-gate arms fire, kind first
+    # both eligibility checks fire, kind first
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
         managed_aspects=frozenset(
@@ -1169,7 +1169,7 @@ def test_streaming_table_under_tags_scope_still_fails_unmanaged_drift():
         kind=TableKind.STREAMING_TABLE,
     )
 
-    # Then the kind gate stays silent (tags scope is allowed here) and the
+    # Then the kind check stays silent (tags scope is allowed here) and the
     # unmanaged comment drift is the failure
     failures = validate_diff(diff)
     assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
