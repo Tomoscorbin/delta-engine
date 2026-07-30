@@ -30,6 +30,25 @@ class PlanningFailed:
 type PlanningResult = PlanningSucceeded | PlanningFailed
 
 
+def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
+    """
+    Narrow a planning result to the plan it accepted, if any.
+
+    The one place the union narrows to a plan. Every phase downstream of
+    planning asks this question — the engine's run while the phases are still
+    mutating, its frozen report afterwards — and both ask it of a result that
+    may not exist yet, so the not-yet-planned case answers alongside the
+    rejected one rather than at each caller.
+    """
+    match planning:
+        case PlanningSucceeded(plan=plan):
+            return plan
+        case PlanningFailed() | None:
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def plan_diff(diff: TableDiff) -> PlanningResult:
     """
     Validate ``diff``; accept or reject.

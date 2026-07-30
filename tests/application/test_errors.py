@@ -86,7 +86,7 @@ def _table_report(
         planning=planning,
         planned_sql_statements=statements,
         resolution=resolution,
-        execution_outcome=execution,
+        execution=execution,
     )
 
 

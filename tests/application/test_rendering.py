@@ -356,7 +356,7 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
         ),
         planned_sql_statements=(),
         resolution=TableResolution(desired, (), ()),
-        execution_outcome=None,
+        execution=None,
     )
 
 
@@ -376,7 +376,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
         planning=PlanningSucceeded(ActionPlan(target=report.desired.qualified_name)),
         planned_sql_statements=(),
         resolution=report.resolution,
-        execution_outcome=None,
+        execution=None,
     )
 
     block = render_diff_block(healthy)
@@ -436,7 +436,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
             (),
             (),
         ),
-        execution_outcome=None,
+        execution=None,
     )
 
     # When rendering the diff block
@@ -471,7 +471,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
             f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
         ),
         resolution=TableResolution(desired, (), ()),
-        execution_outcome=execution,
+        execution=execution,
     )
 
 

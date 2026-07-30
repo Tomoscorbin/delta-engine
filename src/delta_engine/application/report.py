@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, assert_never
+from typing import Any, Final
 
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
@@ -23,7 +23,7 @@ from delta_engine.application.failures import (
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningResult,
-    PlanningSucceeded,
+    accepted_plan,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
@@ -111,7 +111,7 @@ class TableRunReport:
     planning: PlanningResult | None
     planned_sql_statements: tuple[str, ...]
     resolution: TableResolution
-    execution_outcome: ExecutionSummary | None
+    execution: ExecutionSummary | None
     blocked_failures: tuple[ForeignKeyFailure, ...] = ()
 
     def __post_init__(self) -> None:
@@ -129,12 +129,10 @@ class TableRunReport:
             raise ValueError("Planned action target must match the reported table")
         if self.planned_sql_statements and plan is None:
             raise ValueError("Compiled statements require a successful planning outcome")
-        if self.execution_outcome is not None and (
-            read_failed or planning_failed or resolution_failed
-        ):
+        if self.execution is not None and (read_failed or planning_failed or resolution_failed):
             raise ValueError("Execution cannot follow a failed earlier phase")
         if self.blocked_failures:
-            if self.execution_outcome is not None:
+            if self.execution is not None:
                 raise ValueError("A blocked table records no execution outcome")
             if any(
                 failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
@@ -142,27 +140,15 @@ class TableRunReport:
             ):
                 raise ValueError("Blocked failures must carry the dependency-blocking reason")
 
-        execution = self.execution
-        if execution is not None:
-            executed = tuple(result.statement for result in execution.results)
+        if self.execution is not None:
+            executed = tuple(result.statement for result in self.execution.results)
             if executed != self.planned_sql_statements[: len(executed)]:
                 raise ValueError("Execution results must match the planned statement prefix")
 
     @property
     def plan(self) -> ActionPlan | None:
         """The accepted plan, or ``None`` when reading or planning failed."""
-        match self.planning:
-            case PlanningSucceeded(plan=plan):
-                return plan
-            case PlanningFailed() | None:
-                return None
-            case _ as unreachable:
-                assert_never(unreachable)
-
-    @property
-    def execution(self) -> ExecutionSummary | None:
-        """The attempted statements; ``None`` when nothing was executed."""
-        return self.execution_outcome
+        return accepted_plan(self.planning)
 
     @property
     def failures(self) -> tuple[Failure, ...]:
@@ -181,8 +167,8 @@ class TableRunReport:
         if isinstance(self.planning, PlanningFailed):
             failures.extend(self.planning.failures)
 
-        if self.execution_outcome is not None:
-            failures.extend(self.execution_outcome.failures)
+        if self.execution is not None:
+            failures.extend(self.execution.failures)
         failures.extend(self.blocked_failures)
 
         return tuple(failures)

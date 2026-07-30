@@ -57,6 +57,7 @@ from delta_engine.application.planning import (
     PlanningFailed,
     PlanningResult,
     PlanningSucceeded,
+    accepted_plan,
     plan_diff,
 )
 from delta_engine.application.ports import (
@@ -147,13 +148,7 @@ class _TableRun:
 
     @property
     def plan(self) -> ActionPlan | None:
-        match self.planning:
-            case PlanningSucceeded(plan=plan):
-                return plan
-            case PlanningFailed() | None:
-                return None
-            case _ as unreachable:
-                assert_never(unreachable)
+        return accepted_plan(self.planning)
 
     @property
     def has_failures(self) -> bool:
@@ -179,7 +174,7 @@ class _TableRun:
             planning=self.planning,
             planned_sql_statements=self.planned_sql_statements,
             resolution=self.resolution,
-            execution_outcome=self.execution,
+            execution=self.execution,
         )
 
 
