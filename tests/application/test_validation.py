@@ -1079,6 +1079,30 @@ def test_column_spelling_check_reports_before_unmanaged_aspect_drift():
     ]
 
 
+def test_column_spelling_check_reports_before_the_streaming_table_check():
+    # Given a streaming table whose declaration both misspells a column and
+    # claims more than tags. UnmanagedAspectDrift stays silent — the case drift
+    # is the one difference it passes over — so this isolates the spelling and
+    # kind checks against each other
+    diff = _drift(
+        ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
+        managed_aspects=frozenset(
+            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
+        ),
+        kind=TableKind.STREAMING_TABLE,
+    )
+
+    failures = validate_diff(diff)
+
+    # Then the spelling leads. Narrowing the scope to "tags" is what the kind
+    # failure asks for, and it would not make the misspelling right — so the
+    # defect that survives the suggested fix is reported first
+    assert [failure.rule_name for failure in failures] == [
+        "ColumnSpellingMustMatchCatalog",
+        "StreamingTableTagsOnly",
+    ]
+
+
 # ---- streaming tables
 
 
