@@ -239,6 +239,19 @@ def test_resolve_with_empty_tables_returns_empty_result():
     assert result == ()
 
 
+def test_each_resolution_carries_the_declaration_it_was_judged_from():
+    # Given two tables whose dependency reverses their input order
+    parent = _table("cat.sch.customers")
+    child = _table_with_fk("cat.sch.orders", "cat.sch.customers")
+
+    # When resolving dependencies
+    result = resolve((child, parent))
+
+    # Then each resolution carries its own declaration, so callers need no lookup
+    assert [resolution.desired for resolution in result] == [parent, child]
+    assert _resolution_for(result, "cat.sch.orders").desired is child
+
+
 def test_resolve_with_no_fks_preserves_prepared_input_order():
     # Given three independent tables in prepared order
     tables = (

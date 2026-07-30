@@ -350,13 +350,12 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
     return TableRunReport(
-        desired=desired,
         read=TablePresent(table=observed),
         planning=PlanningFailed(
             (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
         ),
         planned_sql_statements=(),
-        resolution=TableResolution(qualified_name, (), ()),
+        resolution=TableResolution(desired, (), ()),
         execution_outcome=None,
     )
 
@@ -373,7 +372,6 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
     healthy = TableRunReport(
-        desired=report.desired,
         read=report.read,
         planning=PlanningSucceeded(ActionPlan(target=report.desired.qualified_name)),
         planned_sql_statements=(),
@@ -430,13 +428,14 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     qualified_name = QualifiedName("cat", "sch", "orders")
     failure = ReadFailure("IOError", "boom")
     report = TableRunReport(
-        desired=DesiredTable(
-            qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)
-        ),
         read=failure,
         planning=None,
         planned_sql_statements=(),
-        resolution=TableResolution(qualified_name, (), ()),
+        resolution=TableResolution(
+            DesiredTable(qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)),
+            (),
+            (),
+        ),
         execution_outcome=None,
     )
 
@@ -453,6 +452,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 def _grid_report(name, *, plan=None, failures=(), execution=None):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (DesiredColumn("id", Integer()),)
+    desired = DesiredTable(qualified_name=qualified_name, columns=columns)
     if plan is None and not failures:
         plan = ActionPlan(target=qualified_name)
     planning_failures = tuple(
@@ -460,7 +460,6 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
     )
     planning = PlanningFailed(planning_failures) if planning_failures else PlanningSucceeded(plan)
     return TableRunReport(
-        desired=DesiredTable(qualified_name=qualified_name, columns=columns),
         read=TablePresent(
             table=ObservedTable(
                 qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
@@ -471,7 +470,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
         planned_sql_statements=tuple(
             f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
         ),
-        resolution=TableResolution(qualified_name, (), ()),
+        resolution=TableResolution(desired, (), ()),
         execution_outcome=execution,
     )
 
