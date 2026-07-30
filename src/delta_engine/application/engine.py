@@ -16,24 +16,22 @@ The phases are:
   5. Plan     — retain an accepted plan of the complete diff, or the
                 rejected planning outcome
   6. Compile  — retain the exact backend statements for every accepted plan
-  7. Gate     — block dependents of failed tables (dry and real runs)
-  8. Execute  — retain attempted statement results (real runs only)
+  7. Execute  — retain attempted statement results (real runs only)
+  8. Account  — freeze the runs into a report that derives dependency blocking
 
 The declaration set is judged before the world is consulted: resolution reads
 only declarations, so a run is born knowing its position, its edges, and its
 structural verdicts, and no later phase has to narrow a union to reach them.
 
 Resolution is a pure structural judgment of the declarations against each
-other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked*
-by another table's failure is decided later, at the execution gate: walking
-the dependency-ordered runs, a run whose resolved dependency will not reach
-desired state this sync — a failed read, a rejected plan, a failed
-resolution, an execution failure, or a block of its own — is blocked with
-BLOCKED_BY_FAILED_DEPENDENCY rather than executed, so the block propagates
-along FK chains. The rule is uniform: if a dependency won't reach desired
-state this sync, its dependents don't execute either. A dry run applies the
-same gate without attempting statements, so blocking stays visible in
-previews.
+other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked* by
+another table's failure is nobody's outcome to record: it is the derived
+consequence of the dependency edges and the run's other fates, worked out once
+at accounting. One rule states it — a table did not converge if it has
+failures of its own or a dependency did not — and execution and accounting
+each fold that same rule over the dependency-ordered runs: execution to decide
+what not to attempt, accounting to say why. Because it is derived rather than
+recorded, blocking is equally visible in a dry run, which attempts nothing.
 
 A table that fails an early phase carries that failure forward on its run and
 is skipped by execution, so all tables are attempted and the report is always
@@ -74,8 +72,6 @@ from delta_engine.application.ports import (
 )
 from delta_engine.application.relationships import TableResolution, resolve
 from delta_engine.application.report import (
-    ExecutionBlockedByDependency,
-    ExecutionOutcome,
     SyncReport,
     TableRunReport,
 )
@@ -139,7 +135,7 @@ class _TableRun:
     diff: TableDiff | None = None
     planning: PlanningResult | None = None
     planned_sql_statements: tuple[str, ...] = ()
-    execution: ExecutionOutcome | None = None
+    execution: ExecutionSummary | None = None
 
     @property
     def desired(self) -> DesiredTable:
@@ -161,13 +157,17 @@ class _TableRun:
 
     @property
     def has_failures(self) -> bool:
-        """True when any completed phase has failed for this table."""
+        """
+        True when a completed phase failed this table on its own account.
+
+        Own faults only: being blocked by another table is not a fault of this
+        run, and is derived at accounting rather than recorded here.
+        """
         return (
             isinstance(self.read, ReadFailure)
             or isinstance(self.planning, PlanningFailed)
             or bool(self.resolution.structural_failures)
-            or isinstance(self.execution, ExecutionBlockedByDependency)
-            or (isinstance(self.execution, ExecutionSummary) and bool(self.execution.failures))
+            or (self.execution is not None and bool(self.execution.failures))
         )
 
     def to_report(self) -> TableRunReport:
@@ -205,11 +205,12 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs lower → resolve → read → diff → plan → compile → gate → execute.
-        Resolution births one private run per table in dependency-first order
-        carrying its static facts, the worldly phases enrich the runs in
-        place, the gate blocks dependents of failed tables, and the completed
-        outcomes are finally frozen into ``TableRunReport`` values.
+        Runs lower → resolve → read → diff → plan → compile → execute →
+        account. Resolution births one private run per table in
+        dependency-first order carrying its static facts, the worldly phases
+        enrich the runs in place, and assembly freezes the completed outcomes
+        into ``TableRunReport`` values, deriving dependency blocking from the
+        edges as it goes.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -218,12 +219,12 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, run every phase but attempt no statements
-                (zero catalog mutations). The execution gate still records
-                dependency blocking, so a dependent of a failed table reports
-                BLOCKED_BY_FAILED_DEPENDENCY in the preview; no run retains
-                attempted statement results, while its ``plan`` still records
-                the actions compiled from the observed snapshot. The report is
+            dry_run: When True, stop after compile and attempt no statements
+                (zero catalog mutations). No run retains attempted statement
+                results, while its ``plan`` still records the actions compiled
+                from the observed snapshot. Blocking is derived rather than
+                executed, so a dependent of a failed table still reports
+                BLOCKED_BY_FAILED_DEPENDENCY in the preview. The report is
                 returned instead of raising ``SyncFailedError`` when a table
                 fails.
 
@@ -248,11 +249,10 @@ class Engine:
         self._diff(runs)
         self._plan(runs)
         self._compile(runs)
-        self._gate(runs)
         if not dry_run:
             self._execute(runs)
 
-        report = SyncReport(
+        report = SyncReport.assemble(
             started_at=run_started,
             ended_at=datetime.now(UTC),
             table_reports=tuple(run.to_report() for run in runs),
@@ -363,9 +363,10 @@ class Engine:
 
         Resolution is structural: it judges the declarations against each
         other, before any catalog state is fetched. Whether a table is
-        *blocked* by another's failure is decided later, by the gating walk in
-        ``_gate``. Every run carries a resolution from birth, so no later
-        phase has to consider a half-resolved table.
+        *blocked* by another's failure is not decided here but derived from
+        these edges once the run's other fates are known. Every run carries a
+        resolution from birth, so no later phase has to consider a
+        half-resolved table.
         """
         runs: list[_TableRun] = []
 
@@ -377,57 +378,29 @@ class Engine:
 
         return tuple(runs)
 
-    def _gate(self, runs: tuple[_TableRun, ...]) -> None:
-        """
-        Block every run whose dependency already failed an earlier phase.
-
-        Walks the resolved runs in dependency-first order, seeding the
-        will-not-converge set with every run that failed to read, resolve, or
-        plan, and recording ExecutionBlockedByDependency on each of their
-        dependents — which then blocks its own dependents, so the block
-        propagates along FK chains in one pass. The gate runs on dry and real
-        runs alike: blocking is part of the preview, and execution afterwards
-        only has to react to failures that arise while statements run.
-        """
-        failed: set[QualifiedName] = {run.qualified_name for run in runs if run.has_failures}
-
-        for run in runs:
-            if run.has_failures:
-                continue
-
-            blocking_failures = run.resolution.blocked_by(failed)
-            if blocking_failures:
-                run.execution = ExecutionBlockedByDependency(blocking_failures)
-                failed.add(run.qualified_name)
-                logger.error(
-                    "Execution blocked for %s (%d foreign key failure(s))",
-                    run.qualified_name,
-                    len(blocking_failures),
-                )
-
     def _execute(self, runs: tuple[_TableRun, ...]) -> None:
         """
-        Execute the plan of every gated run with no failures and a non-empty plan.
+        Execute every convergent run's plan, skipping dependents of failure.
 
-        The gate has already blocked dependents of tables that failed an
-        earlier phase, so this walk reacts only to failures that arise while
-        statements run: a run whose resolved dependency fails mid-execution is
-        blocked with BLOCKED_BY_FAILED_DEPENDENCY instead of executed — even a
-        dependent with no work of its own. A run with an empty plan and no
-        blocking failures is skipped and counts as a healthy parent. The
-        execution outcome remains the sole source of execution or runtime
-        dependency failures.
+        One walk in dependency order applies the single blocking rule: a run
+        with failures of its own, or with a dependency that will not converge,
+        joins the not-converged set and is skipped. Nothing is recorded on the
+        run either way — the account derives blocking from the same edges — so
+        the two arms differ only in what they can say about the skip. Plan
+        emptiness gates only statement execution: a no-op run still joins the
+        set through the same rule when its dependency failed, so blocking
+        propagates through tables with no work of their own.
         """
-        failed_during_execution: set[QualifiedName] = set()
+        not_converged: set[QualifiedName] = set()
 
         for run in runs:
             if run.has_failures:
+                not_converged.add(run.qualified_name)
                 continue
 
-            blocking_failures = run.resolution.blocked_by(failed_during_execution)
+            blocking_failures = run.resolution.blocked_by(not_converged)
             if blocking_failures:
-                run.execution = ExecutionBlockedByDependency(blocking_failures)
-                failed_during_execution.add(run.qualified_name)
+                not_converged.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",
                     run.qualified_name,
@@ -435,7 +408,6 @@ class Engine:
                 )
                 continue
 
-            # A no-op table must still be blocked when its dependency failed.
             plan = run.plan
             if plan is None:
                 raise RuntimeError(f"Executable table was not planned: {run.qualified_name}")
@@ -446,7 +418,7 @@ class Engine:
             run.execution = summary
 
             if summary.failures:
-                failed_during_execution.add(run.qualified_name)
+                not_converged.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",

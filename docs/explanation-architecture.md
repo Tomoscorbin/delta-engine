@@ -319,19 +319,19 @@ The full run, with reporting last:
    carries the privately constructed `ActionPlan` into the next phase.
 6. **Compile**: lower every accepted plan through the executor port and record
    the exact statements used for both dry-run preview and real execution.
-7. **Gate**: walk the dependency-ordered runs, blocking every run whose
-   dependency will not reach desired state this sync. Dry runs walk the same
-   gate, so blocking stays visible in previews.
-8. **Execute**: run the compiled statements of tables with a non-empty plan and
-   no failures (real runs only).
-9. **Report** (after the chain): return `SyncReport`, or raise
-   `SyncFailedError` with the report on real runs that failed.
+7. **Execute**: run the compiled statements of tables with a non-empty plan,
+   no failures of their own, and no dependency that will not converge (real
+   runs only).
+8. **Account**: freeze the runs into `SyncReport` through `SyncReport.assemble`,
+   which derives dependency blocking from the retained edges; or raise
+   `SyncFailedError` with that report on real runs that failed.
 
-Execution is gated by failures derived from the retained phase outcomes. A
-table that failed read, validation, or structural foreign-key resolution is
-skipped during execution, and its FK dependents are blocked with
-`ExecutionBlockedByDependency` on their execution slot. The engine still
-processes other tables.
+A table that failed read, validation, or structural foreign-key resolution is
+skipped during execution, and so is any table depending on one that will not
+converge. The engine still processes other tables. Nothing records the block:
+it is derived at accounting, so a blocked table carries no execution outcome
+and its `blocked_failures` name every dependency that let it down, whichever
+phase each one failed in.
 
 | Shape              | Produced by            | Consumed by                      | Purpose                                     |
 | ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
@@ -629,24 +629,26 @@ declared foreign key structurally and reports:
 - `CYCLE` for true multi-table FK cycles.
 
 Whether a table is *blocked* by another table's failure is not a resolution
-outcome: the engine's execution gate emits `BLOCKED_BY_FAILED_DEPENDENCY` when
-a table depends on another table that will not reach desired state this sync,
-whatever phase failed it — a read failure, validation failure, structural FK
-failure, or an execution failure in the same run.
+outcome, and nor is it anybody's recorded outcome: it is derived from the
+retained dependency edges once the run's other fates are known.
+`TableResolution.blocked_by` states the rule — given the set of tables that
+will not converge, return one `BLOCKED_BY_FAILED_DEPENDENCY` failure per edge
+pointing into it — whatever phase failed each of those tables, be it a read
+failure, validation failure, structural FK failure, or an execution failure in
+the same run.
 
 Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
 `validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid and no unmanaged aspect has drifted. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
-Execution walks the dependency-first order produced by the resolver and keeps a
-set of every table that will not converge — seeded with the tables that failed
-an earlier phase, then grown as tables fail or are blocked during the walk.
-Before each table executes, the engine walks the dependency edges its
-resolution retained and blocks on any that will not converge. An
-execution failure in a parent therefore gives every later dependent a
-`BLOCKED_BY_FAILED_DEPENDENCY` failure in the same run, including a dependent
-whose own plan is empty. One pass suffices because the resolver already placed
-parents before their dependents, and dry runs walk the same gate without
+Two walks fold that one rule over the dependency-first order the resolver
+produced, each accumulating its own not-converged set as it goes: `_execute`
+folds it to decide what not to attempt, and `SyncReport.assemble` folds it to
+say why a table was skipped. One pass suffices for each because the resolver
+already placed parents before their dependents. An execution failure in a
+parent therefore gives every later dependent a `BLOCKED_BY_FAILED_DEPENDENCY`
+failure in the same run, including a dependent whose own plan is empty; a dry
+run runs only the second walk, so the preview reports the same blocking without
 executing.
 
 ## Public declarations and lowering
@@ -769,9 +771,10 @@ failures: callers receive the complete failure tuple without another mutable
 source of run truth. For execution, the engine stops at the first failed
 statement because it is not transactional and later statements may depend on
 earlier ones. The `ExecutionSummary` records all attempted statements up to
-that point. Runtime dependency blocking is retained as an execution outcome;
-the report exposes its foreign-key failures and keeps `execution` as `None`
-because no statement was attempted.
+that point. Dependency blocking is retained as no outcome at all: it is derived
+at accounting into `blocked_failures`, which the report flattens at the
+execution position while `execution` stays `None` because no statement was
+attempted.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would
@@ -812,7 +815,7 @@ dependency cost.
 | Add a safety rule                 | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and unresolvable differences and return `ValidationFailure` values.                                                                                                                               |
 | Add a data type                   | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                |
 | Change public declarations        | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                     |
-| Change FK ordering, verdicts, or blocking | `delta_engine.application.relationships` (blocking gate: `Engine._gate`) | Cross-table relationship judgment — dependency ordering and structural validation (exact referenced spelling included) — lives in the application layer; FK *existence* is a difference like any other and lives in the differ.       |
+| Change FK ordering, verdicts, or blocking | `delta_engine.application.relationships` (the blocking rule is `TableResolution.blocked_by`, folded by `Engine._execute` and `SyncReport.assemble`) | Cross-table relationship judgment — dependency ordering and structural validation (exact referenced spelling included) — lives in the application layer; FK *existence* is a difference like any other and lives in the differ.       |
 | Change report output              | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                              |
 | Change Databricks SQL             | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                       |
 | Change CLI commands or output     | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                     |

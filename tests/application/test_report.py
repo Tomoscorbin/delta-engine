@@ -21,7 +21,6 @@ from delta_engine.application.ports import (
 )
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
-    ExecutionBlockedByDependency,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -107,7 +106,6 @@ def _report(
     failures: tuple[Failure, ...] = (),
     dependencies: tuple[ForeignKeyConstraint, ...] = (),
     execution: ExecutionSummary | None = None,
-    execution_blocked: bool = False,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
 ) -> TableRunReport:
     """Construct a frozen report snapshot from concise test inputs."""
@@ -141,10 +139,7 @@ def _report(
     resolution = TableResolution(
         desired=desired,
         dependencies=dependencies,
-        structural_failures=() if execution_blocked else resolution_failures,
-    )
-    execution_outcome = (
-        ExecutionBlockedByDependency(resolution_failures) if execution_blocked else execution
+        structural_failures=resolution_failures,
     )
 
     return TableRunReport(
@@ -152,7 +147,7 @@ def _report(
         planning=planning,
         planned_sql_statements=planned_sql_statements,
         resolution=resolution,
-        execution_outcome=execution_outcome,
+        execution_outcome=execution,
         blocked_failures=blocked_failures,
     )
 
@@ -402,26 +397,6 @@ def test_status_reflects_the_earliest_failing_phase():
     )
     # Then its canonical read outcome determines the status
     assert read_failed.status is TableRunStatus.READ_FAILED
-
-
-def test_runtime_dependency_block_is_failure_but_not_statement_execution():
-    desired = _a_desired_table("orders")
-    failure = ForeignKeyFailure(
-        table=desired.qualified_name,
-        local_columns=("customer_id",),
-        references=QualifiedName("cat", "schema", "customers"),
-        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
-    )
-    report = _report(
-        desired=desired,
-        read=TablePresent(table=_an_observed_table()),
-        failures=(failure,),
-        execution_blocked=True,
-    )
-
-    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert report.failures == (failure,)
-    assert report.execution is None
 
 
 def test_table_run_report_carries_its_desired_definition():

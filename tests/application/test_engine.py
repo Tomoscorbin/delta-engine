@@ -23,7 +23,6 @@ from delta_engine.application.ports import (
     TablePresent,
 )
 from delta_engine.application.report import (
-    ExecutionBlockedByDependency,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -831,13 +830,13 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.b", "cat.sch.a"),
         )
 
-    # Then b is blocked at the execution gate and neither table executes
+    # Then b is blocked by a and neither table executes
     report = exc_info.value.report
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.READ_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
     assert table_b.resolution.structural_failures == ()
-    assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
+    assert table_b.blocked_failures != ()
     _assert_has_fk_failure(
         table_b,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -867,7 +866,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
         )
 
-    # Then orders is blocked at the execution gate, before any statement runs
+    # Then orders is blocked by customers, before any statement runs
     report = exc_info.value.report
     customers = _assert_status(
         report,
@@ -881,7 +880,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
     )
 
     assert orders.resolution.structural_failures == ()
-    assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
+    assert orders.blocked_failures != ()
     _assert_has_fk_failure(
         orders,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -906,14 +905,14 @@ def test_structural_fk_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.b", "cat.sch.a"),
         )
 
-    # Then a fails resolution structurally and b is blocked at the execution gate
+    # Then a fails resolution structurally and b is blocked by a
     report = exc_info.value.report
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.FOREIGN_KEY_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
     assert table_a.resolution.structural_failures != ()
     assert table_b.resolution.structural_failures == ()
-    assert isinstance(table_b.execution_outcome, ExecutionBlockedByDependency)
+    assert table_b.blocked_failures != ()
     _assert_has_fk_failure(
         table_b,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -1194,6 +1193,54 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
     assert executor.executed_names == ["cat.sch.a"]
 
 
+def test_blocked_table_lists_blockers_from_both_eras():
+    # Given suppliers fails structurally (FK to an unregistered table),
+    # employees fails while executing, and deliveries depends on both
+    deliveries = DeltaTable(
+        "cat",
+        "sch",
+        "deliveries",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("supplier_id", String()),
+            Column("employee_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[
+            ForeignKey(
+                columns={"supplier_id": "id"},
+                references=_referenced_spec("cat.sch.suppliers"),
+            ),
+            ForeignKey(
+                columns={"employee_id": "id"},
+                references=_referenced_spec("cat.sch.employees"),
+            ),
+        ],
+    )
+    reader = _RecordingReader()  # every table absent — plans are creations
+    executor = _RecordingExecutor([_execution_error()])  # employees, the only table that runs
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing for real
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.suppliers", "cat.sch.ghost"),
+            _spec("cat.sch.employees"),
+            deliveries,
+        )
+
+    # Then deliveries names both blockers — the structural-era parent and the
+    # execution-era parent — not just the first era's
+    report = exc_info.value.report
+    table = _assert_status(report, "cat.sch.deliveries", TableRunStatus.FOREIGN_KEY_FAILED)
+    assert {str(failure.references) for failure in table.blocked_failures} == {
+        "cat.sch.employees",
+        "cat.sch.suppliers",
+    }
+    assert table.execution_outcome is None
+    assert executor.executed_names == ["cat.sch.employees"]
+
+
 def test_synced_fk_parent_with_no_work_does_not_block_dependent():
     # Given customers already matches its declaration and orders is absent
     reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
@@ -1392,7 +1439,7 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
     )
 
 
-def test_dry_run_records_dependency_blocking_for_dependents_of_failed_tables():
+def test_dry_run_derives_dependency_blocking_for_dependents_of_failed_tables():
     # Given a parent that fails validation and a child declaring an FK to it
     reader = _RecordingReader(
         {
@@ -1413,7 +1460,7 @@ def test_dry_run_records_dependency_blocking_for_dependents_of_failed_tables():
     # Then the dry run keeps blocking visible without executing anything
     _assert_status(report, "cat.sch.customers", TableRunStatus.PLANNING_FAILED)
     orders = _assert_status(report, "cat.sch.orders", TableRunStatus.FOREIGN_KEY_FAILED)
-    assert isinstance(orders.execution_outcome, ExecutionBlockedByDependency)
+    assert orders.blocked_failures != ()
     _assert_has_fk_failure(
         orders,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
