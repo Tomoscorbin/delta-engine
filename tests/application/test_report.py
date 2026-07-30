@@ -147,7 +147,7 @@ def _report(
         planning=planning,
         planned_sql_statements=planned_sql_statements,
         resolution=resolution,
-        execution_outcome=execution,
+        execution=execution,
         blocked_failures=blocked_failures,
     )
 
@@ -423,7 +423,7 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=(),
             resolution=TableResolution(desired, (), ()),
-            execution_outcome=None,
+            execution=None,
         )
 
 
@@ -442,7 +442,7 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("SQL",),
             resolution=TableResolution(desired, (), (failure,)),
-            execution_outcome=ExecutionSummary((_ok_exec(0, "SQL"),)),
+            execution=ExecutionSummary((_ok_exec(0, "SQL"),)),
         )
 
 
@@ -455,7 +455,7 @@ def test_table_run_report_rejects_execution_unrelated_to_planned_sql():
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("PLANNED SQL",),
             resolution=TableResolution(desired, (), ()),
-            execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
+            execution=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
         )
 
 
@@ -623,7 +623,7 @@ def test_assemble_bakes_blocked_failures_onto_a_sound_dependent_of_a_failed_pare
     assert failure.table == _name("b")
     assert failure.references == _name("a")
     assert failure.reason is ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-    assert derived_child.execution_outcome is None
+    assert derived_child.execution is None
     assert derived_child.status is TableRunStatus.FOREIGN_KEY_FAILED
 
 

@@ -1237,7 +1237,7 @@ def test_blocked_table_lists_blockers_from_both_eras():
         "cat.sch.employees",
         "cat.sch.suppliers",
     }
-    assert table.execution_outcome is None
+    assert table.execution is None
     assert executor.executed_names == ["cat.sch.employees"]
 
 
