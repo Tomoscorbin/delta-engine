@@ -50,7 +50,11 @@ metadata is applied.
 - **Requires** the live schema to match the declaration exactly. Any unmanaged
   aspect (column structure, partitioning, or clustering) that has drifted
   fails the sync at validation (`UnmanagedAspectDrift`) before any SQL
-  executes. Catalog properties are the exception: a declaration that does not
+  executes. That includes column *case*: because you must name the live
+  columns to declare keys or comments over them, a column declared
+  `requestid` against a catalog holding `requestId` fails with
+  `ColumnSpellingMustMatchCatalog` naming both spellings. `DESCRIBE TABLE`
+  shows the spelling to copy. Catalog properties are the exception: a declaration that does not
   manage properties makes no property assertion at all, so they are never
   compared — declared properties are carried but ignored, and properties on
   the live table (for example those written by a previous fully managed sync)

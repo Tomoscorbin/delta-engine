@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 from delta_engine.application.failures import ValidationFailure
+from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
     MANDATORY_SCOPE_GATES,
@@ -136,6 +137,7 @@ def test_mandatory_scope_gates_cover_all_scope_policies_in_evaluation_order():
     gate_names = tuple(type(gate).__name__ for gate in MANDATORY_SCOPE_GATES)
 
     assert gate_names == (
+        "ColumnSpellingMustMatchCatalog",
         "MissingTableUnmanaged",
         "StreamingTableTagsOnly",
         "UnmanagedAspectDrift",
@@ -157,7 +159,6 @@ def test_default_rules_cover_all_safety_policies():
         "PropertyMustBeDeclared",
         "ColumnMappingRequiredForDrop",
         "AmbiguousColumnRename",
-        "ColumnSpellingMustMatchCatalog",
         "PrimaryKeyReferencedByForeignKeys",
     )
 
@@ -1015,6 +1016,67 @@ def test_agreeing_spelling_passes_the_case_rule():
     failures = validate_diff(diff_table(desired, observed))
 
     assert not any(f.rule_name == "ColumnSpellingMustMatchCatalog" for f in failures)
+
+
+def test_column_case_drift_is_named_at_a_scope_that_does_not_manage_columns():
+    # Given a metadata-scoped declaration whose only difference is a column
+    # spelled differently from the catalog — the shape of a declaration adding
+    # keys or comments to a table someone else created
+    drift = _drift(
+        ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    # When the diff is validated
+    failures = validate_diff(drift)
+
+    # Then the spelling itself is named. A misspelled reference is a defect in
+    # the declaration, not drift in an aspect the declaration may decline to
+    # manage, so it does not hide behind UnmanagedAspectDrift
+    assert [failure.rule_name for failure in failures] == ["ColumnSpellingMustMatchCatalog"]
+
+
+def test_column_spelling_gate_cannot_be_suppressed_by_empty_rules():
+    # Given case drift and no safety rules at all
+    drift = _drift(ColumnCaseDrift(declared_name="requestid", observed_name="requestId"))
+
+    failures = validate_diff(drift, rules=())
+
+    # Then exact spelling still holds — it is a law, not a suppressible policy
+    assert [failure.rule_name for failure in failures] == ["ColumnSpellingMustMatchCatalog"]
+
+
+def test_column_spelling_gate_short_circuits_safety_rules():
+    # Given a misspelled column alongside a change a safety rule would reject
+    drift = _drift(
+        ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
+        _type_drift("id"),
+    )
+
+    failures = validate_diff(drift)
+
+    # Then the spelling is reported alone: a diff whose column references
+    # disagree with the catalog is not worth safety judgement yet
+    assert [failure.rule_name for failure in failures] == ["ColumnSpellingMustMatchCatalog"]
+
+
+def test_column_spelling_gate_reports_before_unmanaged_aspect_drift():
+    # Given a metadata-scoped declaration with both a misspelled column and
+    # genuinely unmanaged structural drift, so two gate arms fire
+    drift = _drift(
+        ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
+        AddColumn(DesiredColumn("extra", Integer())),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    failures = validate_diff(drift)
+
+    # Then the spelling failure leads: it is the actionable root defect, and a
+    # reader who fixes the spelling first re-reads a trustworthy diff
+    assert [failure.rule_name for failure in failures] == [
+        "ColumnSpellingMustMatchCatalog",
+        "UnmanagedAspectDrift",
+    ]
 
 
 # ---- streaming tables
