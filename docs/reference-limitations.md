@@ -26,19 +26,32 @@ therefore normalized to lowercase, exactly as the catalog stores them.
 
 Column names, nested struct field names, and constraint names keep their
 declared or observed spelling. Case never distinguishes two identifiers:
-names differing only in case are the same column, collide as duplicates
-within one schema, and a case-only difference between a declaration and the
-catalog is never drift. A partition, clustering, primary-key, or foreign-key
-reference may use any casing; once attached to a table it uses the referenced
-``Column.name`` when the public declaration is lowered. Thus
-``Column("requestId", ...)`` and
-``primary_key=["REQUESTID"]`` are accepted, while
-``DeltaTable.primary_key`` returns ``("requestId",)``.
+names differing only in case are the same column and collide as duplicates
+within one schema.
 
-When the engine changes an existing column or adds a constraint over one, it
-emits the catalog's exact spelling (some Databricks DDL paths require it);
-newly created columns are spelled as declared. Callers that relied on
-lowercase accessor values should apply their own presentation policy.
+**Within one declaration, case is free.** A partition, clustering,
+primary-key, or foreign-key reference may use any casing; once attached to a
+table it uses the referenced ``Column.name`` when the public declaration is
+lowered. Thus ``Column("requestId", ...)`` and ``primary_key=["REQUESTID"]``
+are accepted together, while ``DeltaTable.primary_key`` returns
+``("requestId",)``.
+
+**Against the catalog, case is exact.** A declaration naming an existing
+column with different casing fails validation with
+`ColumnSpellingMustMatchCatalog`, which reports both spellings; a foreign key
+that spells the referenced table's key differently from that table's own
+declaration fails resolution with `REFERENCED_COLUMN_CASE_MISMATCH`. Nothing
+is rewritten to compensate: the engine emits the spelling the declaration
+carries, and this rule is what makes that safe on the Databricks DDL paths
+that resolve case-sensitively. Columns the sync creates are spelled as
+declared — a table that does not yet exist has no catalog spelling to agree
+with.
+
+Exactness holds at every scope. A `scope="metadata"` or `scope="tags"`
+declaration still names the columns it keys, comments, or tags, so it is
+judged the same way; narrowing the scope does not narrow this rule.
+`DESCRIBE TABLE` shows the spelling to copy. Callers that relied on lowercase
+accessor values should apply their own presentation policy.
 
 Declared catalog, schema, and table names are validated against Unity
 Catalog's object-name rules at declaration time: at most 255 characters, and
