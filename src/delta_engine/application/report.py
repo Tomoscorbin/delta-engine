@@ -92,25 +92,6 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionBlockedByDependency:
-    """Execution was skipped because a referenced table failed while executing."""
-
-    failures: tuple[ForeignKeyFailure, ...]
-
-    def __post_init__(self) -> None:
-        if not self.failures:
-            raise ValueError("Dependency blocking requires at least one failure")
-        if any(
-            failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-            for failure in self.failures
-        ):
-            raise ValueError("Execution blocking requires dependency-blocking failures")
-
-
-type ExecutionOutcome = ExecutionSummary | ExecutionBlockedByDependency
-
-
-@dataclass(frozen=True, slots=True)
 class TableRunReport:
     """
     Frozen public projection of one completed table run.
@@ -130,7 +111,7 @@ class TableRunReport:
     planning: PlanningResult | None
     planned_sql_statements: tuple[str, ...]
     resolution: TableResolution
-    execution_outcome: ExecutionOutcome | None
+    execution_outcome: ExecutionSummary | None
     blocked_failures: tuple[ForeignKeyFailure, ...] = ()
 
     def __post_init__(self) -> None:
@@ -152,8 +133,6 @@ class TableRunReport:
             read_failed or planning_failed or resolution_failed
         ):
             raise ValueError("Execution cannot follow a failed earlier phase")
-        if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and resolution_failed:
-            raise ValueError("Execution blocking requires a structurally sound resolution")
         if self.blocked_failures:
             if self.execution_outcome is not None:
                 raise ValueError("A blocked table records no execution outcome")
@@ -182,14 +161,8 @@ class TableRunReport:
 
     @property
     def execution(self) -> ExecutionSummary | None:
-        """The attempted statements, excluding dependency-blocked execution."""
-        match self.execution_outcome:
-            case ExecutionSummary() as summary:
-                return summary
-            case ExecutionBlockedByDependency() | None:
-                return None
-            case _ as unreachable:
-                assert_never(unreachable)
+        """The attempted statements; ``None`` when nothing was executed."""
+        return self.execution_outcome
 
     @property
     def failures(self) -> tuple[Failure, ...]:
@@ -208,15 +181,8 @@ class TableRunReport:
         if isinstance(self.planning, PlanningFailed):
             failures.extend(self.planning.failures)
 
-        match self.execution_outcome:
-            case ExecutionSummary() as summary:
-                failures.extend(summary.failures)
-            case ExecutionBlockedByDependency(failures=blocked):
-                failures.extend(blocked)
-            case None:
-                pass
-            case _ as unreachable:
-                assert_never(unreachable)
+        if self.execution_outcome is not None:
+            failures.extend(self.execution_outcome.failures)
         failures.extend(self.blocked_failures)
 
         return tuple(failures)
