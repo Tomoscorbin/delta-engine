@@ -131,7 +131,7 @@ def _report(
         planning = PlanningSucceeded(report_plan)
 
     resolution = TableResolution(
-        qualified_name=desired.qualified_name,
+        desired=desired,
         dependencies=(),
         structural_failures=() if execution_blocked else resolution_failures,
     )
@@ -140,7 +140,6 @@ def _report(
     )
 
     return TableRunReport(
-        desired=desired,
         read=read,
         planning=planning,
         planned_sql_statements=planned_sql_statements,
@@ -436,11 +435,10 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
 
     with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
         TableRunReport(
-            desired=desired,
             read=ReadFailure("IOError", "boom"),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=(),
-            resolution=TableResolution(desired.qualified_name, (), ()),
+            resolution=TableResolution(desired, (), ()),
             execution_outcome=None,
         )
 
@@ -456,11 +454,10 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
 
     with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
         TableRunReport(
-            desired=desired,
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("SQL",),
-            resolution=TableResolution(desired.qualified_name, (), (failure,)),
+            resolution=TableResolution(desired, (), (failure,)),
             execution_outcome=ExecutionSummary((_ok_exec(0, "SQL"),)),
         )
 
@@ -470,11 +467,10 @@ def test_table_run_report_rejects_execution_unrelated_to_planned_sql():
 
     with pytest.raises(ValueError, match="planned statement prefix"):
         TableRunReport(
-            desired=desired,
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("PLANNED SQL",),
-            resolution=TableResolution(desired.qualified_name, (), ()),
+            resolution=TableResolution(desired, (), ()),
             execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
         )
 

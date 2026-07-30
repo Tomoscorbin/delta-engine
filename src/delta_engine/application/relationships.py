@@ -4,10 +4,11 @@ Cross-table relationship resolution: ordering, edges, and structural verdicts.
 The public entry point is `resolve`, which takes the registered desired tables
 and returns one `TableResolution` per table in dependency-first order. It is
 pure declaration analysis: no catalog state is consulted, and no work is
-planned — differences are the differ's. Each resolution carries the table's
-dependency edges (the declared constraints themselves) and its structural
-foreign-key verdicts, and states through `blocked_by` which of those edges
-block it once the caller knows which tables will not converge.
+planned — differences are the differ's. Each resolution carries the
+declaration it judged, that table's dependency edges (the declared
+constraints themselves), and its structural foreign-key verdicts, and states
+through `blocked_by` which of those edges block it once the caller knows which
+tables will not converge.
 
 For example, given these declared foreign keys (child ──► parent)::
 
@@ -59,14 +60,22 @@ class TableResolution:
     """
     One table's static relationship facts, in dependency order by tuple position.
 
-    ``dependencies`` are the retained dependency edges — the managed foreign
-    keys themselves, declared constraints verbatim. Empty
-    ``structural_failures`` means the table is structurally sound.
+    ``desired`` is the declaration these facts were judged from, so a
+    resolution is self-sufficient: callers read the table from it rather than
+    looking it back up by name. ``dependencies`` are the retained dependency
+    edges — the managed foreign keys themselves, declared constraints
+    verbatim. Empty ``structural_failures`` means the table is structurally
+    sound.
     """
 
-    qualified_name: QualifiedName
+    desired: DesiredTable
     dependencies: tuple[ForeignKeyConstraint, ...]
     structural_failures: tuple[ForeignKeyFailure, ...]
+
+    @property
+    def qualified_name(self) -> QualifiedName:
+        """The identity of the declaration these facts were judged from."""
+        return self.desired.qualified_name
 
     def blocked_by(self, unconverged: AbstractSet[QualifiedName]) -> tuple[ForeignKeyFailure, ...]:
         """
@@ -95,11 +104,11 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     Resolve cross-table relationships for one sync.
 
     Pure declaration analysis: orders every table dependency-first, judges
-    each managed foreign key structurally, and retains each table's
-    dependency edges as the declared constraints themselves. No catalog
-    state is consulted, and no work is planned — differences are the
-    differ's, and blocking is inherited at enactment along these edges via
-    :meth:`TableResolution.blocked_by`.
+    each managed foreign key structurally, and retains each declaration
+    alongside its dependency edges as the declared constraints themselves.
+    No catalog state is consulted, and no work is planned — differences are
+    the differ's, and blocking is inherited at enactment along these edges
+    via :meth:`TableResolution.blocked_by`.
     """
     registered_names = {table.qualified_name for table in tables}
     dependencies_by_table = _build_dependencies(tables, registered_names)
@@ -110,7 +119,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
 
     return tuple(
         TableResolution(
-            qualified_name=table.qualified_name,
+            desired=table,
             dependencies=dependencies_by_table[table.qualified_name],
             structural_failures=failures_by_table.get(table.qualified_name, ()),
         )

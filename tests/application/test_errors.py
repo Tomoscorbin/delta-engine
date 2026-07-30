@@ -76,13 +76,12 @@ def _table_report(
         else PlanningSucceeded(ActionPlan(target=desired.qualified_name))
     )
     resolution = TableResolution(
-        qualified_name=desired.qualified_name,
+        desired=desired,
         dependencies=(),
         structural_failures=resolution_failures,
     )
 
     return TableRunReport(
-        desired=desired,
         read=read,
         planning=planning,
         planned_sql_statements=statements,

@@ -123,7 +123,6 @@ class TableRunReport:
     changes remain inspectable even when execution is skipped or blocked.
     """
 
-    desired: DesiredTable
     read: ReadResult
     planning: PlanningResult | None
     planned_sql_statements: tuple[str, ...]
@@ -135,8 +134,6 @@ class TableRunReport:
         planning_failed = isinstance(self.planning, PlanningFailed)
         resolution_failed = bool(self.resolution.structural_failures)
 
-        if self.resolution.qualified_name != self.qualified_name:
-            raise ValueError("Resolution outcome must belong to the reported table")
         if read_failed and self.planning is not None:
             raise ValueError("Planning cannot follow a failed read")
         if not read_failed and self.planning is None:
@@ -210,9 +207,14 @@ class TableRunReport:
         return tuple(failures)
 
     @property
+    def desired(self) -> DesiredTable:
+        """The declaration this run reconciled, as retained by its resolution."""
+        return self.resolution.desired
+
+    @property
     def qualified_name(self) -> QualifiedName:
         """The table identity from the declaration retained by this report."""
-        return self.desired.qualified_name
+        return self.resolution.qualified_name
 
     @property
     def status(self) -> TableRunStatus:

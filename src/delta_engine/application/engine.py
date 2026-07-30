@@ -125,15 +125,15 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the resolve phase, in dependency order, carrying its static facts:
-    the declaration, its dependency edges, and its structural verdicts. Its
-    read, diff, planning outcome, compiled SQL, and execution outcome accrete
-    as the worldly phases run, each written once, then the run is frozen into
-    a public :class:`TableRunReport`. Kept private to the engine so the
-    published report stays immutable while the phases mutate in place.
+    Born in the resolve phase, in dependency order, carrying its resolution —
+    which holds its static facts: the declaration, its dependency edges, and
+    its structural verdicts. Its read, diff, planning outcome, compiled SQL,
+    and execution outcome accrete as the worldly phases run, each written
+    once, then the run is frozen into a public :class:`TableRunReport`. Kept
+    private to the engine so the published report stays immutable while the
+    phases mutate in place.
     """
 
-    desired: DesiredTable
     resolution: TableResolution
     read: ReadResult | None = None
     diff: TableDiff | None = None
@@ -142,8 +142,12 @@ class _TableRun:
     execution: ExecutionOutcome | None = None
 
     @property
+    def desired(self) -> DesiredTable:
+        return self.resolution.desired
+
+    @property
     def qualified_name(self) -> QualifiedName:
-        return self.desired.qualified_name
+        return self.resolution.qualified_name
 
     @property
     def plan(self) -> ActionPlan | None:
@@ -171,7 +175,6 @@ class _TableRun:
         if self.read is None:
             raise RuntimeError(f"Run was frozen before its read completed: {self.qualified_name}")
         return TableRunReport(
-            desired=self.desired,
             read=self.read,
             planning=self.planning,
             planned_sql_statements=self.planned_sql_statements,
@@ -364,15 +367,10 @@ class Engine:
         ``_gate``. Every run carries a resolution from birth, so no later
         phase has to consider a half-resolved table.
         """
-        ordered_resolutions = resolve(tables)
-
-        desired_by_name = {table.qualified_name: table for table in tables}
-
         runs: list[_TableRun] = []
 
-        for resolution in ordered_resolutions:
-            desired = desired_by_name[resolution.qualified_name]
-            runs.append(_TableRun(desired=desired, resolution=resolution))
+        for resolution in resolve(tables):
+            runs.append(_TableRun(resolution=resolution))
 
             if resolution.structural_failures:
                 logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
