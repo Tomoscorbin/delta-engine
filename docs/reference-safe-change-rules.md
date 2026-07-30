@@ -65,14 +65,23 @@ rather than validated. CHECK constraints and generated columns are also
 outside the model: change dependent expressions first, or Databricks rejects
 the rename at execution.
 
-Three further checks are scope invariants rather than rules — they define what
-a declaration is allowed to govern and always run, regardless of the rule set:
+Four further checks are laws rather than rules — they define what a declaration
+is allowed to govern and how it must name the table's columns, and always run
+regardless of the rule set:
 
-| Invariant                | What it blocks                                                                                          | How to resolve                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `UnmanagedAspectDrift`   | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync | Sync the table fully, or update the declaration to match the live schema              |
-| `MissingTableUnmanaged`  | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
-| `StreamingTableTagsOnly` | The observed table is a streaming table and the declaration manages more than tags                      | Declare it with `scope="tags"`; the table's definition belongs to its owning pipeline |
+| Law                              | What it blocks                                                                                          | How to resolve                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `ColumnSpellingMustMatchCatalog` | A declared column (or `renamed_from` reference) spelled differently from the catalog — case must match exactly | Update the declaration to the catalog's exact spelling (`DESCRIBE TABLE` shows it)     |
+| `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync  | Sync the table fully, or update the declaration to match the live schema              |
+| `MissingTableUnmanaged`          | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
+| `StreamingTableTagsOnly`         | The observed table is a streaming table and the declaration manages more than tags                      | Declare it with `scope="tags"`; the table's definition belongs to its owning pipeline |
+
+`ColumnSpellingMustMatchCatalog` is judged at every scope, because a misspelled
+column reference is a defect in the declaration rather than drift in one of the
+table's aspects: a declaration managing only keys or tags still names its
+columns, and naming them wrongly is wrong whatever else it declines to manage.
+It is reported first when several of these fire, so the actionable root defect
+leads rather than a consequence of it.
 
 `StreamingTableTagsOnly` judges the declaration against the observed relation
 kind, not against drift, so it fires even when the streaming table is

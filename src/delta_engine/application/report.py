@@ -6,17 +6,12 @@ engine run; `SyncReport` aggregates those table snapshots.
 """
 
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, assert_never
 
-from delta_engine.application.dependency_resolution import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-)
 from delta_engine.application.diff_entries import action_entries
 from delta_engine.application.failures import (
     Failure,
@@ -31,6 +26,7 @@ from delta_engine.application.planning import (
     PlanningSucceeded,
 )
 from delta_engine.application.ports import ExecutionSummary, ReadResult
+from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 
@@ -96,25 +92,6 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionBlockedByDependency:
-    """Execution was skipped because a referenced table failed while executing."""
-
-    failures: tuple[ForeignKeyFailure, ...]
-
-    def __post_init__(self) -> None:
-        if not self.failures:
-            raise ValueError("Dependency blocking requires at least one failure")
-        if any(
-            failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
-            for failure in self.failures
-        ):
-            raise ValueError("Execution blocking requires dependency-blocking failures")
-
-
-type ExecutionOutcome = ExecutionSummary | ExecutionBlockedByDependency
-
-
-@dataclass(frozen=True, slots=True)
 class TableRunReport:
     """
     Frozen public projection of one completed table run.
@@ -125,22 +102,23 @@ class TableRunReport:
     planned no-op retains an empty, target-bearing plan.
     ``planned_sql_statements`` is populated on dry and real runs so planned
     changes remain inspectable even when execution is skipped or blocked.
+    ``blocked_failures`` is the derived consequence of other tables' fates,
+    baked in at assembly — a blocked table records no execution outcome of its
+    own.
     """
 
-    desired: DesiredTable
     read: ReadResult
     planning: PlanningResult | None
     planned_sql_statements: tuple[str, ...]
     resolution: TableResolution
-    execution_outcome: ExecutionOutcome | None
+    execution_outcome: ExecutionSummary | None
+    blocked_failures: tuple[ForeignKeyFailure, ...] = ()
 
     def __post_init__(self) -> None:
         read_failed = isinstance(self.read, ReadFailure)
         planning_failed = isinstance(self.planning, PlanningFailed)
-        resolution_failed = isinstance(self.resolution, ResolutionFailed)
+        resolution_failed = bool(self.resolution.structural_failures)
 
-        if self.resolution.qualified_name != self.qualified_name:
-            raise ValueError("Resolution outcome must belong to the reported table")
         if read_failed and self.planning is not None:
             raise ValueError("Planning cannot follow a failed read")
         if not read_failed and self.planning is None:
@@ -155,10 +133,14 @@ class TableRunReport:
             read_failed or planning_failed or resolution_failed
         ):
             raise ValueError("Execution cannot follow a failed earlier phase")
-        if isinstance(self.execution_outcome, ExecutionBlockedByDependency) and not isinstance(
-            self.resolution, ResolutionSucceeded
-        ):
-            raise ValueError("Execution blocking requires successful dependency resolution")
+        if self.blocked_failures:
+            if self.execution_outcome is not None:
+                raise ValueError("A blocked table records no execution outcome")
+            if any(
+                failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+                for failure in self.blocked_failures
+            ):
+                raise ValueError("Blocked failures must carry the dependency-blocking reason")
 
         execution = self.execution
         if execution is not None:
@@ -179,43 +161,41 @@ class TableRunReport:
 
     @property
     def execution(self) -> ExecutionSummary | None:
-        """The attempted statements, excluding dependency-blocked execution."""
-        match self.execution_outcome:
-            case ExecutionSummary() as summary:
-                return summary
-            case ExecutionBlockedByDependency() | None:
-                return None
-            case _ as unreachable:
-                assert_never(unreachable)
+        """The attempted statements; ``None`` when nothing was executed."""
+        return self.execution_outcome
 
     @property
     def failures(self) -> tuple[Failure, ...]:
-        """Flatten canonical phase outcomes into lifecycle order for callers."""
+        """
+        Flatten canonical phase outcomes for callers.
+
+        Lifecycle order: structural, read, planning, execution — derived
+        blocking sits at the execution position, where the run it replaced
+        would have been.
+        """
         failures: list[Failure] = []
 
+        failures.extend(self.resolution.structural_failures)
         if isinstance(self.read, ReadFailure):
             failures.append(self.read)
         if isinstance(self.planning, PlanningFailed):
             failures.extend(self.planning.failures)
-        if isinstance(self.resolution, ResolutionFailed):
-            failures.extend(self.resolution.failures)
 
-        match self.execution_outcome:
-            case ExecutionSummary() as summary:
-                failures.extend(summary.failures)
-            case ExecutionBlockedByDependency(failures=blocked):
-                failures.extend(blocked)
-            case None:
-                pass
-            case _ as unreachable:
-                assert_never(unreachable)
+        if self.execution_outcome is not None:
+            failures.extend(self.execution_outcome.failures)
+        failures.extend(self.blocked_failures)
 
         return tuple(failures)
 
     @property
+    def desired(self) -> DesiredTable:
+        """The declaration this run reconciled, as retained by its resolution."""
+        return self.resolution.desired
+
+    @property
     def qualified_name(self) -> QualifiedName:
         """The table identity from the declaration retained by this report."""
-        return self.desired.qualified_name
+        return self.resolution.qualified_name
 
     @property
     def status(self) -> TableRunStatus:
@@ -268,6 +248,43 @@ class SyncReport:
     ended_at: datetime
     table_reports: tuple[TableRunReport, ...]
     dry_run: bool = False
+
+    @classmethod
+    def assemble(
+        cls,
+        *,
+        started_at: datetime,
+        ended_at: datetime,
+        table_reports: tuple[TableRunReport, ...],
+        dry_run: bool,
+    ) -> "SyncReport":
+        """
+        Assemble the run report, deriving dependency blocking from the graph.
+
+        Folds the blocking rule over the reports in dependency order: a table
+        that did not converge — own failures, or a dependency that did not —
+        marks its name, and a sound table its resolution reports as blocked is
+        replaced by a copy carrying those failures. The run recorded nothing
+        about blocking; this projection is where the consequence becomes
+        visible, dry and real runs alike.
+        """
+        not_converged: set[QualifiedName] = set()
+        derived: list[TableRunReport] = []
+        for report in table_reports:
+            if report.has_failures:
+                not_converged.add(report.qualified_name)
+                derived.append(report)
+                continue
+            blocking = report.resolution.blocked_by(not_converged)
+            if blocking:
+                not_converged.add(report.qualified_name)
+            derived.append(replace(report, blocked_failures=blocking) if blocking else report)
+        return cls(
+            started_at=started_at,
+            ended_at=ended_at,
+            table_reports=tuple(derived),
+            dry_run=dry_run,
+        )
 
     @property
     def has_failures(self) -> bool:

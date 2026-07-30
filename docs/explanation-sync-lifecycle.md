@@ -17,17 +17,23 @@ one table's failure does not take down the rest of the run.
 Every sync runs the same chain of phases over every table in the call:
 
 ```text
-read → diff → plan → compile → resolve → execute → report
+lower → resolve → read → diff → plan → compile → execute → report
 ```
 
 | Phase       | Question it answers                          | Outcome                                                            |
 | ----------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| **Lower**   | What tables does the declaration set define? | Domain tables, deduplicated, in deterministic order                |
+| **Resolve** | Can each declared foreign key work, and which tables go first? | Tables ordered dependency-first, with structural FK verdicts and their dependency edges |
 | **Read**    | What does the table look like right now?     | Present (with its observed state), absent, or a read failure       |
-| **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — or no drift            |
-| **Plan**    | Is the diff accepted, and in what order?     | A validated action plan, or named validation failures with no plan |
+| **Diff**    | How does observed state differ from desired? | Direct actions and non-action differences — foreign-key existence included — or no drift |
+| **Plan**    | Is the complete diff accepted?               | A validated action plan, or named validation failures with no plan |
 | **Compile** | What exact backend statements apply it?     | The SQL exposed on the report and passed unchanged to execution    |
-| **Resolve** | Which tables must be synced before which?    | Tables ordered so foreign-key targets go first                     |
-| **Execute** | Apply the compiled statements                | Attempted results, a dependency block, or skipped on a dry run     |
+| **Execute** | Apply the compiled statements                | Attempted results — or nothing, for tables skipped as no-ops, blocked, or on a dry run |
+
+Resolution comes before read because it needs nothing from the catalog: it
+judges the declarations against each other, so every table starts its worldly
+phases already knowing its position, its dependency edges, and whether its
+relationships are sound.
 
 The result is a `SyncReport` with one entry per table. On a real run, if any
 table failed, the engine raises `SyncFailedError` with that report attached; a
@@ -77,23 +83,37 @@ independent — see the next section.
 
 A foreign key can only be created if the table it references already exists
 with its primary key in place. The resolve phase therefore orders tables so
-referenced tables are executed before the tables that reference them.
+referenced tables are executed before the tables that reference them. The
+foreign keys a table needs set or dropped are a difference like any other, so
+the diff states them; resolve judges only what one table's declaration means
+for another's.
 
-The same dependency logic propagates failure: if a table fails — at any phase,
+The same dependency edges propagate failure: if a table fails — at any phase,
 including mid-execution — every table whose foreign keys depend on it is
 blocked rather than executed, reporting `FOREIGN_KEY_FAILED`. The rule is
 uniform: if a dependency won't reach its desired state this sync, its
-dependents don't run either. Fix the upstream table and re-sync.
+dependents don't run either.
+
+Blocking is not something the engine records as it goes; it is worked out from
+the dependency edges once the run's other outcomes are known. So a blocked
+table carries no execution outcome at all, and it names *every* dependency that
+let it down, whichever phase each one failed in. The upshot for you is that a
+blocked table's report tells you the whole story of why it was skipped. Fix the
+upstream tables and re-sync.
 [Foreign keys](how-to-configure-table.md#foreign-keys) covers the
 declaration side.
 
-## Dry runs stop before execution
+## Dry runs execute nothing
 
-`sync(..., dry_run=True)` runs read, diff, accepted/rejected planning,
-compilation, and resolve, then skips execution. You get every action and SQL
-statement planned from the catalog snapshot it read, plus any read, validation,
-or foreign-key failure found before execution. It cannot predict execution-time
-Databricks errors. The run makes zero catalog mutations and raises no exception.
+`sync(..., dry_run=True)` runs every phase but attempts no statements: resolve,
+read, diff, accepted/rejected planning, and compilation all happen, then the
+run stops. Because blocking is derived from the dependency edges rather than
+recorded while executing, the preview still shows which tables a failure would
+block. You get every action and SQL statement planned from the catalog snapshot
+it read, plus any read, validation, foreign-key, or dependency-blocking failure
+the run found.
+It cannot predict execution-time Databricks errors. The run makes zero catalog
+mutations and raises no exception.
 See [how to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down

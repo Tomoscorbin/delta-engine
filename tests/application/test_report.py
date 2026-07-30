@@ -3,10 +3,6 @@ import json
 
 import pytest
 
-from delta_engine.application.dependency_resolution import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
@@ -23,8 +19,8 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
+from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
-    ExecutionBlockedByDependency,
     SyncReport,
     TableRunReport,
     TableRunStatus,
@@ -32,6 +28,7 @@ from delta_engine.application.report import (
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
+    ForeignKeyConstraint,
     Integer,
     ObservedColumn,
     ObservedTable,
@@ -47,10 +44,15 @@ from delta_engine.domain.plan.actions import (
 # ---------- test builders
 
 
+def _name(table="observed"):
+    """Build the qualified name every builder in this file works in."""
+    return QualifiedName("cat", "schema", table)
+
+
 def _an_observed_table(partitioned_by=()):
     """Build a real ObservedTable, so reports are exercised against the domain type."""
     return ObservedTable(
-        qualified_name=QualifiedName("cat", "schema", "observed"),
+        qualified_name=_name(),
         columns=(ObservedColumn("id", Integer()),),
         partitioned_by=partitioned_by,
     )
@@ -59,7 +61,7 @@ def _an_observed_table(partitioned_by=()):
 def _a_desired_table(name="observed"):
     """Build a minimal real DesiredTable for pipeline-record construction."""
     return DesiredTable(
-        qualified_name=QualifiedName("cat", "schema", name),
+        qualified_name=_name(name),
         columns=(DesiredColumn("id", Integer()),),
     )
 
@@ -102,8 +104,9 @@ def _report(
     plan: ActionPlan | None | object = _PLAN_UNSET,
     planned_sql_statements: tuple[str, ...] = (),
     failures: tuple[Failure, ...] = (),
+    dependencies: tuple[ForeignKeyConstraint, ...] = (),
     execution: ExecutionSummary | None = None,
-    execution_blocked: bool = False,
+    blocked_failures: tuple[ForeignKeyFailure, ...] = (),
 ) -> TableRunReport:
     """Construct a frozen report snapshot from concise test inputs."""
     if execution is not None and not planned_sql_statements:
@@ -133,22 +136,19 @@ def _report(
         assert isinstance(report_plan, ActionPlan)
         planning = PlanningSucceeded(report_plan)
 
-    resolution = (
-        ResolutionFailed(desired.qualified_name, resolution_failures)
-        if resolution_failures and not execution_blocked
-        else ResolutionSucceeded(desired.qualified_name, ())
-    )
-    execution_outcome = (
-        ExecutionBlockedByDependency(resolution_failures) if execution_blocked else execution
+    resolution = TableResolution(
+        desired=desired,
+        dependencies=dependencies,
+        structural_failures=resolution_failures,
     )
 
     return TableRunReport(
-        desired=desired,
         read=read,
         planning=planning,
         planned_sql_statements=planned_sql_statements,
         resolution=resolution,
-        execution_outcome=execution_outcome,
+        execution_outcome=execution,
+        blocked_failures=blocked_failures,
     )
 
 
@@ -323,7 +323,7 @@ def test_table_run_report_status_is_planning_failed_when_only_validation_failure
     assert report.has_failures is True
 
 
-def test_table_run_report_status_is_planning_failed_when_both_fk_and_validation_present():
+def test_table_run_report_status_is_foreign_key_failed_when_both_fk_and_validation_present():
     # Given a table with both a validation failure and an FK failure
     report = _report(
         desired=_a_desired_table("orders"),
@@ -339,9 +339,31 @@ def test_table_run_report_status_is_planning_failed_when_both_fk_and_validation_
         ),
     )
 
-    # Then PLANNING_FAILED wins: it is the earlier phase and the actionable root cause
-    assert report.status is TableRunStatus.PLANNING_FAILED
+    # Then FOREIGN_KEY_FAILED wins: resolution judges the declaration set
+    # before any single table is diffed, so it is the earlier phase and the
+    # root cause — the plan cannot be right while the relationships are broken
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert len(report.failures) == 2
+
+
+def test_multi_phase_failure_reports_the_earliest_pipeline_phase():
+    # Given a table that failed resolution (structural FK) and also failed its read
+    desired = _a_desired_table("orders")
+    report = _report(
+        desired=desired,
+        read=ReadFailure("IOError", "boom"),
+        failures=(
+            ForeignKeyFailure(
+                table=desired.qualified_name,
+                local_columns=("customer_id",),
+                references=QualifiedName("cat", "schema", "customers"),
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    # Then the earliest pipeline phase wins: resolution precedes read
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
 
 
 def test_table_run_report_with_no_failures_is_success():
@@ -377,26 +399,6 @@ def test_status_reflects_the_earliest_failing_phase():
     assert read_failed.status is TableRunStatus.READ_FAILED
 
 
-def test_runtime_dependency_block_is_failure_but_not_statement_execution():
-    desired = _a_desired_table("orders")
-    failure = ForeignKeyFailure(
-        table=desired.qualified_name,
-        local_columns=("customer_id",),
-        references=QualifiedName("cat", "schema", "customers"),
-        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
-    )
-    report = _report(
-        desired=desired,
-        read=TablePresent(table=_an_observed_table()),
-        failures=(failure,),
-        execution_blocked=True,
-    )
-
-    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
-    assert report.failures == (failure,)
-    assert report.execution is None
-
-
 def test_table_run_report_carries_its_desired_definition():
     # Given a completed, unchanged table run
     desired = _a_desired_table("customers")
@@ -417,11 +419,10 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
 
     with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
         TableRunReport(
-            desired=desired,
             read=ReadFailure("IOError", "boom"),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=(),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            resolution=TableResolution(desired, (), ()),
             execution_outcome=None,
         )
 
@@ -437,11 +438,10 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
 
     with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
         TableRunReport(
-            desired=desired,
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("SQL",),
-            resolution=ResolutionFailed(desired.qualified_name, (failure,)),
+            resolution=TableResolution(desired, (), (failure,)),
             execution_outcome=ExecutionSummary((_ok_exec(0, "SQL"),)),
         )
 
@@ -451,11 +451,10 @@ def test_table_run_report_rejects_execution_unrelated_to_planned_sql():
 
     with pytest.raises(ValueError, match="planned statement prefix"):
         TableRunReport(
-            desired=desired,
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
             planned_sql_statements=("PLANNED SQL",),
-            resolution=ResolutionSucceeded(desired.qualified_name, ()),
+            resolution=TableResolution(desired, (), ()),
             execution_outcome=ExecutionSummary((_ok_exec(0, "OTHER SQL"),)),
         )
 
@@ -567,3 +566,150 @@ def test_to_dict_is_deterministic():
         started_at=_t0(), ended_at=_t1(), table_reports=(_a_changed_table_report(),)
     )
     assert report.to_dict() == report.to_dict()
+
+
+# ---------- Derived dependency blocking
+
+
+def _fk_edge(parent: QualifiedName, constraint_name: str = "blocked_edge_fk"):
+    """Build a dependency edge onto ``parent``; blocking reads its columns and target."""
+    return ForeignKeyConstraint(
+        local_columns=("parent_id",),
+        referenced_table=parent,
+        referenced_columns=("id",),
+        constraint_name=constraint_name,
+    )
+
+
+def _blocked_failure():
+    """Build the failure ``b`` earns for its edge onto a parent ``a`` that did not converge."""
+    return ForeignKeyFailure(
+        table=_name("b"),
+        local_columns=("parent_id",),
+        references=_name("a"),
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+    )
+
+
+def _sound_report(name: str, dependencies: tuple[ForeignKeyConstraint, ...] = ()):
+    """Build a table that read, planned, and validated cleanly, with ``dependencies``."""
+    return _report(
+        desired=_a_desired_table(name),
+        read=TablePresent(table=_an_observed_table()),
+        dependencies=dependencies,
+    )
+
+
+def _assemble(*table_reports: TableRunReport) -> SyncReport:
+    return SyncReport.assemble(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=table_reports,
+        dry_run=True,
+    )
+
+
+def test_assemble_bakes_blocked_failures_onto_a_sound_dependent_of_a_failed_parent():
+    # Given a parent that failed its read and a sound child depending on it
+    parent = _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
+    child = _sound_report("b", dependencies=(_fk_edge(_name("a")),))
+
+    # When the run report is assembled
+    report = _assemble(parent, child)
+
+    # Then the child's blocking is derived into its frozen projection
+    _, derived_child = report.table_reports
+    (failure,) = derived_child.blocked_failures
+    assert failure.table == _name("b")
+    assert failure.references == _name("a")
+    assert failure.reason is ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
+    assert derived_child.execution_outcome is None
+    assert derived_child.status is TableRunStatus.FOREIGN_KEY_FAILED
+
+
+def test_assemble_propagates_blocking_along_chains():
+    # Given a -> b -> c where a failed its read: b is blocked, and c through b
+    reports = (
+        _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom")),
+        _sound_report("b", dependencies=(_fk_edge(_name("a")),)),
+        _sound_report("c", dependencies=(_fk_edge(_name("b"), constraint_name="c_b_fk"),)),
+    )
+
+    # When the run report is assembled
+    report = _assemble(*reports)
+
+    # Then each blocked table names the parent that blocked it
+    _, derived_b, derived_c = report.table_reports
+    assert [failure.references for failure in derived_b.blocked_failures] == [_name("a")]
+    assert [failure.references for failure in derived_c.blocked_failures] == [_name("b")]
+
+
+def test_assemble_does_not_bake_onto_a_table_with_its_own_failures():
+    # Given a parent that failed its read and a child that failed planning on its own
+    parent = _report(desired=_a_desired_table("a"), read=ReadFailure("IOError", "boom"))
+    child = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+        dependencies=(_fk_edge(_name("a")),),
+    )
+
+    # When the run report is assembled
+    report = _assemble(parent, child)
+
+    # Then the child keeps exactly its own failures — blocking is not stacked on
+    # top of a table that already failed (it still counts as not converged for
+    # its own dependents, which the chain test covers)
+    _, derived_child = report.table_reports
+    assert derived_child.blocked_failures == ()
+    assert derived_child.status is TableRunStatus.PLANNING_FAILED
+
+
+def test_assemble_with_no_failures_returns_the_reports_unchanged():
+    # Given a sound dependency edge in a run where nothing failed
+    reports = (_sound_report("a"), _sound_report("b", dependencies=(_fk_edge(_name("a")),)))
+
+    report = _assemble(*reports)
+
+    assert report.table_reports == reports
+    assert report.has_failures is False
+
+
+def test_baked_blocked_failures_flatten_into_the_report_failures():
+    # Given a report whose blocking was baked in at assembly
+    child = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        blocked_failures=(_blocked_failure(),),
+    )
+
+    # Then it reaches callers through the ordinary failure flattening
+    assert child.has_failures is True
+    assert child.failures == child.blocked_failures
+    assert child.status is TableRunStatus.FOREIGN_KEY_FAILED
+
+
+def test_blocked_failures_reject_a_recorded_execution_outcome():
+    with pytest.raises(ValueError, match="records no execution outcome"):
+        _report(
+            desired=_a_desired_table("b"),
+            read=TablePresent(table=_an_observed_table()),
+            execution=ExecutionSummary(),
+            blocked_failures=(_blocked_failure(),),
+        )
+
+
+def test_blocked_failures_require_the_dependency_blocking_reason():
+    with pytest.raises(ValueError, match="dependency-blocking reason"):
+        _report(
+            desired=_a_desired_table("b"),
+            read=TablePresent(table=_an_observed_table()),
+            blocked_failures=(
+                ForeignKeyFailure(
+                    table=_name("b"),
+                    local_columns=("parent_id",),
+                    references=_name("a"),
+                    reason=ForeignKeyFailureReason.CYCLE,
+                ),
+            ),
+        )

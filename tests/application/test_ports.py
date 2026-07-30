@@ -25,9 +25,7 @@ def test_execution_summary_reports_no_failure_when_every_statement_succeeds():
     summary = ExecutionSummary((_ok_exec(0), _ok_exec(1)))
 
     # Then the summary reports success with no failures
-    assert summary.failed is False
-    assert summary.failures == ()
-    assert summary.failed_count == 0
+    assert not summary.failures
     assert summary.applied_count == 2
 
 
@@ -36,10 +34,8 @@ def test_execution_summary_exposes_the_failures_among_mixed_results():
     summary = ExecutionSummary((_ok_exec(0), _failed_exec(1, msg="bang")))
 
     # Then the summary surfaces the single failure and the applied count
-    assert summary.failed is True
-    assert summary.failed_count == 1
-    assert summary.applied_count == 1
     assert tuple(f.message for f in summary.failures) == ("bang",)
+    assert summary.applied_count == 1
 
 
 def test_execution_summary_defaults_to_an_empty_unattempted_run():
@@ -48,8 +44,7 @@ def test_execution_summary_defaults_to_an_empty_unattempted_run():
 
     # Then it is an empty, non-failing summary
     assert summary.results == ()
-    assert summary.failed is False
-    assert summary.failed_count == 0
+    assert not summary.failures
     assert summary.applied_count == 0
 
 

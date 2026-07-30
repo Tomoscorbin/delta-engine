@@ -378,7 +378,7 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
-            DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
+            DropPrimaryKey(primary_key=_primary_key()),
             "ALTER TABLE `cat`.`sch`.`tbl` DROP PRIMARY KEY IF EXISTS",
         ),
         (
@@ -540,7 +540,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     CreateTable: _create_table(DesiredColumn("id", Integer())),
     DropColumn: DropColumn(ObservedColumn("legacy", Integer())),
     DropForeignKey: DropForeignKey(constraint=_foreign_key()),
-    DropPrimaryKey: DropPrimaryKey(primary_key=_primary_key(), referencing_foreign_keys=()),
+    DropPrimaryKey: DropPrimaryKey(primary_key=_primary_key()),
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),

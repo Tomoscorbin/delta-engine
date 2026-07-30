@@ -67,10 +67,10 @@ through a sync.
 | `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
-| `ValidationResult` | Lower-level validation verdict used to test policy rules in isolation.                                                                                      |
+| `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
 | `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
-| `ResolveResult`    | One explicit success or failure per table in dependency-first order; successful outcomes retain their resolved dependencies for execution.                  |
+| `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
 | `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
@@ -274,14 +274,16 @@ Failures and status are derived from those outcomes.
 sequenceDiagram
     participant User
     participant Engine
+    participant Resolver as relationships.resolve
     participant Reader as CatalogStateReader
     participant Differ as diff_table
     participant Planner as plan_diff
-    participant Resolver as resolve
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
-    Engine->>Engine: prepare desired tables
+    Engine->>Engine: lower desired tables
+    Engine->>Resolver: resolve(desired tables)
+    Resolver-->>Engine: dependency order + dependency edges + structural verdicts
     Engine->>Reader: fetch_state(qualified_name)
     Reader-->>Engine: TablePresent / TableAbsent / ReadError
     Engine->>Engine: ReadError → ReadFailure
@@ -291,39 +293,45 @@ sequenceDiagram
     Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
     Engine->>Executor: compile(plan)
     Executor-->>Engine: SQL statements
-    Engine->>Resolver: resolve(tables, blocked=failed_tables)
-    Resolver-->>Engine: dependency order + FK failures
-    loop each statement until the first failure
-        Engine->>Executor: execute(statement)
+    loop dependency-ordered runs
+        Engine->>Engine: block the run if a dependency will not converge
+        Engine->>Executor: execute(statement) until the first failure (real runs)
         Executor-->>Engine: success or ExecutionError
     end
-    Engine->>Engine: build ExecutionSummary
     Engine-->>User: SyncReport or SyncFailedError(report)
 ```
 
-The full run, with preparation first and reporting last bracketing the six
-phases:
+The full run, with reporting last:
 
-1. **Prepare** (before the chain): lower user-facing table declarations to
-   `DesiredTable` values and reject duplicate qualified names.
-2. **Read**: ask the reader port for the current catalog state of each table.
-3. **Diff**: compute the typed `TableDiff` with `diff_table`.
-4. **Plan**: call the total `plan_diff` boundary, which always applies the
-   default validation policy. A rejected result contributes validation
-   failures and has no plan; an accepted result carries the privately
-   constructed `ActionPlan` into the next phase.
-5. **Compile**: lower every accepted plan through the executor port and record
+1. **Lower**: lower user-facing table declarations to `DesiredTable` values and
+   reject duplicate qualified names.
+2. **Resolve**: order tables dependency-first with `relationships.resolve`,
+   judging each declared foreign key structurally (referenced spelling
+   included) and retaining each table's dependency edges. This is pure
+   declaration analysis, so it precedes the read: a run is born knowing its
+   position, its edges, and its verdicts, before any catalog state exists.
+3. **Read**: ask the reader port for the current catalog state of each table.
+4. **Diff**: compute the typed `TableDiff` with `diff_table`, foreign-key
+   existence included.
+5. **Plan**: call the total `plan_diff` boundary with the complete diff;
+   validation always applies the default policy to that one stream. A rejected
+   result contributes validation failures and has no plan; an accepted result
+   carries the privately constructed `ActionPlan` into the next phase.
+6. **Compile**: lower every accepted plan through the executor port and record
    the exact statements used for both dry-run preview and real execution.
-6. **Resolve**: order tables by foreign-key dependency and block dependents of
-   failed tables.
-7. **Execute**: run the compiled statements of every table that has a
-   non-empty plan and no failures.
-8. **Report** (after the chain): return `SyncReport`, or raise
-   `SyncFailedError` with the report on real runs that failed.
+7. **Execute**: run the compiled statements of tables with a non-empty plan,
+   no failures of their own, and no dependency that will not converge (real
+   runs only).
+8. **Account**: freeze the runs into `SyncReport` through `SyncReport.assemble`,
+   which derives dependency blocking from the retained edges; or raise
+   `SyncFailedError` with that report on real runs that failed.
 
-Execution is gated by failures derived from the retained phase outcomes. A
-table that failed read, validation, or foreign-key resolution is skipped during
-execution. The engine still processes other tables.
+A table that failed read, validation, or structural foreign-key resolution is
+skipped during execution, and so is any table depending on one that will not
+converge. The engine still processes other tables. Nothing records the block:
+it is derived at accounting, so a blocked table carries no execution outcome
+and its `blocked_failures` name every dependency that let it down, whichever
+phase each one failed in.
 
 | Shape              | Produced by            | Consumed by                      | Purpose                                     |
 | ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
@@ -345,7 +353,7 @@ execution. The engine still processes other tables.
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
 | `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
 | `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`, `Property`                                               |
-| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, dependency resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
+| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |
 | `delta_engine.adapters`    | Backend integration and translation                                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler |
 
@@ -491,8 +499,12 @@ validation, as a gate rather than an optional rule. Before any safety rule
 runs, `validate_diff` fails the sync once per unmanaged aspect that has
 drifted (`UnmanagedAspectDrift`) and short-circuits — so an unmanaged
 difference produces exactly the scope failure rather than also tripping
-safety rules for differences the user never requested. Because the gate runs
-first, the safety rules only ever see a fully in-scope diff and read
+safety rules for differences the user never requested. Column spelling is
+gated alongside it (`ColumnSpellingMustMatchCatalog`) and reported first: a
+misspelled reference is a defect in the declaration rather than drift in an
+aspect, so it is judged at every scope, and a diff whose column references
+disagree with the catalog is not worth safety judgement yet. Because the gate
+runs first, the safety rules only ever see a fully in-scope diff and read
 `drift.actions` and `drift.unresolvable` directly. If planning succeeds, every
 difference belongs to a managed aspect and the plan holds executable actions
 only.
@@ -601,8 +613,14 @@ flowchart LR
     Orders --> OrderLines
 ```
 
+Which foreign keys a table needs set or dropped is a difference like any
+other, computed by the differ from that table's own snapshot. The resolver
+answers the cross-table question instead: what one table's declaration means
+for another's.
+
 The resolver builds a graph from desired foreign keys and uses strongly
-connected components to produce a dependency-first order. It reports:
+connected components to produce a dependency-first order. It judges each
+declared foreign key structurally and reports:
 
 - `UNRESOLVABLE_REFERENCE` when a foreign key points to a table that is not part
   of the sync.
@@ -610,23 +628,32 @@ connected components to produce a dependency-first order. It reports:
   referenced table's primary key.
 - `REFERENCED_COLUMN_TYPE_MISMATCH` when a foreign-key column's type does not
   match the referenced column's type on the table registered for the sync.
+- `REFERENCED_COLUMN_CASE_MISMATCH` when the referenced columns are the
+  registered parent's key but spelled with different case.
 - `CYCLE` for true multi-table FK cycles.
-- `BLOCKED_BY_FAILED_DEPENDENCY` when a table depends on another table that
-  is already known to have failed before execution begins, such as a table with
-  a read failure, validation failure, unresolvable FK, invalid FK target, or FK
-  cycle.
+
+Whether a table is *blocked* by another table's failure is not a resolution
+outcome, and nor is it anybody's recorded outcome: it is derived from the
+retained dependency edges once the run's other fates are known.
+`TableResolution.blocked_by` states the rule — given the set of tables that
+will not converge, return one `BLOCKED_BY_FAILED_DEPENDENCY` failure per edge
+pointing into it — whatever phase failed each of those tables, be it a read
+failure, validation failure, structural FK failure, or an execution failure in
+the same run.
 
 Each mandatory gate implements the `ScopeGate` protocol over `TableDiff`; a gate returns no failures when its check does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The scope gates run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid and no unmanaged aspect has drifted. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into a `ValidationResult`. `plan_diff` fixes that default composition in place and turns the verdict into the accepted/rejected planning sum.
+`validate_diff` evaluates every gate in `MANDATORY_SCOPE_GATES` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` clears the gates when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` clears the gates when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
-Execution walks the dependency-first order produced by the resolver and keeps a
-set of every table that has failed so far. Before each table executes, the engine
-re-applies the same blocking rule to its foreign-key dependencies. An execution
-failure in a parent therefore gives every later dependent a
-`BLOCKED_BY_FAILED_DEPENDENCY` failure in the same run, including a dependent
-whose own plan is empty. No second graph ordering pass is needed because the
-resolver already placed parents before their dependents.
+Two walks fold that one rule over the dependency-first order the resolver
+produced, each accumulating its own not-converged set as it goes: `_execute`
+folds it to decide what not to attempt, and `SyncReport.assemble` folds it to
+say why a table was skipped. One pass suffices for each because the resolver
+already placed parents before their dependents. An execution failure in a
+parent therefore gives every later dependent a `BLOCKED_BY_FAILED_DEPENDENCY`
+failure in the same run, including a dependent whose own plan is empty; a dry
+run runs only the second walk, so the preview reports the same blocking without
+executing.
 
 ## Public declarations and lowering
 
@@ -733,11 +760,11 @@ keeps downstream planning focused on schema facts.
 ## Reporting and failure semantics
 
 Failures are phase-tagged application values. A `TableRunReport` derives its
-status from the earliest failing phase:
+status from the earliest failing phase, in pipeline order:
 
+- `FOREIGN_KEY_FAILED`
 - `READ_FAILED`
 - `PLANNING_FAILED`
-- `FOREIGN_KEY_FAILED`
 - `EXECUTION_FAILED`
 - `SUCCESS`
 
@@ -748,9 +775,10 @@ failures: callers receive the complete failure tuple without another mutable
 source of run truth. For execution, the engine stops at the first failed
 statement because it is not transactional and later statements may depend on
 earlier ones. The `ExecutionSummary` records all attempted statements up to
-that point. Runtime dependency blocking is retained as an execution outcome;
-the report exposes its foreign-key failures and keeps `execution` as `None`
-because no statement was attempted.
+that point. Dependency blocking is retained as no outcome at all: it is derived
+at accounting into `blocked_failures`, which the report flattens at the
+execution position while `execution` stays `None` because no statement was
+attempted.
 
 Reports also keep the plan even when execution does not happen. That makes dry
 runs useful and makes failed runs explainable: a user can inspect what would
@@ -786,12 +814,12 @@ dependency cost.
 | Change                            | Main location                                                              | Notes                                                                                                                                                                                                                                       |
 | --------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Add a new backend                 | `delta_engine.adapters`                                                    | Implement `CatalogStateReader` and `PlanExecutor`; keep backend exceptions inside the adapter.                                                                                                                                              |
-| Add a new executable difference   | `delta_engine.domain.plan.actions`, differ, and adapter compiler           | Define the rich action, its aspect and phase in `actions.py`; emit it directly from the relevant `_diff_*` helper; add policy rules if needed; compile it in the backend adapter.                                                           |
+| Add a new executable difference   | `delta_engine.domain.plan.actions`, differ, and adapter compiler           | Define the rich action, its aspect and phase in `actions.py`; emit it directly from the relevant `_diff_*` helper (foreign-key existence included); add policy rules if needed; compile it in the backend adapter.                          |
 | Add a new unresolvable difference | `delta_engine.domain.plan.unresolvable` and application validation         | Add the frozen domain difference to `Unresolvable`, emit it into the diff's `unresolvable` tuple from `diff.py`, then make the rejection or acceptance decision in application policy. Successful planning must still contain actions only. |
 | Add a safety rule                 | `delta_engine.application.validation`                                      | Rules inspect the drift's managed actions and unresolvable differences and return `ValidationFailure` values.                                                                                                                               |
 | Add a data type                   | `delta_engine.domain.model.data_type` and adapter type mapping             | The domain type is backend-free; SQL names and Spark parsing live in the Databricks adapter.                                                                                                                                                |
 | Change public declarations        | `delta_engine.api`, surfaced only through `delta_engine.schema`            | Keep public ergonomics in `delta_engine.schema` and lower choices into domain snapshots before the engine phases begin.                                                                                                                     |
-| Change FK ordering or blocking    | `delta_engine.application.dependency_resolution`                           | Cross-table dependency policy lives in the application layer, not in the domain plan or SQL compiler.                                                                                                                                       |
+| Change FK ordering, verdicts, or blocking | `delta_engine.application.relationships` (the blocking rule is `TableResolution.blocked_by`, folded by `Engine._execute` and `SyncReport.assemble`) | Cross-table relationship judgment — dependency ordering and structural validation (exact referenced spelling included) — lives in the application layer; FK *existence* is a difference like any other and lives in the differ.       |
 | Change report output              | `delta_engine.application.report` and `delta_engine.application.rendering` | Keep display formatting out of domain objects.                                                                                                                                                                                              |
 | Change Databricks SQL             | `delta_engine.adapters.databricks.sql`                                     | Compile domain actions to backend statements at the adapter boundary.                                                                                                                                                                       |
 | Change CLI commands or output     | `delta_engine.cli`                                                         | Thin orchestration over `declarations.py`, `connection.py`, and the application ports; keep policy in the layers below.                                                                                                                     |
@@ -809,8 +837,11 @@ dependency cost.
   still holds. This applies at the public boundary too: `ForeignKey.columns`
   and `Column.tags` copy what the user passed, so mutating the original
   mapping later does not alter the declaration.
-- Put orchestration, safety policy, dependency resolution, and failure
-  propagation in the application layer.
+- Put orchestration, safety policy, relationship resolution, and failure
+  propagation in the application layer. Cross-table relationship judgment —
+  dependency ordering, structural verdicts — lives in
+  `application/relationships.py`; single-table differences, foreign-key
+  existence among them, stay in the domain differ.
 - Put backend normalization at adapter boundaries, such as lowercasing catalog,
   schema, and table-name parts, parsing Spark types, and quoting SQL. Preserve
   column-like identifier spelling by wrapping it in `Identifier` — a `str`
@@ -822,12 +853,20 @@ dependency cost.
   clustering, primary-key, and foreign-key references resolve to their actual
   desired `Column.name` while lowering; domain table snapshots require local
   references to carry that spelling and never rewrite their contents.
-- Adopt catalog spellings once, between read and diff: `adopt_catalog_spellings`
-  respells each desired table so an existing column carries the catalog's exact
-  spelling and a new or renamed column keeps its declared spelling, with
-  foreign-key referenced columns taking the referenced table's spelling. Diffing
-  stays single-table and emits desired values verbatim; planning only validates
-  and orders the resulting actions.
+- Spelling is exact by law: a declaration names existing columns with the
+  catalog's exact spelling, checked where each reference lives —
+  declaration-internal references at construction, declared-vs-observed
+  columns at diff and validation (`ColumnCaseDrift` →
+  `ColumnSpellingMustMatchCatalog`), and foreign-key referenced columns
+  against the registered parent's declaration at resolve
+  (`REFERENCED_COLUMN_CASE_MISMATCH`). Both catalog-facing checks are laws in
+  the same sense: the resolver verdict is structural, and the validation one is
+  a mandatory gate rather than a suppressible safety rule, so neither depends on
+  the declaration's scope or on the rule set in force. Nothing rewrites a spelling: emitted
+  SQL renders declarations verbatim, correct because validation has already
+  required agreement. Matching stays case-insensitive — `Identifier`
+  equality is what recognises "same column, wrong case" so it can be
+  rejected precisely instead of misread as an add and a drop.
 - Return typed failures across ports instead of raising backend exceptions.
 - Let `ActionPlan` own action ordering; callers should not sort plans manually.
 - Keep user-facing schema convenience in `delta_engine.schema`, then lower to

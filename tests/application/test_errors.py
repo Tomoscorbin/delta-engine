@@ -1,9 +1,5 @@
 from datetime import UTC, datetime
 
-from delta_engine.application.dependency_resolution import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-)
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
@@ -25,6 +21,7 @@ from delta_engine.application.ports import (
     ReadResult,
     TableAbsent,
 )
+from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
     TableRunReport,
@@ -78,14 +75,13 @@ def _table_report(
         if planning_failures
         else PlanningSucceeded(ActionPlan(target=desired.qualified_name))
     )
-    resolution = (
-        ResolutionFailed(desired.qualified_name, resolution_failures)
-        if resolution_failures
-        else ResolutionSucceeded(desired.qualified_name, ())
+    resolution = TableResolution(
+        desired=desired,
+        dependencies=(),
+        structural_failures=resolution_failures,
     )
 
     return TableRunReport(
-        desired=desired,
         read=read,
         planning=planning,
         planned_sql_statements=statements,

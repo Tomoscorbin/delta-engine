@@ -235,7 +235,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.actions == (
-        DropPrimaryKey(primary_key=observed_key, referencing_foreign_keys=()),
+        DropPrimaryKey(primary_key=observed_key),
         RenameColumn("customer_nm", "customer_name"),
         SetPrimaryKey(primary_key=desired_key),
     )
@@ -459,3 +459,115 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     assert create.table.primary_key is not None
     assert tuple(str(c) for c in create.table.primary_key.columns) == ("requestId",)
     assert tuple(str(c) for c in create.table.clustered_by) == ("requestId",)
+
+
+# ---------- foreign-key actions ----------
+
+
+def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
+    # Given an in-scope drift whose only difference is a declared foreign key
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+            foreign_keys=(fk,),
+        ),
+        _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
+        ),
+    )
+
+    # When planning
+    result = plan_diff(diff)
+
+    # Then the accepted plan carries the foreign-key action
+    assert isinstance(result, PlanningSucceeded)
+    assert result.plan.actions == (SetForeignKey(constraint=fk),)
+
+
+def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
+    # Given a drift dropping its PK while this table's own FK references it,
+    # with that FK dropped in the same diff
+    reference = ForeignKeyReference(
+        constraint_name="test_parent_id_fk",
+        referencing_table=_NAME,
+    )
+    own_fk = _foreign_key(
+        local_columns=("parent_id",),
+        referenced_table=_NAME,
+        referenced_columns=("id",),
+        constraint_name="test_parent_id_fk",
+    )
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("parent_id", Integer())),
+        ),
+        _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("parent_id", Integer())),
+            primary_key=PrimaryKeyConstraint(("id",), "test_pk"),
+            foreign_keys=(own_fk,),
+            referencing_foreign_keys=(reference,),
+        ),
+    )
+
+    # When planning
+    result = plan_diff(diff)
+
+    # Then the exemption found the drop in the same stream, and the plan
+    # phases the FK drop before the PK drop
+    assert isinstance(result, PlanningSucceeded)
+    assert [type(action) for action in result.plan.actions] == [DropForeignKey, DropPrimaryKey]
+
+
+def test_foreign_key_drift_on_an_unmanaged_aspect_fails_the_scope_gate():
+    # Given a declaration that does not manage foreign keys but declares one
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    diff = diff_table(
+        _desired(
+            columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+            foreign_keys=(fk,),
+            managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+        ),
+        _observed(
+            columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
+        ),
+    )
+
+    # When planning
+    result = plan_diff(diff)
+
+    # Then the scope gate rejects the unmanaged work
+    assert isinstance(result, PlanningFailed)
+    assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
+
+
+def test_missing_table_plan_contains_the_declared_foreign_keys():
+    # Given a missing table declaring one foreign key
+    fk = _foreign_key(
+        local_columns=("customer_id",),
+        referenced_table=QualifiedName("dev", "silver", "customers"),
+        referenced_columns=("id",),
+        constraint_name="orders_customers_fk",
+    )
+    desired = _desired(
+        columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
+        foreign_keys=(fk,),
+    )
+    diff = diff_table(desired, None)
+
+    # When planning
+    result = plan_diff(diff)
+
+    # Then the accepted plan creates the table and then adds the constraint
+    assert isinstance(result, PlanningSucceeded)
+    assert [type(action) for action in result.plan.actions] == [CreateTable, SetForeignKey]

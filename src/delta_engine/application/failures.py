@@ -18,9 +18,9 @@ from delta_engine.domain.model import QualifiedName
 class FailurePhase(IntEnum):
     """The sync phase that produced a failure. Ordered so the earliest wins."""
 
-    READ = 1
-    PLANNING = 2
-    FOREIGN_KEY = 3
+    FOREIGN_KEY = 1
+    READ = 2
+    PLANNING = 3
     EXECUTION = 4
 
 
@@ -32,6 +32,7 @@ class ForeignKeyFailureReason(StrEnum):
     BLOCKED_BY_FAILED_DEPENDENCY = "BLOCKED_BY_FAILED_DEPENDENCY"
     REFERENCED_COLUMNS_NOT_A_KEY = "REFERENCED_COLUMNS_NOT_A_KEY"
     REFERENCED_COLUMN_TYPE_MISMATCH = "REFERENCED_COLUMN_TYPE_MISMATCH"
+    REFERENCED_COLUMN_CASE_MISMATCH = "REFERENCED_COLUMN_CASE_MISMATCH"
 
     @property
     def detail(self) -> str:
@@ -48,6 +49,11 @@ class ForeignKeyFailureReason(StrEnum):
             case ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH:
                 return (
                     "its column types do not match the registered referenced table's column types"
+                )
+            case ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH:
+                return (
+                    "its referenced columns are spelled differently from the"
+                    " registered referenced table's declaration"
                 )
             case _ as unreachable:
                 assert_never(unreachable)

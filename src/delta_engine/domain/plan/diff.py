@@ -1,9 +1,11 @@
 """
 Compare desired and observed table state.
 
-The differ reports every discrepancy as either an executable action or an
-unresolvable difference. Validation, safety policy, execution ordering, and
-backend compilation live elsewhere.
+The differ reports every single-table discrepancy — foreign-key existence
+included — as either an executable action or an unresolvable difference.
+Cross-table judgment (dependency ordering, structural foreign-key verdicts)
+lives in ``application/relationships.py``; validation, safety policy,
+execution ordering, and backend compilation live elsewhere.
 """
 
 from collections.abc import Iterable, Mapping
@@ -49,6 +51,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.unresolvable import (
+    ColumnCaseDrift,
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
@@ -138,8 +141,12 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         observed.supported_features,
     )
     column_actions = _diff_columns(desired.columns, renames.columns)
+    case_drift = _column_case_drift(desired, observed, renames)
     layout_actions, layout_unresolvable = _diff_layout(desired, renames)
-    constraint_actions = _diff_constraints(desired, observed)
+    constraint_actions = (
+        *_diff_primary_key(desired, observed),
+        *_diff_foreign_keys(desired, observed),
+    )
     metadata_actions, metadata_unresolvable = _diff_table_metadata(desired, observed)
 
     return TableDrift(
@@ -155,6 +162,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
         ),
         unresolvable=(
             *renames.conflicts,
+            *case_drift,
             *metadata_unresolvable,
             *layout_unresolvable,
         ),
@@ -196,7 +204,9 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
     Return every action needed to realize a missing table.
 
     CREATE TABLE establishes columns, comment, properties, layout, and the
-    primary key. Unity Catalog tags and foreign keys require follow-up actions.
+    primary key. Unity Catalog tags and foreign keys need follow-up actions;
+    ``SET_FOREIGN_KEY`` phases after ``CREATE_TABLE``, so a self-referential
+    key sequences correctly by action phasing alone.
     """
     table_tag_actions = tuple(
         SetTableTag(name=name, desired_value=value, observed_value=None)
@@ -212,14 +222,11 @@ def _actions_for_missing_table(desired: DesiredTable) -> tuple[Action, ...]:
         for column in desired.columns
         for name, value in column.tags.items()
     )
-    foreign_key_actions = tuple(
-        SetForeignKey(constraint=constraint) for constraint in desired.foreign_keys
-    )
     return (
         CreateTable(desired),
         *table_tag_actions,
         *column_tag_actions,
-        *foreign_key_actions,
+        *(SetForeignKey(constraint=foreign_key) for foreign_key in desired.foreign_keys),
     )
 
 
@@ -339,6 +346,37 @@ def _align_columns(
     )
 
 
+def _column_case_drift(
+    desired: DesiredTable,
+    observed: ObservedTable,
+    renames: _RenameResolution,
+) -> tuple[ColumnCaseDrift, ...]:
+    """
+    Return every reference to an existing column whose spelling disagrees.
+
+    Matched columns compare against the rename-projected frame, so a renamed
+    column wears its declared target spelling and never drifts. A
+    ``renamed_from`` hint names a catalog column directly and compares against
+    the raw observed frame. New columns and rename targets have no catalog
+    counterpart, so nothing compares for them: what a declaration creates, it
+    spells freely.
+    """
+    projected_by_name = {column.name: column for column in renames.columns}
+    observed_by_name = {column.name: column for column in observed.columns}
+    drift: list[ColumnCaseDrift] = []
+    for column in desired.columns:
+        matched = projected_by_name.get(column.name)
+        if matched is not None and str(column.name) != str(matched.name):
+            drift.append(ColumnCaseDrift(declared_name=column.name, observed_name=matched.name))
+        source = column.renamed_from
+        if source is None:
+            continue
+        observed_source = observed_by_name.get(source)
+        if observed_source is not None and str(source) != str(observed_source.name):
+            drift.append(ColumnCaseDrift(declared_name=source, observed_name=observed_source.name))
+    return tuple(drift)
+
+
 def _actions_for_added_column(desired: DesiredColumn) -> tuple[Action, ...]:
     """Add a column, then establish tags not covered by ADD COLUMN."""
     return (
@@ -447,22 +485,6 @@ def _diff_layout(
     return actions, unresolvable
 
 
-def _diff_constraints(
-    desired: DesiredTable, observed: ObservedTable
-) -> tuple[DropPrimaryKey | SetPrimaryKey | SetForeignKey | DropForeignKey, ...]:
-    """
-    Return primary- and foreign-key actions against raw observed names.
-
-    Renaming a constrained column drops its constraints, so a renamed key must
-    surface as an explicit drop and set rather than compare in the projected
-    name frame used by columns and physical layout.
-    """
-    return (
-        *_diff_primary_key(desired, observed),
-        *_diff_foreign_keys(desired, observed),
-    )
-
-
 def _diff_primary_key(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[DropPrimaryKey | SetPrimaryKey, ...]:
@@ -470,8 +492,12 @@ def _diff_primary_key(
     Return primary-key actions; a changed key becomes a drop and a set.
 
     A primary key is identified by its column set, with absence its own
-    identity. Dropping one carries its inbound references so validation can
-    judge the transition.
+    identity. The comparison runs against raw observed names, not the
+    rename-projected frame used by columns and layout: renaming a constrained
+    column drops the constraint, so a renamed key must surface as an explicit
+    drop and set. ``SetPrimaryKey`` carries the declared columns verbatim:
+    actions are semantic values, and a declaration whose spelling disagrees
+    with the catalog is rejected as ``ColumnCaseDrift`` before any plan forms.
     """
     desired_key = desired.primary_key
     observed_key = observed.primary_key
@@ -483,12 +509,7 @@ def _diff_primary_key(
 
     actions: list[DropPrimaryKey | SetPrimaryKey] = []
     if observed_key is not None:
-        actions.append(
-            DropPrimaryKey(
-                primary_key=observed_key,
-                referencing_foreign_keys=observed.referencing_foreign_keys,
-            )
-        )
+        actions.append(DropPrimaryKey(primary_key=observed_key))
     if desired_key is not None:
         actions.append(SetPrimaryKey(primary_key=desired_key))
     return tuple(actions)
@@ -497,7 +518,17 @@ def _diff_primary_key(
 def _diff_foreign_keys(
     desired: DesiredTable, observed: ObservedTable
 ) -> tuple[SetForeignKey | DropForeignKey, ...]:
-    """Return foreign-key actions matched by content signature."""
+    """
+    Return set/drop actions converging the table's foreign keys.
+
+    Constraints are matched by content signature (columns and referenced
+    table; names excluded), so a generated name and a catalog name still
+    match. A declared-but-absent constraint is set carrying the declaration
+    verbatim; an observed-but-undeclared one is dropped carrying the observed
+    constraint — drops go by name. Everything here reads the child's own
+    snapshot; whether the referenced table can hold up its end is the
+    relationship resolver's judgment, not a difference.
+    """
     desired_by_signature = {fk.signature: fk for fk in desired.foreign_keys}
     observed_by_signature = {fk.signature: fk for fk in observed.foreign_keys}
     actions: list[SetForeignKey | DropForeignKey] = []

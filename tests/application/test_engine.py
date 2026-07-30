@@ -14,6 +14,7 @@ from delta_engine.application.failures import (
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
+    ValidationFailure,
 )
 from delta_engine.application.ports import (
     CatalogState,
@@ -777,9 +778,10 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
     with pytest.raises(SyncFailedError) as exc_info:
         engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"))
 
-    # Then orders is FK-failed and not executed
+    # Then orders is FK-failed on the resolution slot and not executed
     [orders] = list(exc_info.value.report)
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert orders.resolution.structural_failures != ()
     assert orders.execution is None
     assert executor.executed_names == []
 
@@ -789,6 +791,26 @@ def test_sync_fails_table_whose_fk_references_table_not_in_the_sync():
         references="cat.sch.customers",
         local_columns=("ref_id",),
     )
+
+
+def test_structural_verdicts_are_recorded_even_when_every_read_fails():
+    # Given orders references a table that is not registered, and its read errors
+    reader = _RecordingReader(
+        {
+            "cat.sch.orders": ReadError("IOError", "cannot read"),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.ghost"), dry_run=True)
+
+    # Then the declaration was judged without consulting the world: the
+    # structural verdict and the read failure both stand on the run
+    [orders] = list(report)
+    assert orders.resolution.structural_failures != ()
+    assert isinstance(orders.read, ReadFailure)
 
 
 def test_read_failure_in_upstream_blocks_fk_dependent():
@@ -808,11 +830,13 @@ def test_read_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.b", "cat.sch.a"),
         )
 
-    # Then b is blocked and neither table executes
+    # Then b is blocked by a and neither table executes
     report = exc_info.value.report
     table_a = _assert_status(report, "cat.sch.a", TableRunStatus.READ_FAILED)
     table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
 
+    assert table_b.resolution.structural_failures == ()
+    assert table_b.blocked_failures != ()
     _assert_has_fk_failure(
         table_b,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -842,7 +866,7 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
             _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
         )
 
-    # Then orders is blocked before execution
+    # Then orders is blocked by customers, before any statement runs
     report = exc_info.value.report
     customers = _assert_status(
         report,
@@ -855,6 +879,8 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
         TableRunStatus.FOREIGN_KEY_FAILED,
     )
 
+    assert orders.resolution.structural_failures == ()
+    assert orders.blocked_failures != ()
     _assert_has_fk_failure(
         orders,
         reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
@@ -863,6 +889,35 @@ def test_validation_failure_in_upstream_blocks_fk_dependent():
 
     assert customers.execution is None
     assert orders.execution is None
+    assert executor.executed_names == []
+
+
+def test_structural_fk_failure_in_upstream_blocks_fk_dependent():
+    # Given b depends on a, whose own FK references a table not in the sync
+    reader = _RecordingReader()
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.a", "cat.sch.missing"),
+            _spec_with_fk("cat.sch.b", "cat.sch.a"),
+        )
+
+    # Then a fails resolution structurally and b is blocked by a
+    report = exc_info.value.report
+    table_a = _assert_status(report, "cat.sch.a", TableRunStatus.FOREIGN_KEY_FAILED)
+    table_b = _assert_status(report, "cat.sch.b", TableRunStatus.FOREIGN_KEY_FAILED)
+
+    assert table_a.resolution.structural_failures != ()
+    assert table_b.resolution.structural_failures == ()
+    assert table_b.blocked_failures != ()
+    _assert_has_fk_failure(
+        table_b,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.a",
+    )
     assert executor.executed_names == []
 
 
@@ -1138,6 +1193,54 @@ def test_execution_failure_blocks_diamond_dependent_with_one_failure_per_fk():
     assert executor.executed_names == ["cat.sch.a"]
 
 
+def test_blocked_table_lists_blockers_from_both_eras():
+    # Given suppliers fails structurally (FK to an unregistered table),
+    # employees fails while executing, and deliveries depends on both
+    deliveries = DeltaTable(
+        "cat",
+        "sch",
+        "deliveries",
+        columns=(
+            Column("id", String(), nullable=False),
+            Column("supplier_id", String()),
+            Column("employee_id", String()),
+        ),
+        primary_key=["id"],
+        foreign_keys=[
+            ForeignKey(
+                columns={"supplier_id": "id"},
+                references=_referenced_spec("cat.sch.suppliers"),
+            ),
+            ForeignKey(
+                columns={"employee_id": "id"},
+                references=_referenced_spec("cat.sch.employees"),
+            ),
+        ],
+    )
+    reader = _RecordingReader()  # every table absent — plans are creations
+    executor = _RecordingExecutor([_execution_error()])  # employees, the only table that runs
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing for real
+    with pytest.raises(SyncFailedError) as exc_info:
+        engine.sync(
+            _spec_with_fk("cat.sch.suppliers", "cat.sch.ghost"),
+            _spec("cat.sch.employees"),
+            deliveries,
+        )
+
+    # Then deliveries names both blockers — the structural-era parent and the
+    # execution-era parent — not just the first era's
+    report = exc_info.value.report
+    table = _assert_status(report, "cat.sch.deliveries", TableRunStatus.FOREIGN_KEY_FAILED)
+    assert {str(failure.references) for failure in table.blocked_failures} == {
+        "cat.sch.employees",
+        "cat.sch.suppliers",
+    }
+    assert table.execution_outcome is None
+    assert executor.executed_names == ["cat.sch.employees"]
+
+
 def test_synced_fk_parent_with_no_work_does_not_block_dependent():
     # Given customers already matches its declaration and orders is absent
     reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
@@ -1268,8 +1371,9 @@ def test_failed_table_records_no_planned_sql():
 
 def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
     # Given an absent table whose FK references a table not in the sync.
-    # FK resolution runs after planning and compilation, so the plan and its
-    # SQL are already legitimate facts — only the dependency check failed.
+    # A failed resolution still carries its planned FK actions, and planning
+    # and compilation still run, so the plan and its SQL remain legitimate
+    # facts — only the structural judgment failed.
     reader = _RecordingReader()
     executor = _RecordingExecutor(per_table_errors=[])
     engine = Engine(reader=reader, executor=executor)
@@ -1333,6 +1437,53 @@ def test_dry_run_returns_fk_failures_without_raising_or_executing():
         reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
         references="cat.sch.customers",
     )
+
+
+def test_dry_run_derives_dependency_blocking_for_dependents_of_failed_tables():
+    # Given a parent that fails validation and a child declaring an FK to it
+    reader = _RecordingReader(
+        {
+            "cat.sch.customers": _existing_id_table("cat.sch.customers"),
+            "cat.sch.orders": TableAbsent(),
+        }
+    )
+    executor = _RecordingExecutor(per_table_errors=[])
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(
+        _spec_adding_not_null("cat.sch.customers"),
+        _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
+        dry_run=True,
+    )
+
+    # Then the dry run keeps blocking visible without executing anything
+    _assert_status(report, "cat.sch.customers", TableRunStatus.PLANNING_FAILED)
+    orders = _assert_status(report, "cat.sch.orders", TableRunStatus.FOREIGN_KEY_FAILED)
+    assert orders.blocked_failures != ()
+    _assert_has_fk_failure(
+        orders,
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+        references="cat.sch.customers",
+    )
+    assert executor.executed_names == []
+
+
+def test_foreign_key_failed_table_still_carries_its_planned_sql():
+    # Given a child whose FK references an unregistered table
+    reader = _RecordingReader()
+    executor = _SqlRecordingExecutor()
+    engine = Engine(reader=reader, executor=executor)
+
+    # When syncing in dry-run mode
+    report = engine.sync(_spec_with_fk("cat.sch.orders", "cat.sch.customers"), dry_run=True)
+
+    # Then resolution failed but the preview still includes the constraint SQL
+    [orders] = list(report)
+    assert orders.resolution.structural_failures != ()
+    assert orders.planned_sql_statements != ()
+    assert any("ADD CONSTRAINT" in statement for statement in orders.planned_sql_statements)
+    assert executor.executed_statements == []
 
 
 # ---------------------------------------------------------------------------
@@ -1505,14 +1656,14 @@ def test_created_tables_compile_as_ordinary_tables():
     )
 
 
-def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
-    # Given a live table whose physical column spelling differs from the declaration
+def test_executed_sql_is_byte_for_byte_the_planned_sql_for_constraint_ddl():
+    # Given a live table missing its declared primary key
     fqn = "c.s.mixed_case"
     catalog, schema, table_name = _split_fqn(fqn)
     observed = TablePresent(
         table=ObservedTable(
             qualified_name=QualifiedName(catalog, schema, table_name),
-            columns=(ObservedColumn("requestId", String(), nullable=False),),
+            columns=(ObservedColumn("requestid", String(), nullable=False),),
         )
     )
     spec = DeltaTable(
@@ -1533,17 +1684,52 @@ def test_executed_sql_is_byte_for_byte_the_planned_sql_for_mixed_case_tables():
     Engine(reader=_RecordingReader({fqn: observed}), executor=executor).sync(spec)
 
     # Then the executed SQL is byte-for-byte the planned SQL, with the
-    # primary-key action carrying the physical name
+    # primary-key action carrying the declared name
     [table_report] = list(dry_report)
     assert tuple(executor.executed_statements) == table_report.planned_sql_statements
     assert any(
-        "PRIMARY KEY (`requestId`)" in statement for statement in executor.executed_statements
+        "PRIMARY KEY (`requestid`)" in statement for statement in executor.executed_statements
     )
 
 
-def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
-    # Given a child and parent declared with different reference spelling than
-    # the columns already present in the catalog
+def test_case_drifted_declaration_is_rejected_with_no_sql():
+    # Given a declaration whose column case disagrees with the catalog
+    fqn = "c.s.mixed_case"
+    catalog, schema, table_name = _split_fqn(fqn)
+    observed = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName(catalog, schema, table_name),
+            columns=(ObservedColumn("requestId", String(), nullable=False),),
+        )
+    )
+    spec = DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(Column("requestid", String(), nullable=False),),
+        primary_key=("requestid",),
+    )
+
+    # When syncing as a dry run
+    report = Engine(
+        reader=_RecordingReader({fqn: observed}),
+        executor=_SqlRecordingExecutor(),
+    ).sync(spec, dry_run=True)
+
+    # Then the sync rejects the declaration by name and plans no SQL
+    [table_report] = list(report)
+    assert table_report.status is TableRunStatus.PLANNING_FAILED
+    assert table_report.planned_sql_statements == ()
+    assert any(
+        failure.rule_name == "ColumnSpellingMustMatchCatalog"
+        for failure in table_report.failures
+        if isinstance(failure, ValidationFailure)
+    )
+
+
+def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
+    # Given a child whose FK mapping is spelled loudly; the API resolves it to
+    # the declared column spellings, which the catalog agrees with
     parent = DeltaTable(
         "c",
         "s",
@@ -1568,14 +1754,14 @@ def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
             "c.s.parent": TablePresent(
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "parent"),
-                    columns=(ObservedColumn("OrderId", String(), nullable=False),),
-                    primary_key=PrimaryKeyConstraint(("OrderId",), "parent_pk"),
+                    columns=(ObservedColumn("orderid", String(), nullable=False),),
+                    primary_key=PrimaryKeyConstraint(("orderid",), "parent_pk"),
                 )
             ),
             "c.s.child": TablePresent(
                 ObservedTable(
                     qualified_name=QualifiedName("c", "s", "child"),
-                    columns=(ObservedColumn("orderRef", String()),),
+                    columns=(ObservedColumn("orderref", String()),),
                 )
             ),
         }
@@ -1588,9 +1774,10 @@ def test_foreign_key_sql_uses_observed_names_from_both_registered_tables():
         dry_run=True,
     )
 
-    # Then the FK statement uses the catalog's exact name on each side
+    # Then the FK statement wears the declared names, which validation has
+    # required to equal the catalog's
     child_report = _reports_by_name(report)["c.s.child"]
     assert any(
-        "FOREIGN KEY (`orderRef`) REFERENCES `c`.`s`.`parent` (`OrderId`)" in statement
+        "FOREIGN KEY (`orderref`) REFERENCES `c`.`s`.`parent` (`orderid`)" in statement
         for statement in child_report.planned_sql_statements
     )

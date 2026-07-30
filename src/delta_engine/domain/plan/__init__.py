@@ -29,8 +29,8 @@ from delta_engine.domain.plan.diff import (
     TableMissing,
     diff_table,
 )
-from delta_engine.domain.plan.spelling import adopt_catalog_spellings
 from delta_engine.domain.plan.unresolvable import (
+    ColumnCaseDrift,
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
@@ -44,6 +44,7 @@ __all__ = [
     "AddColumn",
     "AlterClustering",
     "AlterColumnType",
+    "ColumnCaseDrift",
     "ColumnRenameConflict",
     "CreateTable",
     "DropColumn",
@@ -68,6 +69,5 @@ __all__ = [
     "UnsetColumnTag",
     "UnsetProperty",
     "UnsetTableTag",
-    "adopt_catalog_spellings",
     "diff_table",
 ]

@@ -1,39 +1,46 @@
 """
-Foreign key dependency resolution for sync ordering and failure classification.
+Cross-table relationship resolution: ordering, edges, and structural verdicts.
 
-The public entry point is `resolve`, which takes the registered tables and
-returns one explicit success or failure per table in dependency-first order.
-A successful resolution retains its resolved foreign-key dependencies so the
-engine can react to execution-time failures without reinterpreting the desired
-table declaration.
+The public entry point is `resolve`, which takes the registered desired tables
+and returns one `TableResolution` per table in dependency-first order. It is
+pure declaration analysis: no catalog state is consulted, and no work is
+planned — differences are the differ's. Each resolution carries the
+declaration it judged, that table's dependency edges (the declared
+constraints themselves), and its structural foreign-key verdicts, and states
+through `blocked_by` which of those edges block it once the caller knows which
+tables will not converge.
 
 For example, given these declared foreign keys (child ──► parent)::
 
     order_items ──► orders ──► customers      invoices ◄──► ledger
     payments ──► invoices                     refunds ──► archive (not registered)
 
-`resolve` orders every table dependency-first and classifies its outcome::
+`resolve` orders every table dependency-first and judges each declaration::
 
-    ResolutionSucceeded(customers)
-    ResolutionSucceeded(orders)
-    ResolutionSucceeded(order_items)
-    ResolutionFailed(invoices, CYCLE)
-    ResolutionFailed(ledger, CYCLE)
-    ResolutionFailed(payments, BLOCKED_BY_FAILED_DEPENDENCY)
-    ResolutionFailed(refunds, UNRESOLVABLE_REFERENCE)
+    TableResolution(customers)
+    TableResolution(orders,      dependencies=(fk → customers,))
+    TableResolution(order_items, dependencies=(fk → orders,))
+    TableResolution(invoices,    dependencies=(fk → ledger,),   failures=(CYCLE,))
+    TableResolution(ledger,      dependencies=(fk → invoices,), failures=(CYCLE,))
+    TableResolution(payments,    dependencies=(fk → invoices,))
+    TableResolution(refunds,     failures=(UNRESOLVABLE_REFERENCE,))
 
-Healthy tables execute in that order; the engine gates failed tables out by
-their recorded failures.
+Healthy tables execute in that order. Whether a table is *blocked* by another's
+failure depends on how the run goes, so the caller supplies the tables that
+will not converge and each resolution names its own blocked edges — folded
+over the tables in that same order, the block propagates along FK chains.
 
 All graph-traversal implementation details (adjacency map, Tarjan's
-strongly-connected-components algorithm, fixpoint propagation of blocked
-dependents) are hidden behind that interface.
+strongly-connected-components algorithm) are hidden behind that interface.
 """
 
 from collections.abc import Mapping, Set as AbstractSet
 from dataclasses import dataclass
 
-from delta_engine.application.failures import ForeignKeyFailure, ForeignKeyFailureReason
+from delta_engine.application.failures import (
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
+)
 from delta_engine.domain.model import (
     DataType,
     DesiredTable,
@@ -49,97 +56,75 @@ from delta_engine.domain.model import (
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedDependency:
-    """An execution-ready dependency edge produced by foreign-key resolution."""
-
-    referenced_table: QualifiedName
-    blocked_failure: ForeignKeyFailure
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionSucceeded:
-    """A table is placed in dependency order with its resolved dependencies."""
-
-    qualified_name: QualifiedName
-    dependencies: tuple[ResolvedDependency, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ResolutionFailed:
-    """A table is placed in dependency order but cannot sync because of its foreign keys."""
-
-    qualified_name: QualifiedName
-    failures: tuple[ForeignKeyFailure, ...]
-
-    def __post_init__(self) -> None:
-        if not self.failures:
-            raise ValueError("ResolutionFailed requires at least one foreign-key failure")
-
-
-type TableResolution = ResolutionSucceeded | ResolutionFailed
-type ResolveResult = tuple[TableResolution, ...]
-
-
-def resolve(
-    tables: tuple[DesiredTable, ...],
-    *,
-    failed_names: AbstractSet[QualifiedName] = frozenset(),
-) -> ResolveResult:
+class TableResolution:
     """
-    Resolve foreign key dependencies across all registered tables.
+    One table's static relationship facts, in dependency order by tuple position.
 
-    Builds a dependency graph, runs Tarjan's strongly-connected-components
-    algorithm to find the safe sync order and detect true cycles, then
-    classifies every table's foreign-key failures.
+    ``desired`` is the declaration these facts were judged from, so a
+    resolution is self-sufficient: callers read the table from it rather than
+    looking it back up by name. ``dependencies`` are the retained dependency
+    edges — the managed foreign keys themselves, declared constraints
+    verbatim. Empty ``structural_failures`` means the table is structurally
+    sound.
+    """
 
-    Args:
-        tables: All desired tables to sync, in prepared (name-sorted) order.
-        failed_names: Tables already known to be failing before FK resolution
-            (e.g. failed read or planning). Their FK dependents are blocked with
-            BLOCKED_BY_FAILED_DEPENDENCY, but resolution succeeds for the failed
-            tables themselves unless they have their own foreign-key failure —
-            their earlier failures remain owned by the phase that produced them.
+    desired: DesiredTable
+    dependencies: tuple[ForeignKeyConstraint, ...]
+    structural_failures: tuple[ForeignKeyFailure, ...]
 
-    Returns:
-        One explicit success or failure per table, in dependency-first order.
-        Successful outcomes retain the resolved dependencies needed to react
-        to failures that arise later during execution.
+    @property
+    def qualified_name(self) -> QualifiedName:
+        """The identity of the declaration these facts were judged from."""
+        return self.desired.qualified_name
 
+    def blocked_by(self, unconverged: AbstractSet[QualifiedName]) -> tuple[ForeignKeyFailure, ...]:
+        """
+        Return one failure per dependency edge that will not converge this sync.
+
+        Empty when no edge points into ``unconverged``, which is what a caller
+        walking tables in dependency order treats as "free to enact". Which
+        tables will not converge is a fact about the run, not about the
+        declarations, so it is supplied rather than resolved: the caller
+        accumulates it as reads, plans, and statements fail.
+        """
+        return tuple(
+            ForeignKeyFailure(
+                table=self.qualified_name,
+                local_columns=dependency.local_columns,
+                references=dependency.referenced_table,
+                reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+            )
+            for dependency in self.dependencies
+            if dependency.referenced_table in unconverged
+        )
+
+
+def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
+    """
+    Resolve cross-table relationships for one sync.
+
+    Pure declaration analysis: orders every table dependency-first, judges
+    each managed foreign key structurally, and retains each declaration
+    alongside its dependency edges as the declared constraints themselves.
+    No catalog state is consulted, and no work is planned — differences are
+    the differ's, and blocking is inherited at enactment along these edges
+    via :meth:`TableResolution.blocked_by`.
     """
     registered_names = {table.qualified_name for table in tables}
-    resolved_dependencies_by_table = _build_resolved_dependencies(tables, registered_names)
-    dependencies_by_table = _build_dependency_graph(resolved_dependencies_by_table)
-    components = _strongly_connected_components(dependencies_by_table)
-
+    dependencies_by_table = _build_dependencies(tables, registered_names)
+    components = _strongly_connected_components(_build_dependency_graph(dependencies_by_table))
     cycle_partners = _cycle_partners_by_table(components)
     ordered = _order_tables(tables, components)
-    failures_by_table = _classify_failures(
-        tables,
-        registered_names,
-        cycle_partners,
-        failed_names,
-        resolved_dependencies_by_table,
-    )
+    failures_by_table = _classify_structural_failures(tables, registered_names, cycle_partners)
 
-    resolutions: list[TableResolution] = []
-    for table in ordered:
-        qualified_name = table.qualified_name
-        failures = failures_by_table.get(qualified_name)
-        if failures is None:
-            resolutions.append(
-                ResolutionSucceeded(
-                    qualified_name=qualified_name,
-                    dependencies=resolved_dependencies_by_table[qualified_name],
-                )
-            )
-        else:
-            resolutions.append(
-                ResolutionFailed(
-                    qualified_name=qualified_name,
-                    failures=failures,
-                )
-            )
-    return tuple(resolutions)
+    return tuple(
+        TableResolution(
+            desired=table,
+            dependencies=dependencies_by_table[table.qualified_name],
+            structural_failures=failures_by_table.get(table.qualified_name, ()),
+        )
+        for table in ordered
+    )
 
 
 def _managed_foreign_keys(table: DesiredTable) -> tuple[ForeignKeyConstraint, ...]:
@@ -178,12 +163,12 @@ def _foreign_key_types_match(
     )
 
 
-def _build_resolved_dependencies(
+def _build_dependencies(
     tables: tuple[DesiredTable, ...],
     registered_names: AbstractSet[QualifiedName],
-) -> dict[QualifiedName, tuple[ResolvedDependency, ...]]:
+) -> dict[QualifiedName, tuple[ForeignKeyConstraint, ...]]:
     """
-    Build execution-ready dependency edges for every table.
+    Build the dependency edges for every table.
 
     Only references to tables in this sync are included; FK references to tables
     outside it are omitted here and classified as UNRESOLVABLE_REFERENCE later.
@@ -191,32 +176,24 @@ def _build_resolved_dependencies(
     create the table, then add the constraint. It cannot block its own execution,
     so it is excluded from the dependency edges.
     """
-    dependencies_by_table: dict[QualifiedName, tuple[ResolvedDependency, ...]] = {}
-    for table in tables:
-        table_name = table.qualified_name
-        dependencies_by_table[table_name] = tuple(
-            ResolvedDependency(
-                referenced_table=foreign_key.referenced_table,
-                blocked_failure=_foreign_key_failure(
-                    table,
-                    foreign_key,
-                    ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
-                ),
-            )
+    return {
+        table.qualified_name: tuple(
+            foreign_key
             for foreign_key in _managed_foreign_keys(table)
             if foreign_key.referenced_table in registered_names
-            and foreign_key.referenced_table != table_name
+            and foreign_key.referenced_table != table.qualified_name
         )
-    return dependencies_by_table
+        for table in tables
+    }
 
 
 def _build_dependency_graph(
-    resolved_dependencies_by_table: dict[QualifiedName, tuple[ResolvedDependency, ...]],
+    dependencies_by_table: dict[QualifiedName, tuple[ForeignKeyConstraint, ...]],
 ) -> dict[QualifiedName, set[QualifiedName]]:
-    """Project resolved dependency edges into the adjacency map used for ordering."""
+    """Project dependency edges into the adjacency map used for ordering."""
     return {
-        table_name: {dependency.referenced_table for dependency in dependencies}
-        for table_name, dependencies in resolved_dependencies_by_table.items()
+        table_name: {foreign_key.referenced_table for foreign_key in dependencies}
+        for table_name, dependencies in dependencies_by_table.items()
     }
 
 
@@ -327,39 +304,20 @@ def _order_tables(
     return [table_by_name[name] for component in components for name in component]
 
 
-def _classify_failures(
+def _classify_structural_failures(
     tables: tuple[DesiredTable, ...],
     registered_names: AbstractSet[QualifiedName],
     cycle_partners_by_table: dict[QualifiedName, frozenset[QualifiedName]],
-    already_failed: AbstractSet[QualifiedName],
-    resolved_dependencies_by_table: dict[
-        QualifiedName,
-        tuple[ResolvedDependency, ...],
-    ],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """
-    Classify every table as buildable or failed because of a foreign key.
+    Classify each table's directly-broken foreign keys.
 
-    Two passes:
-
-    1. Direct failures — a foreign key to an unregistered table
-       (UNRESOLVABLE_REFERENCE), a foreign key whose target is not the
-       registered table's primary key (REFERENCED_COLUMNS_NOT_A_KEY), a
-       foreign key whose column types disagree with the registered table's
-       (REFERENCED_COLUMN_TYPE_MISMATCH), or a foreign key into the owning
-       table's own dependency cycle (CYCLE).
-    2. Propagation — a table that references a table which will not be built
-       cannot be built either (its foreign key would target a missing table).
-       This repeats to a fixpoint so the block flows along chains of dependents.
-       `already_failed` seeds this pass with names that failed for external
-       reasons (e.g. planning), so their FK dependents are also blocked.
-
-    For example, with `archive` not registered::
-
-        c ──► b ──► a ──► archive
-
-    pass 1 fails `a` (UNRESOLVABLE_REFERENCE) and pass 2 blocks `b` and `c`
-    (BLOCKED_BY_FAILED_DEPENDENCY).
+    A foreign key fails structurally when it references an unregistered table
+    (UNRESOLVABLE_REFERENCE), targets columns that are not the registered
+    table's primary key (REFERENCED_COLUMNS_NOT_A_KEY), disagrees with the
+    registered table's column types (REFERENCED_COLUMN_TYPE_MISMATCH), spells
+    the registered table's key differently (REFERENCED_COLUMN_CASE_MISMATCH),
+    or points into the owning table's own dependency cycle (CYCLE).
     """
     failures: dict[QualifiedName, list[ForeignKeyFailure]] = {}
 
@@ -383,6 +341,17 @@ def _classify_failures(
         for table in tables
     }
 
+    # Exact spelling of every registered primary key. The signature map above
+    # judges the key case-insensitively; this map lets the case arm state
+    # drift between two declarations precisely.
+    primary_key_spellings_by_name = {
+        table.qualified_name: frozenset(
+            str(column)
+            for column in (table.primary_key.columns if table.primary_key is not None else ())
+        )
+        for table in tables
+    }
+
     # Column types of every registered table, keyed by qualified name. A
     # foreign key's types were validated at declaration time against the
     # particular parent *object* it was declared with, but the table the sync
@@ -395,7 +364,7 @@ def _classify_failures(
         for table in tables
     }
 
-    # Pass 1 — direct failures.
+    # Judge each managed foreign key against the registered declarations.
     for table in tables:
         table_name = table.qualified_name
         for foreign_key in _managed_foreign_keys(table):
@@ -415,29 +384,17 @@ def _classify_failures(
                 referenced_types=column_types_by_name[referenced_table],
             ):
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH)
+            elif {
+                str(column) for column in foreign_key.referenced_columns
+            } != primary_key_spellings_by_name[referenced_table]:
+                # The NOT_A_KEY arm proved these columns ARE the key
+                # case-insensitively, so an exact-set mismatch is precisely a
+                # case drift between the declaration the FK was built against
+                # and the registered one. ADD CONSTRAINT resolves
+                # case-sensitively, and the registered declaration is what
+                # validation requires to equal the catalog.
+                record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_CASE_MISMATCH)
             elif referenced_table in cycle_partners_by_table.get(table_name, frozenset()):
                 record(table, foreign_key, ForeignKeyFailureReason.CYCLE)
-
-    # Pass 2 — propagate to dependents until no new table is blocked.
-    # Seed with both FK direct failures and any externally supplied failed names.
-    # Materialize a builtin set: the fixpoint loop below mutates it, and
-    # already_failed may be any read-only AbstractSet.
-    failed_names = set(failures) | set(already_failed)
-    changed = True
-    while changed:
-        changed = False
-        for table in tables:
-            table_name = table.qualified_name
-            if table_name in failed_names:
-                continue
-            dependency_failures = tuple(
-                dependency.blocked_failure
-                for dependency in resolved_dependencies_by_table[table_name]
-                if dependency.referenced_table in failed_names
-            )
-            if dependency_failures:
-                failures.setdefault(table_name, []).extend(dependency_failures)
-                failed_names.add(table_name)
-                changed = True
 
     return {qualified_name: tuple(items) for qualified_name, items in failures.items()}

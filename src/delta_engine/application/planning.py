@@ -32,30 +32,24 @@ type PlanningResult = PlanningSucceeded | PlanningFailed
 
 def plan_diff(diff: TableDiff) -> PlanningResult:
     """
-    Validate ``diff`` and return an accepted or rejected result.
+    Validate ``diff``; accept or reject.
 
-    This is the only boundary that constructs an :class:`ActionPlan` from a
-    complete diff. A rejected result carries validation failures and
-    deliberately has no plan, making execution of unvalidated drift
-    unrepresentable. The plan carries the relation kind its actions lower
-    against: the observed kind for drift, and the default ordinary kind for
-    a creation.
+    The diff is complete — foreign-key existence included — so policy judges
+    exactly one stream with no side channels. This remains the only boundary
+    that constructs an :class:`ActionPlan`; a rejected result carries
+    validation failures and deliberately has no plan, making execution of
+    unvalidated drift unrepresentable. The plan carries the relation kind its
+    actions lower against: the observed kind for drift, and the default
+    ordinary kind for a creation.
     """
-    validation = validate_diff(diff)
-    if validation.failed:
-        return PlanningFailed(failures=validation.failures)
+    failures = validate_diff(diff)
+    if failures:
+        return PlanningFailed(failures=failures)
     match diff:
         case TableDrift() as drift:
-            plan = ActionPlan(
-                target=drift.target,
-                actions=drift.actions,
-                kind=drift.observed.kind,
-            )
+            plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
         case TableMissing() as missing:
-            plan = ActionPlan(
-                target=missing.target,
-                actions=missing.actions,
-            )
+            plan = ActionPlan(target=missing.target, actions=missing.actions)
         case _ as unreachable:
             assert_never(unreachable)
     return PlanningSucceeded(plan=plan)

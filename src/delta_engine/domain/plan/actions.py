@@ -11,7 +11,6 @@ from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
-    ForeignKeyReference,
     Identifier,
     ObservedColumn,
     PrimaryKeyConstraint,
@@ -339,7 +338,6 @@ class DropPrimaryKey(Action):
     """Drop a complete observed primary key constraint."""
 
     primary_key: PrimaryKeyConstraint
-    referencing_foreign_keys: tuple[ForeignKeyReference, ...]
 
     aspect: ClassVar[TableAspect] = TableAspect.PRIMARY_KEY
     phase: ClassVar[ActionPhase] = ActionPhase.DROP_PRIMARY_KEY

@@ -1,33 +1,37 @@
 """
 High-level orchestration of planning and execution.
 
-`Engine.sync` threads one private table run through six phases. Each run retains
-the canonical outcome of every completed phase; failures, status, and public
-report views are derived from those outcomes rather than copied into parallel
-fields. On a real run, if any table fails, `SyncFailedError` is raised with a
-formatted summary.
+`Engine.sync` threads one private table run through eight phases. Each run
+retains the canonical outcome of every completed phase; failures, status, and
+public report views are derived from those outcomes rather than copied into
+parallel fields. On a real run, if any table fails, `SyncFailedError` is raised
+with a formatted summary.
 
 The phases are:
-  1. Read     — fetch current catalog state and create one run per table
-  2. Diff     — compute direct actions and non-action differences in place
-  3. Plan     — retain an accepted plan or rejected planning outcome in place
-  4. Compile  — retain the exact backend statements for every accepted plan
-  5. Resolve  — return the runs in FK dependency order with resolution outcomes
-  6. Execute  — retain attempted statement results or dependency blocking
+  1. Lower    — lower the declaration set into domain tables, deduplicated
+  2. Resolve  — birth one run per table, FK-dependency-first, carrying its
+                dependency edges and structural verdicts
+  3. Read     — fetch the current catalog state of every declared table
+  4. Diff     — compute direct actions and non-action differences in place
+  5. Plan     — retain an accepted plan of the complete diff, or the
+                rejected planning outcome
+  6. Compile  — retain the exact backend statements for every accepted plan
+  7. Execute  — retain attempted statement results (real runs only)
+  8. Account  — freeze the runs into a report that derives dependency blocking
 
-Compilation deliberately precedes resolution. An accepted plan is a
-table-local fact, so it receives the exact SQL exposed on the report before
-cross-table dependency checks decide whether it may execute. A later FK failure
-therefore does not erase a valid preview or force compilation to understand
-resolution failures.
+The declaration set is judged before the world is consulted: resolution reads
+only declarations, so a run is born knowing its position, its edges, and its
+structural verdicts, and no later phase has to narrow a union to reach them.
 
-Running `resolve()` after validation means a table that fails validation
-blocks its FK dependents with BLOCKED_BY_FAILED_DEPENDENCY, not just tables
-with FK-structural failures (CYCLE / UNRESOLVABLE_REFERENCE). Execution
-applies the same rule as it walks the dependency-ordered runs: a run whose
-dependency fails during execution is blocked rather than executed. The rule
-is uniform: if a dependency won't reach desired state this sync, its
-dependents don't execute either.
+Resolution is a pure structural judgment of the declarations against each
+other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked* by
+another table's failure is nobody's outcome to record: it is the derived
+consequence of the dependency edges and the run's other fates, worked out once
+at accounting. One rule states it — a table did not converge if it has
+failures of its own or a dependency did not — and execution and accounting
+each fold that same rule over the dependency-ordered runs: execution to decide
+what not to attempt, accounting to say why. Because it is derived rather than
+recorded, blocking is equally visible in a dry run, which attempts nothing.
 
 A table that fails an early phase carries that failure forward on its run and
 is skipped by execution, so all tables are attempted and the report is always
@@ -39,19 +43,16 @@ from datetime import UTC, datetime
 import logging
 from typing import assert_never
 
-from delta_engine.application.dependency_resolution import (
-    ResolutionFailed,
-    ResolutionSucceeded,
-    TableResolution,
-    resolve,
-)
 from delta_engine.application.errors import (
     DuplicateTableDefinitionError,
     ExecutionError,
     ReadError,
     SyncFailedError,
 )
-from delta_engine.application.failures import ExecutionFailure, ReadFailure
+from delta_engine.application.failures import (
+    ExecutionFailure,
+    ReadFailure,
+)
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningResult,
@@ -69,35 +70,34 @@ from delta_engine.application.ports import (
     TableAbsent,
     TablePresent,
 )
+from delta_engine.application.relationships import TableResolution, resolve
 from delta_engine.application.report import (
-    ExecutionBlockedByDependency,
-    ExecutionOutcome,
     SyncReport,
     TableRunReport,
 )
 from delta_engine.domain.model import (
     DesiredTable,
-    ObservedTable,
     QualifiedName,
 )
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
-    adopt_catalog_spellings,
     diff_table,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def prepare_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
+def lower_desired_tables(*tables: DesiredTableSource) -> tuple[DesiredTable, ...]:
     """
     Lower table specifications into domain tables for the phase chain.
 
     Converts each source via ``to_desired_table()``, rejects duplicate
     qualified names, and returns the tables in deterministic qualified-name
     order so a sync's report and execution order never depend on the order
-    tables were passed. Passing no tables yields an empty tuple.
+    tables were passed. Passing no tables yields an empty tuple. The system
+    lowers at both edges: specifications into domain tables here, and plans
+    into SQL at translation.
 
     Public so drivers such as the CLI can run the same duplicate check
     before acquiring a backend connection; the rule lives only here.
@@ -121,24 +121,29 @@ class _TableRun:
     """
     Mutable scratch pad threaded through the sync phases.
 
-    Born in the read phase, it accretes its diff, planning outcome, compiled
-    SQL, resolution outcome, and execution outcome as the phases proceed, then is
-    frozen into a public :class:`TableRunReport` once complete. Kept private to
-    the engine so the published report stays immutable while the phases mutate
-    in place.
+    Born in the resolve phase, in dependency order, carrying its resolution —
+    which holds its static facts: the declaration, its dependency edges, and
+    its structural verdicts. Its read, diff, planning outcome, compiled SQL,
+    and execution outcome accrete as the worldly phases run, each written
+    once, then the run is frozen into a public :class:`TableRunReport`. Kept
+    private to the engine so the published report stays immutable while the
+    phases mutate in place.
     """
 
-    desired: DesiredTable
-    read: ReadResult
+    resolution: TableResolution
+    read: ReadResult | None = None
     diff: TableDiff | None = None
     planning: PlanningResult | None = None
     planned_sql_statements: tuple[str, ...] = ()
-    resolution: TableResolution | None = None
-    execution: ExecutionOutcome | None = None
+    execution: ExecutionSummary | None = None
+
+    @property
+    def desired(self) -> DesiredTable:
+        return self.resolution.desired
 
     @property
     def qualified_name(self) -> QualifiedName:
-        return self.desired.qualified_name
+        return self.resolution.qualified_name
 
     @property
     def plan(self) -> ActionPlan | None:
@@ -152,21 +157,24 @@ class _TableRun:
 
     @property
     def has_failures(self) -> bool:
-        """True when any completed phase has failed for this table."""
+        """
+        True when a completed phase failed this table on its own account.
+
+        Own faults only: being blocked by another table is not a fault of this
+        run, and is derived at accounting rather than recorded here.
+        """
         return (
             isinstance(self.read, ReadFailure)
             or isinstance(self.planning, PlanningFailed)
-            or isinstance(self.resolution, ResolutionFailed)
-            or isinstance(self.execution, ExecutionBlockedByDependency)
-            or (isinstance(self.execution, ExecutionSummary) and self.execution.failed)
+            or bool(self.resolution.structural_failures)
+            or (self.execution is not None and bool(self.execution.failures))
         )
 
     def to_report(self) -> TableRunReport:
         """Freeze this run into its public, immutable report."""
-        if self.resolution is None:
-            raise RuntimeError(f"Completed table run was not resolved: {self.qualified_name}")
+        if self.read is None:
+            raise RuntimeError(f"Run was frozen before its read completed: {self.qualified_name}")
         return TableRunReport(
-            desired=self.desired,
             read=self.read,
             planning=self.planning,
             planned_sql_statements=self.planned_sql_statements,
@@ -197,10 +205,12 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs read → diff → plan → compile → resolve → execute. The read phase
-        creates private table runs, the middle phases enrich them, resolution
-        changes their order, and the completed outcomes are finally frozen into
-        ``TableRunReport`` values.
+        Runs lower → resolve → read → diff → plan → compile → execute →
+        account. Resolution births one private run per table in
+        dependency-first order carrying its static facts, the worldly phases
+        enrich the runs in place, and assembly freezes the completed outcomes
+        into ``TableRunReport`` values, deriving dependency blocking from the
+        edges as it goes.
 
         A table that fails an early phase carries that failure forward and is
         skipped by execution; its partial run is still included in the report.
@@ -209,12 +219,14 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, run read → diff → plan → compile → resolve
-                but skip execution (zero catalog mutations). Every run's
-                ``execution`` stays ``None`` while its ``plan`` still records
-                the actions compiled from the observed snapshot, and the report
-                is returned instead of raising ``SyncFailedError`` when a
-                pre-execution phase fails.
+            dry_run: When True, stop after compile and attempt no statements
+                (zero catalog mutations). No run retains attempted statement
+                results, while its ``plan`` still records the actions compiled
+                from the observed snapshot. Blocking is derived rather than
+                executed, so a dependent of a failed table still reports
+                BLOCKED_BY_FAILED_DEPENDENCY in the preview. The report is
+                returned instead of raising ``SyncFailedError`` when a table
+                fails.
 
         Returns:
             The aggregate :class:`SyncReport` for the run.
@@ -229,19 +241,18 @@ class Engine:
 
         """
         run_started = datetime.now(UTC)
-        desired = prepare_desired_tables(*tables)
+        desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
-        runs = self._read(desired)
+        runs = self._resolve(desired)
+        self._read(runs)
         self._diff(runs)
         self._plan(runs)
         self._compile(runs)
-        runs = self._resolve(runs)
-
         if not dry_run:
             self._execute(runs)
 
-        report = SyncReport(
+        report = SyncReport.assemble(
             started_at=run_started,
             ended_at=datetime.now(UTC),
             table_reports=tuple(run.to_report() for run in runs),
@@ -259,62 +270,55 @@ class Engine:
 
         return report
 
-    def _read(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
-        """Fetch current catalog state for every table, birthing one run each."""
-        runs: list[_TableRun] = []
-        for desired in tables:
+    def _read(self, runs: tuple[_TableRun, ...]) -> None:
+        """Fetch the current catalog state of every run's table."""
+        for run in runs:
             read: ReadResult
             try:
-                read = self.reader.fetch_state(desired.qualified_name)
+                read = self.reader.fetch_state(run.qualified_name)
             except ReadError as error:
                 read = ReadFailure(
                     exception_type=error.exception_type,
                     message=str(error),
                 )
 
-            runs.append(_TableRun(desired=desired, read=read))
+            run.read = read
 
             match read:
                 case ReadFailure() as failure:
                     logger.error(
                         "Read failed for %s: %s - %s",
-                        desired.qualified_name,
+                        run.qualified_name,
                         failure.exception_type,
                         failure.message,
                     )
                 case TablePresent():
-                    logger.info("Table present: %s", desired.qualified_name)
+                    logger.info("Table present: %s", run.qualified_name)
                 case TableAbsent():
-                    logger.info("Table absent: %s", desired.qualified_name)
+                    logger.info("Table absent: %s", run.qualified_name)
                 case _ as unreachable:
                     assert_never(unreachable)
-
-        return tuple(runs)
 
     def _diff(self, runs: tuple[_TableRun, ...]) -> None:
-        """Adopt catalog spellings, then diff each run; read-failed runs carry no diff."""
-        diffable: list[tuple[_TableRun, ObservedTable | None]] = []
+        """Diff each readable run; read-failed runs carry no diff."""
         for run in runs:
             match run.read:
-                case ReadFailure():
+                case ReadFailure() | None:
                     continue
                 case TablePresent(table=observed_table):
-                    diffable.append((run, observed_table))
+                    run.diff = diff_table(run.desired, observed_table)
                 case TableAbsent():
-                    diffable.append((run, None))
+                    run.diff = diff_table(run.desired, None)
                 case _ as unreachable:
                     assert_never(unreachable)
-
-        adopted = adopt_catalog_spellings((run.desired, observed) for run, observed in diffable)
-        for run, observed in diffable:
-            run.diff = diff_table(adopted[run.qualified_name], observed)
 
     def _plan(self, runs: tuple[_TableRun, ...]) -> None:
         """
         Accept or reject each diff according to the default planning policy.
 
-        Rejected runs retain ``PlanningFailed``; accepted runs retain
-        ``PlanningSucceeded`` with the validated action plan.
+        Each diff is judged as one complete stream. Rejected runs retain
+        ``PlanningFailed``; accepted runs retain ``PlanningSucceeded`` with the
+        validated action plan.
         """
         for run in runs:
             if run.diff is None:
@@ -353,68 +357,50 @@ class Engine:
                 run.qualified_name,
             )
 
-    def _resolve(self, runs: tuple[_TableRun, ...]) -> tuple[_TableRun, ...]:
+    def _resolve(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
         """
-        Order runs by FK dependency and retain each table's resolution outcome.
+        Birth one run per table, dependency-first, with its resolution outcome.
 
-        Runs that already carry a failure (read or planning) seed the
-        failed-name set, so their FK dependents are blocked with
-        BLOCKED_BY_FAILED_DEPENDENCY. Returns the runs in dependency-first order.
+        Resolution is structural: it judges the declarations against each
+        other, before any catalog state is fetched. Whether a table is
+        *blocked* by another's failure is not decided here but derived from
+        these edges once the run's other fates are known. Every run carries a
+        resolution from birth, so no later phase has to consider a
+        half-resolved table.
         """
-        failed_names = {run.qualified_name for run in runs if run.has_failures}
+        runs: list[_TableRun] = []
 
-        ordered_resolutions = resolve(
-            tables=tuple(run.desired for run in runs),
-            failed_names=failed_names,
-        )
+        for resolution in resolve(tables):
+            runs.append(_TableRun(resolution=resolution))
 
-        runs_by_name = {run.qualified_name: run for run in runs}
+            if resolution.structural_failures:
+                logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
 
-        ordered_runs: list[_TableRun] = []
-
-        for resolution in ordered_resolutions:
-            run = runs_by_name[resolution.qualified_name]
-            run.resolution = resolution
-            ordered_runs.append(run)
-
-            if isinstance(resolution, ResolutionFailed):
-                logger.error("Foreign key resolution failed for %s", run.qualified_name)
-
-        return tuple(ordered_runs)
+        return tuple(runs)
 
     def _execute(self, runs: tuple[_TableRun, ...]) -> None:
         """
-        Execute the plan of every run with no failures and a non-empty plan.
+        Execute every convergent run's plan, skipping dependents of failure.
 
-        Walks the resolved runs in dependency-first order, tracking tables that
-        fail during execution. A run whose resolved dependency references one is
-        blocked with BLOCKED_BY_FAILED_DEPENDENCY instead of executed, so an
-        execution failure in a parent blocks its FK dependents in the same
-        sync — even dependents with no work of their own. A run with an empty
-        plan and no blocking failures is skipped and counts as a healthy
-        parent. The execution outcome remains the sole source of execution or
-        runtime dependency failures.
+        One walk in dependency order applies the single blocking rule: a run
+        with failures of its own, or with a dependency that will not converge,
+        joins the not-converged set and is skipped. Nothing is recorded on the
+        run either way — the account derives blocking from the same edges — so
+        the two arms differ only in what they can say about the skip. Plan
+        emptiness gates only statement execution: a no-op run still joins the
+        set through the same rule when its dependency failed, so blocking
+        propagates through tables with no work of their own.
         """
-        failed_during_execution: set[QualifiedName] = set()
+        not_converged: set[QualifiedName] = set()
 
         for run in runs:
             if run.has_failures:
+                not_converged.add(run.qualified_name)
                 continue
 
-            resolution = run.resolution
-            if not isinstance(resolution, ResolutionSucceeded):
-                raise RuntimeError(
-                    f"Executable table was not successfully resolved: {run.qualified_name}"
-                )
-
-            blocking_failures = tuple(
-                dependency.blocked_failure
-                for dependency in resolution.dependencies
-                if dependency.referenced_table in failed_during_execution
-            )
+            blocking_failures = run.resolution.blocked_by(not_converged)
             if blocking_failures:
-                run.execution = ExecutionBlockedByDependency(blocking_failures)
-                failed_during_execution.add(run.qualified_name)
+                not_converged.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",
                     run.qualified_name,
@@ -422,7 +408,6 @@ class Engine:
                 )
                 continue
 
-            # A no-op table must still be blocked when its dependency failed.
             plan = run.plan
             if plan is None:
                 raise RuntimeError(f"Executable table was not planned: {run.qualified_name}")
@@ -432,14 +417,14 @@ class Engine:
             summary = self._execute_statements(run.planned_sql_statements)
             run.execution = summary
 
-            if summary.failed:
-                failed_during_execution.add(run.qualified_name)
+            if summary.failures:
+                not_converged.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
                 run.qualified_name,
-                summary.failed_count,
+                len(summary.failures),
             )
 
     def _execute_statements(self, statements: tuple[str, ...]) -> ExecutionSummary:
