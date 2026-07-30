@@ -39,6 +39,8 @@ from delta_engine.domain.plan.actions import (
     ActionPlan,
     EnableTableFeature,
     SetTableComment,
+    SetTableTag,
+    UnsetTableTag,
 )
 
 # ---------- test builders
@@ -509,6 +511,29 @@ def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
             "detail": "",
         }
     ]
+
+
+def test_table_to_dict_spells_every_operation_as_one_of_three_plain_words():
+    # Given a plan holding one change of each operation
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan(
+            "orders",
+            SetTableTag(name="env", desired_value="prod", observed_value=None),
+            UnsetTableTag(name="legacy"),
+            SetTableComment(desired_comment="hello", observed_comment=""),
+        ),
+        planned_sql_statements=("ALTER TABLE ... SET TAGS (...)",),
+    )
+
+    # When serializing the public report
+    operations = [change["operation"] for change in report.to_dict()["changes"]]
+
+    # Then each is the documented word for its operation, and a plain string
+    # rather than the enum — to_dict promises data, not application types.
+    assert operations == ["add", "remove", "change"]
+    assert all(type(operation) is str for operation in operations)
 
 
 def test_table_to_dict_reports_failures_with_phase_and_type():

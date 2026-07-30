@@ -9,10 +9,10 @@ what each action *means* (category, operation, subject cells); presentation
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 import functools
 from types import MappingProxyType
-from typing import Final
+from typing import Final, assert_never
 
 from delta_engine.domain.model import DataType, Decimal, DesiredColumn
 from delta_engine.domain.plan import (
@@ -81,23 +81,48 @@ CATEGORY_NOUN: Final[Mapping[DiffCategory, tuple[str, str]]] = MappingProxyType(
 )
 
 
-_OPERATION_FOR_SYMBOL: Final[Mapping[str, str]] = MappingProxyType(
-    {"+": "add", "-": "remove", "~": "change"}
-)
+class DiffOperation(StrEnum):
+    """
+    What a diff line does to its subject.
+
+    One fact in the two spellings its consumers need: the member value is the
+    stable word in the ``to_dict`` contract, and ``symbol`` is the character
+    the text renderer prefixes the line with. Pairing them on the member is
+    what makes a bad operation unconstructable — as a free ``str`` symbol, a
+    typo took any character, rendered it happily, and surfaced only as a
+    ``KeyError`` once some caller projected the run to a dict.
+    """
+
+    ADD = "add"
+    REMOVE = "remove"
+    CHANGE = "change"
+
+    @property
+    def symbol(self) -> str:
+        """The character the text diff prefixes this operation's line with."""
+        match self:
+            case DiffOperation.ADD:
+                return "+"
+            case DiffOperation.REMOVE:
+                return "-"
+            case DiffOperation.CHANGE:
+                return "~"
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 @dataclass(frozen=True, slots=True)
 class DiffEntry:
-    """One interpreted diff line: its category, +/-/~ symbol, and aligned cells."""
+    """One interpreted diff line: its category, operation, and aligned cells."""
 
     category: DiffCategory
-    symbol: str
+    operation: DiffOperation
     cells: tuple[str, ...]
 
     @property
-    def operation(self) -> str:
-        """The symbol as a stable word for machine consumers: add, remove, or change."""
-        return _OPERATION_FOR_SYMBOL[self.symbol]
+    def symbol(self) -> str:
+        """The +/-/~ character the text renderer prefixes this line with."""
+        return self.operation.symbol
 
     @property
     def subject(self) -> str:
@@ -115,7 +140,7 @@ def _column_add_entry(column: DesiredColumn) -> DiffEntry:
     cells = [column.name, _type_name(column.data_type)]
     if not column.nullable:
         cells.append("NOT NULL")
-    return DiffEntry(DiffCategory.COLUMNS, "+", tuple(cells))
+    return DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, tuple(cells))
 
 
 @functools.singledispatch
@@ -131,30 +156,44 @@ def _(action: CreateTable) -> tuple[DiffEntry, ...]:
     primary_key_columns = action.table.primary_key_columns
     if primary_key_columns:
         entries.append(
-            DiffEntry(DiffCategory.KEYS, "+", (f"primary key ({', '.join(primary_key_columns)})",))
+            DiffEntry(
+                DiffCategory.KEYS,
+                DiffOperation.ADD,
+                (f"primary key ({', '.join(primary_key_columns)})",),
+            )
         )
 
     if action.table.clustered_by:
         columns = ", ".join(action.table.clustered_by)
-        entries.append(DiffEntry(DiffCategory.CLUSTERING, "+", (f"clustering ({columns})",)))
+        entries.append(
+            DiffEntry(DiffCategory.CLUSTERING, DiffOperation.ADD, (f"clustering ({columns})",))
+        )
 
     if action.table.partitioned_by:
         columns = ", ".join(action.table.partitioned_by)
-        entries.append(DiffEntry(DiffCategory.PARTITIONING, "+", (f"partitioning ({columns})",)))
+        entries.append(
+            DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, (f"partitioning ({columns})",))
+        )
 
     entries.extend(
-        DiffEntry(DiffCategory.PROPERTIES, "+", (f"{name} = '{value}'",))
+        DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, (f"{name} = '{value}'",))
         for name, value in sorted(action.table.properties.items())
         if value is not None
     )
 
     entries.extend(
-        DiffEntry(DiffCategory.COMMENTS, "+", (f"column {column.name}: '{column.comment}'",))
+        DiffEntry(
+            DiffCategory.COMMENTS, DiffOperation.ADD, (f"column {column.name}: '{column.comment}'",)
+        )
         for column in action.table.columns
         if column.comment
     )
     if action.table.comment:
-        entries.append(DiffEntry(DiffCategory.COMMENTS, "+", (f"table: '{action.table.comment}'",)))
+        entries.append(
+            DiffEntry(
+                DiffCategory.COMMENTS, DiffOperation.ADD, (f"table: '{action.table.comment}'",)
+            )
+        )
 
     return tuple(entries)
 
@@ -166,13 +205,17 @@ def _(action: AddColumn) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: DropColumn) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.COLUMNS, "-", (action.column.name,)),)
+    return (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, (action.column.name,)),)
 
 
 @action_entries.register
 def _(action: RenameColumn) -> tuple[DiffEntry, ...]:
     return (
-        DiffEntry(DiffCategory.COLUMNS, "~", (action.old_name, f"renamed → {action.new_name}")),
+        DiffEntry(
+            DiffCategory.COLUMNS,
+            DiffOperation.CHANGE,
+            (action.old_name, f"renamed → {action.new_name}"),
+        ),
     )
 
 
@@ -182,13 +225,13 @@ def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
         change = "drop NOT NULL (was NOT NULL)"
     else:
         change = "set NOT NULL (was nullable)"
-    return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
+    return (DiffEntry(DiffCategory.COLUMNS, DiffOperation.CHANGE, (action.column_name, change)),)
 
 
 @action_entries.register
 def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
     change = f"{_type_display(action.observed_type)} → {_type_display(action.desired_type)}"
-    return (DiffEntry(DiffCategory.COLUMNS, "~", (action.column_name, change)),)
+    return (DiffEntry(DiffCategory.COLUMNS, DiffOperation.CHANGE, (action.column_name, change)),)
 
 
 @action_entries.register
@@ -197,7 +240,7 @@ def _(action: SetColumnComment) -> tuple[DiffEntry, ...]:
         text = f"column {action.column_name}: '{action.desired_comment}'"
     else:
         text = f"column {action.column_name} comment (unset)"
-    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
+    return (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, (text,)),)
 
 
 @action_entries.register
@@ -205,81 +248,103 @@ def _(action: SetTableComment) -> tuple[DiffEntry, ...]:
     text = (
         f"table: '{action.desired_comment}'" if action.desired_comment else "table comment (unset)"
     )
-    return (DiffEntry(DiffCategory.COMMENTS, "~", (text,)),)
+    return (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, (text,)),)
 
 
 @action_entries.register
 def _(action: EnableTableFeature) -> tuple[DiffEntry, ...]:
     text = f"table feature {action.feature} — permanent protocol upgrade"
-    return (DiffEntry(DiffCategory.FEATURES, "+", (text,)),)
+    return (DiffEntry(DiffCategory.FEATURES, DiffOperation.ADD, (text,)),)
 
 
 @action_entries.register
 def _(action: SetProperty) -> tuple[DiffEntry, ...]:
     if action.observed_value is None:
         return (
-            DiffEntry(DiffCategory.PROPERTIES, "+", (f"{action.name} = '{action.desired_value}'",)),
+            DiffEntry(
+                DiffCategory.PROPERTIES,
+                DiffOperation.ADD,
+                (f"{action.name} = '{action.desired_value}'",),
+            ),
         )
     text = f"{action.name} = '{action.desired_value}' (was '{action.observed_value}')"
-    return (DiffEntry(DiffCategory.PROPERTIES, "~", (text,)),)
+    return (DiffEntry(DiffCategory.PROPERTIES, DiffOperation.CHANGE, (text,)),)
 
 
 @action_entries.register
 def _(action: UnsetProperty) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.PROPERTIES, "-", (action.name,)),)
+    return (DiffEntry(DiffCategory.PROPERTIES, DiffOperation.REMOVE, (action.name,)),)
 
 
 @action_entries.register
 def _(action: SetTableTag) -> tuple[DiffEntry, ...]:
     text = f"{action.name} = '{action.desired_value}'"
     if action.observed_value is None:
-        return (DiffEntry(DiffCategory.TAGS, "+", (text,)),)
-    return (DiffEntry(DiffCategory.TAGS, "~", (f"{text} (was '{action.observed_value}')",)),)
+        return (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, (text,)),)
+    return (
+        DiffEntry(
+            DiffCategory.TAGS, DiffOperation.CHANGE, (f"{text} (was '{action.observed_value}')",)
+        ),
+    )
 
 
 @action_entries.register
 def _(action: UnsetTableTag) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.TAGS, "-", (action.name,)),)
+    return (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, (action.name,)),)
 
 
 @action_entries.register
 def _(action: SetColumnTag) -> tuple[DiffEntry, ...]:
     text = f"column {action.column_name}.{action.name} = '{action.desired_value}'"
     if action.observed_value is None:
-        return (DiffEntry(DiffCategory.TAGS, "+", (text,)),)
-    return (DiffEntry(DiffCategory.TAGS, "~", (f"{text} (was '{action.observed_value}')",)),)
+        return (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, (text,)),)
+    return (
+        DiffEntry(
+            DiffCategory.TAGS, DiffOperation.CHANGE, (f"{text} (was '{action.observed_value}')",)
+        ),
+    )
 
 
 @action_entries.register
 def _(action: UnsetColumnTag) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.TAGS, "-", (f"column {action.column_name}.{action.name}",)),)
+    return (
+        DiffEntry(
+            DiffCategory.TAGS, DiffOperation.REMOVE, (f"column {action.column_name}.{action.name}",)
+        ),
+    )
 
 
 @action_entries.register
 def _(action: SetPrimaryKey) -> tuple[DiffEntry, ...]:
     return (
         DiffEntry(
-            DiffCategory.KEYS, "+", (f"primary key ({', '.join(action.primary_key.columns)})",)
+            DiffCategory.KEYS,
+            DiffOperation.ADD,
+            (f"primary key ({', '.join(action.primary_key.columns)})",),
         ),
     )
 
 
 @action_entries.register
 def _(action: DropPrimaryKey) -> tuple[DiffEntry, ...]:
-    return (DiffEntry(DiffCategory.KEYS, "-", ("primary key",)),)
+    return (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, ("primary key",)),)
 
 
 @action_entries.register
 def _(action: SetForeignKey) -> tuple[DiffEntry, ...]:
     local_columns = ", ".join(action.constraint.local_columns)
     text = f"foreign key ({local_columns}) → {action.constraint.referenced_table}"
-    return (DiffEntry(DiffCategory.KEYS, "+", (text,)),)
+    return (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, (text,)),)
 
 
 @action_entries.register
 def _(action: DropForeignKey) -> tuple[DiffEntry, ...]:
     return (
-        DiffEntry(DiffCategory.KEYS, "-", (f"foreign key {action.constraint.constraint_name}",)),
+        DiffEntry(
+            DiffCategory.KEYS,
+            DiffOperation.REMOVE,
+            (f"foreign key {action.constraint.constraint_name}",),
+        ),
     )
 
 
@@ -292,7 +357,7 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
     # columns (DELTA_OPTIMIZE_FULL_NOT_SUPPORTED); existing files simply keep
     # their old layout after CLUSTER BY NONE.
     if not action.desired_clustering:
-        return (DiffEntry(DiffCategory.CLUSTERING, "-", ("clustering",)),)
+        return (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.REMOVE, ("clustering",)),)
     columns = ", ".join(action.desired_clustering)
     text = f"clustering ({columns}) — {_OPTIMIZE_FULL_HINT}"
-    return (DiffEntry(DiffCategory.CLUSTERING, "~", (text,)),)
+    return (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.CHANGE, (text,)),)
