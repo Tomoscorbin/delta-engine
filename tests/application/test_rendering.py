@@ -7,6 +7,7 @@ from delta_engine.application.diff_entries import (
     DiffEntry,
     DiffOperation,
     action_entries,
+    unresolvable_entries,
 )
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
@@ -37,6 +38,12 @@ from delta_engine.domain.model import (
     QualifiedName,
     String,
     TableFeature,
+)
+from delta_engine.domain.plan import (
+    ColumnCaseDrift,
+    ColumnRenameConflict,
+    PartitioningChanged,
+    PropertyUndeclared,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -424,6 +431,20 @@ def test_every_action_type_has_registered_diff_entries():
     for action_type in concrete_action_types:
         assert action_entries.dispatch(action_type) is not fallback, (
             f"No diff entries registered for {action_type.__name__}"
+        )
+
+
+def test_every_unresolvable_type_has_registered_diff_entries():
+    # Given every member of the Unresolvable union
+    import typing
+
+    from delta_engine.domain.plan.unresolvable import Unresolvable
+
+    # Then each dispatches to a real arm, not the NotImplementedError fallback
+    fallback = unresolvable_entries.dispatch(object)
+    for unresolvable_type in typing.get_args(Unresolvable.__value__):
+        assert unresolvable_entries.dispatch(unresolvable_type) is not fallback, (
+            f"No diff entries registered for {unresolvable_type.__name__}"
         )
 
 
@@ -903,3 +924,58 @@ def test_enable_table_feature_renders_a_permanent_features_entry():
     assert entry.symbol == "+"
     assert entry.subject == "timestampNtz"
     assert "permanent" in entry.detail[0]
+
+
+@pytest.mark.parametrize(
+    ("unresolvable", "expected"),
+    [
+        (
+            ColumnCaseDrift(declared_name="SKU", observed_name="sku"),
+            (
+                DiffEntry(
+                    DiffCategory.COLUMNS,
+                    DiffOperation.CHANGE,
+                    "SKU",
+                    ("spelled 'sku' in the catalog",),
+                ),
+            ),
+        ),
+        (
+            ColumnRenameConflict(old_name="old_id", new_name="id"),
+            (
+                DiffEntry(
+                    DiffCategory.COLUMNS,
+                    DiffOperation.CHANGE,
+                    "old_id",
+                    ("renamed → id, but both columns exist",),
+                ),
+            ),
+        ),
+        (
+            PropertyUndeclared(name="delta.enableChangeDataFeed", observed_value="true"),
+            (
+                DiffEntry(
+                    DiffCategory.PROPERTIES,
+                    DiffOperation.CHANGE,
+                    "delta.enableChangeDataFeed",
+                    ("= 'true'", "(set on the table, undeclared)"),
+                ),
+            ),
+        ),
+        (
+            PartitioningChanged(
+                desired_partitioning=("region",), observed_partitioning=("country",)
+            ),
+            (
+                DiffEntry(
+                    DiffCategory.PARTITIONING,
+                    DiffOperation.CHANGE,
+                    "partitioning",
+                    ("(country) → (region)",),
+                ),
+            ),
+        ),
+    ],
+)
+def test_unresolvable_differences_describe_themselves(unresolvable, expected):
+    assert unresolvable_entries(unresolvable) == expected

@@ -19,11 +19,15 @@ from delta_engine.domain.plan import (
     AddColumn,
     AlterClustering,
     AlterColumnType,
+    ColumnCaseDrift,
+    ColumnRenameConflict,
     CreateTable,
     DropColumn,
     DropForeignKey,
     DropPrimaryKey,
     EnableTableFeature,
+    PartitioningChanged,
+    PropertyUndeclared,
     RenameColumn,
     SetColumnComment,
     SetColumnNullability,
@@ -33,6 +37,7 @@ from delta_engine.domain.plan import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    Unresolvable,
     UnsetColumnTag,
     UnsetProperty,
     UnsetTableTag,
@@ -464,5 +469,71 @@ def _(action: AlterClustering) -> tuple[DiffEntry, ...]:
             DiffOperation.CHANGE,
             subject="clustering",
             detail=(*_columns_detail(action.desired_clustering), f"— {_OPTIMIZE_FULL_HINT}"),
+        ),
+    )
+
+
+@functools.singledispatch
+def unresolvable_entries(unresolvable: Unresolvable) -> tuple[DiffEntry, ...]:
+    """
+    Describe one unresolvable difference as category-tagged diff entries.
+
+    The sibling of :func:`action_entries` for differences no action can close.
+    Every entry is a ``CHANGE``: an unresolvable difference is neither an
+    addition nor a removal the engine could make, it is a disagreement between
+    the declaration and the catalog that something outside this sync must
+    settle.
+    """
+    raise NotImplementedError(f"No diff entries for unresolvable {type(unresolvable).__name__}")
+
+
+@unresolvable_entries.register
+def _(unresolvable: ColumnCaseDrift) -> tuple[DiffEntry, ...]:
+    return (
+        DiffEntry(
+            DiffCategory.COLUMNS,
+            DiffOperation.CHANGE,
+            subject=unresolvable.declared_name,
+            detail=(f"spelled '{unresolvable.observed_name}' in the catalog",),
+        ),
+    )
+
+
+@unresolvable_entries.register
+def _(unresolvable: ColumnRenameConflict) -> tuple[DiffEntry, ...]:
+    return (
+        DiffEntry(
+            DiffCategory.COLUMNS,
+            DiffOperation.CHANGE,
+            subject=unresolvable.old_name,
+            detail=(f"renamed → {unresolvable.new_name}, but both columns exist",),
+        ),
+    )
+
+
+@unresolvable_entries.register
+def _(unresolvable: PropertyUndeclared) -> tuple[DiffEntry, ...]:
+    # Same two-phrase shape as a property change, so the trailing clause aligns
+    # into its own column down a group of property lines.
+    return (
+        DiffEntry(
+            DiffCategory.PROPERTIES,
+            DiffOperation.CHANGE,
+            subject=unresolvable.name,
+            detail=(f"= '{unresolvable.observed_value}'", "(set on the table, undeclared)"),
+        ),
+    )
+
+
+@unresolvable_entries.register
+def _(unresolvable: PartitioningChanged) -> tuple[DiffEntry, ...]:
+    observed = ", ".join(unresolvable.observed_partitioning)
+    desired = ", ".join(unresolvable.desired_partitioning)
+    return (
+        DiffEntry(
+            DiffCategory.PARTITIONING,
+            DiffOperation.CHANGE,
+            subject="partitioning",
+            detail=(f"({observed}) → ({desired})",),
         ),
     )
