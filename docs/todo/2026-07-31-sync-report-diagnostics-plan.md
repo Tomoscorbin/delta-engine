@@ -4,15 +4,69 @@
 
 **Goal:** Make a sync report say *what* drifted, *what* was rejected, and *what* actually happened to the catalog, instead of naming a rule and discarding the evidence.
 
-**Architecture:** Three independent, stacked pull requests over the application layer. PR1 fixes message text and adds one shared type-display function — no public type changes. PR2 carries the computed `TableDiff` onto `TableRunReport` so a rejected table can show its drift, and teaches `UnmanagedAspectDrift` to name the differences it currently collapses into a bare aspect label. PR3 makes real-run output honest about what executed. Each PR is independently mergeable and revertable.
+**Architecture:** Three independent pull requests over the application layer. PR1 fixes message text — no public type changes. PR2 carries the computed `TableDiff` onto `TableRunReport` so a rejected table can show its drift, and teaches `UnmanagedAspectDrift` to name the differences it collapsed into a bare aspect label. PR3 makes real-run output honest about what executed. Each PR is independently mergeable and revertable.
+
+They were written as a stack. They are not one any more: PR2 landed off `main` before PR1 existed as a branch, and everything remaining branches off `main` too.
 
 **Tech Stack:** Python 3.12+, `uv`, pytest, mypy, ruff, import-linter. No new runtime dependencies.
+
+---
+
+## Status — 2026-07-31
+
+**PR2 is done and merged. PR1 is half done. PR3 has not started.**
+
+| | Task | State |
+| --- | --- | --- |
+| **PR1** | 1. One function that names a data type | ✅ landed in #313, **differently** — see below |
+| | 2. The CREATE diff keeps its type detail | ✅ satisfied by #313 |
+| | 3. Validation messages stop leaking dataclass reprs | ✅ satisfied by #313 |
+| | 4. Statement numbers read from 1 | ❌ **outstanding** |
+| | 5. `NonNullableColumnAdd` says what to do about it | ❌ **outstanding** |
+| | 6. The grid names what a validation failure is about | ❌ **outstanding** |
+| | 7. The run summary counts in English | ❌ **outstanding** |
+| **PR2** | 8–12 | ✅ all merged in #316 |
+| **PR3** | 13–16 | ❌ not started |
+
+### What PR1 actually did, and what it changed underneath this plan
+
+#313 (`feat: improve rendering`) was written independently of this plan. It covered task 1's territory but chose a different design, and reshaped `diff_entries.py` while it was there. **Every later task in this document was written against the pre-#313 code.** The substitutions:
+
+- **No `application/type_display.py`, and no `describe_type`.** A data type names itself: `DataType.__str__` returns `type(self).__name__`, with `Decimal`, `Struct`, `Array` and `Map` overriding it. Read `str(data_type)` wherever this plan says `describe_type(data_type)`. The SQL spelling stays in the adapter (`adapters/databricks/sql/types.py::render_data_type`) — two audiences, two functions.
+- **`DiffEntry` gained a `subject`.** It is now `DiffEntry(category, operation, subject, detail)` where `detail` is a `tuple[str, ...]` of phrases, not the old flat `cells` tuple. `entry.cells` survives as `(subject, *detail)` for renderers. Any `DiffEntry(...)` literal in this document is written in the old three-argument form and needs the subject split out.
+- **`CATEGORY_NOUN` is gone**; `DiffCategory` carries `.plural` and `.counted(n)` itself.
+- **Layout moved into the renderer.** `_render_entry_groups` owns grouping and column alignment; interpretation returns unaligned phrases. This is the organising principle to preserve: *facts on the object that owns the data, phrasing on the object being described, layout in the renderer.*
+- **`report.py` gained derived facts** — `StatementProgress`, `RunCounts`, `SyncReport.counts`, `SyncReport.duration_seconds`, `TableRunReport.statement_progress`, `TableRunReport.creates_table`. PR3's tasks 14–16 hand-roll several of these; use the properties instead.
+
+### What PR2 added, and its two deviations
+
+Merged in #316, off `main` (not stacked — PR1 never existed as a branch).
+
+- `TableRunReport.diff: TableDiff | None = None`, with the invariant that a failed read produces no diff. The engine's `to_report()` passes it through.
+- `unresolvable_entries(unresolvable) -> tuple[DiffEntry, ...]` in `diff_entries.py`, singledispatch over all four `Unresolvable` variants, with `test_every_unresolvable_type_has_registered_diff_entries` guarding a fifth.
+- **`drift_entries(drift) -> tuple[DiffEntry, ...]`**, beside `plan_entries`. This replaced the plan's `_rejected_entries` in `rendering.py` *and* the duplicated comprehension in `_rejected_change_records` — "every entry this diff lowers to" is a question about meaning, so it lives in the meaning layer and both consumers call it.
+- `render_diff_block` distinguishes `plan is None` (rejected — show the drift under a `(REJECTED — no SQL planned)` header) from an empty plan (a validated no-op).
+- `to_dict()` gained `rejected_changes`; `schema_version` stays `2`.
+- `UnmanagedAspectDrift` names each difference and its remedy no longer says "sync the table fully".
+
+**Deviation 1 — the drift lines are `ValidationFailure.details`, not newlines inside `message`.** The plan had the rule build its own indented block. That composes wrongly: `render_failures_section` indents the first element of `format_lines()` by four spaces and nests later elements by eight, so an embedded remedy line rendered at *less* indentation than the failure owning it, and the JSON `message` gained raw `\n    ` runs no other failure has. `ValidationFailure` now carries `details: tuple[str, ...] = ()` and `format_lines()` returns `(headline, *details)`. Layout stays in the renderer.
+
+**Deviation 2 — no `ValidationFailure.subject`.** Task 12's tests used it, but it comes from task 6, which has not landed. Adding the field and populating it for one rule out of fourteen would be a half-done version of task 6, so those tests assert on `message` and `details` instead. **When task 6 is done, `subject` slots in beside `details` and task 12's tests can be tightened to use it.**
+
+### Picking this up tomorrow
+
+Do **PR1's remaining tasks (4, 5, 6, 7) first** — PR3's task 16 depends on task 7's `_count_phrase`, and task 6's `subject` is the thing that makes a forty-table grid readable. Branch each off `main`; nothing is stacked any more.
+
+Before starting PR3, read "PR3 — what changed underneath it" at the head of that section.
+
+---
 
 ## Global Constraints
 
 - Work in the existing worktree at `.claude/worktrees/feat-sync-report-diagnostics`. Never commit to `main`.
 - Conventional commit messages. No `Co-authored-by` trailers.
-- Run `uv run pytest -q` after every task; coverage gate is 70% and the suite currently sits at 96.69%.
+- Run `uv run pytest -q` after every task; coverage gate is 70% and the suite sits at 96.52% over 1149 tests as of #316.
+- `sphinx-build` needs its dependency group: `uv run --group docs sphinx-build -W -b html docs docs/_build/html`. The bare `uv run sphinx-build` written throughout this document will not resolve.
 - Layer order is enforced by import-linter: `adapters|api → application → domain`. Nothing in `application/` may import from `adapters/`, `api/`, or `cli/`. Intra-layer imports inside `application/` are legal.
 - `SyncReport.to_dict()` / `TableRunReport.to_dict()` are a versioned public contract (`schema_version: 2`, `docs/reference-run-report.md`). **Adding** a field is backwards-compatible; renaming or removing one is breaking and bumps the version. This plan adds fields only — `schema_version` stays at `2`.
 - `delta_engine.__all__` exports `Engine`, `SyncReport`, `TableRunReport`, `TableRunStatus`, `Failure`, `FailurePhase`, `ReadFailure`, `ValidationFailure`, `ExecutionFailure`, `ForeignKeyFailure`, `SyncFailedError`, `DuplicateTableDefinitionError`, `render_diff`, `render_report`. Anything else is internal and free to change.
@@ -44,56 +98,83 @@ Failures
 
 The engine computed a complete `TableDiff` naming `customer_id`, `legacy_region` and `shipped_at`, then threw it away. Three separate defects combine to produce that output, and this plan fixes all three plus eight smaller ones.
 
+**As of #316 that same scenario now reads:**
+
+```
+main.sales.orders  (REJECTED — no SQL planned)
+  columns
+    - legacy_region
+    ~ customer_id    Integer → Long
+
+Failures
+--------
+  main.sales.orders
+    Validation failed: UnmanagedAspectDrift - Operation not allowed: column structure
+    has drifted but is not managed by this definition. Update the declaration to match
+    the live table, or widen its scope to manage this aspect.
+        - legacy_region
+        ~ customer_id Integer → Long
+```
+
+The headline defect is fixed. What remains is PR1's text quality (tasks 4–7) and PR3's real-run honesty (tasks 13–16) — this preview is a dry run, and on a real run the same block would still describe intent as though it were outcome.
+
 ## File Structure
 
 **New files**
 
-| File | Responsibility |
-| --- | --- |
-| `src/delta_engine/application/type_display.py` | The single answer to "how do I name a `DataType` for a human". One public function, `describe_type`. |
-| `tests/application/test_type_display.py` | Tests for the above. |
+~~`src/delta_engine/application/type_display.py` / `tests/application/test_type_display.py`~~ — **superseded.** #313 put the answer on the type itself (`DataType.__str__`) rather than in a third module. The reasoning below is kept because it still explains *why* one spelling must be shared; it just landed on the object instead of beside it. No new files remain in this plan.
 
 **Modified files**
 
 | File | Change |
 | --- | --- |
-| `src/delta_engine/application/diff_entries.py` | Delete the two private type-name helpers; consume `describe_type`. Add `unresolvable_entries` as a sibling of `action_entries`. |
-| `src/delta_engine/application/validation.py` | Consume `describe_type` in type-change messages; give `NonNullableColumnAdd` a remedy; pass `subject=` from rules that name one; make `UnmanagedAspectDrift` enumerate the differences. |
-| `src/delta_engine/application/failures.py` | 1-based statement display; `ValidationFailure.subject`. |
-| `src/delta_engine/application/report.py` | `TableRunReport.diff` field, `unapplied_statements` property, `rejected_changes` in `to_dict()`. |
-| `src/delta_engine/application/engine.py` | Pass the run's diff into `to_report()`. |
-| `src/delta_engine/application/rendering.py` | Rejected-change blocks, real-run outcome markers, honest STATEMENTS cell, honest footer, pluralisation. |
-| `docs/reference-safe-change-rules.md` | Updated `UnmanagedAspectDrift` remedy wording. |
-| `docs/reference-run-report.md` | Document the new `rejected_changes` field. |
-| `docs/how-to-handle-sync-failures.md` | Point at `unapplied_statements`. |
+| `src/delta_engine/application/diff_entries.py` | ~~Delete the two private type-name helpers; consume `describe_type`.~~ Done in #313. ~~Add `unresolvable_entries` as a sibling of `action_entries`.~~ Done in #316, along with `drift_entries` beside `plan_entries`. |
+| `src/delta_engine/application/validation.py` | ~~Consume `describe_type` in type-change messages~~ (#313); **give `NonNullableColumnAdd` a remedy (task 5)**; **pass `subject=` from rules that name one (task 6)**; ~~make `UnmanagedAspectDrift` enumerate the differences~~ (#316). |
+| `src/delta_engine/application/failures.py` | **1-based statement display (task 4)**; **`ValidationFailure.subject` (task 6)**. `ValidationFailure.details` landed in #316. |
+| `src/delta_engine/application/report.py` | ~~`TableRunReport.diff` field~~ (#316), **`unapplied_statements` property (task 13)**, ~~`rejected_changes` in `to_dict()`~~ (#316). |
+| `src/delta_engine/application/engine.py` | ~~Pass the run's diff into `to_report()`.~~ Done in #316 — nothing further. |
+| `src/delta_engine/application/rendering.py` | ~~Rejected-change blocks~~ (#316); **real-run outcome markers, honest STATEMENTS cell, honest footer, pluralisation (tasks 7, 13–16)**. |
+| `docs/reference-safe-change-rules.md` | ~~Updated `UnmanagedAspectDrift` remedy wording.~~ Done in #316. |
+| `docs/reference-run-report.md` | ~~Document the new `rejected_changes` field.~~ Done in #316. |
+| `docs/how-to-handle-sync-failures.md` | **Point at `unapplied_statements` (task 13)**. |
 
-**Why `type_display.py` is its own module.** Three modules need a human-readable type name and none of them owns the concept: `diff_entries.py` shows types in a diff line, `validation.py` shows them in a rejection message, and a future `generate` command will need the same spelling again. Putting it in `diff_entries.py` would make "how do I name a type" a sub-fact of "how do I describe a diff", which it is not — the two happen to agree today only because there is one right answer. A third module both can depend on keeps that answer in one place, and matches the existing precedent of small single-purpose application modules (`scopes.py` is 62 lines).
+**Why `type_display.py` was going to be its own module** — superseded by `DataType.__str__`, kept because the reasoning about sharing one spelling still applies. Three modules need a human-readable type name and none of them owns the concept: `diff_entries.py` shows types in a diff line, `validation.py` shows them in a rejection message, and a future `generate` command will need the same spelling again. Putting it in `diff_entries.py` would make "how do I name a type" a sub-fact of "how do I describe a diff", which it is not — the two happen to agree today only because there is one right answer. A third module both can depend on keeps that answer in one place, and matches the existing precedent of small single-purpose application modules (`scopes.py` is 62 lines).
 
 This is **not** an argument that `validation.py` must avoid importing from `diff_entries.py` — Task 12 deliberately creates exactly that edge, because building a failure message that enumerates drift needs the same interpretation the diff view uses. See "On package structure" below.
 
 **On package structure.** `application/` is flat (12 modules) and stays that way in this plan. The presentation-shaped code is really two layers with different dependency shapes, and only one of them is a leaf:
 
 - `rendering.py` — text output. Nothing inside `application/` imports it; only `application/__init__.py` re-exports it and the CLI consumes it. A genuine leaf, ~280 lines after PR3.
-- `diff_entries.py` + `type_display.py` — the shared *meaning* layer. Imported today by `rendering.py` and `report.py`, and after Task 12 by `validation.py` as well.
+- `diff_entries.py` — the shared *meaning* layer, on its own now that `type_display.py` is superseded. Imported by `rendering.py`, `report.py`, and since Task 12 by `validation.py` as well.
 
-A folder named `rendering/` would therefore either hold one module, or hold a module that `validation.py` imports from — which would misdescribe the arrows. If a package is wanted later, the honest one groups the meaning layer, not the text layer, and it should be a separate pure-move commit **after PR3**, when the final module sizes are known. The trigger worth watching: `diff_entries.py` is 363 lines today and gains `unresolvable_entries` in Task 9; if it passes ~500 lines or gains a third source of entries, promote it and `type_display.py` into `application/interpretation/` and leave `rendering.py` where it is.
+A folder named `rendering/` would therefore either hold one module, or hold a module that `validation.py` imports from — which would misdescribe the arrows. If a package is wanted later, the honest one groups the meaning layer, not the text layer, and it should be a separate pure-move commit **after PR3**, when the final module sizes are known. The trigger worth watching: `diff_entries.py` was 363 lines when this was written and is **531 after #316** — past the ~500 threshold named here, though it now holds two sources of entries rather than the third that was meant to trigger a move. Revisit after PR3 rather than mid-flight; if it moves, it goes to `application/interpretation/` and `rendering.py` stays put.
 
 ---
 
-# PR 1 — `fix/sync-failure-message-quality`
+# PR 1 — `fix/sync-failure-message-quality` — ⚠️ HALF DONE
 
 Six user-visible text defects. No public type changes, no report-contract changes. Ships on its own.
 
-Branch from `main` (this plan lands on its own `docs/` PR first, so nothing is stacked on it):
+**Tasks 1, 2 and 3 are done** (#313, task 1 by a different design — see Status). **Tasks 4, 5, 6 and 7 are outstanding and are the next work to pick up.** They are independent of each other; each could ship alone, though one branch for the four is simpler.
+
+Branch from `main`:
 
 ```bash
 git checkout main && git pull
 git checkout -b fix/sync-failure-message-quality
 ```
 
+Every line number in the tasks below predates #313 and #316 — locate by symbol name, not by line.
+
 ---
 
-### Task 1: One function that names a data type
+### Task 1: One function that names a data type — ✅ DONE (#313, differently)
+
+> **Superseded.** No `type_display.py` and no `describe_type`: a data type names itself via `DataType.__str__`. `Decimal`, `Struct`, `Array` and `Map` override it; everything else returns its class name. Read `str(data_type)` wherever the tasks below say `describe_type(data_type)`.
+>
+> #316 fixed two delimiter bugs in that work (`Struct` dropped its closing `>`, `Map` opened with `>`), which #315 landed separately. The lesson is recorded there: a *scalar* spelling is cosmetic and not worth a test, but a *composite* one carries a structural invariant — its delimiters must balance and nest — and that is worth exactly one test, which is why `test_action_entries_render_expected` has a row nesting all three composites.
+>
+> The original task is kept below for its reasoning about why one spelling must be shared.
 
 Today there are two private helpers in `diff_entries.py` (`_type_name` at line 43, `_type_display` at line 48) and `validation.py` uses neither — it interpolates the dataclass directly, so a user sees `Decimal(precision=12, scale=4)` and `Array(element=String())` in failure messages.
 
@@ -232,7 +313,9 @@ git commit -m "feat: add one display name for domain data types"
 
 ---
 
-### Task 2: The CREATE diff keeps its type detail
+### Task 2: The CREATE diff keeps its type detail — ✅ DONE (#313)
+
+> Satisfied by `_column_add_entry` in `diff_entries.py`, which every `CreateTable` column goes through. Verify before assuming: `rg -n '_column_add_entry' src/`.
 
 `_column_add_entry` (`diff_entries.py:138-143`) uses `_type_name`, which is the bare class name. So a newly created table renders `+ price Decimal`, `+ tags Array`, `+ address Struct` — losing exactly the information a reviewer needs before the type is baked in permanently. Meanwhile `AlterColumnType` in the same view uses `_type_display` and renders `Decimal(10,2) → Decimal(12,2)`. Two vocabularies inside one diff.
 
@@ -359,7 +442,9 @@ git commit -m "fix: keep type parameters in the diff for added columns"
 
 ---
 
-### Task 3: Validation messages stop leaking dataclass reprs
+### Task 3: Validation messages stop leaking dataclass reprs — ✅ DONE (#313)
+
+> `DataType.__str__` did this for free — the rule bodies interpolate the type and get a clean spelling. Verify before assuming: `rg -n '!r\}|\{action\}' src/delta_engine/application/validation.py` should find nothing.
 
 `validation.py` interpolates `DataType` instances directly, so a rejected decimal narrowing reads:
 
@@ -453,7 +538,9 @@ git commit -m "fix: name data types consistently in validation messages"
 
 ---
 
-### Task 4: Statement numbers read from 1
+### Task 4: Statement numbers read from 1 — ❌ OUTSTANDING
+
+> Still 0-based: `ExecutionFailure.format_lines` reads `f"Execution failed at statement {self.statement_index}"`, so the first statement is statement 0.
 
 `ExecutionFailure.statement_index` is 0-based (`engine.py:428` uses `enumerate(statements)`), and `format_lines` prints it raw. A run that fails on the third of three statements shows `Execution failed at statement 2` in the failures section beside `2/3` in the STATEMENTS column. Same number, two meanings, on one screen.
 
@@ -540,7 +627,9 @@ git commit -m "fix: number statements from 1 in execution failure messages"
 
 ---
 
-### Task 5: `NonNullableColumnAdd` says what to do about it
+### Task 5: `NonNullableColumnAdd` says what to do about it — ❌ OUTSTANDING
+
+> Still bare: `Operation not allowed: cannot add non-nullable column 'email'` with no remedy, where every sibling rule has one.
 
 Every other safety rule ends with a remedy. This one is bare: `Operation not allowed: cannot add non-nullable column 'email'`. Its sibling `NullabilityTighteningOnExistingColumn` (`validation.py:137-157`) already carries the right words, and `docs/reference-safe-change-rules.md:12` already documents the same remedy — it just never reached the message.
 
@@ -613,7 +702,11 @@ git commit -m "fix: tell the author how to add a non-nullable column"
 
 ---
 
-### Task 6: The grid names what a validation failure is about
+### Task 6: The grid names what a validation failure is about — ❌ OUTSTANDING
+
+> **`ValidationFailure` has changed since this was written.** #316 added `details: tuple[str, ...] = ()` for the drift lines. `subject` goes *before* it (`rule_name`, `message`, `subject=""`, `details=()`), and `format_lines` already returns `(headline, *details)` — only `headline()` needs the subject. Once this lands, tighten task 12's `test_unmanaged_drift_reports_one_failure_per_aspect` to assert on `subject` as originally written.
+>
+> The nine-rule table in step 5 still holds; line numbers do not.
 
 `ValidationFailure.headline()` returns only the rule name, so the DETAIL column of a forty-table grid reads `Validation failed: NonNullableColumnAdd (+2 more)` — you learn the rule but not the column. The full message in the failures section already names the subject; the grid just cannot reach it.
 
@@ -774,7 +867,9 @@ git commit -m "feat: name the subject of a validation failure in the report grid
 
 ---
 
-### Task 7: The run summary counts in English
+### Task 7: The run summary counts in English — ❌ OUTSTANDING
+
+> Still `1 tables: 0 changed, 0 unchanged, 1 failed`. **PR3's task 16 depends on the `_count_phrase` helper this task introduces — do this one first.** Note that #313 moved the counting itself onto `SyncReport.counts` (a `RunCounts` named tuple) and the duration onto `SyncReport.duration_seconds`; this task now only changes how the footer *words* those numbers.
 
 `run_summary_footer` (`rendering.py:133-148`) prints `1 tables: ...` on every single-table run.
 
@@ -866,7 +961,7 @@ git push -u origin fix/sync-failure-message-quality
 gh pr create --title "fix: make sync failure messages say what and how" --body "$(cat <<'EOF'
 Six user-visible defects in what a sync tells you, none of which change a public type.
 
-- Data types render as `Decimal(12,4)` / `Array<String>` everywhere, instead of `Decimal(precision=12, scale=4)` in failure messages and a bare `Decimal` in a CREATE diff. One `describe_type` function is now the single home for that spelling.
+- Data types render as `Decimal(12,4)` / `Array<String>` everywhere, instead of `Decimal(precision=12, scale=4)` in failure messages and a bare `Decimal` in a CREATE diff. `DataType.__str__` is the single home for that spelling (this bullet already landed via #313 — drop it from the PR text and keep only tasks 4–7).
 - Execution failures number statements from 1, so "statement 3" and the grid's "2/3" describe the same three statements.
 - `NonNullableColumnAdd` carries the remedy that `reference-safe-change-rules.md` already documents.
 - The grid's DETAIL column names the column a rule rejected, not just the rule.
@@ -879,9 +974,13 @@ EOF
 
 ---
 
-# PR 2 — `feat/report-carries-the-diff`
+# PR 2 — `feat/report-carries-the-diff` — ✅ MERGED (#316)
 
-The structural change. Branch from PR1's head so the shared `describe_type` is available:
+The structural change. **All of tasks 8–12 are done and on `main`.** Nothing below needs doing; it is kept as the record of what was built and why, and because PR3 reads several of the interfaces it produced. Two deviations from what is written here are described in Status at the top: the drift lines are `ValidationFailure.details` rather than newlines in `message`, and `ValidationFailure.subject` was left to task 6.
+
+The one interface that appears nowhere below, because it was introduced during the work: **`drift_entries(drift) -> tuple[DiffEntry, ...]`** in `diff_entries.py`, beside `plan_entries`. It replaced both the plan's `_rejected_entries` helper in `rendering.py` and the duplicated comprehension in `_rejected_change_records`.
+
+The original branching instruction is stale — this shipped off `main`, since PR1 never existed as a branch:
 
 ```bash
 git checkout -b feat/report-carries-the-diff
@@ -1882,9 +1981,12 @@ git commit -m "feat: name the differences that unmanaged aspect drift found"
 
 ---
 
-### PR2 close-out
+### PR2 close-out — ✅ DONE
 
-- [ ] **Open the PR**
+Merged as **#316**, based on `main` rather than PR1. Gates at merge: 1149 passed, coverage 96.52%, mypy, ruff check + format, `lint-imports` (7 kept), `sphinx-build -W`, plus a manual run of the metadata-scope scenario through the real engine.
+
+<details>
+<summary>The PR text as planned</summary>
 
 ```bash
 git push -u origin feat/report-carries-the-diff
@@ -1901,15 +2003,40 @@ EOF
 )"
 ```
 
+</details>
+
 ---
 
-# PR 3 — `feat/real-run-report-honesty`
+# PR 3 — `feat/real-run-report-honesty` — ❌ NOT STARTED
 
 On a real run the renderers describe what was *planned* as though it happened. A table blocked by a failed dependency renders an identical `+` block to one that committed; the footer counts a partially-applied table as neither changed nor unchanged; and nothing says which statements were never attempted.
 
 This matters for library callers — `render_diff` and `render_report` are both in `delta_engine.__all__`. The CLI is dry-run only and is unaffected.
 
+## PR3 — what changed underneath it
+
+**Read this before writing any of tasks 13–16.** They were written against `rendering.py` and `report.py` as they stood before #313 and #316, and several code blocks below would now undo work that has landed. Line numbers are all stale; locate by symbol.
+
+1. **Task 13 step 7 would revert #313 and break #316.** Its replacement `render_failures_section` collapses every failure line to one indent level:
+
+   ```python
+   lines.extend(f"    {line}" for line in failure.format_lines())   # ← do NOT apply
+   ```
+
+   The current body deliberately splits head from supporting detail and nests the rest by eight spaces, and `ValidationFailure.details` (#316) depends on that nesting to render the drift lines under their failure. **Keep the existing loop; only append `_not_attempted_lines(report)` after it.**
+
+2. **`report.statement_progress` already exists** (a `StatementProgress` named tuple of `applied`/`planned`). Task 14's `_outcome_marker` and task 15's `_grid_statements_cell` both hand-roll it from `execution.applied_count` and `len(planned_sql_statements)`. Use the property; it is the one place that pairing is derived.
+
+3. **`_plan_creates_table(plan)` is gone** — task 14's `_diff_header` calls it. It is now `report.creates_table`, a property, which is why `_diff_header` can take the report alone.
+
+4. **`render_diff_block` has a third branch now.** #316 split `plan is None` (rejected — renders the drift under a `(REJECTED — no SQL planned)` header) from an empty plan (a validated no-op). Task 14 rewrites "the last two lines of the function body" and adds a header composer; make sure the rejected branch keeps its own header and is not silently folded into `_diff_header`. **Decide deliberately whether a rejected table on a real run should read `(REJECTED — no SQL planned)`, `(REJECTED — not applied)`, or stay as it is** — the plan predates the branch existing, so it has no answer. The honest default is to leave it: nothing was planned, so there is no outcome to report.
+
+5. **Task 16 depends on PR1 task 7.** It calls `_count_phrase`, which task 7 introduces. Do task 7 first. Note too that `SyncReport.counts` and `SyncReport.duration_seconds` now exist (#313) — `_planned_counts` should read `report.counts` rather than re-walking the tables, and the `seconds = (ended_at - started_at).total_seconds()` line is already a property.
+
+6. **`entries = [entry for action in plan for entry in action_entries(action)]`** appears in task 14. That is now `plan_entries(plan)`.
+
 ```bash
+git checkout main && git pull
 git checkout -b feat/real-run-report-honesty
 ```
 
@@ -2619,8 +2746,8 @@ uv run sphinx-build -W -b html docs docs/_build/html
 
 ```bash
 git push -u origin feat/real-run-report-honesty
-gh pr create --base feat/report-carries-the-diff --title "feat: report a real run by what happened, not what was planned" --body "$(cat <<'EOF'
-Stacked on #<PR2>. `render_diff` and `render_report` are public API, so library callers see them after real runs — where they described intent as though it were outcome.
+gh pr create --base main --title "feat: report a real run by what happened, not what was planned" --body "$(cat <<'EOF'
+Not stacked — #316 landed on `main`, so this branches from `main` too. `render_diff` and `render_report` are public API, so library callers see them after real runs — where they described intent as though it were outcome.
 
 - `TableRunReport.unapplied_statements` names the work a partial failure left un-run; the failures section lists it.
 - Diff block headers state a real run's outcome per table (`(CREATE — partially applied, 2/3)`, `(CREATE — not applied)`). Dry runs are unchanged.
@@ -2650,5 +2777,5 @@ Recorded so a future reader knows these were considered, not missed.
 ## Risks
 
 - **Test churn is concentrated in `tests/application/test_rendering.py`.** Tasks 14, 15 and 16 all change what the renderers emit; Task 16 in particular requires adding `dry_run=True` to three existing footer tests. Run the full suite after every task rather than at the end of a PR.
-- **`UnmanagedAspectDrift` messages become multi-line.** `_failure_records` in `report.py` joins failure lines with `" ".join(line.strip() ...)` for the JSON projection, which flattens them — check that the projected message stays readable after Task 12, and if it does not, that is a Task 12 follow-up, not a new PR.
+- ~~**`UnmanagedAspectDrift` messages become multi-line.**~~ **Resolved in #316.** The drift lines are `ValidationFailure.details`, carrying no indentation of their own, so the JSON projection flattens to a clean single line: `Validation failed: UnmanagedAspectDrift - Operation not allowed: column structure has drifted … - legacy_region ~ customer_id Integer → Long`. Note `_failure_records` no longer calls `.strip()` — #313 removed it once nothing emitted pre-indented lines, which is the reason the `details` design had to keep indentation out.
 - **`_grid_detail` truncates at 60 characters.** Task 6's longer headlines (`Validation failed: NonNullableColumnAdd (email)` is 46) fit, but a long property key as a subject could push a headline past the limit and get an ellipsis. That is the existing, intended behaviour of the grid; the failures section carries the full text.
