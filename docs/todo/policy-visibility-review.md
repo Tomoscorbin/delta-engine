@@ -76,10 +76,13 @@ mechanism and its deterministic evaluation order in one short block.
 ### Named scopes — consolidated
 
 `application/scopes.py` owns the public scope names, their aspect sets, and
-the name-to-aspects translation. `DeltaTable` resolves its `scope` at the API
-boundary, while `StreamingTableAnnotationsOnly` reuses `ANNOTATION_ASPECTS`;
-the public `"annotations"` definition and streaming-table allowance cannot
-diverge.
+the name-to-aspects translation. The four sets are written as parallel
+literals, each stating its own definition rather than deriving it from a
+neighbour; that they nest (`tags ⊂ annotations ⊂ metadata ⊂ full`) is a
+checked property, asserted in `tests/application/test_scopes.py`, not a
+structural one. `DeltaTable` resolves its `scope` at the API boundary, while
+`StreamingTableAnnotationsOnly` reuses `ANNOTATION_ASPECTS`; the public
+`"annotations"` definition and streaming-table allowance cannot diverge.
 
 The domain continues to receive only `managed_aspects`. Its property exception
 in `domain/plan/diff.py` and the managed foreign-key filtering in

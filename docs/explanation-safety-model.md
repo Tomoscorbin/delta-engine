@@ -57,26 +57,35 @@ silently omitted from the observed state, so drift can never hide in a column
 the reader could not represent. See
 [unsupported types](reference-data-types.md#unsupported-types).
 
-There are three public scopes, selected by `DeltaTable`'s `scope` parameter:
+There are four public scopes, selected by `DeltaTable`'s `scope` parameter.
+They nest — `tags ⊂ annotations ⊂ metadata ⊂ full` — so narrowing a scope only
+ever drops authority:
 
 | Scope                  | Manages                                                                                 | Use for                                                                                                           |
 | ---------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `"full"` (the default) | Everything: columns, comments, properties, tags, partitioning, primary and foreign keys | Tables this declaration owns end to end                                                                           |
 | `"metadata"`           | Comments, tags, and key constraints only                                                | Rolling out governance metadata with a hard guarantee that no schema change can slip in                           |
-| `"tags"`               | Table and column tags only                                                              | Tag governance for tables owned elsewhere — including streaming tables, where tags are the only manageable aspect |
+| `"annotations"`        | Table and column comments, table and column tags                                        | Documenting and tagging a table whose structure and keys belong elsewhere — including streaming tables            |
+| `"tags"`               | Table and column tags only                                                              | Tag governance alone, where even a comment would be too much authority to claim                                   |
 
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
-metadata scope in practice, and [tags](how-to-configure-table.md#manage-tags-only)
-for tag-only declarations.
+metadata scope in practice, and
+[annotations](how-to-configure-table.md#manage-comments-and-tags-only) and
+[tags](how-to-configure-table.md#manage-tags-only) for the two restricted
+scopes below it.
 
 Streaming tables make the scope boundary literal. Their definition is owned by
-a pipeline, so the engine reads one for annotation governance only: the
-relation kind is discovered at read time, and a declaration that manages
+a pipeline, and the line the platform draws is the defining SQL: schema,
+properties, and keys belong to `CREATE OR REFRESH`, while comments and tags are
+alterable from outside it. So the engine reads one for annotation governance:
+the relation kind is discovered at read time, and a declaration that manages
 anything beyond comments and tags fails validation
 (`StreamingTableAnnotationsOnly`) before any SQL runs — even with zero drift.
-See
+A declaration claiming authority the engine must never exercise is wrong now,
+not when drift eventually materialises, which is why the capability has its own
+scope name rather than a kind-dependent reading of `"metadata"`. See
 [safe-change rules](reference-safe-change-rules.md) for the invariant and
-[tag a streaming table](how-to-deploy-metadata-only.md#tag-a-streaming-table)
+[annotate a streaming table](how-to-deploy-metadata-only.md#annotate-a-streaming-table)
 for the workflow.
 
 ## Cross-table dependency blocking
