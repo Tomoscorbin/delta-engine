@@ -7,6 +7,7 @@ from delta_engine.application.scopes import ANNOTATION_ASPECTS, METADATA_ASPECTS
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
     ELIGIBILITY_CHECKS,
+    UnmanagedAspectDrift,
     validate_diff,
 )
 from delta_engine.domain.model import (
@@ -49,7 +50,11 @@ from delta_engine.domain.plan.diff import (
     TableDrift,
     diff_table,
 )
-from delta_engine.domain.plan.unresolvable import ColumnCaseDrift, ColumnRenameConflict
+from delta_engine.domain.plan.unresolvable import (
+    ColumnCaseDrift,
+    ColumnRenameConflict,
+    PartitioningChanged,
+)
 from tests.builders import as_observed_columns
 
 _QUALIFIED_NAME = QualifiedName("dev", "silver", "test")
@@ -1209,3 +1214,66 @@ def test_scope_failure_prevents_safety_evaluation():
     failures = validate_diff(diff, rules=(MustNotRun(),))
 
     assert failures[0].rule_name == "UnmanagedAspectDrift"
+
+
+def test_unmanaged_drift_names_the_differences_that_drifted():
+    # Given a metadata-scoped declaration against a table whose columns drifted
+    diff = _drift(
+        AddColumn(DesiredColumn("legacy_region", String())),
+        AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer()),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    # When the eligibility check judges it
+    (failure,) = UnmanagedAspectDrift().evaluate(diff)
+
+    # Then the message names the aspect, and each difference is stated in full
+    assert "column structure" in failure.message
+    assert failure.details == (
+        "+ legacy_region String",
+        "~ amount Integer → Long",
+    )
+
+
+def test_unmanaged_drift_names_differences_no_action_could_close():
+    # Given drift a plan action cannot express
+    diff = _drift(
+        PartitioningChanged(desired_partitioning=("region",), observed_partitioning=("country",)),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    # When the check judges it
+    (failure,) = UnmanagedAspectDrift().evaluate(diff)
+
+    # Then it is named too — an unresolvable difference is often the whole reason
+    assert failure.details == ("~ partitioning (country) → (region)",)
+
+
+def test_unmanaged_drift_reports_one_failure_per_aspect():
+    # Given drift in two unmanaged aspects at once
+    diff = _drift(
+        AddColumn(DesiredColumn("legacy_region", String())),
+        PartitioningChanged(desired_partitioning=("region",), observed_partitioning=("country",)),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    # When the check judges it
+    failures = UnmanagedAspectDrift().evaluate(diff)
+
+    # Then each aspect gets its own failure, each naming only its own differences
+    assert len(failures) == 2
+    assert [failure.details for failure in failures] == [
+        ("+ legacy_region String",),
+        ("~ partitioning (country) → (region)",),
+    ]
+
+
+def test_unmanaged_drift_still_passes_over_a_column_spelled_differently():
+    # Given case drift, which ColumnSpellingMustMatchCatalog owns at every scope
+    diff = _drift(
+        ColumnCaseDrift(declared_name="SKU", observed_name="sku"),
+        managed_aspects=METADATA_ASPECTS,
+    )
+
+    # Then this check says nothing about it
+    assert UnmanagedAspectDrift().evaluate(diff) == ()

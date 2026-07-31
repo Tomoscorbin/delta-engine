@@ -117,14 +117,24 @@ class ReadFailure(Failure):
 
 @dataclass(frozen=True, slots=True)
 class ValidationFailure(Failure):
-    """Description of a validation rule failure."""
+    """
+    Description of a validation rule failure.
+
+    ``details`` are the individual differences behind a summary judgment, for
+    a rule whose message names a whole aspect rather than one column. They are
+    separate lines rather than newlines inside ``message`` so the report
+    renderer owns their indentation, as it already does for the SQL line of an
+    execution failure; a rule that embeds its own layout composes wrongly
+    wherever the failure is nested.
+    """
 
     phase: ClassVar[FailurePhase] = FailurePhase.PLANNING
     rule_name: str
     message: str
+    details: tuple[str, ...] = ()
 
     def format_lines(self) -> tuple[str, ...]:
-        return (f"Validation failed: {self.rule_name} - {self.message}",)
+        return (f"Validation failed: {self.rule_name} - {self.message}", *self.details)
 
     def headline(self) -> str:
         return f"Validation failed: {self.rule_name}"
