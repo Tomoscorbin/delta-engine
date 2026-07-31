@@ -1,7 +1,7 @@
 # Annotations scope on streaming tables — design
 
 Date: 2026-07-30
-Status: proposed
+Status: implemented (2026-07-31)
 Supersedes in part: `2026-07-16-streaming-table-tags-design.md`
 
 ## Problem
@@ -344,14 +344,10 @@ The rename is breaking: `ValidationFailure.rule_name` is projected by
 `to_dict()` under `schema_version: 2`. v0.7.0 is unreleased and already
 carries `BREAKING CHANGE:` footers, so the window is open.
 
-`schema_version` is proposed to stay at 2. The key and its type do not
-change, only one of the values it can take, and the precedent runs that way:
-`DiffOperation` (todo.md) reshaped how an emitted value was derived and left
-the version alone. But the precedents are all about *keys*, and this is the
-first change to a *value* consumers may match on, so it is called out here as
-a decision to confirm rather than assumed. If the answer is that a value
-change moves the version, that belongs in the plan, not discovered during
-implementation.
+`schema_version` stays at 2 (confirmed 2026-07-31). The key and its type do not
+change, only one of the values it can take, following the `DiffOperation`
+precedent. The rename rides a `BREAKING CHANGE:` footer instead, which is where
+a consumer matching on a rule name will see it.
 
 ## Out of scope
 
