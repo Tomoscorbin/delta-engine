@@ -150,8 +150,8 @@ too.
 
 `GeneratedModule` earns its place for one concrete reason: the CLI writes
 `source` to stdout and `warnings` to stderr. Without that split, anyone
-redirecting stdout to a file never sees the foreign-key warning until they open
-the file — which defeats its purpose.
+redirecting stdout to a file never sees the warnings until they open the file —
+which defeats their purpose.
 
 ### The inversions
 
@@ -159,8 +159,8 @@ the file — which defeats its purpose.
 | -------- | -------- |
 | `ObservedColumn` fields | `Column` fields one-for-one; `renamed_from` is declaration-only and never set |
 | `PrimaryKeyConstraint` | `primary_key=[...]`; the generated constraint name is discarded |
-| `TableKind.STREAMING_TABLE` | forced `scope="tags"` — the only scope validation admits for a streaming table |
-| `TableKind.TABLE` | `scope="full"` (omitted, it is the default) |
+| `TableKind.STREAMING_TABLE` | **no scope declared** — the default is wrong here, and becomes a warning |
+| `TableKind.TABLE` | no scope declared; the `"full"` default is already correct |
 | `properties` | direct copy; the reader has already projected to managed keys |
 | `comment`, `tags`, `partitioned_by`, `clustered_by` | direct copy |
 | `foreign_keys` | **never carried** — becomes a warning |
@@ -194,6 +194,29 @@ import `adapters` — layers separated by `|` are independent, which is why
 `schema -> api.delta_table` needs an explicit `ignore_imports` exemption — so
 reaching for `compile_plan` to quote the real `ALTER TABLE` text would be the
 first crack in the boundary this design otherwise respects.
+
+## Streaming tables: the second accepted trap
+
+Generated declarations never pass `scope`, so they take the `"full"` default.
+For an ordinary table that is exactly right. For a streaming table it is not:
+`StreamingTableAnnotationsOnly` (`application/validation.py:661`) is an
+eligibility check, so it runs unconditionally, cannot be suppressed via
+`rules`, and judges the declaration's *claimed aspects* against the observed
+kind rather than the drift — meaning it fires even when the table is perfectly
+in sync. A generated streaming-table module therefore diffs clean and then
+fails validation.
+
+**Decision: warn, exactly as with foreign keys.** The warning names the check
+and gives the one line that fixes it — `scope="annotations"`, the widest scope
+a streaming table admits, and the one that keeps comment management rather than
+narrowing to tags. The same three mitigations apply: the commented block in the
+source, the stderr warning, and a test pinning that a generated streaming table
+produces exactly that one validation failure.
+
+The alternative — a `DeltaTable.scope` property, letting the generator emit the
+correct scope per kind — is recorded under *Rejected alternatives*. It is the
+only option needing no hand edit, and it was rejected on surface cost, not on
+correctness.
 
 ## Everything else that cannot be declared
 
@@ -432,6 +455,16 @@ problem onto the user exactly when the schema is most complex.
 **Emitting every declaration with `scope="tags"`.** Safe by construction —
 nothing outside tags is ever compared, so nothing is ever dropped — but the
 result is close to useless as a starting point for managing the table.
+
+**Adding a `DeltaTable.scope` property so the generator can emit the right scope
+per relation kind.** This is what an earlier draft of the plan did, and it is
+the only option that makes a generated streaming-table module plan cleanly with
+no hand edit. Rejected because it widens the public surface to serve one
+relation kind: every ordinary table — the overwhelming majority, and the whole
+point of the on-ramp — already wants the `"full"` default, so the property would
+exist to be read back by one branch of one renderer. The streaming case is
+instead handled the same way as foreign keys, which it closely resembles: state
+a single-table module cannot express, reported rather than guessed.
 
 **A structured `Undeclarable` residue type** carrying aspect, reason,
 consequence and remedy, with foreign keys as one member. Attractive while it

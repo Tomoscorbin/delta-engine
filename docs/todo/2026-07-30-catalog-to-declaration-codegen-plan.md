@@ -30,7 +30,6 @@ Gates for every task: `uv run pytest`, `ruff check`, `ruff format --check`, `myp
 | ---- | -------------- |
 | `src/delta_engine/api/declaration_source.py` | **New.** Text emission: a `DeltaTable` → the Python source that reconstructs it. Knows the public vocabulary; knows nothing about catalogs. |
 | `src/delta_engine/api/codegen.py` | **New.** Semantic inversion: an `ObservedTable` → a `DeltaTable`, plus the `generate_module` use case that composes it with the renderer. |
-| `src/delta_engine/api/delta_table.py` | Add a `scope` property so the public surface round-trips completely. |
 | `src/delta_engine/databricks.py` | Add `build_sql_reader`. |
 | `src/delta_engine/adapters/databricks/warehouse/factory.py` | Add `build_reader`. |
 | `src/delta_engine/cli/app.py` | Add the `generate` command. |
@@ -38,88 +37,11 @@ Gates for every task: `uv run pytest`, `ruff check`, `ruff format --check`, `myp
 | `tests/api/test_codegen.py` | **New.** The raise, the module assembly, and the round-trip oracle. |
 | `tests/cli/test_app_generate.py` | **New.** Command behaviour, exit codes, stdout/stderr split. |
 
-**Deviation from the design doc:** the design listed `cli/generate.py`. The command goes in `cli/app.py` instead — that is where the Typer app and its shared `_anticipated_errors` / `_engine_logging` helpers live, and `tests/cli/conftest.py` already monkeypatches names on `cli_app`. Splitting would force a second patch target for no benefit. Task 8 updates the design doc's file table to match.
+**Deviation from the design doc:** the design listed `cli/generate.py`. The command goes in `cli/app.py` instead — that is where the Typer app and its shared `_anticipated_errors` / `_engine_logging` helpers live, and `tests/cli/conftest.py` already monkeypatches names on `cli_app`. Splitting would force a second patch target for no benefit. Task 7 updates the design doc's file table to match.
 
 ---
 
-## Task 1: `DeltaTable.scope`
-
-`render_declaration` must emit `scope=` for a metadata- or tags-scoped declaration. Every other constructor parameter has a matching read-only property; `scope` does not, so the renderer cannot currently recover it. Without this, rendering a hand-written `scope="metadata"` declaration would silently produce `scope="full"` — a change in meaning.
-
-**Files:**
-- Modify: `src/delta_engine/api/delta_table.py`
-- Test: `tests/api/test_delta_table.py`
-
-**Interfaces:**
-- Produces: `DeltaTable.scope -> ScopeName`
-
-- [ ] **Step 1: Write the failing tests**
-
-Append to `tests/api/test_delta_table.py`:
-
-```python
-def test_scope_defaults_to_full_and_is_readable():
-    table = DeltaTable("dev", "silver", "orders", columns=(Column("id", String()),))
-
-    assert table.scope == "full"
-
-
-def test_scope_reports_the_declared_value():
-    table = DeltaTable(
-        "dev",
-        "silver",
-        "orders",
-        columns=(Column("id", String()),),
-        scope="metadata",
-    )
-
-    assert table.scope == "metadata"
-```
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run: `uv run pytest tests/api/test_delta_table.py -k scope -v`
-Expected: FAIL, `AttributeError: 'DeltaTable' object has no attribute 'scope'`
-
-- [ ] **Step 3: Store and expose the scope**
-
-In `src/delta_engine/api/delta_table.py`, at the end of `DeltaTable.__init__` (after `self._foreign_key_declarations = ...`):
-
-```python
-        self._scope = scope
-```
-
-And add the property beside the others (after `foreign_keys`):
-
-```python
-    @property
-    def scope(self) -> ScopeName:
-        """What this declaration manages: ``"full"``, ``"metadata"``, or ``"tags"``."""
-        return self._scope
-```
-
-`ScopeName` is already imported at the top of the module from `delta_engine.application.scopes`; no new import is needed. The value is stored verbatim rather than derived from `managed_aspects`, because `_normalize_declaration` has already passed it through `managed_aspects_for`, which rejects unknown names.
-
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `uv run pytest tests/api/test_delta_table.py -k scope -v`
-Expected: 2 passed
-
-- [ ] **Step 5: Run the full gates**
-
-Run: `uv run pytest && ruff check && ruff format --check && uv run mypy . && uv run lint-imports`
-Expected: all green
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/delta_engine/api/delta_table.py tests/api/test_delta_table.py
-git commit -m "feat(api): expose the declared scope on DeltaTable"
-```
-
----
-
-## Task 2: Data type source rendering
+## Task 1: Data type source rendering
 
 **Files:**
 - Create: `src/delta_engine/api/declaration_source.py`
@@ -356,14 +278,14 @@ git commit -m "feat(api): render domain data types as declaration source"
 
 ---
 
-## Task 3: Render a whole declaration
+## Task 2: Render a whole declaration
 
 **Files:**
 - Modify: `src/delta_engine/api/declaration_source.py`
 - Test: `tests/api/test_declaration_source.py`
 
 **Interfaces:**
-- Consumes: `render_data_type_source`, `schema_names_for` (Task 2); `DeltaTable.scope` (Task 1).
+- Consumes: `render_data_type_source`, `schema_names_for` (Task 1).
 - Produces:
   - `render_declaration(table: DeltaTable, *, variable: str) -> str` — the `variable = DeltaTable(...)` statement, no imports.
   - `render_import_line(table: DeltaTable) -> str` — the `from delta_engine.schema import ...` line, wrapped in parentheses when it would exceed 100 characters.
@@ -406,7 +328,6 @@ def test_renders_every_non_default_argument():
         tags={"team": "data"},
         partitioned_by=["region"],
         primary_key=["id"],
-        scope="metadata",
     )
 
     source = render_declaration(table, variable="orders")
@@ -416,7 +337,7 @@ def test_renders_every_non_default_argument():
     assert '    tags={"team": "data"},' in source
     assert '    partitioned_by=["region"],' in source
     assert '    primary_key=["id"],' in source
-    assert '    scope="metadata",' in source
+    assert "scope" not in source
     assert '        Column("id", Integer(), nullable=False, comment="pk"),' in source
     assert '        Column("region", String(), tags={"pii": "no"}),' in source
 
@@ -546,8 +467,6 @@ def render_declaration(table: DeltaTable, *, variable: str) -> str:
         arguments.append(f"clustered_by={_render_string_list(table.clustered_by)}")
     if table.primary_key:
         arguments.append(f"primary_key={_render_string_list(table.primary_key)}")
-    if table.scope != "full":
-        arguments.append(f"scope={table.scope!r}")
 
     body = "".join(f"{_INDENT}{argument},\n" for argument in arguments)
     return f"{variable} = DeltaTable(\n{body})"
@@ -567,7 +486,9 @@ def render_import_line(table: DeltaTable) -> str:
     return f"from delta_engine.schema import (\n{wrapped})"
 ```
 
-`foreign_keys` is deliberately absent from the argument list: a generated declaration never carries them (Task 5 emits a warning instead), and `render_declaration` has no way to name the referenced `DeltaTable` variable. This is stated in the docstring rather than silently omitted — see Step 3 of Task 5.
+`foreign_keys` is deliberately absent from the argument list: a generated declaration never carries them (Task 4 emits a warning instead), and `render_declaration` has no way to name the referenced `DeltaTable` variable. This is stated in the docstring rather than silently omitted — see Step 3 of Task 4.
+
+`scope` is absent for a different reason, and the renderer could not emit it anyway: `DeltaTable` exposes no `scope` property. Generated declarations always take the `"full"` default, which is correct for an ordinary table and is the whole point of omitting it — the output reads as a declaration a person would write. For a streaming table it is *not* correct, because `StreamingTableAnnotationsOnly` (`application/validation.py:661`) is an eligibility check that cannot be suppressed via `rules`, and `"full"` claims more than `ANNOTATION_ASPECTS`. That gap is handled the same way as the foreign-key trap — a warning and a commented block in Task 4 — rather than by widening the public surface.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -588,7 +509,7 @@ git commit -m "feat(api): render a DeltaTable as declaration source"
 
 ---
 
-## Task 4: Raise an observed table into a declaration
+## Task 3: Raise an observed table into a declaration
 
 **Files:**
 - Create: `src/delta_engine/api/codegen.py`
@@ -615,7 +536,6 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
-    TableKind,
 )
 
 
@@ -680,16 +600,6 @@ def test_foreign_keys_are_never_carried():
     assert raise_declaration(table).foreign_keys == ()
 
 
-def test_a_streaming_table_is_raised_at_tags_scope():
-    table = observed(kind=TableKind.STREAMING_TABLE)
-
-    assert raise_declaration(table).scope == "tags"
-
-
-def test_an_ordinary_table_is_raised_at_full_scope():
-    assert raise_declaration(observed()).scope == "full"
-
-
 def test_layout_comment_properties_and_tags_survive():
     table = observed(
         comment="Orders",
@@ -737,40 +647,29 @@ The semantic half of catalog-to-declaration generation, and the inverse of
 need in order to be reconciled to its current state. The textual half — turning
 that declaration into source — is :mod:`delta_engine.api.declaration_source`.
 
-Two things do not cross. Foreign keys cannot: ``ForeignKey`` references its
+Three things do not cross. Foreign keys cannot: ``ForeignKey`` references its
 parent as a ``DeltaTable`` object, which a single-table declaration does not
-have. And a table whose observed state no declaration can express — a nullable
-primary key column, an unsupported column mapping mode — is not worked around;
-``DeltaTable`` raises and the caller reports it. Both are deliberate; see the
-design doc for the alternatives weighed.
+have. The ownership scope is not inferred either — the declaration takes the
+``"full"`` default, which is what an ordinary table wants and what a streaming
+table must not have; :func:`generate_module` warns rather than guessing. And a
+table whose observed state no declaration can express — a nullable primary key
+column, an unsupported column mapping mode — is not worked around;
+``DeltaTable`` raises and the caller reports it. All three are deliberate; see
+the design doc for the alternatives weighed.
 """
 
-from typing import assert_never
-
 from delta_engine.api.delta_table import DeltaTable
-from delta_engine.application.scopes import ScopeName
-from delta_engine.domain.model import DesiredColumn as Column, ObservedTable, TableKind
-
-
-def _scope_for(kind: TableKind) -> ScopeName:
-    """Return the widest scope a declaration may claim over this relation kind."""
-    match kind:
-        case TableKind.STREAMING_TABLE:
-            # A streaming table's definition belongs to its owning pipeline;
-            # validation rejects any wider scope.
-            return "tags"
-        case TableKind.TABLE:
-            return "full"
-        case _ as unreachable:
-            assert_never(unreachable)
+from delta_engine.domain.model import DesiredColumn as Column, ObservedTable
 
 
 def raise_declaration(observed: ObservedTable) -> DeltaTable:
     """
     Return the declaration that reconciles to ``observed``.
 
-    Foreign keys are never carried. Every other observable aspect crosses
-    verbatim, so planning the result against the table it came from is a no-op.
+    Foreign keys are never carried, and the scope is always the ``"full"``
+    default. Every other observable aspect crosses verbatim, so diffing the
+    result against the table it came from is a no-op — but a streaming table's
+    full scope fails validation, which is :func:`generate_module`'s to report.
 
     Raises:
         ValueError: The observed state cannot be expressed as a declaration.
@@ -800,7 +699,6 @@ def raise_declaration(observed: ObservedTable) -> DeltaTable:
             if observed.primary_key is not None
             else None
         ),
-        scope=_scope_for(observed.kind),
     )
 ```
 
@@ -823,7 +721,7 @@ git commit -m "feat(api): raise observed catalog state into a declaration"
 
 ---
 
-## Task 5: Assemble the module, and prove the round trip
+## Task 4: Assemble the module, and prove the round trip
 
 This is the task that produces the deliverable, and the one carrying the correctness oracle. Do not skip Step 7.
 
@@ -832,7 +730,7 @@ This is the task that produces the deliverable, and the one carrying the correct
 - Test: `tests/api/test_codegen.py`
 
 **Interfaces:**
-- Consumes: `raise_declaration` (Task 4); `render_declaration`, `render_import_line` (Task 3).
+- Consumes: `raise_declaration` (Task 3); `render_declaration`, `render_import_line` (Task 2).
 - Produces:
   - `GeneratedModule` — frozen dataclass with `source: str` and `warnings: tuple[str, ...]`.
   - `generate_module(observed: ObservedTable, *, variable: str | None = None) -> GeneratedModule`
@@ -844,6 +742,7 @@ Append to `tests/api/test_codegen.py`:
 
 ```python
 from delta_engine.api.codegen import GeneratedModule, generate_module, variable_name_for
+from delta_engine.application.validation import validate_diff
 from delta_engine.domain.plan import diff_table
 
 
@@ -871,7 +770,7 @@ def test_the_module_is_importable_and_exposes_a_plan_able_collection():
     assert namespace["tables"] == [namespace["orders"]]
 
 
-def test_a_table_without_foreign_keys_warns_about_nothing():
+def test_an_ordinary_table_with_no_foreign_keys_warns_about_nothing():
     assert generate_module(observed()).warnings == ()
 
 
@@ -898,6 +797,17 @@ def test_foreign_keys_produce_a_warning_naming_the_constraint_that_would_drop():
     # And the same information reaches anyone who only reads the file
     assert "orders_region_fk" in module.source
     assert "# " in module.source
+
+
+def test_a_streaming_table_warns_that_the_default_scope_will_not_validate():
+    module = generate_module(observed(kind=TableKind.STREAMING_TABLE))
+
+    assert len(module.warnings) == 1
+    warning = module.warnings[0]
+    assert "streaming table" in warning
+    assert 'scope="annotations"' in warning
+    # And the same information reaches anyone who only reads the file
+    assert 'scope="annotations"' in module.source
 
 
 def test_output_is_byte_identical_when_regenerated():
@@ -953,9 +863,25 @@ def test_a_generated_table_with_foreign_keys_plans_exactly_the_key_drops():
     # Then the accepted trap is exactly one key drop, and nothing else
     assert [type(action).__name__ for action in drift.actions] == ["DropForeignKey"]
     assert drift.unresolvable == ()
+
+
+def test_a_generated_streaming_table_fails_exactly_the_streaming_eligibility_check():
+    # Given a streaming table already in sync with its generated declaration
+    table = observed(kind=TableKind.STREAMING_TABLE)
+
+    namespace: dict[str, object] = {}
+    exec(compile(generate_module(table).source, "<generated>", "exec"), namespace)  # noqa: S102
+    drift = diff_table(namespace["orders"].to_desired_table(), table)
+
+    # Then the diff is clean — the trap is the claimed scope, not the state
+    assert drift.actions == ()
+    # And validation says so, naming the one check the warning told the user about
+    assert [failure.rule_name for failure in validate_diff(drift)] == [
+        "StreamingTableAnnotationsOnly"
+    ]
 ```
 
-Add `Array`, `Decimal`, `Struct`, `StructField` to the `delta_engine.domain.model` import at the top of the test file.
+Add `Array`, `Decimal`, `Struct`, `StructField`, and `TableKind` to the `delta_engine.domain.model` import at the top of the test file. `TableKind` is new here rather than in Task 3 — Task 3 no longer distinguishes relation kinds, so importing it there would leave an unused import and fail `ruff check`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -970,9 +896,10 @@ Append to `src/delta_engine/api/codegen.py`. Add to the imports at the top:
 from dataclasses import dataclass
 import keyword
 import re
+from typing import assert_never
 
 from delta_engine.api.declaration_source import render_declaration, render_import_line
-from delta_engine.domain.model import ForeignKeyConstraint
+from delta_engine.domain.model import ForeignKeyConstraint, TableKind
 ```
 
 Then:
@@ -1042,6 +969,32 @@ def _suggested_foreign_key(key: ForeignKeyConstraint) -> str:
     return f"ForeignKey({columns}, references={variable_name_for(key.referenced_table.name)}),"
 
 
+def _streaming_scope_warning(observed: ObservedTable) -> str | None:
+    """Warn that a streaming table's generated declaration claims a scope it may not."""
+    match observed.kind:
+        case TableKind.TABLE:
+            return None
+        case TableKind.STREAMING_TABLE:
+            return (
+                f"{observed.qualified_name} is a streaming table, and the generated"
+                " module declares no scope — so it takes the default and claims"
+                " ownership of the whole table.\n"
+                "A streaming table's definition — schema, properties, and keys — is"
+                " owned by its pipeline; only comments and Unity Catalog tags can be"
+                " managed from outside it.\n"
+                "\n"
+                "Planning this declaration as written will fail"
+                " StreamingTableAnnotationsOnly, an eligibility check that no rules="
+                " setting can suppress.\n"
+                "\n"
+                "To plan it, add:\n"
+                "\n"
+                '    scope="annotations",'
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _commented(text: str) -> str:
     """Prefix every line with a comment marker, leaving blank lines bare."""
     return "\n".join(f"# {line}".rstrip() for line in text.splitlines())
@@ -1059,6 +1012,12 @@ def generate_module(
     with ``delta-engine plan <module>:tables``. Output is deterministic: the
     same observed table always produces byte-identical source.
 
+    Two aspects of the live table cannot be declared by a single-table module
+    and are reported instead of guessed: its foreign keys, and — for a streaming
+    table — the restricted scope its declaration needs. Each produces a warning
+    and a matching commented block in the source, so the module still imports
+    and the reader is told what planning it as written would do.
+
     Raises:
         ValueError: The observed state cannot be expressed as a declaration.
 
@@ -1071,11 +1030,15 @@ def generate_module(
         render_import_line(declaration),
         render_declaration(declaration, variable=name),
     ]
+
     warnings: list[str] = []
+    scope_warning = _streaming_scope_warning(observed)
+    if scope_warning is not None:
+        warnings.append(scope_warning)
     if observed.foreign_keys:
-        warning = _foreign_key_warning(observed)
-        warnings.append(warning)
-        blocks.append(_commented(f"WARNING: {warning}"))
+        warnings.append(_foreign_key_warning(observed))
+
+    blocks.extend(_commented(f"WARNING: {warning}") for warning in warnings)
     blocks.append(f"tables = [{name}]")
 
     return GeneratedModule(source="\n\n".join(blocks) + "\n", warnings=tuple(warnings))
@@ -1130,7 +1093,7 @@ git commit -m "feat(api): assemble a plan-able declaration module from observed 
 
 ---
 
-## Task 6: The reader seam
+## Task 5: The reader seam
 
 **Files:**
 - Modify: `src/delta_engine/adapters/databricks/warehouse/factory.py`
@@ -1243,7 +1206,7 @@ git commit -m "feat(databricks): expose a catalog-state reader alongside the eng
 
 ---
 
-## Task 7: The `generate` command
+## Task 6: The `generate` command
 
 **Files:**
 - Modify: `src/delta_engine/cli/app.py`
@@ -1251,7 +1214,7 @@ git commit -m "feat(databricks): expose a catalog-state reader alongside the eng
 - Test: `tests/cli/test_app_generate.py`
 
 **Interfaces:**
-- Consumes: `generate_module`, `GeneratedModule` (Task 5); `build_sql_reader` (Task 6).
+- Consumes: `generate_module`, `GeneratedModule` (Task 4); `build_sql_reader` (Task 5).
 
 - [ ] **Step 1: Extend the CLI fixtures**
 
@@ -1463,7 +1426,7 @@ git commit -m "feat(cli): add generate, printing a declaration for one live tabl
 
 ---
 
-## Task 8: Documentation
+## Task 7: Documentation
 
 **Files:**
 - Modify: `docs/reference-cli.md`
@@ -1473,7 +1436,7 @@ git commit -m "feat(cli): add generate, printing a declaration for one live tabl
 
 - [ ] **Step 1: Update the CLI reference**
 
-`docs/reference-cli.md` opens with *"The `delta-engine` command has one read-only workflow"*. Change it to two, and add a `generate` section after the `plan` one covering: the `CATALOG.SCHEMA.TABLE` argument, that source goes to stdout and warnings to stderr, that the output is a plan-able module ending in `tables = [...]`, that output is deterministic so `generate | diff` works as a drift check, and — stated plainly, not buried — that foreign keys are not declared and planning the output as written drops them.
+`docs/reference-cli.md` opens with *"The `delta-engine` command has one read-only workflow"*. Change it to two, and add a `generate` section after the `plan` one covering: the `CATALOG.SCHEMA.TABLE` argument, that source goes to stdout and warnings to stderr, that the output is a plan-able module ending in `tables = [...]`, that output is deterministic so `generate | diff` works as a drift check, and — stated plainly, not buried — the two accepted traps: foreign keys are not declared and planning the output as written drops them, and a generated streaming table declares no scope, so it fails `StreamingTableAnnotationsOnly` until `scope="annotations"` is added.
 
 - [ ] **Step 2: Update the README**
 
@@ -1485,7 +1448,7 @@ The design lists `cli/generate.py`; the command went into `cli/app.py`. Update t
 
 - [ ] **Step 4: Mark the backlog entry resolved**
 
-In `docs/todo/todo.md`, change the codegen entry from `- [ ]` to `- [x]` and append what was actually built, what was deferred (schema-wide discovery, the Spark path), and the accepted FK trap.
+In `docs/todo/todo.md`, change the codegen entry from `- [ ]` to `- [x]` and append what was actually built, what was deferred (schema-wide discovery, the Spark path), and the two accepted traps (foreign keys, streaming-table scope).
 
 - [ ] **Step 5: Verify the docs build**
 
@@ -1501,7 +1464,7 @@ git commit -m "docs: document the generate command"
 
 ---
 
-## Task 9: Live verification (credentialed)
+## Task 8: Live verification (credentialed)
 
 Requires a real workspace. Run before considering the feature proven; it is the only test that exercises a real `DESCRIBE … AS JSON` document.
 
@@ -1592,24 +1555,31 @@ git commit -m "test: pin generated declarations against a live workspace"
 ## Coverage notes against the design
 
 The design's testing section lists a golden-file test. No separate golden file
-is added: `test_renders_a_minimal_declaration_omitting_every_default` (Task 3)
+is added: `test_renders_a_minimal_declaration_omitting_every_default` (Task 2)
 already asserts the complete rendered text character-for-character, and
-`test_output_is_byte_identical_when_regenerated` (Task 5) pins determinism.
+`test_output_is_byte_identical_when_regenerated` (Task 4) pins determinism.
 Between them a format change fails a diff-reviewable assertion, which is what
-the golden file was for. Task 5's Step 5 covers the remaining concern the
+the golden file was for. Task 4's Step 5 covers the remaining concern the
 design raised — that the output survives a formatter untouched — by running
 `ruff check --isolated` over real generated source.
 
 Everything else in the design maps to a task: the raise and its inversion table
-(Task 4), the renderer and the omit-defaults rule (Task 3), the foreign-key
-warning and the stdout/stderr split (Tasks 5 and 7), the undeclarable cases
-(Task 4's final test), the reader seam (Task 6), the CLI surface and its named
-failure paths (Task 7), and the vocabulary pin (Task 2).
+(Task 3), the renderer and the omit-defaults rule (Task 2), both warnings and
+the stdout/stderr split (Tasks 4 and 6), the undeclarable cases (Task 3's final
+test), the reader seam (Task 5), the CLI surface and its named failure paths
+(Task 6), and the vocabulary pin (Task 1).
+
+No task adds a `scope` property to `DeltaTable`. Generated modules never pass
+`scope` and take the `"full"` default, which is correct for an ordinary table
+and wrong for a streaming table; the streaming case is an accepted trap carried
+by a warning, exactly as foreign keys are. The design records why, under
+*Rejected alternatives*.
 
 ## Definition of done
 
 - `delta-engine generate dev.silver.orders` prints a module that `delta-engine plan generated:tables` reports as no changes.
 - Regenerating an unchanged table is byte-identical.
 - A generated FK-bearing table plans exactly the expected `DropForeignKey` actions and nothing else.
+- A generated streaming table diffs clean and fails exactly `StreamingTableAnnotationsOnly`, and its warning names the `scope="annotations"` fix.
 - Every name the renderer emits is in `schema.__all__`; every `DataType` variant renders.
 - All six gates green, live suite included.
