@@ -180,6 +180,18 @@ observed against declared with no unmanaged branch, so an undeclared key becomes
 includes `FOREIGN_KEYS`, and out-of-scope drift fails validation rather than
 being ignored.
 
+**One exception, and v1 knowingly leaves it on the table.** A key onto its *own*
+table needs no second object: `Self` is public (`schema.__all__`), the
+`_SelfReference` sentinel lives at `api/delta_table.py:79-88`, and
+`ForeignKey.columns` accepts a `Mapping[str, str]` (`:313`), so
+`ForeignKey(columns={"parent_id": "id"}, references=Self)` is expressible today
+and would round-trip losslessly. v1 still warns rather than rendering it — the
+renderer would need a `foreign_keys=` branch and the import line would have to
+carry `ForeignKey` and `Self` — but the warning suggests the `Self` form rather
+than a variable name the reader cannot use, and rendering it is the cheapest
+follow-on on the list. The blanket claim that no key can cross is wrong, and is
+corrected here so the next iteration starts from the true statement.
+
 **Decision: emit the keys as a commented block with a warning that names the
 consequence.** The generated module stays importable and immediately plan-able;
 the cost is that planning it as written drops the table's foreign keys until the

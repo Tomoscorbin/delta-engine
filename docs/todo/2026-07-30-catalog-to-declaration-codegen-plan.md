@@ -799,6 +799,32 @@ def test_foreign_keys_produce_a_warning_naming_the_constraint_that_would_drop():
     assert "# " in module.source
 
 
+def test_a_self_referencing_key_is_suggested_with_the_self_sentinel():
+    # Given a table whose foreign key points back at itself
+    table = observed(
+        columns=(
+            ObservedColumn("id", Integer(), nullable=False),
+            ObservedColumn("parent_id", Integer()),
+        ),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        foreign_keys=(
+            ForeignKeyConstraint(
+                local_columns=("parent_id",),
+                referenced_table=QualifiedName("dev", "silver", "orders"),
+                referenced_columns=("id",),
+                constraint_name="orders_parent_fk",
+            ),
+        ),
+    )
+
+    warning = generate_module(table).warnings[0]
+
+    # Then the suggested repair is one the reader can actually follow: the
+    # variable is not bound until its own constructor call returns
+    assert "references=Self" in warning
+    assert "references=orders" not in warning
+
+
 def test_a_streaming_table_warns_that_the_default_scope_will_not_validate():
     module = generate_module(observed(kind=TableKind.STREAMING_TABLE))
 
@@ -899,7 +925,7 @@ import re
 from typing import assert_never
 
 from delta_engine.api.declaration_source import render_declaration, render_import_line
-from delta_engine.domain.model import ForeignKeyConstraint, TableKind
+from delta_engine.domain.model import ForeignKeyConstraint, QualifiedName, TableKind
 ```
 
 Then:
@@ -939,12 +965,15 @@ def _foreign_key_warning(observed: ObservedTable) -> str:
         f" -> {key.referenced_table})"
         for key in keys
     )
-    suggested = "\n".join(f"    {_suggested_foreign_key(key)}" for key in keys)
+    suggested = "\n".join(
+        f"    {_suggested_foreign_key(key, observed.qualified_name)}" for key in keys
+    )
     return (
         f"{observed.qualified_name} has {len(keys)} foreign key{plural},"
         " not declared in the generated module.\n"
         "ForeignKey references its parent as a DeltaTable object, which a"
-        " single-table module does not have.\n"
+        " single-table module does not have. A key onto this same table is the"
+        " exception and can use the Self sentinel — see the suggestion below.\n"
         "\n"
         f"Planning this declaration as written will DROP the constraint{plural}:\n"
         "\n"
@@ -959,14 +988,21 @@ def _foreign_key_warning(observed: ObservedTable) -> str:
     )
 
 
-def _suggested_foreign_key(key: ForeignKeyConstraint) -> str:
+def _suggested_foreign_key(key: ForeignKeyConstraint, owner: QualifiedName) -> str:
     """Render the ForeignKey call that would restore one observed constraint."""
     columns = (
         repr(str(key.local_columns[0]))
         if len(key.local_columns) == 1
         else "[" + ", ".join(repr(str(column)) for column in key.local_columns) + "]"
     )
-    return f"ForeignKey({columns}, references={variable_name_for(key.referenced_table.name)}),"
+    # A key onto its own table cannot name the variable it sits inside — that
+    # name is not bound until the constructor call returns. Self is the public
+    # sentinel for exactly this, so suggesting the variable would be advice the
+    # reader cannot follow.
+    parent = (
+        "Self" if key.referenced_table == owner else variable_name_for(key.referenced_table.name)
+    )
+    return f"ForeignKey({columns}, references={parent}),"
 
 
 def _streaming_scope_warning(observed: ObservedTable) -> str | None:
