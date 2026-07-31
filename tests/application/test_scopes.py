@@ -9,30 +9,41 @@ from delta_engine.application.scopes import (
 from delta_engine.domain.model import ALL_ASPECTS, TableAspect
 
 
-def test_full_scope_manages_every_aspect():
-    assert managed_aspects_for("full") == ALL_ASPECTS
-
-
-def test_metadata_scope_manages_only_catalog_metadata():
-    assert managed_aspects_for("metadata") == frozenset(
-        {
-            TableAspect.TABLE_COMMENT,
-            TableAspect.COLUMN_COMMENTS,
-            TableAspect.TABLE_TAGS,
-            TableAspect.COLUMN_TAGS,
-            TableAspect.PRIMARY_KEY,
-            TableAspect.FOREIGN_KEYS,
-        }
-    )
-
-
-def test_tags_scope_manages_only_tags():
-    assert managed_aspects_for("tags") == frozenset(
-        {
-            TableAspect.TABLE_TAGS,
-            TableAspect.COLUMN_TAGS,
-        }
-    )
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("full", ALL_ASPECTS),
+        (
+            "metadata",
+            frozenset(
+                {
+                    TableAspect.TABLE_COMMENT,
+                    TableAspect.COLUMN_COMMENTS,
+                    TableAspect.TABLE_TAGS,
+                    TableAspect.COLUMN_TAGS,
+                    TableAspect.PRIMARY_KEY,
+                    TableAspect.FOREIGN_KEYS,
+                }
+            ),
+        ),
+        (
+            "annotations",
+            frozenset(
+                {
+                    TableAspect.TABLE_COMMENT,
+                    TableAspect.COLUMN_COMMENTS,
+                    TableAspect.TABLE_TAGS,
+                    TableAspect.COLUMN_TAGS,
+                }
+            ),
+        ),
+        ("tags", frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})),
+    ],
+)
+def test_each_scope_name_resolves_to_its_aspects(scope, expected):
+    # Spelled out rather than compared against the module's own constants, so
+    # this states each scope's definition instead of restating it
+    assert managed_aspects_for(scope) == expected
 
 
 def test_unknown_scope_is_rejected():
@@ -40,28 +51,33 @@ def test_unknown_scope_is_rejected():
         managed_aspects_for("everything")
 
 
-def test_annotations_scope_manages_comments_and_tags():
-    assert managed_aspects_for("annotations") == frozenset(
-        {
-            TableAspect.TABLE_COMMENT,
-            TableAspect.COLUMN_COMMENTS,
-            TableAspect.TABLE_TAGS,
-            TableAspect.COLUMN_TAGS,
-        }
-    )
-
-
 def test_the_scopes_form_a_containment_lattice():
     # Given the four public scopes
-    # Then each is contained by the enxt, so a caller who narrows a
+    # Then each is contained by the next, so a caller who narrows a
     # scope can only ever lose authority, never trade it sideways
     assert TAG_ASPECTS < ANNOTATION_ASPECTS
     assert ANNOTATION_ASPECTS < METADATA_ASPECTS
     assert METADATA_ASPECTS < ALL_ASPECTS
 
 
+def test_metadata_excludes_existence_and_physical_aspects():
+    # Stated as a subtraction on purpose: a new TableAspect added to the domain
+    # fails this test until someone decides whether metadata governs it. The
+    # enumerated cases above would keep passing, since neither side of them grows.
+    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
+        {
+            TableAspect.TABLE_EXISTENCE,
+            TableAspect.COLUMN_STRUCTURE,
+            TableAspect.PROPERTIES,
+            TableAspect.PARTITIONING,
+            TableAspect.CLUSTERING,
+        }
+    )
+
+
 def test_annotations_scope_does_not_manage_keys():
-    # The reason "annotations" exists is because streaming
-    # tables can't support them (kind of)
+    # Keys are why "annotations" sits below "metadata": a streaming table's
+    # defining SQL owns them, and a refresh can revert a change made from
+    # outside the pipeline. Comments and tags survive one.
     assert TableAspect.PRIMARY_KEY not in ANNOTATION_ASPECTS
     assert TableAspect.FOREIGN_KEYS not in ANNOTATION_ASPECTS
