@@ -1,11 +1,12 @@
 """
-Live pins for the streaming-table facts the tags scope is built on.
+Live pins for the streaming-table facts the annotations scope is built on.
 
-A streaming table's definition — schema, comments, properties — is owned by
-its pipeline; Unity Catalog tags are the one aspect durably manageable from
-outside it, via the documented ALTER STREAMING TABLE dialect. Each test
-states platform facts the engine's reader gate, validation gate, or SQL
-dialect dispatch assumes.
+A streaming table's definition — schema, properties, and keys — is owned by
+its pipeline. The line the platform draws is the defining SQL: comments and
+Unity Catalog tags are alterable from outside the pipeline via the documented
+ALTER STREAMING TABLE dialect and COMMENT ON, while schema, properties, and
+constraints belong to CREATE OR REFRESH. Each test states platform facts the
+engine's reader gate, validation gate, or SQL dialect dispatch assumes.
 
 Two pins are deliberately absent. A raw ``DESCRIBE ... AS JSON`` pin proved
 ``type="STREAMING_TABLE"``, ``provider="delta"`` on every Live run and was
@@ -66,15 +67,20 @@ def _report_quota_retry(condition: str, delay: float) -> None:
 
 
 def _create_streaming_table(live_connection, live_tables) -> str:
-    """Create a streaming table over a one-column Delta source; skip if the workspace cannot."""
+    """Create a keyed streaming table over a Delta source; skip if the workspace cannot."""
     source_name = live_tables("st_source")
     table_name = live_tables("st")
     execute_sql(
         live_connection,
-        f"CREATE TABLE {qualified_table(source_name)} (id INT) USING DELTA",
+        f"CREATE TABLE {qualified_table(source_name)} (id INT NOT NULL) USING DELTA",
     )
+    # The key is declared in the defining SQL, which is what makes this table a
+    # realistic pipeline-owned fixture: the engine can never manage that key, so
+    # a declaration must mirror it. NOT NULL is required twice over — Unity
+    # Catalog will not key a nullable column, and the engine will not declare one.
     create_statement = (
         f"CREATE STREAMING TABLE {qualified_table(table_name)} "
+        f"(id INT NOT NULL, CONSTRAINT {table_name}_pk PRIMARY KEY (id)) "
         f"AS SELECT id FROM STREAM({qualified_table(source_name)})"
     )
     # The one-pipeline quota releases asynchronously after a previous DROP TABLE,
@@ -82,7 +88,7 @@ def _create_streaming_table(live_connection, live_tables) -> str:
     # cleanup for both the streaming table and its source.
     require_databricks_capability(
         lambda: execute_sql(live_connection, create_statement),
-        capability="streaming tables",
+        capability="streaming tables with key constraints",
         unavailable_conditions=_STREAMING_TABLE_UNAVAILABLE_CONDITIONS,
         retry_conditions={_QUOTA_ERROR_CONDITION},
         retry_timeout_seconds=_QUOTA_RETRY_TIMEOUT_SECONDS,
@@ -114,12 +120,35 @@ def _column_tags(live_connection, table_name: str) -> dict[tuple[str, str], str]
     return {(row["column_name"], row["tag_name"]): row["tag_value"] for row in rows}
 
 
-def test_alter_streaming_table_tags_round_through_information_schema(live_connection, live_tables):
-    """ALTER STREAMING TABLE manages table and column tags, visible in information_schema."""
-    # The four tag statements are the entire surface the engine compiles
-    # against a streaming table, and information_schema.table_tags /
-    # column_tags is where the engine's reader observes them — both facts on
-    # one provisioned table, with each statement's effect asserted.
+def _table_comment(live_connection, table_name: str) -> str:
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT comment "
+        f"FROM {backtick(live_catalog())}.information_schema.tables "
+        f"WHERE table_schema = {quote_literal(live_schema())} "
+        f"AND table_name = {quote_literal(table_name)}",
+    )
+    [row] = rows
+    return row["comment"] or ""
+
+
+def _column_comments(live_connection, table_name: str) -> dict[str, str]:
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT column_name, comment "
+        f"FROM {backtick(live_catalog())}.information_schema.columns "
+        f"WHERE table_schema = {quote_literal(live_schema())} "
+        f"AND table_name = {quote_literal(table_name)}",
+    )
+    return {row["column_name"]: row["comment"] or "" for row in rows}
+
+
+def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_tables):
+    """ALTER STREAMING TABLE and COMMENT ON manage tags and comments from outside the pipeline."""
+    # The statements are the entire surface the engine compiles against a
+    # streaming table, and information_schema is where its reader observes
+    # their effect — every statement's effect asserted, on one provisioned
+    # table (see the module docstring on the pipeline quota).
     table_name = _create_streaming_table(live_connection, live_tables)
     target = qualified_table(table_name)
 
@@ -131,6 +160,13 @@ def test_alter_streaming_table_tags_round_through_information_schema(live_connec
     assert _table_tags(live_connection, table_name) == {"owner": "governance"}
     assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
 
+    # Comments are the capability the annotations scope adds: the column
+    # clause of ALTER STREAMING TABLE, and kind-independent COMMENT ON.
+    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} ALTER COLUMN id COMMENT 'the id'")
+    execute_sql(live_connection, f"COMMENT ON TABLE {target} IS 'click events'")
+    assert _column_comments(live_connection, table_name) == {"id": "the id"}
+    assert _table_comment(live_connection, table_name) == "click events"
+
     execute_sql(live_connection, f"ALTER STREAMING TABLE {target} UNSET TAGS ('owner')")
     execute_sql(
         live_connection,
@@ -138,6 +174,12 @@ def test_alter_streaming_table_tags_round_through_information_schema(live_connec
     )
     assert _table_tags(live_connection, table_name) == {}
     assert _column_tags(live_connection, table_name) == {}
+
+    # An empty desired comment compiles to COMMENT '' rather than UNSET
+    # COMMENT: SQL warehouses reject the latter. This pins that the ALTER
+    # STREAMING TABLE prefix accepts it and that '' is what comes back.
+    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} ALTER COLUMN id COMMENT ''")
+    assert _column_comments(live_connection, table_name) == {"id": ""}
 
 
 def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
