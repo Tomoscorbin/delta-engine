@@ -17,6 +17,8 @@ tags:
 
 **Follow-up revision:** `db4f41ae` (current reporting branch)
 
+**Rendering follow-up revision:** `a3ddbc4e` (`report-carries-the-diff` branch)
+
 ## Scope
 
 This review asks where the code makes callers understand or coordinate more
@@ -58,6 +60,13 @@ validated, complete, or versioned values whose construction does not establish
 those claims. Those gaps make downstream correctness depend on caller
 convention and couple machine-facing data to display implementation details.
 
+A rendering-focused pass found the same ownership opportunity demonstrated by
+the recent `DataType.__str__` work: several facts with one semantic answer are
+still reconstructed by `report.py`, `diff_entries.py`, and `rendering.py`.
+Moving those facts to the value or interpretation boundary that owns them
+would simplify both text and JSON consumers. Alignment, headings, truncation,
+and backend SQL spelling should remain at their presentation boundaries.
+
 ## Summary
 
 | # | Priority | Finding | Main symptom |
@@ -75,6 +84,9 @@ convention and couple machine-facing data to display implementation details.
 | 11 | Medium | Unresolvable differences are not classified exhaustively | A new blocker can be silently omitted from a successful plan |
 | 12 | Medium | Other error translators also catch beyond their boundary | Adapter and import defects become expected operational failures |
 | 13 | Medium | Declaration loading leaks process-wide import state | One invocation can affect backend imports and later invocations |
+| 14 | High | Planning outcomes do not retain the diff they judged | Reports carry planning and diff as unrelated values that can disagree |
+| 15 | High | Change interpretation is partial and repeated | Rejected creates and added-column comments disappear from reports |
+| 16 | Medium | Consumers reconstruct one-answer semantic facts | Renderers and serializers know action polarity, plan kind, and wire identity |
 
 ## 1. Make declaration admission a total boundary
 
@@ -464,9 +476,18 @@ Create one explicit versioned report-schema boundary:
 - give changes, phases, and failure variants stable wire codes;
 - serialize lossless fields such as raw backend message, exception type, rule
   code, FK reason and target, SQL, and statement index;
+- have each failure own one headline plus lossless diagnostic facts, and derive
+  its display lines from that headline rather than repeating the prefix;
+- return physical supporting lines rather than one string containing embedded
+  newlines; and
 - keep truncation solely in text renderers and `SyncFailedError`; and
 - describe the payload with typed schema definitions and a named version
   constant.
+
+One application-level failure-block renderer can then own line splitting,
+indentation, and display truncation for both `render_report` and
+`SyncFailedError`. That is presentation policy worth sharing; the structured
+serializer should continue to consume the underlying facts instead.
 
 Existing version 2 fields can remain while additive structured fields are
 introduced. Changing the current `message` semantics would justify version 3.
@@ -616,6 +637,141 @@ execution is simpler but may break that behavior; scoping the whole invocation
 retains in-invocation shadowing but prevents cross-invocation leakage. Choose
 and document that contract explicitly.
 
+## 14. Make a planning outcome own the diff it judged
+
+### Cause
+
+`PlanningSucceeded` is documented as an accepted diff but retains only its
+`ActionPlan`; `PlanningFailed` is documented as a rejected diff but retains
+only validation failures. `_TableRun` and `TableRunReport` consequently carry
+`planning` and `diff` as independent, parallel fields.
+
+The report rejects a diff after a failed read and checks an accepted plan's
+target, but it does not establish that the planning result and diff came from
+the same table or even the same planning call. A hand-constructed report can
+therefore pair one table's rejected differences with another table's failures
+and render a coherent-looking false account.
+
+### Why this creates complexity
+
+The facts are born together in `plan_diff` but separated immediately. Every
+later consumer must coordinate them again: the engine transports both, the
+report decides which one is authoritative, and rendering needs both to explain
+a rejection. The association exists only in the phase ordering convention.
+
+### Recommended direction
+
+Put `diff: TableDiff` on both `PlanningSucceeded` and `PlanningFailed` and have
+`plan_diff` construct the complete outcome. Derive `TableRunReport.diff` from
+`planning` rather than accepting it as another constructor argument. The
+outcome should validate that its plan and diff share a target, and the report
+should validate that the outcome target matches its declaration.
+
+This keeps the domain diff as the retained fact; it does not put report text or
+`DiffEntry` values on the planning result. The improvement is the same one as
+moving a canonical string to its data type: the value that makes the claim
+also carries everything required to substantiate it.
+
+## 15. Give every table diff one total change interpretation
+
+### Cause
+
+Text rendering and machine projection independently choose their source of
+change entries. An accepted result uses `plan_entries`; a rejected result uses
+`drift_entries`, but only when the retained diff is a `TableDrift`. A
+`TableMissing` can legitimately be rejected by `MissingTableUnmanaged`; that
+diff contains the proposed `CreateTable` action, yet the text view says “no
+changes” and the JSON view emits an empty `rejected_changes` list.
+
+Interpretation is also incomplete inside one action family.
+`_column_add_entry` emits a column's name, type, and nullability. `CreateTable`
+separately emits comments for its columns, while the `AddColumn` arm returns
+only `_column_add_entry`. `AddColumn` retains the complete `DesiredColumn`, and
+the SQL compiler applies its comment, so the operation executes a change that
+neither report view shows.
+
+Finally, the complete meaning of a `TableDrift` is repeatedly reconstructed as
+`actions + unresolvable`: `drift_entries` does it for reports and
+`UnmanagedAspectDrift` does it for validation.
+
+### Why this creates complexity
+
+Consumers are not merely laying out the same facts; they are independently
+deciding which facts exist. Correctness now depends on remembering every
+lifecycle variant and every one-to-many action expansion in multiple places.
+The two omissions above are the resulting user-visible defects.
+
+### Recommended direction
+
+Make `diff_entries.py` the one total semantic interpreter:
+
+- `table_diff_entries(TableDiff)` should exhaustively lower `TableMissing` to
+  its creation entries and `TableDrift` to both action and unresolvable entries;
+- `_column_add_entries(DesiredColumn)` should return the structural column
+  entry plus its optional comment entry, and be reused by both `CreateTable`
+  and `AddColumn`; and
+- `TableDrift` may expose a derived `differences` stream so validation and
+  reporting no longer reconstruct the concatenation, while retaining separate
+  action and unresolvable storage for planning.
+
+Then let `TableRunReport` expose the lifecycle-derived view — for example,
+`planned_entries` and `rejected_entries`, or a small accepted/rejected change
+disposition. `rendering.py` should decide only wording, grouping, alignment,
+and headings; `to_dict()` should decide only schema shape. Neither should
+reinterpret the run state or the diff.
+
+Keep `DiffEntry` in the application layer. Moving it or its prose onto domain
+actions would make the domain depend on one report vocabulary even though SQL,
+human text, and machine output are legitimately separate projections.
+
+## 16. Let semantic values answer their own one-answer questions
+
+### Cause
+
+Several smaller consumer-side branches have the same shape:
+
+- `TableRunReport.creates_table` imports `CreateTable` and searches an
+  `ActionPlan` even though the plan owns and validates its action aggregate;
+- validation, report interpretation, and SQL compilation each decode
+  `SetColumnNullability.desired_nullable` to decide whether the transition
+  tightens or loosens nullability;
+- validation rebuilds an unaligned diff line from `DiffEntry.symbol` and
+  `DiffEntry.cells`, while the text renderer composes the same semantic line
+  with alignment;
+- `DiffCategory` has human names but its public wire name is manufactured by
+  lowercasing its Python member name; and
+- API layout errors use `type(data_type).__name__` rather than the canonical
+  `DataType.__str__`, losing decimal parameters and nested structure.
+
+The failure phase and concrete failure type have the same wire-identity issue,
+covered by finding 9.
+
+### Why this creates complexity
+
+Each branch is small, but it makes the consumer know a representation detail
+that should be private to the value. Boolean polarity is particularly easy to
+invert, and deriving public identifiers from Python names turns ordinary
+refactors into accidental schema changes.
+
+### Recommended direction
+
+Move only the canonical semantic query, not presentation policy:
+
+- add `ActionPlan.creates_table` (or `is_creation`);
+- add `SetColumnNullability.tightens` and derive the opposite case from it;
+- add an explicit unaligned `DiffEntry.inline_text()` for diagnostic reuse;
+- give `DiffCategory` an explicit stable wire value, using a `StrEnum` if
+  declaration order remains its display order; and
+- use `str(data_type)` anywhere a human-facing error names the actual type.
+
+Prefer `inline_text()` to `DiffEntry.__str__`: omitting a category is a
+deliberate context-specific representation, so calling it the universal string
+would overstate its authority. Likewise, do not add `__str__` merely to make
+`DesiredColumn` or constraint values satisfy one report layout; those values
+have several valid SQL, generated-name, ordering, and human representations.
+The useful test is whether the answer is determined solely by the value and is
+canonical across consumers.
+
 ## Smaller, contained improvements
 
 ### Replace recursive graph traversal
@@ -693,9 +849,14 @@ reduce file or type count:
 
 - SQL compilation and action-to-report interpretation are separate consumers
   with different responsibilities.
+- Domain actions should not import `DiffEntry` or human report prose; the
+  application interpreter is the natural home for that projection and its
+  one-to-many expansions.
 - Structured machine projection and human rendering also have different
   responsibilities; sharing semantic source values is healthy, sharing
   truncated display strings is not.
+- `DataType.__str__` is a logical human spelling, not Databricks DDL. SQL type
+  casing, quoting, and dialect rules should remain in the backend compiler.
 - Desired and observed table types prevent catalog facts from carrying
   declaration-only syntax.
 - `_TableRun` is a useful private mutable phase scratchpad; phase-specific
