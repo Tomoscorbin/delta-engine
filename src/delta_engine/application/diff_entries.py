@@ -14,7 +14,7 @@ import functools
 from types import MappingProxyType
 from typing import Final, assert_never
 
-from delta_engine.domain.model import DataType, Decimal, DesiredColumn
+from delta_engine.domain.model import DesiredColumn
 from delta_engine.domain.plan import (
     Action,
     AddColumn,
@@ -38,18 +38,6 @@ from delta_engine.domain.plan import (
     UnsetProperty,
     UnsetTableTag,
 )
-
-
-def _type_name(data_type: DataType) -> str:
-    """Backend-agnostic display name for a domain data type (e.g. 'String')."""
-    return type(data_type).__name__
-
-
-def _type_display(data_type: DataType) -> str:
-    """Display name including decimal parameters, so a precision widen is visible."""
-    if isinstance(data_type, Decimal):
-        return f"Decimal({data_type.precision},{data_type.scale})"
-    return _type_name(data_type)
 
 
 class DiffCategory(IntEnum):
@@ -137,7 +125,7 @@ class DiffEntry:
 
 def _column_add_entry(column: DesiredColumn) -> DiffEntry:
     """Build a '+' columns entry for a created column (name, type, optional NOT NULL)."""
-    cells = [column.name, _type_name(column.data_type)]
+    cells = [column.name, str(column.data_type)]
     if not column.nullable:
         cells.append("NOT NULL")
     return DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, tuple(cells))
@@ -230,7 +218,7 @@ def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
 
 @action_entries.register
 def _(action: AlterColumnType) -> tuple[DiffEntry, ...]:
-    change = f"{_type_display(action.observed_type)} → {_type_display(action.desired_type)}"
+    change = f"{action.observed_type} → {action.desired_type}"
     return (DiffEntry(DiffCategory.COLUMNS, DiffOperation.CHANGE, (action.column_name, change)),)
 
 
