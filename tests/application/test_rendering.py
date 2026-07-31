@@ -380,6 +380,32 @@ def test_create_table_entries_include_all_state_embedded_in_create():
     )
 
 
+def test_every_category_names_itself_in_singular_and_plural():
+    # Given every diff category
+    # Then each names itself both ways, so a new one cannot reach a report unnamed
+    for category in DiffCategory:
+        assert category.plural
+        assert category.counted(1).startswith("1 ")
+        assert category.counted(2).startswith("2 ")
+
+
+@pytest.mark.parametrize(
+    ("category", "count", "expected"),
+    [
+        (DiffCategory.COLUMNS, 1, "1 column"),
+        (DiffCategory.COLUMNS, 3, "3 columns"),
+        (DiffCategory.KEYS, 1, "1 key"),
+        # Some nouns do not inflect: "1 clustering" and "2 clustering" both read
+        # correctly, where "2 clusterings" would not.
+        (DiffCategory.CLUSTERING, 2, "2 clustering"),
+        (DiffCategory.FEATURES, 1, "1 table feature"),
+        (DiffCategory.FEATURES, 2, "2 table features"),
+    ],
+)
+def test_a_category_counts_itself_with_the_right_noun(category, count, expected):
+    assert category.counted(count) == expected
+
+
 def test_every_action_type_has_registered_diff_entries():
     # Given every concrete Action subclass the plan vocabulary defines
     import inspect

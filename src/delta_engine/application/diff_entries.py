@@ -7,11 +7,9 @@ what each action *means* (category, operation, subject, detail); presentation
 (grouping, grids, dict shapes) belongs to the consumers.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 import functools
-from types import MappingProxyType
 from typing import Final, assert_never
 
 from delta_engine.domain.model import DesiredColumn
@@ -41,7 +39,14 @@ from delta_engine.domain.plan import (
 
 
 class DiffCategory(IntEnum):
-    """Diff line groups, in display order (enum value = order)."""
+    """
+    Diff line groups, in display order (enum value = order).
+
+    Each member carries the nouns its consumers name it by, for the same
+    reason ``DiffOperation`` carries its symbol: as a lookup table beside the
+    enum, a category added without an entry type-checked fine and surfaced as
+    a ``KeyError`` the first time a report rendered it.
+    """
 
     COLUMNS = 1
     KEYS = 2
@@ -52,21 +57,38 @@ class DiffCategory(IntEnum):
     TAGS = 7
     COMMENTS = 8
 
+    @property
+    def plural(self) -> str:
+        """The heading this category's lines are grouped under in a text diff."""
+        return self._nouns[1]
 
-# (singular, plural) nouns per category: the plural names the diff group heading;
-# the singular is used in the grid's humanized detail count.
-CATEGORY_NOUN: Final[Mapping[DiffCategory, tuple[str, str]]] = MappingProxyType(
-    {
-        DiffCategory.COLUMNS: ("column", "columns"),
-        DiffCategory.KEYS: ("key", "keys"),
-        DiffCategory.CLUSTERING: ("clustering", "clustering"),
-        DiffCategory.PARTITIONING: ("partitioning", "partitioning"),
-        DiffCategory.FEATURES: ("table feature", "table features"),
-        DiffCategory.PROPERTIES: ("property", "properties"),
-        DiffCategory.TAGS: ("tag", "tags"),
-        DiffCategory.COMMENTS: ("comment", "comments"),
-    }
-)
+    def counted(self, count: int) -> str:
+        """Humanised count for the report grid, e.g. ``1 key`` or ``2 columns``."""
+        singular, plural = self._nouns
+        return f"{count} {singular if count == 1 else plural}"
+
+    @property
+    def _nouns(self) -> tuple[str, str]:
+        """The (singular, plural) nouns naming this category's lines."""
+        match self:
+            case DiffCategory.COLUMNS:
+                return ("column", "columns")
+            case DiffCategory.KEYS:
+                return ("key", "keys")
+            case DiffCategory.CLUSTERING:
+                return ("clustering", "clustering")
+            case DiffCategory.PARTITIONING:
+                return ("partitioning", "partitioning")
+            case DiffCategory.FEATURES:
+                return ("table feature", "table features")
+            case DiffCategory.PROPERTIES:
+                return ("property", "properties")
+            case DiffCategory.TAGS:
+                return ("tag", "tags")
+            case DiffCategory.COMMENTS:
+                return ("comment", "comments")
+            case _ as unreachable:
+                assert_never(unreachable)
 
 
 class DiffOperation(StrEnum):

@@ -13,7 +13,6 @@ from collections import Counter
 from typing import Final
 
 from delta_engine.application.diff_entries import (
-    CATEGORY_NOUN,
     DiffCategory,
     DiffEntry,
     action_entries,
@@ -43,7 +42,7 @@ def _render_entry_groups(entries: list[DiffEntry]) -> list[str]:
         group = [entry for entry in entries if entry.category is category]
         if not group:
             continue
-        lines.append(f"  {CATEGORY_NOUN[category][1]}")
+        lines.append(f"  {category.plural}")
         widths: dict[int, int] = {}
         for entry in group:
             for index, cell in enumerate(entry.cells):
@@ -91,8 +90,7 @@ def _humanized_action_summary(plan: ActionPlan | None) -> str:
     for category in DiffCategory:
         count = counts.get(category, 0)
         if count:
-            singular, plural = CATEGORY_NOUN[category]
-            parts.append(f"{count} {singular if count == 1 else plural}")
+            parts.append(category.counted(count))
     return ", ".join(parts) or _NO_CHANGES
 
 
