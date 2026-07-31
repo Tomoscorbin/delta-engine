@@ -72,7 +72,7 @@ def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
             "kind": entry.category.name.lower(),
             "operation": entry.operation.value,
             "subject": entry.subject,
-            "detail": entry.detail,
+            "detail": " ".join(entry.detail),
         }
         for action in plan
         for entry in action_entries(action)

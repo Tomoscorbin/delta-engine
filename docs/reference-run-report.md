@@ -68,8 +68,8 @@ description is `planned_sql_statements`:
 | ----------- | ----- | ---------------------------------------------------------------------------------- |
 | `kind`      | `str` | Change category: `columns`, `keys`, `clustering`, `partitioning`, `features`, `properties`, `tags`, `comments` |
 | `operation` | `str` | `add`, `remove`, or `change`                                                       |
-| `subject`   | `str` | What the change targets, e.g. a column name or `table: '...'`                      |
-| `detail`    | `str` | Extra detail, e.g. `Integer → Long`; empty when there is none                      |
+| `subject`   | `str` | What the change targets: a column, property, or tag name, or one of `table`, `primary key`, `clustering`, `partitioning` |
+| `detail`    | `str` | How it changed, e.g. `Integer → Long` or `= 'true' (was 'false')`; empty when there is none |
 
 ### Failure records
 

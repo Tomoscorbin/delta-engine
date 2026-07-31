@@ -94,15 +94,15 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
     [
         (
             AddColumn(DesiredColumn("age", Integer())),
-            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("age", "Integer")),),
+            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer",)),),
         ),
         (
             AddColumn(DesiredColumn("age", Integer(), nullable=False)),
-            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("age", "Integer", "NOT NULL")),),
+            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "age", ("Integer", "NOT NULL")),),
         ),
         (
             DropColumn(column=ObservedColumn("legacy", Integer())),
-            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, ("legacy",)),),
+            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, "legacy"),),
         ),
         (
             SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
@@ -110,7 +110,8 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.COLUMNS,
                     DiffOperation.CHANGE,
-                    ("id", "set NOT NULL (was nullable)"),
+                    "id",
+                    ("set NOT NULL (was nullable)",),
                 ),
             ),
         ),
@@ -120,13 +121,14 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.COLUMNS,
                     DiffOperation.CHANGE,
-                    ("id", "drop NOT NULL (was NOT NULL)"),
+                    "id",
+                    ("drop NOT NULL (was NOT NULL)",),
                 ),
             ),
         ),
         (
             AlterColumnType(column_name="id", desired_type=Long(), observed_type=Integer()),
-            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.CHANGE, ("id", "Integer → Long")),),
+            (DiffEntry(DiffCategory.COLUMNS, DiffOperation.CHANGE, "id", ("Integer → Long",)),),
         ),
         # Decimal renders its parameters — the bare class name would hide a
         # precision widen.
@@ -140,25 +142,29 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.COLUMNS,
                     DiffOperation.CHANGE,
-                    ("amount", "Decimal(10,2) → Decimal(12,2)"),
+                    "amount",
+                    ("Decimal(10,2) → Decimal(12,2)",),
                 ),
             ),
         ),
         (
             SetPrimaryKey(primary_key=_primary_key(("id", "tenant_id"))),
-            (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, ("primary key (id, tenant_id)",)),),
+            (DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id, tenant_id)",)),),
         ),
         (
             DropPrimaryKey(primary_key=_primary_key()),
-            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, ("primary key",)),),
+            (DiffEntry(DiffCategory.KEYS, DiffOperation.REMOVE, "primary key"),),
         ),
+        # A table has one primary key but many foreign keys, so the local
+        # columns identify the constraint rather than describing it.
         (
             SetForeignKey(constraint=_foreign_key()),
             (
                 DiffEntry(
                     DiffCategory.KEYS,
                     DiffOperation.ADD,
-                    ("foreign key (customer_id) → cat.sch.customers",),
+                    "foreign key (customer_id)",
+                    ("→ cat.sch.customers",),
                 ),
             ),
         ),
@@ -166,7 +172,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             DropForeignKey(constraint=_foreign_key()),
             (
                 DiffEntry(
-                    DiffCategory.KEYS, DiffOperation.REMOVE, ("foreign key orders_customer_id_fk",)
+                    DiffCategory.KEYS, DiffOperation.REMOVE, "foreign key orders_customer_id_fk"
                 ),
             ),
         ),
@@ -178,10 +184,12 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.PROPERTIES,
                     DiffOperation.ADD,
-                    ("delta.enableChangeDataFeed = 'true'",),
+                    "delta.enableChangeDataFeed",
+                    ("= 'true'",),
                 ),
             ),
         ),
+        # The old value trails as its own phrase, so it aligns down the group.
         (
             SetProperty(
                 name="delta.enableChangeDataFeed",
@@ -192,7 +200,8 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.PROPERTIES,
                     DiffOperation.CHANGE,
-                    ("delta.enableChangeDataFeed = 'true' (was 'false')",),
+                    "delta.enableChangeDataFeed",
+                    ("= 'true'", "(was 'false')"),
                 ),
             ),
         ),
@@ -200,27 +209,31 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             UnsetProperty(name="delta.logRetentionDuration", observed_value="old"),
             (
                 DiffEntry(
-                    DiffCategory.PROPERTIES, DiffOperation.REMOVE, ("delta.logRetentionDuration",)
+                    DiffCategory.PROPERTIES, DiffOperation.REMOVE, "delta.logRetentionDuration"
                 ),
             ),
         ),
         (
             SetTableTag(name="env", desired_value="prod", observed_value=None),
-            (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, ("env = 'prod'",)),),
+            (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, "env", ("= 'prod'",)),),
         ),
         (
             SetTableTag(name="env", desired_value="prod", observed_value="dev"),
-            (DiffEntry(DiffCategory.TAGS, DiffOperation.CHANGE, ("env = 'prod' (was 'dev')",)),),
+            (
+                DiffEntry(
+                    DiffCategory.TAGS, DiffOperation.CHANGE, "env", ("= 'prod'", "(was 'dev')")
+                ),
+            ),
         ),
         (
             UnsetTableTag(name="env"),
-            (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, ("env",)),),
+            (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, "env"),),
         ),
         (
             SetColumnTag(
                 column_name="email", name="pii", desired_value="true", observed_value=None
             ),
-            (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, ("column email.pii = 'true'",)),),
+            (DiffEntry(DiffCategory.TAGS, DiffOperation.ADD, "column email.pii", ("= 'true'",)),),
         ),
         (
             SetColumnTag(
@@ -233,33 +246,32 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.TAGS,
                     DiffOperation.CHANGE,
-                    ("column email.pii = 'true' (was 'false')",),
+                    "column email.pii",
+                    ("= 'true'", "(was 'false')"),
                 ),
             ),
         ),
         (
             UnsetColumnTag(column_name="email", name="pii"),
-            (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, ("column email.pii",)),),
+            (DiffEntry(DiffCategory.TAGS, DiffOperation.REMOVE, "column email.pii"),),
         ),
+        # The subject names what carries the comment; alignment separates it
+        # from the text, so no colon is needed.
         (
             SetColumnComment(column_name="id", desired_comment="the key", observed_comment=""),
-            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, ("column id: 'the key'",)),),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "column id", ("'the key'",)),),
         ),
         (
             SetColumnComment(column_name="id", desired_comment="", observed_comment="old"),
-            (
-                DiffEntry(
-                    DiffCategory.COMMENTS, DiffOperation.CHANGE, ("column id comment (unset)",)
-                ),
-            ),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "column id", ("(unset)",)),),
         ),
         (
             SetTableComment(desired_comment="core table", observed_comment=""),
-            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, ("table: 'core table'",)),),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "table", ("'core table'",)),),
         ),
         (
             SetTableComment(desired_comment="", observed_comment="old"),
-            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, ("table comment (unset)",)),),
+            (DiffEntry(DiffCategory.COMMENTS, DiffOperation.CHANGE, "table", ("(unset)",)),),
         ),
         (
             AlterClustering(desired_clustering=("region", "day"), observed_clustering=()),
@@ -267,7 +279,8 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.CLUSTERING,
                     DiffOperation.CHANGE,
-                    ("clustering (region, day) — run OPTIMIZE FULL to recluster existing data",),
+                    "clustering",
+                    ("(region, day)", "— run OPTIMIZE FULL to recluster existing data"),
                 ),
             ),
         ),
@@ -275,7 +288,7 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
         # without clustering columns.
         (
             AlterClustering(desired_clustering=(), observed_clustering=("region",)),
-            (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.REMOVE, ("clustering",)),),
+            (DiffEntry(DiffCategory.CLUSTERING, DiffOperation.REMOVE, "clustering"),),
         ),
         (
             RenameColumn(old_name="customer_nm", new_name="customer_name"),
@@ -283,7 +296,8 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                 DiffEntry(
                     DiffCategory.COLUMNS,
                     DiffOperation.CHANGE,
-                    ("customer_nm", "renamed → customer_name"),
+                    "customer_nm",
+                    ("renamed → customer_name",),
                 ),
             ),
         ),
@@ -309,9 +323,9 @@ def test_create_table_entries_list_columns_with_types_and_primary_key():
 
     # Then it expands to one columns entry per column (with types) plus the primary key
     assert action_entries(action) == (
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("id", "Integer", "NOT NULL")),
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("name", "String")),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, ("primary key (id)",)),
+        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
+        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "name", ("String",)),
+        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id)",)),
     )
 
 
@@ -329,7 +343,7 @@ def test_create_table_entries_include_clustering_without_optimize_hint():
     # Then a clustering line is present with no OPTIMIZE hint (new table, no data)
     clustering = [e for e in entries if e.category is DiffCategory.CLUSTERING]
     assert clustering == [
-        DiffEntry(DiffCategory.CLUSTERING, DiffOperation.ADD, ("clustering (region)",))
+        DiffEntry(DiffCategory.CLUSTERING, DiffOperation.ADD, "clustering", ("(region)",))
     ]
 
 
@@ -355,14 +369,14 @@ def test_create_table_entries_include_all_state_embedded_in_create():
     # Then reporting states every fact that CREATE TABLE establishes. A None
     # property asserts absence and is therefore not a creation change.
     assert action_entries(action) == (
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("id", "Integer", "NOT NULL")),
-        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, ("day", "String")),
-        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, ("primary key (id)",)),
-        DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, ("partitioning (day)",)),
-        DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, ("delta.appendOnly = 'true'",)),
-        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, ("column id: 'identifier'",)),
-        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, ("column day: 'partition date'",)),
-        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, ("table: 'daily orders'",)),
+        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "id", ("Integer", "NOT NULL")),
+        DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, "day", ("String",)),
+        DiffEntry(DiffCategory.KEYS, DiffOperation.ADD, "primary key", ("(id)",)),
+        DiffEntry(DiffCategory.PARTITIONING, DiffOperation.ADD, "partitioning", ("(day)",)),
+        DiffEntry(DiffCategory.PROPERTIES, DiffOperation.ADD, "delta.appendOnly", ("= 'true'",)),
+        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column id", ("'identifier'",)),
+        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "column day", ("'partition date'",)),
+        DiffEntry(DiffCategory.COMMENTS, DiffOperation.ADD, "table", ("'daily orders'",)),
     )
 
 
@@ -455,7 +469,7 @@ def test_diff_block_groups_lines_under_category_headings_in_plan_order():
     assert "  columns" in lines
     assert "    + age  Integer" in lines
     assert "  comments" in lines
-    assert "    ~ table: 'c'" in lines
+    assert "    ~ table  'c'" in lines
     assert lines.index("  columns") < lines.index("  comments")
 
 
@@ -826,7 +840,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
 
     # Then each table's change block appears, in report order
     assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
-    assert "~ table: 'c'" in rendered
+    assert "~ table  'c'" in rendered
     assert "+ age  Integer" in rendered
 
 
@@ -840,5 +854,5 @@ def test_enable_table_feature_renders_a_permanent_features_entry():
     # Then it is presented as a permanent feature addition
     assert entry.category is DiffCategory.FEATURES
     assert entry.symbol == "+"
-    assert "timestampNtz" in entry.cells[0]
-    assert "permanent" in entry.cells[0]
+    assert entry.subject == "timestampNtz"
+    assert "permanent" in entry.detail[0]

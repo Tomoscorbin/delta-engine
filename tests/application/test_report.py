@@ -478,7 +478,7 @@ def test_table_to_dict_states_the_planned_change():
     assert payload["has_changes"] is True
     assert payload["has_failures"] is False
     assert payload["changes"] == [
-        {"kind": "comments", "operation": "change", "subject": "table: 'hello'", "detail": ""}
+        {"kind": "comments", "operation": "change", "subject": "table", "detail": "'hello'"}
     ]
     assert payload["planned_sql_statements"] == [
         "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
@@ -507,8 +507,8 @@ def test_table_to_dict_exposes_feature_enablement_as_a_public_change_kind():
         {
             "kind": "features",
             "operation": "add",
-            "subject": "table feature timestampNtz — permanent protocol upgrade",
-            "detail": "",
+            "subject": "timestampNtz",
+            "detail": "— permanent protocol upgrade",
         }
     ]
 
