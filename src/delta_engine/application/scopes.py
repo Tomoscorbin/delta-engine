@@ -9,7 +9,7 @@ from typing import Final, Literal
 
 from delta_engine.domain.model import ALL_ASPECTS, TableAspect
 
-type ScopeName = Literal["full", "metadata", "tags"]
+type ScopeName = Literal["full", "metadata", "annotations", "tags"]
 
 METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
     {
@@ -19,6 +19,15 @@ METADATA_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
         TableAspect.COLUMN_TAGS,
         TableAspect.PRIMARY_KEY,
         TableAspect.FOREIGN_KEYS,
+    }
+)
+
+ANNOTATION_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
+    {
+        TableAspect.TABLE_COMMENT,
+        TableAspect.COLUMN_COMMENTS,
+        TableAspect.TABLE_TAGS,
+        TableAspect.COLUMN_TAGS,
     }
 )
 
@@ -32,6 +41,7 @@ TAG_ASPECTS: Final[frozenset[TableAspect]] = frozenset(
 _ASPECTS_BY_SCOPE: Final[dict[ScopeName, frozenset[TableAspect]]] = {
     "full": ALL_ASPECTS,
     "metadata": METADATA_ASPECTS,
+    "annotations": ANNOTATION_ASPECTS,
     "tags": TAG_ASPECTS,
 }
 
