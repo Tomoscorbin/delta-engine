@@ -53,7 +53,15 @@
 
 ---
 
-## Task 1: Live backend-fact pins — **STOP for a live run after this task**
+## Task 1: Live backend-fact pins — ✅ **DONE, verified green 2026-07-31**
+
+> Ran against `delta_engine_ci`.`live_tests`:
+> `test_alter_streaming_table_manages_tags_and_comments` **passed**. Confirmed live —
+> `ALTER STREAMING TABLE … ALTER COLUMN c COMMENT '…'` accepted; `COMMENT ON TABLE`
+> accepted on a streaming table; **`COMMENT ''` accepted under the streaming-table
+> prefix**, so the compiler's empty-comment path needs no kind branch and the design's
+> decision 6 holds; `CREATE STREAMING TABLE … CONSTRAINT … PRIMARY KEY` accepted **and
+> the key reported by information_schema**. Tasks 2–8 are unblocked.
 
 The design's risk section requires the documented comment facts pinned before the gate is written. This task pins the facts that need **no engine code** — raw SQL and information_schema only. The engine-level round-trip needs `scope="annotations"` to exist, so it lands in Task 6.
 
@@ -75,7 +83,7 @@ Facts 1–3 are this task. Fact 4 is Task 6, where convergence proves it better 
 - Consumes: existing module helpers `_create_streaming_table`, `_table_tags`, `_column_tags`, and the `live_connection` / `live_tables` fixtures.
 - Produces: `_table_comment(live_connection, table_name) -> str` and `_column_comments(live_connection, table_name) -> dict[str, str]`. Task 6 reuses both.
 
-- [ ] **Step 1: Update the module docstring**
+- [x] **Step 1: Update the module docstring**
 
 Replace lines 1–8 (the first paragraph) of `tests/live/test_sql_warehouse_live_streaming_tables.py`:
 
@@ -93,7 +101,7 @@ engine's reader gate, validation gate, or SQL dialect dispatch assumes.
 
 Leave the two "deliberately absent" paragraphs and the quota paragraph (lines 10–23) exactly as they are.
 
-- [ ] **Step 2: Add the two read helpers**
+- [x] **Step 2: Add the three read helpers**
 
 Append after `_column_tags` (currently ending line 114):
 
@@ -119,11 +127,28 @@ def _column_comments(live_connection, table_name: str) -> dict[str, str]:
         f"AND table_name = {quote_literal(table_name)}",
     )
     return {row["column_name"]: row["comment"] or "" for row in rows}
+
+
+def _primary_key_columns(live_connection, table_name: str) -> list[str]:
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT kcu.column_name "
+        f"FROM {backtick(live_catalog())}.information_schema.table_constraints AS tc "
+        f"JOIN {backtick(live_catalog())}.information_schema.key_column_usage AS kcu "
+        f"ON tc.constraint_catalog = kcu.constraint_catalog "
+        f"AND tc.constraint_schema = kcu.constraint_schema "
+        f"AND tc.constraint_name = kcu.constraint_name "
+        f"WHERE tc.table_schema = {quote_literal(live_schema())} "
+        f"AND tc.table_name = {quote_literal(table_name)} "
+        f"AND tc.constraint_type = 'PRIMARY KEY' "
+        f"ORDER BY kcu.ordinal_position",
+    )
+    return [row["column_name"] for row in rows]
 ```
 
-Both mirror the shape of `_table_tags` / `_column_tags`: a live pin reads the platform through information_schema directly, independently of the engine's own queries, so a pin and the code it guards cannot be wrong together.
+All three mirror the shape of `_table_tags` / `_column_tags`: a live pin reads the platform through information_schema directly, independently of the engine's own queries, so a pin and the code it guards cannot be wrong together. `_primary_key_columns` deliberately restates `primary_key_query` (`adapters/databricks/sql/queries.py:51`) rather than importing it, for the same reason.
 
-- [ ] **Step 3: Give the provisioned streaming table a primary key**
+- [x] **Step 3: Give the provisioned streaming table a primary key**
 
 In `_create_streaming_table` (line ~68), give both the source and the streaming table a key. Replace the two statements:
 
@@ -151,7 +176,7 @@ and widen the capability label, since provisioning now depends on key-constraint
 
 **Trade-off, accepted deliberately:** both live tests now depend on key-constraint support on streaming tables. If the workspace cannot do it, both fail at provisioning rather than one failing for the reason it names. That is why the key goes in at Task 1 rather than Task 6 — this task ends in a live run, so a workspace that cannot support it is discovered before any code is written. If it does fail, split `_create_streaming_table` into keyed and keyless variants and give Task 6 the keyed one.
 
-- [ ] **Step 4: Widen the raw-statement-surface test to comments**
+- [x] **Step 4: Widen the raw-statement-surface test to comments**
 
 `test_alter_streaming_table_tags_round_through_information_schema` (line 117) already owns "the statements the engine compiles against a streaming table, asserted through information_schema". Comments join tags there rather than starting a neighbouring test. Replace it entirely:
 
@@ -164,6 +189,13 @@ def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_t
     # table (see the module docstring on the pipeline quota).
     table_name = _create_streaming_table(live_connection, live_tables)
     target = qualified_table(table_name)
+
+    # The key the defining SQL declared is reported, not merely accepted. This
+    # corrects the 2026-07-16 assumption that streaming tables return no
+    # constraints, and it is what makes mirroring the right advice: were the key
+    # unreported, a declaration that mirrored it would emit SetPrimaryKey and
+    # fail as unmanaged drift instead of matching.
+    assert _primary_key_columns(live_connection, table_name) == ["id"]
 
     execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('owner'='governance')")
     execute_sql(
@@ -195,7 +227,7 @@ def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_t
     assert _column_comments(live_connection, table_name) == {"id": ""}
 ```
 
-- [ ] **Step 5: Lint and type-check (the default suite cannot run these tests)**
+- [x] **Step 5: Lint and type-check (the default suite cannot run these tests)**
 
 ```bash
 uv run ruff format . && uv run ruff check . && uv run pytest --collect-only tests/live -q
@@ -203,14 +235,14 @@ uv run ruff format . && uv run ruff check . && uv run pytest --collect-only test
 
 Expected: clean format/lint, and the widened test still collected (it is deselected from the default run by the `databricks_e2e` marker filter but must still import and collect).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/live/test_sql_warehouse_live_streaming_tables.py
 git commit -m "test: pin the streaming-table comment statements live"
 ```
 
-- [ ] **Step 7: STOP. Hand back for a live run.**
+- [x] **Step 7: STOP. Hand back for a live run.**
 
 Report to the user that Task 1 is committed and the live suite must be run before Task 2:
 
@@ -1419,7 +1451,7 @@ gh pr create --title "feat: annotations scope on streaming tables" --body "Imple
 | Design § Live pins 1–3 (comment statements) | 1 |
 | Design § Live pin 4 (annotations round-trip) | 6 |
 | Design § Live pin 5 (metadata refused) | **3, as a unit test.** The refusal is `managed_aspects <= ANNOTATION_ASPECTS` — nothing platform-specific, and the live suite already pins a wider-scope refusal. |
-| Design § Live pin 6 (key reported; mirroring) | **3, as unit tests, plus 6 implicitly.** The mirroring contract is `_diff_primary_key` + `UnmanagedAspectDrift`. The platform half is folded into Task 1's fixture and verified by Task 6's convergence, rather than buying its own provision. |
+| Design § Live pin 6 (key reported; mirroring) | **1 (platform half) and 3 (contract half).** The key-is-reported fact is asserted in Task 1 against the already-keyed fixture — no dedicated test, no extra provision. The mirroring contract is `_diff_primary_key` + `UnmanagedAspectDrift`, so it is a unit test. |
 | Design § Documentation (7 items) | 7, and Task 8 for the changelog footer |
 | Design § Blast radius — `schema_version` decision | settled 2026-07-31; Task 8 records it |
 | Design § Risks — comment-revert limitation | 7 (`reference-limitations.md`) |

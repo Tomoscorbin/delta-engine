@@ -143,6 +143,23 @@ def _column_comments(live_connection, table_name: str) -> dict[str, str]:
     return {row["column_name"]: row["comment"] or "" for row in rows}
 
 
+def _primary_key_columns(live_connection, table_name: str) -> list[str]:
+    rows = fetch_rows(
+        live_connection,
+        f"SELECT kcu.column_name "
+        f"FROM {backtick(live_catalog())}.information_schema.table_constraints AS tc "
+        f"JOIN {backtick(live_catalog())}.information_schema.key_column_usage AS kcu "
+        f"ON tc.constraint_catalog = kcu.constraint_catalog "
+        f"AND tc.constraint_schema = kcu.constraint_schema "
+        f"AND tc.constraint_name = kcu.constraint_name "
+        f"WHERE tc.table_schema = {quote_literal(live_schema())} "
+        f"AND tc.table_name = {quote_literal(table_name)} "
+        f"AND tc.constraint_type = 'PRIMARY KEY' "
+        f"ORDER BY kcu.ordinal_position",
+    )
+    return [row["column_name"] for row in rows]
+
+
 def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_tables):
     """ALTER STREAMING TABLE and COMMENT ON manage tags and comments from outside the pipeline."""
     # The statements are the entire surface the engine compiles against a
@@ -151,6 +168,13 @@ def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_t
     # table (see the module docstring on the pipeline quota).
     table_name = _create_streaming_table(live_connection, live_tables)
     target = qualified_table(table_name)
+
+    # The key the defining SQL declared is reported, not merely accepted. This
+    # corrects the 2026-07-16 assumption that streaming tables return no
+    # constraints, and it is what makes mirroring the right advice: were the key
+    # unreported, a declaration that mirrored it would emit SetPrimaryKey and
+    # fail as unmanaged drift instead of matching.
+    assert _primary_key_columns(live_connection, table_name) == ["id"]
 
     execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('owner'='governance')")
     execute_sql(
