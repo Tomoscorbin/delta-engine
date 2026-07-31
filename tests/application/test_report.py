@@ -35,6 +35,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     TableFeature,
 )
+from delta_engine.domain.plan import TableDiff, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     CreateTable,
@@ -110,6 +111,7 @@ def _report(
     dependencies: tuple[ForeignKeyConstraint, ...] = (),
     execution: ExecutionSummary | None = None,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
+    diff: TableDiff | None = None,
 ) -> TableRunReport:
     """Construct a frozen report snapshot from concise test inputs."""
     if execution is not None and not planned_sql_statements:
@@ -152,6 +154,7 @@ def _report(
         resolution=resolution,
         execution=execution,
         blocked_failures=blocked_failures,
+        diff=diff,
     )
 
 
@@ -848,4 +851,18 @@ def test_blocked_failures_require_the_dependency_blocking_reason():
                     reason=ForeignKeyFailureReason.CYCLE,
                 ),
             ),
+        )
+
+
+def test_a_report_cannot_claim_a_diff_after_a_failed_read():
+    # Given a read that failed, there is nothing to have compared
+    desired = _a_desired_table()
+    observed = _an_observed_table()
+
+    # Then constructing a report that claims both is rejected
+    with pytest.raises(ValueError, match="failed read produces no diff"):
+        _report(
+            desired=desired,
+            read=ReadFailure(exception_type="IOError", message="boom"),
+            diff=diff_table(desired, observed),
         )

@@ -28,7 +28,7 @@ from delta_engine.application.planning import (
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
-from delta_engine.domain.plan import ActionPlan, CreateTable
+from delta_engine.domain.plan import ActionPlan, CreateTable, TableDiff
 
 # ---------- Status enums ----------
 
@@ -132,6 +132,10 @@ class TableRunReport:
     ``blocked_failures`` is the derived consequence of other tables' fates,
     baked in at assembly — a blocked table records no execution outcome of its
     own.
+    ``diff`` is the complete set of differences the engine found — actions and
+    unresolvable differences alike — retained so a table whose plan was
+    rejected can still show what drifted. It is ``None`` when the read failed,
+    and may be ``None`` on a hand-constructed report.
     """
 
     read: ReadResult
@@ -140,6 +144,7 @@ class TableRunReport:
     resolution: TableResolution
     execution: ExecutionSummary | None
     blocked_failures: tuple[ForeignKeyFailure, ...] = ()
+    diff: TableDiff | None = None
 
     def __post_init__(self) -> None:
         read_failed = isinstance(self.read, ReadFailure)
@@ -150,6 +155,8 @@ class TableRunReport:
             raise ValueError("Planning cannot follow a failed read")
         if not read_failed and self.planning is None:
             raise ValueError("A successful read requires a planning outcome")
+        if read_failed and self.diff is not None:
+            raise ValueError("A failed read produces no diff")
 
         plan = self.plan
         if plan is not None and plan.target != self.qualified_name:
