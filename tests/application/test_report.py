@@ -33,8 +33,10 @@ from delta_engine.domain.model import (
     ObservedColumn,
     ObservedTable,
     QualifiedName,
+    String,
     TableFeature,
 )
+from delta_engine.domain.plan import TableDiff, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     CreateTable,
@@ -110,6 +112,7 @@ def _report(
     dependencies: tuple[ForeignKeyConstraint, ...] = (),
     execution: ExecutionSummary | None = None,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
+    diff: TableDiff | None = None,
 ) -> TableRunReport:
     """Construct a frozen report snapshot from concise test inputs."""
     if execution is not None and not planned_sql_statements:
@@ -152,6 +155,7 @@ def _report(
         resolution=resolution,
         execution=execution,
         blocked_failures=blocked_failures,
+        diff=diff,
     )
 
 
@@ -849,3 +853,66 @@ def test_blocked_failures_require_the_dependency_blocking_reason():
                 ),
             ),
         )
+
+
+def test_a_report_cannot_claim_a_diff_after_a_failed_read():
+    # Given a read that failed, there is nothing to have compared
+    desired = _a_desired_table()
+    observed = _an_observed_table()
+
+    # Then constructing a report that claims both is rejected
+    with pytest.raises(ValueError, match="failed read produces no diff"):
+        _report(
+            desired=desired,
+            read=ReadFailure(exception_type="IOError", message="boom"),
+            diff=diff_table(desired, observed),
+        )
+
+
+def test_a_rejected_table_projects_the_changes_it_refused():
+    # Given a table whose diff was rejected
+    qualified_name = _name("orders")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(
+            DesiredColumn("id", Integer(), nullable=False),
+            DesiredColumn("email", String(), nullable=False),
+        ),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("id", Integer(), nullable=False),),
+    )
+    report = _report(
+        desired=desired,
+        read=TablePresent(table=observed),
+        failures=(ValidationFailure(rule_name="NonNullableColumnAdd", message="nope"),),
+        diff=diff_table(desired, observed),
+    )
+
+    # When it is projected
+    record = report.to_dict()
+
+    # Then `changes` stays empty — nothing was planned — and the refused
+    # differences are stated separately
+    assert record["changes"] == []
+    assert record["rejected_changes"] == [
+        {
+            "kind": "columns",
+            "operation": "add",
+            "subject": "email",
+            "detail": "String NOT NULL",
+        }
+    ]
+
+
+def test_a_successful_table_projects_no_rejected_changes():
+    # Given a table that planned cleanly
+    report = _report(
+        desired=_a_desired_table("tbl"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan("tbl", SetTableComment(desired_comment="hello", observed_comment="")),
+    )
+
+    # Then the rejected list is empty rather than absent
+    assert report.to_dict()["rejected_changes"] == []

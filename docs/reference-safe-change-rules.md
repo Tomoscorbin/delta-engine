@@ -73,7 +73,7 @@ regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
 | Law                              | What it blocks                                                                                          | How to resolve                                                                        |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | `ColumnSpellingMustMatchCatalog` | A declared column (or `renamed_from` reference) spelled differently from the catalog — case must match exactly | Update the declaration to the catalog's exact spelling (`DESCRIBE TABLE` shows it)     |
-| `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync  | Sync the table fully, or update the declaration to match the live schema              |
+| `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync — the failure names each difference | Update the declaration to match the live table, or widen its scope to manage this aspect |
 | `MissingTableUnmanaged`          | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
 | `StreamingTableAnnotationsOnly`  | The observed table is a streaming table and the declaration manages more than comments and tags | Declare it with `scope="annotations"` or `scope="tags"`; the table's schema, properties, and keys belong to its owning pipeline |
 

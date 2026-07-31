@@ -31,6 +31,7 @@ from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedNa
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import (
+    AddColumn,
     CreateTable,
     SetColumnComment,
     SetColumnTag,
@@ -1781,3 +1782,34 @@ def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
         "FOREIGN KEY (`orderref`) REFERENCES `c`.`s`.`parent` (`orderid`)" in statement
         for statement in child_report.planned_sql_statements
     )
+
+
+def test_a_rejected_table_still_reports_the_drift_that_was_found():
+    # Given a declaration whose only change is one the safety rules refuse
+    reader = _RecordingReader({"cat.sch.orders": _existing_id_table("cat.sch.orders")})
+    engine = Engine(reader=reader, executor=_RecordingExecutor())
+
+    # When the sync runs and planning rejects it
+    report = engine.sync(_spec_adding_not_null("cat.sch.orders"), dry_run=True)
+
+    # Then the table has no plan, but the diff that caused the rejection survives
+    (table_report,) = report.table_reports
+    assert table_report.plan is None
+    assert table_report.diff is not None
+    assert any(
+        isinstance(action, AddColumn) and action.column.name == "order_id"
+        for action in table_report.diff.actions
+    )
+
+
+def test_a_failed_read_leaves_no_diff_on_the_report():
+    # Given a table whose catalog read fails
+    reader = _RecordingReader({"cat.sch.orders": ReadError("IOError", "boom")})
+    engine = Engine(reader=reader, executor=_RecordingExecutor())
+
+    # When the sync runs
+    report = engine.sync(_spec("cat.sch.orders"), dry_run=True)
+
+    # Then there is nothing to have diffed
+    (table_report,) = report.table_reports
+    assert table_report.diff is None

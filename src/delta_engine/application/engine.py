@@ -175,6 +175,7 @@ class _TableRun:
             planned_sql_statements=self.planned_sql_statements,
             resolution=self.resolution,
             execution=self.execution,
+            diff=self.diff,
         )
 
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import ClassVar, Final, Protocol, assert_never
 
+from delta_engine.application.diff_entries import action_entries, unresolvable_entries
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.properties import (
     DELTA_PROPERTY_POLICY,
@@ -27,6 +28,7 @@ from delta_engine.domain.model import (
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
+    Action,
     AddColumn,
     AlterColumnType,
     ColumnCaseDrift,
@@ -41,6 +43,7 @@ from delta_engine.domain.plan import (
     TableDiff,
     TableDrift,
     TableMissing,
+    Unresolvable,
     UnsetProperty,
 )
 
@@ -510,6 +513,23 @@ class ColumnSpellingMustMatchCatalog:
                 assert_never(unreachable)
 
 
+def _difference_lines(difference: Action | Unresolvable) -> tuple[str, ...]:
+    """
+    State one difference the way the diff view states it, one line each.
+
+    Reusing the diff interpretation is the point: a rejection message that
+    described drift in its own words would drift from the diff block a reader
+    is comparing it against. Layout is left to whoever renders the failure —
+    these lines carry no indentation of their own.
+    """
+    entries = (
+        action_entries(difference)
+        if isinstance(difference, Action)
+        else unresolvable_entries(difference)
+    )
+    return tuple(f"{entry.symbol} {' '.join(entry.cells)}" for entry in entries)
+
+
 class UnmanagedAspectDrift:
     """
     Fail once per unmanaged aspect that has drifted.
@@ -522,9 +542,9 @@ class UnmanagedAspectDrift:
     aspect the declaration does not manage.
 
     It reads the diff's raw actions and unresolvable differences — its subject
-    is exactly the out-of-scope differences it exists to reject. dict.fromkeys
-    deduplicates the aspects while preserving first-seen order, so failure
-    order follows diff order deterministically.
+    is exactly the out-of-scope differences it exists to reject. Grouping by
+    aspect preserves first-seen order, so failure order follows diff order
+    deterministically, and each failure names only its own differences.
 
     ``ColumnCaseDrift`` is the one difference it passes over: a column spelled
     differently from the catalog is a defect in the declaration rather than
@@ -543,23 +563,28 @@ class UnmanagedAspectDrift:
                 return ()
 
             case TableDrift() as drift:
-                unmanaged_aspects = dict.fromkeys(
-                    difference.aspect
-                    for difference in (*drift.actions, *drift.unresolvable)
-                    if not isinstance(difference, ColumnCaseDrift)
-                    and difference.aspect not in drift.desired.managed_aspects
-                )
+                lines_by_aspect: dict[TableAspect, list[str]] = {}
+                for difference in (*drift.actions, *drift.unresolvable):
+                    if isinstance(difference, ColumnCaseDrift):
+                        continue
+                    if difference.aspect in drift.desired.managed_aspects:
+                        continue
+                    lines_by_aspect.setdefault(difference.aspect, []).extend(
+                        _difference_lines(difference)
+                    )
 
                 return tuple(
                     ValidationFailure(
                         rule_name=self.name,
                         message=(
                             f"Operation not allowed: {aspect.label} has drifted"
-                            " but is not managed by this definition. Sync the table fully"
-                            " or update the declaration to match the live schema."
+                            " but is not managed by this definition. Update the declaration"
+                            " to match the live table, or widen its scope to manage"
+                            " this aspect."
                         ),
+                        details=tuple(lines),
                     )
-                    for aspect in unmanaged_aspects
+                    for aspect, lines in lines_by_aspect.items()
                 )
 
 

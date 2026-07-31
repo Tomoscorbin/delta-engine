@@ -27,6 +27,10 @@ Version 2 renamed the planning-phase status from `VALIDATION_FAILED` to
 `PLANNING_FAILED` and the corresponding failure phase from `VALIDATION` to
 `PLANNING`.
 
+`rejected_changes` was added without a version bump: adding a field is
+backwards-compatible, and a reader that does not know the key sees exactly the
+payload it saw before.
+
 ## Run-level fields
 
 `SyncReport.to_dict()` returns:
@@ -52,6 +56,7 @@ Each entry in `tables`, and the whole of `TableRunReport.to_dict()`:
 | `has_changes`            | `bool`           | True if this table has a planned change                      |
 | `has_failures`           | `bool`           | True if this table failed a phase                            |
 | `changes`                | `list[dict]`     | Summaries of the planned changes, in plan order (see below)  |
+| `rejected_changes`       | `list[dict]`     | Differences found but refused, when the plan was rejected; empty otherwise |
 | `planned_sql_statements` | `list[str]`      | Full compiled DDL the plan lowers to, in order               |
 | `failures`               | `list[dict]`     | Failure records, in phase order (see below)                  |
 | `execution`              | `dict` \| `None` | Execution counts, or `None` on a dry run or a skipped table  |
@@ -70,6 +75,16 @@ description is `planned_sql_statements`:
 | `operation` | `str` | `add`, `remove`, or `change`                                                       |
 | `subject`   | `str` | What the change targets: the name of a column, property, tag, or table feature; `column <name>` or `column <name>.<tag>` when the target is scoped to a column; or one of `table`, `primary key`, `foreign key ...`, `clustering`, `partitioning` |
 | `detail`    | `str` | How it changed, e.g. `Integer → Long` or `= 'true' (was 'false')`; empty when there is none |
+
+### Rejected change records
+
+When a table's diff is rejected, no plan exists, so `changes` is empty. The
+differences the engine did find are projected into `rejected_changes` in the
+same record shape, so a reader can see *what* was refused alongside the
+`failures` list that says *why*. It includes both the actions the engine would
+have taken and the differences no action can close (a column spelled
+differently from the catalog, a property set but undeclared, a partitioning
+change). It is always empty for a table that planned successfully.
 
 ### Failure records
 

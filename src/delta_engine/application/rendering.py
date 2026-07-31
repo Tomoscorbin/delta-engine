@@ -16,11 +16,12 @@ from typing import Final
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
+    drift_entries,
     plan_entries,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.report import SyncReport, TableRunReport
-from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan import ActionPlan, TableDrift
 
 # Shown wherever a report has a readable state but no planned actions. One
 # spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
@@ -65,15 +66,28 @@ def _render_entry_groups(entries: Sequence[DiffEntry]) -> list[str]:
 
 
 def render_diff_block(report: TableRunReport) -> str:
-    """Render one table's change block: its name then its planned changes, grouped."""
+    """Render one table's change block: its name then its changes, grouped."""
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailure):
         return f"{header}\n  (could not read — no diff)"
+
     plan = report.plan
+    if plan is None:
+        # No plan means the diff was rejected, which is not the same as having
+        # found nothing. The failures section says which rule refused; this
+        # says what it refused.
+        refused = drift_entries(report.diff) if isinstance(report.diff, TableDrift) else ()
+        if refused:
+            return "\n".join(
+                [f"{header}  (REJECTED — no SQL planned)", *_render_entry_groups(refused)]
+            )
+        return f"{header}\n  ({_NO_CHANGES} — see failures)"
+
     if not plan:
         if report.has_failures:
             return f"{header}\n  ({_NO_CHANGES} — see failures)"
         return f"{header}\n  ({_NO_CHANGES})"
+
     if report.creates_table:
         header = f"{header}  (CREATE)"
     return "\n".join([header, *_render_entry_groups(plan_entries(plan))])

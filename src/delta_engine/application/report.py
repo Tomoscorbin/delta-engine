@@ -5,14 +5,14 @@ Run reports: per-table and run-level outcome aggregates.
 engine run; `SyncReport` aggregates those table snapshots.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, NamedTuple
 
-from delta_engine.application.diff_entries import plan_entries
+from delta_engine.application.diff_entries import DiffEntry, drift_entries, plan_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
@@ -28,7 +28,7 @@ from delta_engine.application.planning import (
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
-from delta_engine.domain.plan import ActionPlan, CreateTable
+from delta_engine.domain.plan import ActionPlan, CreateTable, TableDiff, TableDrift
 
 # ---------- Status enums ----------
 
@@ -84,6 +84,19 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 )
 
 
+def _entry_records(entries: Iterable[DiffEntry]) -> list[dict[str, str]]:
+    """Project interpreted diff entries as flat records, in the order given."""
+    return [
+        {
+            "kind": entry.category.name.lower(),
+            "operation": entry.operation.value,
+            "subject": entry.subject,
+            "detail": " ".join(entry.detail),
+        }
+        for entry in entries
+    ]
+
+
 def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
     """
     Summarise the plan as flat change records, in plan order.
@@ -95,15 +108,21 @@ def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
     """
     if plan is None:
         return []
-    return [
-        {
-            "kind": entry.category.name.lower(),
-            "operation": entry.operation.value,
-            "subject": entry.subject,
-            "detail": " ".join(entry.detail),
-        }
-        for entry in plan_entries(plan)
-    ]
+    return _entry_records(plan_entries(plan))
+
+
+def _rejected_change_records(
+    diff: TableDiff | None, plan: ActionPlan | None
+) -> list[dict[str, str]]:
+    """
+    Summarise the differences a rejected diff found, in diff order.
+
+    Empty whenever a plan exists: an accepted diff's differences are its
+    changes, already projected by ``_change_records``.
+    """
+    if plan is not None or not isinstance(diff, TableDrift):
+        return []
+    return _entry_records(drift_entries(diff))
 
 
 def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
@@ -132,6 +151,10 @@ class TableRunReport:
     ``blocked_failures`` is the derived consequence of other tables' fates,
     baked in at assembly — a blocked table records no execution outcome of its
     own.
+    ``diff`` is the complete set of differences the engine found — actions and
+    unresolvable differences alike — retained so a table whose plan was
+    rejected can still show what drifted. It is ``None`` when the read failed,
+    and may be ``None`` on a hand-constructed report.
     """
 
     read: ReadResult
@@ -140,6 +163,7 @@ class TableRunReport:
     resolution: TableResolution
     execution: ExecutionSummary | None
     blocked_failures: tuple[ForeignKeyFailure, ...] = ()
+    diff: TableDiff | None = None
 
     def __post_init__(self) -> None:
         read_failed = isinstance(self.read, ReadFailure)
@@ -150,6 +174,8 @@ class TableRunReport:
             raise ValueError("Planning cannot follow a failed read")
         if not read_failed and self.planning is None:
             raise ValueError("A successful read requires a planning outcome")
+        if read_failed and self.diff is not None:
+            raise ValueError("A failed read produces no diff")
 
         plan = self.plan
         if plan is not None and plan.target != self.qualified_name:
@@ -258,6 +284,7 @@ class TableRunReport:
             "has_changes": self.has_changes,
             "has_failures": self.has_failures,
             "changes": _change_records(self.plan),
+            "rejected_changes": _rejected_change_records(self.diff, self.plan),
             "planned_sql_statements": list(self.planned_sql_statements),
             "failures": _failure_records(self.failures),
             "execution": execution_record,
