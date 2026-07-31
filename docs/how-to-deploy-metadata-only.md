@@ -68,10 +68,11 @@ Both failures are laws rather than rules, listed in
 
 ## Annotate a streaming table
 
-`scope="annotations"` extends to streaming tables. A streaming table's
-definition — schema, properties, and keys — is owned by its pipeline and
-belongs to `CREATE OR REFRESH`; comments and Unity Catalog tags sit outside
-it, and are exactly what `ALTER STREAMING TABLE` and `COMMENT ON` reach. The
+`scope="annotations"` extends to streaming tables, as does the narrower
+`scope="tags"`. A streaming table's definition — schema, properties, and
+keys — is owned by its pipeline and belongs to `CREATE OR REFRESH`; comments
+and Unity Catalog tags sit outside it, and are exactly what
+`ALTER STREAMING TABLE` and `COMMENT ON` reach. The
 engine discovers the relation kind when it reads the table (nothing is
 declared), compiles column comments and tag changes as `ALTER STREAMING
 TABLE`, the table comment as `COMMENT ON TABLE`, and rejects any wider scope:
