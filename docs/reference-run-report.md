@@ -68,7 +68,7 @@ description is `planned_sql_statements`:
 | ----------- | ----- | ---------------------------------------------------------------------------------- |
 | `kind`      | `str` | Change category: `columns`, `keys`, `clustering`, `partitioning`, `features`, `properties`, `tags`, `comments` |
 | `operation` | `str` | `add`, `remove`, or `change`                                                       |
-| `subject`   | `str` | What the change targets: a column, property, or tag name, or one of `table`, `primary key`, `clustering`, `partitioning` |
+| `subject`   | `str` | What the change targets: the name of a column, property, tag, or table feature; `column <name>` or `column <name>.<tag>` when the target is scoped to a column; or one of `table`, `primary key`, `foreign key ...`, `clustering`, `partitioning` |
 | `detail`    | `str` | How it changed, e.g. `Integer → Long` or `= 'true' (was 'false')`; empty when there is none |
 
 ### Failure records

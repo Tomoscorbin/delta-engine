@@ -155,7 +155,7 @@ class Struct(DataType):
             seen.add(field.name)
 
     def __str__(self) -> str:
-        return f"Struct<{', '.join(str(f) for f in self.fields)}"
+        return f"Struct<{', '.join(str(field) for field in self.fields)}>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,4 +181,4 @@ class Map(DataType):
             raise ValueError("Map key type must not be a Map")
 
     def __str__(self) -> str:
-        return f"Map>{self.key}, {self.value}"
+        return f"Map<{self.key}, {self.value}>"
