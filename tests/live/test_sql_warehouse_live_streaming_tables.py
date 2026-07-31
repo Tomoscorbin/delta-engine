@@ -5,8 +5,10 @@ A streaming table's definition — schema, properties, and keys — is owned by
 its pipeline. The line the platform draws is the defining SQL: comments and
 Unity Catalog tags are alterable from outside the pipeline via the documented
 ALTER STREAMING TABLE dialect and COMMENT ON, while schema, properties, and
-constraints belong to CREATE OR REFRESH. Each test states platform facts the
-engine's reader gate, validation gate, or SQL dialect dispatch assumes.
+constraints belong to CREATE OR REFRESH. The single test here states the
+platform facts the engine's reader gate, validation gate, and SQL dialect
+dispatch assume, and drives each one through the engine rather than through
+hand-written SQL.
 
 Two pins are deliberately absent. A raw ``DESCRIBE ... AS JSON`` pin proved
 ``type="STREAMING_TABLE"``, ``provider="delta"`` on every Live run and was
@@ -18,10 +20,9 @@ the engine emits the documented ALTER STREAMING TABLE dialect and relies on
 nothing being rejected.
 
 Provisioning is quota-bound: the workspace tier allows one active DBSQL
-pipeline at a time, so every test that creates a streaming table carries the
-``streaming_table`` xdist group (serialized onto one worker by the Live
-workflow's ``--dist loadgroup``) and tests share a provisioned table where
-the facts allow.
+pipeline at a time, so this module carries the ``streaming_table`` xdist group
+(serialized onto one worker by the Live workflow's ``--dist loadgroup``) and
+every pin shares one provisioned table.
 """
 
 import pytest
@@ -30,7 +31,6 @@ pytest.importorskip("databricks.sql")
 
 
 from delta_engine import SyncFailedError, TableRunStatus, ValidationFailure
-from delta_engine.adapters.databricks.sql.dialect import backtick, quote_literal
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.ports import TablePresent
@@ -40,10 +40,10 @@ from delta_engine.schema import Column, DeltaTable, Integer
 from tests.live.capabilities import require_databricks_capability
 from tests.live.sql_warehouse_live_helpers import (
     execute_sql,
-    fetch_rows,
     live_catalog,
     live_schema,
     qualified_table,
+    read_live_table,
 )
 
 pytestmark = pytest.mark.xdist_group("streaming_table")
@@ -98,157 +98,66 @@ def _create_streaming_table(live_connection, live_tables) -> str:
     return table_name
 
 
-def _table_tags(live_connection, table_name: str) -> dict[str, str]:
-    rows = fetch_rows(
-        live_connection,
-        f"SELECT tag_name, tag_value "
-        f"FROM {backtick(live_catalog())}.information_schema.table_tags "
-        f"WHERE schema_name = {quote_literal(live_schema())} "
-        f"AND table_name = {quote_literal(table_name)}",
-    )
-    return {row["tag_name"]: row["tag_value"] for row in rows}
-
-
-def _column_tags(live_connection, table_name: str) -> dict[tuple[str, str], str]:
-    rows = fetch_rows(
-        live_connection,
-        f"SELECT column_name, tag_name, tag_value "
-        f"FROM {backtick(live_catalog())}.information_schema.column_tags "
-        f"WHERE schema_name = {quote_literal(live_schema())} "
-        f"AND table_name = {quote_literal(table_name)}",
-    )
-    return {(row["column_name"], row["tag_name"]): row["tag_value"] for row in rows}
-
-
-def _table_comment(live_connection, table_name: str) -> str:
-    rows = fetch_rows(
-        live_connection,
-        f"SELECT comment "
-        f"FROM {backtick(live_catalog())}.information_schema.tables "
-        f"WHERE table_schema = {quote_literal(live_schema())} "
-        f"AND table_name = {quote_literal(table_name)}",
-    )
-    [row] = rows
-    return row["comment"] or ""
-
-
-def _column_comments(live_connection, table_name: str) -> dict[str, str]:
-    rows = fetch_rows(
-        live_connection,
-        f"SELECT column_name, comment "
-        f"FROM {backtick(live_catalog())}.information_schema.columns "
-        f"WHERE table_schema = {quote_literal(live_schema())} "
-        f"AND table_name = {quote_literal(table_name)}",
-    )
-    return {row["column_name"]: row["comment"] or "" for row in rows}
-
-
-def _primary_key_columns(live_connection, table_name: str) -> list[str]:
-    rows = fetch_rows(
-        live_connection,
-        f"SELECT kcu.column_name "
-        f"FROM {backtick(live_catalog())}.information_schema.table_constraints AS tc "
-        f"JOIN {backtick(live_catalog())}.information_schema.key_column_usage AS kcu "
-        f"ON tc.constraint_catalog = kcu.constraint_catalog "
-        f"AND tc.constraint_schema = kcu.constraint_schema "
-        f"AND tc.constraint_name = kcu.constraint_name "
-        f"WHERE tc.table_schema = {quote_literal(live_schema())} "
-        f"AND tc.table_name = {quote_literal(table_name)} "
-        f"AND tc.constraint_type = 'PRIMARY KEY' "
-        f"ORDER BY kcu.ordinal_position",
-    )
-    return [row["column_name"] for row in rows]
-
-
-def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_tables):
-    """ALTER STREAMING TABLE and COMMENT ON manage tags and comments from outside the pipeline."""
-    # The statements are the entire surface the engine compiles against a
-    # streaming table, and information_schema is where its reader observes
-    # their effect — every statement's effect asserted, on one provisioned
-    # table (see the module docstring on the pipeline quota).
+def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
+    live_connection, live_tables
+):
+    """The engine sets, converges, and clears a streaming table's annotations; wider scopes fail."""
+    # Every pin below shares one provisioned table: the reported key, the read,
+    # the round-trip, the convergence resync, the wider-scope refusal, and the
+    # clear (see the module docstring on the pipeline quota).
     table_name = _create_streaming_table(live_connection, live_tables)
-    target = qualified_table(table_name)
+    execute_sql(
+        live_connection,
+        f"ALTER STREAMING TABLE {qualified_table(table_name)} SET TAGS ('old'='remove-me')",
+    )
 
     # The key the defining SQL declared is reported, not merely accepted. This
     # corrects the 2026-07-16 assumption that streaming tables return no
     # constraints, and it is what makes mirroring the right advice: were the key
     # unreported, a declaration that mirrored it would emit SetPrimaryKey and
     # fail as unmanaged drift instead of matching.
-    assert _primary_key_columns(live_connection, table_name) == ["id"]
+    assert read_live_table(live_connection, table_name)["primary_key"] == ("id",)
 
-    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('owner'='governance')")
-    execute_sql(
-        live_connection,
-        f"ALTER STREAMING TABLE {target} ALTER COLUMN id SET TAGS ('pii'='low')",
-    )
-    assert _table_tags(live_connection, table_name) == {"owner": "governance"}
-    assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
-
-    # Comments are the capability the annotations scope adds: the column
-    # clause of ALTER STREAMING TABLE, and kind-independent COMMENT ON.
-    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} ALTER COLUMN id COMMENT 'the id'")
-    execute_sql(live_connection, f"COMMENT ON TABLE {target} IS 'click events'")
-    assert _column_comments(live_connection, table_name) == {"id": "the id"}
-    assert _table_comment(live_connection, table_name) == "click events"
-
-    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} UNSET TAGS ('owner')")
-    execute_sql(
-        live_connection,
-        f"ALTER STREAMING TABLE {target} ALTER COLUMN id UNSET TAGS ('pii')",
-    )
-    assert _table_tags(live_connection, table_name) == {}
-    assert _column_tags(live_connection, table_name) == {}
-
-    # An empty desired comment compiles to COMMENT '' rather than UNSET
-    # COMMENT: SQL warehouses reject the latter. This pins that the ALTER
-    # STREAMING TABLE prefix accepts it and that '' is what comes back.
-    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} ALTER COLUMN id COMMENT ''")
-    assert _column_comments(live_connection, table_name) == {"id": ""}
-
-
-def test_a_streaming_table_syncs_annotations_and_refuses_a_wider_scope(
-    live_connection, live_tables
-):
-    """A streaming table syncs comments and tags to convergence; a wider scope is refused."""
-    # Supersedes the old supported-relations pin that read streaming tables
-    # as failed: they are now engine state, discovered — never declared. The
-    # read, the round-trip, the convergence resync, and the wider-scope
-    # refusal share one provisioned table (see the module docstring on the
-    # pipeline quota).
-    table_name = _create_streaming_table(live_connection, live_tables)
-    target = qualified_table(table_name)
-    execute_sql(live_connection, f"ALTER STREAMING TABLE {target} SET TAGS ('old'='remove-me')")
-
+    # The kind is discovered, never declared: the engine reads a streaming table
+    # as state to diff against rather than failing the read.
     reader = WarehouseReader(WarehouseSqlRunner(live_connection))
     state = reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
     assert isinstance(state, TablePresent), state
     assert state.table.kind is TableKind.STREAMING_TABLE
 
     engine = build_sql_engine(live_connection)
+    annotated_column = Column(
+        "id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}
+    )
+    table_comment = "Click events, owned by the ingest pipeline."
+    table_tags = {"owner": "governance"}
     declaration = DeltaTable(
         live_catalog(),
         live_schema(),
         table_name,
-        columns=(Column("id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}),),
+        columns=(annotated_column,),
         primary_key=["id"],  # mirrors the pipeline's key; never applied
-        comment="Click events, owned by the ingest pipeline.",
-        tags={"owner": "governance"},
+        comment=table_comment,
+        tags=table_tags,
         scope="annotations",
     )
     engine.sync(declaration)
 
-    assert _table_comment(live_connection, table_name) == (
-        "Click events, owned by the ingest pipeline."
-    )
-    assert _column_comments(live_connection, table_name) == {"id": "the id"}
-    assert _table_tags(live_connection, table_name) == {"owner": "governance"}
-    assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
+    # Every statement form the engine compiles against a streaming table takes
+    # effect: SET TAGS at both levels, UNSET TAGS for the seeded tag this
+    # declaration drops, the ALTER STREAMING TABLE column-comment clause, and
+    # kind-independent COMMENT ON.
+    annotated = read_live_table(live_connection, table_name)
+    assert annotated["comment"] == table_comment
+    assert [column["comment"] for column in annotated["columns"]] == ["the id"]
+    assert annotated["table_tags"] == table_tags
+    assert annotated["column_tags"] == {("id", "pii"): "low"}
 
-    # The reader must round-trip everything the executor just wrote through the
-    # ALTER STREAMING TABLE and COMMENT ON statements: a resync finds nothing
-    # left to do. This is also what verifies the mirroring contract — had the
-    # platform not reported the pipeline's key, mirroring it would have emitted
-    # SetPrimaryKey and failed UnmanagedAspectDrift instead of converging.
+    # The reader must round-trip everything the executor just wrote: a resync
+    # finds nothing left to do. This is also what verifies the mirroring
+    # contract — had the platform not reported the pipeline's key, mirroring it
+    # would have emitted SetPrimaryKey and failed UnmanagedAspectDrift instead
+    # of converging.
     assert engine.sync(declaration).has_changes is False
 
     # Anything wider than annotations is refused before planning — even when
@@ -258,10 +167,10 @@ def test_a_streaming_table_syncs_annotations_and_refuses_a_wider_scope(
         live_catalog(),
         live_schema(),
         table_name,
-        columns=(Column("id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}),),
+        columns=(annotated_column,),
         primary_key=["id"],
-        comment="Click events, owned by the ingest pipeline.",
-        tags={"owner": "governance"},
+        comment=table_comment,
+        tags=table_tags,
     )
     with pytest.raises(SyncFailedError) as error:
         engine.sync(full_scope)
@@ -274,5 +183,27 @@ def test_a_streaming_table_syncs_annotations_and_refuses_a_wider_scope(
         if isinstance(failure, ValidationFailure)
     }
     assert table_report.planned_sql_statements == ()
-    assert _table_tags(live_connection, table_name) == {"owner": "governance"}
-    assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
+    refused = read_live_table(live_connection, table_name)
+    assert refused["table_tags"] == table_tags
+    assert refused["column_tags"] == {("id", "pii"): "low"}
+
+    # Clearing is the other half of managing an aspect, and the half with a
+    # platform quirk: an empty desired comment compiles to COMMENT '' rather
+    # than UNSET COMMENT, which SQL warehouses reject. The resync converging is
+    # what proves '' comes back as the empty comment the reader observes.
+    cleared = DeltaTable(
+        live_catalog(),
+        live_schema(),
+        table_name,
+        columns=(Column("id", Integer(), nullable=False),),
+        primary_key=["id"],
+        scope="annotations",
+    )
+    engine.sync(cleared)
+
+    emptied = read_live_table(live_connection, table_name)
+    assert emptied["comment"] == ""
+    assert [column["comment"] for column in emptied["columns"]] == [""]
+    assert emptied["table_tags"] == {}
+    assert emptied["column_tags"] == {}
+    assert engine.sync(cleared).has_changes is False
