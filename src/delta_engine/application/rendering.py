@@ -10,12 +10,13 @@ render_diff_block, and run_summary_footer are the building blocks they compose.
 """
 
 from collections import Counter
+from collections.abc import Sequence
 from typing import Final
 
 from delta_engine.application.diff_entries import (
     DiffCategory,
     DiffEntry,
-    action_entries,
+    plan_entries,
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.report import SyncReport, TableRunReport
@@ -35,7 +36,24 @@ def _plan_creates_table(plan: ActionPlan) -> bool:
     return any(isinstance(action, CreateTable) for action in plan)
 
 
-def _render_entry_groups(entries: list[DiffEntry]) -> list[str]:
+def _aligned_rows(rows: Sequence[Sequence[str]]) -> list[str]:
+    """
+    Pad ragged rows into columns, each row joined and right-stripped.
+
+    Rows need not be the same length: a column is as wide as the widest cell
+    any row puts there, and rows that stop short simply end early.
+    """
+    widths: dict[int, int] = {}
+    for row in rows:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths.get(index, 0), len(cell))
+    return [
+        "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)).rstrip()
+        for row in rows
+    ]
+
+
+def _render_entry_groups(entries: Sequence[DiffEntry]) -> list[str]:
     """Group entries by category (display order) and align cells within each group."""
     lines: list[str] = []
     for category in DiffCategory:
@@ -43,13 +61,10 @@ def _render_entry_groups(entries: list[DiffEntry]) -> list[str]:
         if not group:
             continue
         lines.append(f"  {category.plural}")
-        widths: dict[int, int] = {}
-        for entry in group:
-            for index, cell in enumerate(entry.cells):
-                widths[index] = max(widths.get(index, 0), len(cell))
-        for entry in group:
-            padded = "  ".join(cell.ljust(widths[index]) for index, cell in enumerate(entry.cells))
-            lines.append(f"    {entry.symbol} {padded}".rstrip())
+        bodies = _aligned_rows([entry.cells for entry in group])
+        lines.extend(
+            f"    {entry.symbol} {body}".rstrip() for entry, body in zip(group, bodies, strict=True)
+        )
     return lines
 
 
@@ -65,8 +80,7 @@ def render_diff_block(report: TableRunReport) -> str:
         return f"{header}\n  ({_NO_CHANGES})"
     if _plan_creates_table(plan):
         header = f"{header}  (CREATE)"
-    entries = [entry for action in plan for entry in action_entries(action)]
-    return "\n".join([header, *_render_entry_groups(entries)])
+    return "\n".join([header, *_render_entry_groups(plan_entries(plan))])
 
 
 def _grid_statements_cell(report: TableRunReport) -> str:
@@ -82,15 +96,8 @@ def _humanized_action_summary(plan: ActionPlan | None) -> str:
     """Summarise a plan as per-category change counts in display order, e.g. '2 columns, 1 key'."""
     if plan is None:
         return _NO_CHANGES
-    counts: Counter[DiffCategory] = Counter()
-    for action in plan:
-        for entry in action_entries(action):
-            counts[entry.category] += 1
-    parts: list[str] = []
-    for category in DiffCategory:
-        count = counts.get(category, 0)
-        if count:
-            parts.append(category.counted(count))
+    counts = Counter(entry.category for entry in plan_entries(plan))
+    parts = [category.counted(counts[category]) for category in DiffCategory if counts[category]]
     return ", ".join(parts) or _NO_CHANGES
 
 
@@ -122,10 +129,7 @@ def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
 def render_grid(reports: tuple[TableRunReport, ...]) -> str:
     """Render an aligned TABLE | STATUS | STATEMENTS | DETAIL grid for ``reports``."""
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
-    widths = [max(len(row[col]) for row in rows) for col in range(len(_GRID_HEADERS))]
-    return "\n".join(
-        "  ".join(cell.ljust(widths[col]) for col, cell in enumerate(row)).rstrip() for row in rows
-    )
+    return "\n".join(_aligned_rows(rows))
 
 
 def run_summary_footer(report: SyncReport) -> str:
@@ -165,7 +169,11 @@ def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
     for report in failed:
         lines = [f"  {report.qualified_name}"]
         for failure in report.failures:
-            lines.extend(f"    {line}" for line in failure.format_lines())
+            # A failure leads with what went wrong; anything after it is
+            # supporting detail, nested a level deeper.
+            head, *supporting = failure.format_lines()
+            lines.append(f"    {head}")
+            lines.extend(f"        {line}" for line in supporting)
         blocks.append("\n".join(lines))
     return "\n".join([_heading("Failures", rule="-"), *blocks])
 

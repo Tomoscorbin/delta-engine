@@ -763,6 +763,27 @@ def test_render_report_shows_a_full_failures_section_for_failed_tables():
     assert "Validation failed: R2 - second" in rendered
 
 
+def test_failures_section_nests_supporting_detail_under_its_error_line():
+    # Given a table whose execution failed, so its failure carries the SQL
+    failed = _grid_report(
+        "orders",
+        plan=_plan("orders", AddColumn(DesiredColumn("age", Integer()))),
+        execution=_execution(applied=0, failed=1),
+    )
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(failed,),
+    )
+
+    lines = render_report(sync).splitlines()
+
+    # Then the error line sits under its table, and the SQL nests below it —
+    # depth is the renderer's decision, so the failure itself carries none
+    assert "    Execution failed at statement 0: AnalysisException - boom" in lines
+    assert "        SQL: SQL 0" in lines
+
+
 def test_render_report_failures_section_has_an_underlined_header():
     # Given a run with a failed table
     failed = _grid_report("orders", failures=(ValidationFailure(rule_name="R", message="m"),))

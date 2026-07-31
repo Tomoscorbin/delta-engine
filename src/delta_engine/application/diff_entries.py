@@ -15,6 +15,7 @@ from typing import Final, assert_never
 from delta_engine.domain.model import DesiredColumn
 from delta_engine.domain.plan import (
     Action,
+    ActionPlan,
     AddColumn,
     AlterClustering,
     AlterColumnType,
@@ -189,6 +190,11 @@ def _columns_detail(columns: tuple[str, ...]) -> tuple[str, ...]:
 def action_entries(action: Action) -> tuple[DiffEntry, ...]:
     """Render one plan action as one or more category-tagged diff entries."""
     raise NotImplementedError(f"No diff entries for action {type(action).__name__}")
+
+
+def plan_entries(plan: ActionPlan) -> tuple[DiffEntry, ...]:
+    """Every diff entry a plan lowers to, in plan order — one action may yield several."""
+    return tuple(entry for action in plan for entry in action_entries(action))
 
 
 @action_entries.register

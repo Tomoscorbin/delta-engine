@@ -75,11 +75,23 @@ def _message_head(message: str) -> str:
 class Failure(ABC):
     """A failure that can render itself as display lines, tagged with its phase."""
 
-    phase: ClassVar[FailurePhase]  # TODO: enforce phase
+    phase: ClassVar[FailurePhase]
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        # A report derives a table's status from the earliest failing phase, so
+        # a failure without one fails there rather than where it was written.
+        super().__init_subclass__(**kwargs)
+        if not hasattr(cls, "phase"):
+            raise TypeError(f"{cls.__name__} must declare the phase that produces it")
 
     @abstractmethod
     def format_lines(self) -> tuple[str, ...]:
-        """Return one or more human-readable lines describing this failure."""
+        """
+        Return the human-readable lines describing this failure.
+
+        Lines carry no indentation: how deeply a report nests them is the
+        renderer's decision, and the machine projection joins them flat.
+        """
         ...
 
     @abstractmethod
@@ -132,7 +144,7 @@ class ExecutionFailure(Failure):
         return (
             f"Execution failed at statement {self.statement_index}: "
             f"{self.exception_type} - {_message_head(self.message)}",
-            f"    SQL: {self.statement}",
+            f"SQL: {self.statement}",
         )
 
     def headline(self) -> str:

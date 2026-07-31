@@ -12,7 +12,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final
 
-from delta_engine.application.diff_entries import action_entries
+from delta_engine.application.diff_entries import plan_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
@@ -74,8 +74,7 @@ def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
             "subject": entry.subject,
             "detail": " ".join(entry.detail),
         }
-        for action in plan
-        for entry in action_entries(action)
+        for entry in plan_entries(plan)
     ]
 
 
@@ -85,7 +84,7 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
         {
             "phase": failure.phase.name,
             "type": type(failure).__name__,
-            "message": " ".join(line.strip() for line in failure.format_lines()),
+            "message": " ".join(failure.format_lines()),
         }
         for failure in failures
     ]
