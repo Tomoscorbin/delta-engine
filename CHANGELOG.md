@@ -1,3 +1,31 @@
+## v0.7.0 (2026-07-31)
+
+### BREAKING CHANGE
+
+- ValidationFailure.rule_name now reports 'StreamingTableAnnotationsOnly' where it previously reported 'StreamingTableTagsOnly'. Consumers matching on that value in a run report's to_dict() projection must update. schema_version stays at 2: the key and its type are unchanged.
+- a declaration must name existing columns with the
+catalog's exact case. Declarations that previously synced against
+differently-cased catalog columns now fail validation with
+ColumnSpellingMustMatchCatalog, or REFERENCED_COLUMN_CASE_MISMATCH for a
+foreign key's referenced columns. Run DESCRIBE TABLE and copy the
+spelling it reports.
+- TableRunReport.execution_outcome is renamed to
+TableRunReport.execution, and the execution pass-through property is
+removed. Code constructing or reading that field by name must rename it.
+The to_dict() payload already spelled the key "execution" and does not
+change, so the schema_version 2 contract is unaffected.
+
+### Feat
+
+- annotations scope on streaming tables (#310)
+- rework relationship resolution and dependency blocking (#290)
+
+### Refactor
+
+- eligibility checks name their role, not their membership (#307)
+- a diff entry names its operation, not a bare symbol (#305)
+- the accepted plan narrows once; execution drops its alias (#304)
+
 ## v0.6.0 (2026-07-28)
 
 ### Feat
