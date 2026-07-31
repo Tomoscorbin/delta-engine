@@ -25,17 +25,21 @@ from delta_engine.application.rendering import (
 )
 from delta_engine.application.report import SyncReport, TableRunReport
 from delta_engine.domain.model import (
+    Array,
     Decimal,
     DesiredColumn,
     DesiredTable,
     ForeignKeyConstraint,
     Integer,
     Long,
+    Map,
     ObservedColumn,
     ObservedTable,
     PrimaryKeyConstraint,
     QualifiedName,
     String,
+    Struct,
+    StructField,
     TableFeature,
 )
 from delta_engine.domain.plan.actions import (
@@ -144,6 +148,30 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
                     DiffOperation.CHANGE,
                     "amount",
                     ("Decimal(10,2) → Decimal(12,2)",),
+                ),
+            ),
+        ),
+        # A nested type spells its own structure, so its delimiters have to
+        # nest too — unbalanced ones leave a reader unable to tell where an
+        # inner type ends.
+        (
+            AddColumn(
+                DesiredColumn(
+                    "payload",
+                    Struct(
+                        (
+                            StructField("id", Integer()),
+                            StructField("labels", Map(String(), Array(String()))),
+                        )
+                    ),
+                )
+            ),
+            (
+                DiffEntry(
+                    DiffCategory.COLUMNS,
+                    DiffOperation.ADD,
+                    "payload",
+                    ("Struct<id: Integer, labels: Map<String, Array<String>>>",),
                 ),
             ),
         ),
