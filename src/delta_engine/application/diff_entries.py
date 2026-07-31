@@ -37,6 +37,7 @@ from delta_engine.domain.plan import (
     SetProperty,
     SetTableComment,
     SetTableTag,
+    TableDrift,
     Unresolvable,
     UnsetColumnTag,
     UnsetProperty,
@@ -200,6 +201,25 @@ def action_entries(action: Action) -> tuple[DiffEntry, ...]:
 def plan_entries(plan: ActionPlan) -> tuple[DiffEntry, ...]:
     """Every diff entry a plan lowers to, in plan order — one action may yield several."""
     return tuple(entry for action in plan for entry in action_entries(action))
+
+
+def drift_entries(drift: TableDrift) -> tuple[DiffEntry, ...]:
+    """
+    Every diff entry a drift lowers to, in diff order — actions, then the rest.
+
+    The sibling of :func:`plan_entries` for a diff that never became a plan.
+    Both of the drift's streams are included: an unresolvable difference is
+    frequently the very reason the diff was rejected, so showing only the
+    actions would omit the answer.
+    """
+    return (
+        *(entry for action in drift.actions for entry in action_entries(action)),
+        *(
+            entry
+            for unresolvable in drift.unresolvable
+            for entry in unresolvable_entries(unresolvable)
+        ),
+    )
 
 
 @action_entries.register

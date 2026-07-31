@@ -44,6 +44,7 @@ from delta_engine.domain.plan import (
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
+    diff_table,
 )
 from delta_engine.domain.plan.actions import (
     Action,
@@ -979,3 +980,83 @@ def test_enable_table_feature_renders_a_permanent_features_entry():
 )
 def test_unresolvable_differences_describe_themselves(unresolvable, expected):
     assert unresolvable_entries(unresolvable) == expected
+
+
+def test_a_rejected_table_shows_the_drift_that_was_refused():
+    # Given a table whose declaration adds a NOT NULL column and drops another,
+    # both refused by validation
+    qualified_name = QualifiedName("cat", "sch", "orders")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(
+            DesiredColumn("id", Integer(), nullable=False),
+            DesiredColumn("email", String(), nullable=False),
+        ),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(
+            ObservedColumn("id", Integer(), nullable=False),
+            ObservedColumn("obsolete", String()),
+        ),
+    )
+    report = TableRunReport(
+        read=TablePresent(table=observed),
+        planning=PlanningFailed(
+            (ValidationFailure(rule_name="NonNullableColumnAdd", message="nope"),)
+        ),
+        planned_sql_statements=(),
+        resolution=TableResolution(desired, (), ()),
+        execution=None,
+        diff=diff_table(desired, observed),
+    )
+
+    # When the block is rendered
+    block = render_diff_block(report)
+
+    # Then it names the refused changes rather than claiming there were none
+    assert "(no changes" not in block
+    assert "REJECTED" in block.splitlines()[0]
+    assert "+ email" in block
+    assert "- obsolete" in block
+
+
+def test_a_rejected_table_shows_the_differences_no_action_could_close():
+    # Given a table rejected over drift an action cannot express
+    qualified_name = QualifiedName("cat", "sch", "orders")
+    columns = (("id", Integer()), ("region", String()), ("country", String()))
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=tuple(DesiredColumn(name, data_type) for name, data_type in columns),
+        partitioned_by=("region",),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=tuple(ObservedColumn(name, data_type) for name, data_type in columns),
+        partitioned_by=("country",),
+    )
+    report = TableRunReport(
+        read=TablePresent(table=observed),
+        planning=PlanningFailed(
+            (ValidationFailure(rule_name="PartitioningIsImmutable", message="nope"),)
+        ),
+        planned_sql_statements=(),
+        resolution=TableResolution(desired, (), ()),
+        execution=None,
+        diff=diff_table(desired, observed),
+    )
+
+    # When the block is rendered
+    block = render_diff_block(report)
+
+    # Then the unresolvable difference is shown alongside any refused actions
+    assert "~ partitioning  (country) → (region)" in block
+
+
+def test_a_table_with_no_diff_at_all_still_points_at_its_failures():
+    # Given a report that carries failures but no diff (a hand-built report,
+    # or a table that failed before the diff phase)
+    block = render_diff_block(_report_with_empty_plan_and_failure())
+
+    # Then the old wording stands — there is genuinely nothing to show
+    assert "(no changes — see failures)" in block
