@@ -11,6 +11,9 @@ _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 class DataType:
     """Base class for all data types."""
 
+    def __str__(self) -> str:
+        return type(self).__name__
+
 
 @dataclass(frozen=True, slots=True)
 class Integer(DataType):
@@ -78,6 +81,9 @@ class Decimal(DataType):
         if self.precision <= 0 or not (0 <= self.scale <= self.precision):
             raise ValueError("invalid decimal(precision, scale)")
 
+    def __str__(self) -> str:
+        return f"Decimal({self.precision},{self.scale})"
+
 
 @dataclass(frozen=True, slots=True)
 class Byte(DataType):
@@ -122,6 +128,9 @@ class StructField:
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
         object.__setattr__(self, "name", Identifier(self.name))
 
+    def __str__(self) -> str:
+        return f"{self.name}: {self.data_type}"
+
 
 @dataclass(frozen=True, slots=True)
 class Struct(DataType):
@@ -141,12 +150,18 @@ class Struct(DataType):
                 raise ValueError(f"Duplicate struct field name: {field.name}")
             seen.add(field.name)
 
+    def __str__(self) -> str:
+        return f"Struct<{', '.join(str(f) for f in self.fields)}"
+
 
 @dataclass(frozen=True, slots=True)
 class Array(DataType):
     """Array of homogeneous ``element`` values."""
 
     element: DataType
+
+    def __str__(self) -> str:
+        return f"Array<{self.element}>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,3 +175,6 @@ class Map(DataType):
         # Databricks accepts any MAP key type except MAP itself.
         if isinstance(self.key, Map):
             raise ValueError("Map key type must not be a Map")
+
+    def __str__(self) -> str:
+        return f"Map>{self.key}, {self.value}"

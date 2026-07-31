@@ -10,9 +10,9 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, NamedTuple
 
-from delta_engine.application.diff_entries import action_entries
+from delta_engine.application.diff_entries import plan_entries
 from delta_engine.application.failures import (
     Failure,
     FailurePhase,
@@ -28,7 +28,7 @@ from delta_engine.application.planning import (
 from delta_engine.application.ports import ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
-from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan import ActionPlan, CreateTable
 
 # ---------- Status enums ----------
 
@@ -41,6 +41,34 @@ class TableRunStatus(StrEnum):
     PLANNING_FAILED = "PLANNING_FAILED"
     FOREIGN_KEY_FAILED = "FOREIGN_KEY_FAILED"
     EXECUTION_FAILED = "EXECUTION_FAILED"
+
+
+# ---------- Derived run facts ----------
+
+
+class StatementProgress(NamedTuple):
+    """How many of a table's planned statements execution actually applied."""
+
+    applied: int
+    planned: int
+
+
+class RunCounts(NamedTuple):
+    """
+    How a run's tables came out.
+
+    Every table falls in exactly one bucket, so ``total`` is their sum rather
+    than a separately counted fact that could disagree with them.
+    """
+
+    changed: int
+    unchanged: int
+    failed: int
+
+    @property
+    def total(self) -> int:
+        """Tables in the run."""
+        return self.changed + self.unchanged + self.failed
 
 
 # ---------- Reports ----------
@@ -72,10 +100,9 @@ def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
             "kind": entry.category.name.lower(),
             "operation": entry.operation.value,
             "subject": entry.subject,
-            "detail": entry.detail,
+            "detail": " ".join(entry.detail),
         }
-        for action in plan
-        for entry in action_entries(action)
+        for entry in plan_entries(plan)
     ]
 
 
@@ -85,7 +112,7 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
         {
             "phase": failure.phase.name,
             "type": type(failure).__name__,
-            "message": " ".join(line.strip() for line in failure.format_lines()),
+            "message": " ".join(failure.format_lines()),
         }
         for failure in failures
     ]
@@ -200,6 +227,20 @@ class TableRunReport:
         """True when the plan holds actions — drift was found and validated."""
         return bool(self.plan)
 
+    @property
+    def creates_table(self) -> bool:
+        """True when the plan brings the table into existence rather than altering it."""
+        return any(isinstance(action, CreateTable) for action in self.plan or ())
+
+    @property
+    def statement_progress(self) -> StatementProgress | None:
+        """How far execution got, or ``None`` when it did not run."""
+        if self.execution is None:
+            return None
+        return StatementProgress(
+            applied=self.execution.applied_count, planned=len(self.planned_sql_statements)
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """
         Project this table's run as plain, JSON-serialisable data.
@@ -207,13 +248,10 @@ class TableRunReport:
         The field names are a public stability contract (see the run report
         reference doc); changing them is a breaking change.
         """
-        if self.execution is None:
-            execution_record: dict[str, int] | None = None
-        else:
-            execution_record = {
-                "applied": self.execution.applied_count,
-                "total": len(self.planned_sql_statements),
-            }
+        progress = self.statement_progress
+        execution_record = (
+            None if progress is None else {"applied": progress.applied, "total": progress.planned}
+        )
         return {
             "name": str(self.qualified_name),
             "status": self.status.value,
@@ -287,6 +325,30 @@ class SyncReport:
         ``report.has_failures or report.has_changes``.
         """
         return any(table_report.has_changes for table_report in self.table_reports)
+
+    @property
+    def duration_seconds(self) -> float:
+        """Wall-clock seconds the run took, start to end."""
+        return (self.ended_at - self.started_at).total_seconds()
+
+    @property
+    def counts(self) -> RunCounts:
+        """
+        Per-outcome table counts.
+
+        A table that failed counts as failed whatever else it planned: the
+        planned changes were not applied, so reporting them as changes would
+        overstate what the run achieved.
+        """
+        changed = unchanged = failed = 0
+        for table_report in self.table_reports:
+            if table_report.has_failures:
+                failed += 1
+            elif table_report.has_changes:
+                changed += 1
+            else:
+                unchanged += 1
+        return RunCounts(changed=changed, unchanged=unchanged, failed=failed)
 
     @property
     def planned_sql_statements(self) -> dict[str, tuple[str, ...]]:

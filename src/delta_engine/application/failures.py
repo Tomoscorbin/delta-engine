@@ -75,11 +75,23 @@ def _message_head(message: str) -> str:
 class Failure(ABC):
     """A failure that can render itself as display lines, tagged with its phase."""
 
-    phase: ClassVar[FailurePhase]  # TODO: enforce phase
+    phase: ClassVar[FailurePhase]
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        # A report derives a table's status from the earliest failing phase, so
+        # a failure without one fails there rather than where it was written.
+        super().__init_subclass__(**kwargs)
+        if not hasattr(cls, "phase"):
+            raise TypeError(f"{cls.__name__} must declare the phase that produces it")
 
     @abstractmethod
     def format_lines(self) -> tuple[str, ...]:
-        """Return one or more human-readable lines describing this failure."""
+        """
+        Return the human-readable lines describing this failure.
+
+        Lines carry no indentation: how deeply a report nests them is the
+        renderer's decision, and the machine projection joins them flat.
+        """
         ...
 
     @abstractmethod
@@ -132,7 +144,7 @@ class ExecutionFailure(Failure):
         return (
             f"Execution failed at statement {self.statement_index}: "
             f"{self.exception_type} - {_message_head(self.message)}",
-            f"    SQL: {self.statement}",
+            f"SQL: {self.statement}",
         )
 
     def headline(self) -> str:
@@ -149,13 +161,22 @@ class ForeignKeyFailure(Failure):
     references: QualifiedName
     reason: ForeignKeyFailureReason
 
+    @property
+    def _constraint(self) -> str:
+        """
+        How a message names the constraint that failed.
+
+        A table may carry several foreign keys, so the local columns and the
+        referenced table are what identify one to a reader — the constraint
+        name is generated and means nothing to them.
+        """
+        return f"({', '.join(self.local_columns)}) → {self.references}"
+
     def format_lines(self) -> tuple[str, ...]:
-        columns = ", ".join(self.local_columns)
         return (
-            f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
+            f"Foreign key {self._constraint} on {self.table} was not applied: "
             f"{self.reason.detail}.",
         )
 
     def headline(self) -> str:
-        columns = ", ".join(self.local_columns)
-        return f"Foreign key ({columns}) → {self.references} not applied"
+        return f"Foreign key {self._constraint} not applied"
