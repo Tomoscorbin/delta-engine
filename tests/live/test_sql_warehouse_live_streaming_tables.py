@@ -206,10 +206,10 @@ def test_alter_streaming_table_manages_tags_and_comments(live_connection, live_t
     assert _column_comments(live_connection, table_name) == {"id": ""}
 
 
-def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
+def test_a_streaming_table_syncs_annotations_and_refuses_a_wider_scope(
     live_connection, live_tables
 ):
-    """A streaming table syncs tags to convergence; any wider scope is refused."""
+    """A streaming table syncs comments and tags to convergence; a wider scope is refused."""
     # Supersedes the old supported-relations pin that read streaming tables
     # as failed: they are now engine state, discovered — never declared. The
     # read, the round-trip, the convergence resync, and the wider-scope
@@ -229,26 +229,38 @@ def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
         live_catalog(),
         live_schema(),
         table_name,
-        columns=(Column("id", Integer(), tags={"pii": "low"}),),
+        columns=(Column("id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}),),
+        primary_key=["id"],  # mirrors the pipeline's key; never applied
+        comment="Click events, owned by the ingest pipeline.",
         tags={"owner": "governance"},
-        scope="tags",
+        scope="annotations",
     )
     engine.sync(declaration)
 
+    assert _table_comment(live_connection, table_name) == (
+        "Click events, owned by the ingest pipeline."
+    )
+    assert _column_comments(live_connection, table_name) == {"id": "the id"}
     assert _table_tags(live_connection, table_name) == {"owner": "governance"}
     assert _column_tags(live_connection, table_name) == {("id", "pii"): "low"}
-    # The reader must round-trip the tags the executor just wrote through the
-    # ALTER STREAMING TABLE dialect: a resync finds nothing left to do.
+
+    # The reader must round-trip everything the executor just wrote through the
+    # ALTER STREAMING TABLE and COMMENT ON statements: a resync finds nothing
+    # left to do. This is also what verifies the mirroring contract — had the
+    # platform not reported the pipeline's key, mirroring it would have emitted
+    # SetPrimaryKey and failed UnmanagedAspectDrift instead of converging.
     assert engine.sync(declaration).has_changes is False
 
-    # Anything wider than tags is refused before planning — even when the
-    # declaration mirrors the observed state exactly, so the refusal is about
-    # the table's kind, not about drift.
+    # Anything wider than annotations is refused before planning — even when
+    # the declaration mirrors the observed state exactly, so the refusal is
+    # about the table's kind, not about drift.
     full_scope = DeltaTable(
         live_catalog(),
         live_schema(),
         table_name,
-        columns=(Column("id", Integer(), tags={"pii": "low"}),),
+        columns=(Column("id", Integer(), nullable=False, comment="the id", tags={"pii": "low"}),),
+        primary_key=["id"],
+        comment="Click events, owned by the ingest pipeline.",
         tags={"owner": "governance"},
     )
     with pytest.raises(SyncFailedError) as error:
