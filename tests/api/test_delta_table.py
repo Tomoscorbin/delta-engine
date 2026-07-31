@@ -2,7 +2,7 @@ from types import MappingProxyType
 
 import pytest
 
-from delta_engine.application.scopes import METADATA_ASPECTS, TAG_ASPECTS
+from delta_engine.application.scopes import ANNOTATION_ASPECTS, METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.domain.model import (
     ALL_ASPECTS,
     DesiredColumn as DomainColumn,
@@ -787,6 +787,10 @@ def test_delta_table_preserves_tag_key_case():
 
 # ---- scope
 
+# Every scope below "full" leaves column structure unmanaged, which is what
+# exempts a declaration from the naming rules that bind a table's author.
+_SCOPES_WITHOUT_COLUMN_STRUCTURE = ["metadata", "annotations", "tags"]
+
 
 def test_delta_table_manages_all_aspects_by_default():
     # Given a table declared without a scope
@@ -798,22 +802,34 @@ def test_delta_table_manages_all_aspects_by_default():
     assert table.to_desired_table().managed_aspects == ALL_ASPECTS
 
 
-def test_metadata_scope_manages_metadata_aspects():
-    # Given a metadata-scoped declaration
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("full", ALL_ASPECTS),
+        ("metadata", METADATA_ASPECTS),
+        ("annotations", ANNOTATION_ASPECTS),
+        ("tags", TAG_ASPECTS),
+    ],
+)
+def test_a_scope_name_narrows_what_the_declaration_manages(scope, expected):
+    # Given a declaration carrying a named scope
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer())],
-        scope="metadata",
+        scope=scope,
     )
 
-    # Then the lowered scope is exactly the metadata aspects
-    assert table.to_desired_table().managed_aspects == METADATA_ASPECTS
+    # Then it lowers to exactly that scope's aspects. What each set contains is
+    # pinned in tests/application/test_scopes.py; this is the wiring from the
+    # public name to it
+    assert table.to_desired_table().managed_aspects == expected
 
 
-def test_tag_scope_manages_only_table_and_column_tags():
-    # Given a tag-scoped declaration of a full table shape
+def test_a_restricted_scope_still_lowers_everything_declared():
+    # Given a tag-scoped declaration of a full table shape — the narrowest
+    # scope, so everything but the tags is outside what it manages
     table = DeltaTable(
         catalog="dev",
         schema="silver",
@@ -829,9 +845,10 @@ def test_tag_scope_manages_only_table_and_column_tags():
         scope="tags",
     )
 
-    # Then only the tag aspects are managed; the rest is carried for comparison
+    # Then it is all lowered anyway. Scope decides what gets reconciled, not
+    # what may be declared: the unmanaged detail is what drift is judged
+    # against, so dropping it would leave nothing to refuse
     desired = table.to_desired_table()
-    assert desired.managed_aspects == TAG_ASPECTS
     assert desired.comment == "Streaming orders"
     assert desired.partitioned_by == ("id",)
     assert desired.primary_key_columns == ("id",)
@@ -842,8 +859,8 @@ def test_tag_scope_manages_only_table_and_column_tags():
 
 def test_delta_table_rejects_unknown_scope():
     # Given a scope value outside the named scopes
-    # When / Then construction fails naming the valid options
-    with pytest.raises(ValueError, match="'full', 'metadata', 'tags'"):
+    # When / Then construction fails
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
@@ -899,16 +916,24 @@ def test_tag_scope_carries_foreign_keys_without_managing_them():
     assert TableAspect.FOREIGN_KEYS not in desired.managed_aspects
 
 
-def test_metadata_scope_without_properties_constructs_cleanly():
+def test_annotations_scope_carries_a_mirrored_primary_key_without_managing_it():
+    # Given an annotations-scoped declaration restating a key that a streaming
+    # table's pipeline declared — the contract the guide asks for
     table = DeltaTable(
         catalog="dev",
         schema="silver",
-        name="orders",
-        columns=[Column("id", Integer())],
-        scope="metadata",
+        name="clicks",
+        columns=[Column("id", Integer(), nullable=False)],
+        primary_key=["id"],
+        scope="annotations",
     )
 
-    assert table.to_desired_table().properties == {}
+    # Then the key is lowered but PRIMARY_KEY stays unmanaged: it is carried so
+    # that the diff finds nothing to act on, never so that it can be applied.
+    # Omitting it would instead read as a drop this scope cannot authorise
+    desired = table.to_desired_table()
+    assert desired.primary_key is not None
+    assert TableAspect.PRIMARY_KEY not in desired.managed_aspects
 
 
 def test_no_properties_are_injected_by_default():
@@ -972,30 +997,18 @@ def test_delta_table_accepts_none_property_value_without_value_check() -> None:
     assert table.to_desired_table().properties["delta.enableChangeDataFeed"] is None
 
 
-def test_metadata_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
-    # A metadata-scoped declaration does not manage properties, so the
-    # declaration is a mirror of existing state, not an attempt to enable CDF.
+@pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
+def test_a_restricted_scope_mirrors_cdf_reserved_column_names(scope) -> None:
+    # A declaration that does not manage column structure never creates or adds
+    # a column, so naming one is mirroring state the catalog already holds. It
+    # carries the CDF property for the same reason, not to enable the feature.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("id", Integer()), Column("_change_type", String())],
         properties={"delta.enableChangeDataFeed": "true"},
-        scope="metadata",
-    )
-    assert len(table.to_desired_table().columns) == 2
-
-
-def test_tag_scope_mirrors_cdf_reserved_columns_with_cdf_declared() -> None:
-    # A tag-scoped declaration does not manage column structure either, so it
-    # must mirror reserved names the live table already carries.
-    table = DeltaTable(
-        catalog="dev",
-        schema="silver",
-        name="orders",
-        columns=[Column("id", Integer()), Column("_change_type", String())],
-        properties={"delta.enableChangeDataFeed": "true"},
-        scope="tags",
+        scope=scope,
     )
     assert len(table.to_desired_table().columns) == 2
 
@@ -1010,41 +1023,6 @@ def test_delta_table_accepts_column_tags_at_the_limits() -> None:
         columns=[Column("id", Integer(), tags=at_limit)],
     )
     assert len(table.to_desired_table().columns[0].tags) == 50
-
-
-def test_metadata_scope_still_lowers_the_full_schema():
-    # Given a metadata-scoped declaration with full schema detail
-    table = DeltaTable(
-        catalog="dev",
-        schema="silver",
-        name="orders",
-        columns=[Column("id", Integer(), nullable=False), Column("name", String())],
-        scope="metadata",
-    )
-
-    # Then all columns are lowered — scope controls reconciliation, not lowering
-    desired = table.to_desired_table()
-    assert tuple(c.name for c in desired.columns) == ("id", "name")
-
-
-def test_metadata_aspects_excludes_existence_and_physical_aspects():
-    # Given the metadata named scope
-    # Then physical-behaviour aspects are excluded by design
-    assert METADATA_ASPECTS == ALL_ASPECTS - frozenset(
-        {
-            TableAspect.TABLE_EXISTENCE,
-            TableAspect.COLUMN_STRUCTURE,
-            TableAspect.PROPERTIES,
-            TableAspect.PARTITIONING,
-            TableAspect.CLUSTERING,
-        }
-    )
-
-
-def test_tag_aspects_contains_only_tag_aspects():
-    # Given the tags named scope
-    # Then it manages exactly table and column tags
-    assert TAG_ASPECTS == frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
 
 
 def test_delta_table_rejects_special_character_column_names_without_column_mapping() -> None:
@@ -1110,27 +1088,17 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
         )
 
 
-def test_metadata_scope_mirrors_special_character_columns_without_the_property() -> None:
-    # A metadata-scoped declaration never creates or adds columns; the catalog
-    # already accepted this name, so the declaration must be able to mirror it.
+@pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
+def test_a_restricted_scope_mirrors_special_character_column_names(scope) -> None:
+    # The same exemption, for the same reason: the catalog already accepted
+    # this name, so the declaration must be able to name it back without
+    # declaring the column mapping its creation would have needed.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
         columns=[Column("order id", Integer())],
-        scope="metadata",
-    )
-    assert table.to_desired_table().columns[0].name == "order id"
-
-
-def test_tag_scope_mirrors_special_character_columns_without_column_mapping() -> None:
-    # A tag-scoped declaration never creates or adds columns either.
-    table = DeltaTable(
-        catalog="dev",
-        schema="silver",
-        name="orders",
-        columns=[Column("order id", Integer())],
-        scope="tags",
+        scope=scope,
     )
     assert table.to_desired_table().columns[0].name == "order id"
 

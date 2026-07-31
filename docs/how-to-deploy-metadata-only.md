@@ -66,16 +66,18 @@ metadata is applied.
 Both failures are laws rather than rules, listed in
 [safe-change rules](reference-safe-change-rules.md).
 
-## Tag a streaming table
+## Annotate a streaming table
 
-`scope="tags"` extends to streaming tables. A streaming table's definition —
-schema, comments, properties — is owned by its pipeline, and out-of-band
-changes to those can be reverted on refresh; Unity Catalog tags persist, so
-tags are the one aspect the engine can durably manage there. The engine
-discovers the relation kind when it reads the table (nothing is declared),
-compiles tag changes as `ALTER STREAMING TABLE`, and rejects any wider scope:
+`scope="annotations"` extends to streaming tables, as does the narrower
+`scope="tags"`. A streaming table's definition — schema, properties, and
+keys — is owned by its pipeline and belongs to `CREATE OR REFRESH`; comments
+and Unity Catalog tags sit outside it, and are exactly what
+`ALTER STREAMING TABLE` and `COMMENT ON` reach. The
+engine discovers the relation kind when it reads the table (nothing is
+declared), compiles column comments and tag changes as `ALTER STREAMING
+TABLE`, the table comment as `COMMENT ON TABLE`, and rejects any wider scope:
 a `"full"` or `"metadata"` declaration against a streaming table fails
-validation (`StreamingTableTagsOnly`) even when nothing has drifted.
+validation (`StreamingTableAnnotationsOnly`) even when nothing has drifted.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, Integer
@@ -84,16 +86,40 @@ clicks = DeltaTable(
     catalog="dev",
     schema="silver",
     name="clicks",
-    columns=[Column("id", Integer(), tags={"pii": "low"})],
+    columns=[Column("id", Integer(), nullable=False, tags={"pii": "low"})],
+    primary_key=["id"],        # mirrors the pipeline's key; never applied
     tags={"owner": "governance"},
-    scope="tags",
+    comment="Click events, owned by the ingest pipeline.",
+    scope="annotations",
 )
 ```
+
+### Mirror the pipeline's keys
+
+A restricted scope still declares the full table shape, and keys are no
+exception. If the pipeline's `CREATE STREAMING TABLE` declares a primary key,
+the declaration must mirror it — as `primary_key=["id"]` above. The engine
+never applies it: the declared and observed keys match, so no difference is
+emitted at all. Omitting it is not neutral, because `primary_key=None` is a
+positive assertion of absence everywhere else in the engine; the sync would
+fail `UnmanagedAspectDrift` on a key this scope cannot manage.
+
+If the pipeline later changes the key, the mirror stops matching and the next
+sync fails the same way. That is late but loud, and it is the only honest
+answer available: the engine cannot reconcile a key the pipeline owns, and
+must not pretend otherwise. Update the declaration to the new reality.
+
+A comment declared in the pipeline's own defining SQL is a different matter:
+`CREATE OR REFRESH` is fully declarative, so a refresh can revert a comment
+this engine set, and the next sync will set it again. The engine cannot read
+the pipeline's SQL and so cannot warn about it. Do not manage a comment from
+both places.
 
 Materialized views remain unsupported: a name that resolves to one still
 fails its read. See [limitations](reference-limitations.md).
 
 ## Mixing scopes in one sync
 
-`scope` is per-table, not per-sync. A single `engine.sync(...)` call
-can include fully managed, metadata-scoped, and tag-scoped tables.
+`scope` is per-table, not per-sync. A single `engine.sync(...)` call can
+include fully managed, metadata-scoped, annotations-scoped, and tag-scoped
+tables.

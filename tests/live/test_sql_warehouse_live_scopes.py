@@ -1,4 +1,12 @@
-"""Live proofs that restricted scopes change only the catalog aspects they own."""
+"""
+Live proofs that restricted scopes change only the catalog aspects they own.
+
+There is deliberately no ``annotations`` pin here. Every statement form that
+scope emits against an ordinary Delta table is already driven by the metadata
+and tags pins below, so a third would state no platform fact they do not. What
+distinguishes it — reaching a streaming table, where keys and structure belong
+to the pipeline — is pinned in ``test_sql_warehouse_live_streaming_tables.py``.
+"""
 
 import pytest
 

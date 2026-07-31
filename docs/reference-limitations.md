@@ -12,7 +12,7 @@ the page with the detail.
 
 | Requirement           | Supported                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader reads managed and external Delta tables, plus Delta streaming tables for tag-only management, and any other relation a registered name resolves to (view, materialized view, foreign table, non-Delta format) fails its read ([architecture](explanation-architecture.md)) |
+| Backend               | Delta Lake tables on Databricks with Unity Catalog — the supported target today; the reader reads managed and external Delta tables, plus Delta streaming tables for comment and tag management, and any other relation a registered name resolves to (view, materialized view, foreign table, non-Delta format) fails its read ([architecture](explanation-architecture.md)) |
 | Python                | 3.12 or later                                                                                                                                                                                                                                                                                                                                                          |
 | PySpark               | Supplied by Databricks Runtime for the Spark backend and not installed by delta-engine; the SQL warehouse backend needs none. Declaring and planning are pure Python either way ([installation](installation.md))                                                                                                                                                       |
 | Reads (both backends) | Unity Catalog only — every existing-table read uses one `DESCRIBE TABLE EXTENDED … AS JSON` for table shape, properties, and supported features, plus `information_schema` for tags, primary and foreign keys, and inbound foreign keys; a `hive_metastore` or other non-UC table is not readable and surfaces as a read failure on both backends ([installation](installation.md)) |
@@ -47,9 +47,10 @@ that resolve case-sensitively. Columns the sync creates are spelled as
 declared — a table that does not yet exist has no catalog spelling to agree
 with.
 
-Exactness holds at every scope. A `scope="metadata"` or `scope="tags"`
-declaration still names the columns it keys, comments, or tags, so it is
-judged the same way; narrowing the scope does not narrow this rule.
+Exactness holds at every scope. A `scope="metadata"`, `scope="annotations"`,
+or `scope="tags"` declaration still names the columns it keys, comments, or
+tags, so it is judged the same way; narrowing the scope does not narrow this
+rule.
 `DESCRIBE TABLE` shows the spelling to copy. Callers that relied on lowercase
 accessor values should apply their own presentation policy.
 
@@ -81,7 +82,8 @@ columns](how-to-configure-table.md#column-mapping-and-dropping-columns).
 | Clustering                |       ✓       | Liquid clustering keys are reconciled in place, unlike partitioning ([clustering](how-to-configure-table.md#clustering))                                                                                                  |
 | Metadata-only scope       |       ✓       | `scope="metadata"` restricts a sync to comments, tags, and keys ([guide](how-to-deploy-metadata-only.md))                                                                                                                 |
 | Tag-only scope            |       ✓       | `scope="tags"` restricts a sync to table and column tags ([tags](how-to-configure-table.md#manage-tags-only))                                                                                                             |
-| Streaming tables          |   Tags only   | Discovered at read time; only `scope="tags"` declarations may target one — schema, comments, and properties belong to the owning pipeline ([guide](how-to-deploy-metadata-only.md#tag-a-streaming-table))                 |
+| Annotations scope         |       ✓       | `scope="annotations"` restricts a sync to comments and tags ([annotations](how-to-configure-table.md#manage-comments-and-tags-only))                                                                                      |
+| Streaming tables          | Comments and tags | Discovered at read time; only `scope="annotations"` and `scope="tags"` declarations may target one — schema, properties, and keys belong to the owning pipeline and must be mirrored, not managed ([guide](how-to-deploy-metadata-only.md#annotate-a-streaming-table)) |
 | Dry run                   |       ✓       | Full plan and validation, zero mutations ([guide](how-to-preview-changes.md))                                                                                                                                             |
 
 ## Outside the model
@@ -95,10 +97,17 @@ changes, or drops them, and they produce no drift.
 | Key constraint options (`RELY`, `MATCH`, `ON UPDATE`/`ON DELETE`) | Keys are created with Databricks defaults (`NOT ENFORCED NORELY`); option drift is invisible, and an out-of-band `RELY` is lost when a primary-key change drops and re-adds the key            |
 | `UNIQUE` constraints                                              | Cannot be declared or used as a registered foreign-key target, even on Databricks versions that support them                                                                                   |
 | Identity and generated columns                                    | Generation expressions are invisible; one that references a renamed column must be changed before the rename                                                                                   |
-| Views and materialized views                                      | Unsupported; a registered name that resolves to a view or materialized view fails its read rather than being planned against (streaming tables, by contrast, are read for tag-only management) |
+| Views and materialized views                                      | Unsupported; a registered name that resolves to a view or materialized view fails its read rather than being planned against (streaming tables, by contrast, are read for comment and tag management) |
 | External table creation                                           | Existing external Delta tables are read and reconciled like managed ones, but the engine creates managed tables only: a location cannot be declared, and an absent table is created managed    |
 | Grants, row filters, column masks                                 | Governance beyond comments and tags is out of scope                                                                                                                                            |
 | Data                                                              | The engine runs DDL only; it never reads, writes, or backfills rows                                                                                                                            |
+
+A comment this engine sets on a streaming table can be reverted by the owning
+pipeline. `CREATE OR REFRESH` is fully declarative, so a refresh re-applies
+the pipeline's own comment and deletes metadata the refresh does not specify.
+The engine cannot read the pipeline's defining SQL, so it cannot warn: a
+contested comment re-drifts on every pipeline update and each sync sets it
+again. Manage a given comment from one place only.
 
 ## Type support
 

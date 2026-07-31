@@ -373,11 +373,37 @@ to match the live table or use the full scope. Properties are the exception:
 a restricted scope never compares them, so live table properties cannot fail
 the sync.
 
-Streaming tables are supported here and only here: the engine discovers the
-relation kind at read time and compiles tag changes with the
-`ALTER STREAMING TABLE` dialect, while any wider scope against one fails
-validation. See
-[tag a streaming table](how-to-deploy-metadata-only.md#tag-a-streaming-table).
+### Manage comments and tags only
+
+Use `scope="annotations"` when the table's structure belongs to someone else
+but its catalog documentation should still be governed here. It manages the
+table comment, column comments, table tags, and column tags — a superset of
+`"tags"` and a subset of `"metadata"`, which adds key constraints on top.
+
+```python
+from delta_engine.schema import Column, DeltaTable, String
+
+events = DeltaTable(
+    catalog="dev",
+    schema="silver",
+    name="streaming_events",
+    columns=[
+        Column("id", String(), comment="Event identifier"),
+        Column("email", String(), comment="Contact address", tags={"pii": "true"}),
+    ],
+    comment="Raw events, owned by the ingest pipeline.",
+    tags={"domain": "events"},
+    scope="annotations",
+)
+```
+
+Streaming tables are supported under `"annotations"` and `"tags"`, and no
+wider scope: the engine discovers the relation kind at read time, compiles
+column comments and tags with the `ALTER STREAMING TABLE` dialect and the
+table comment with `COMMENT ON TABLE`, and rejects a scope claiming schema,
+properties, or keys. A key the owning pipeline declared must be mirrored in
+the declaration. See
+[annotate a streaming table](how-to-deploy-metadata-only.md#annotate-a-streaming-table).
 
 ### Requirements and limits
 

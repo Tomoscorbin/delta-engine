@@ -594,7 +594,7 @@ class DeltaTable:
     Defines a Delta table schema.
 
     ``scope`` selects how much of the table the declaration manages: the whole
-    table (default), catalog metadata only, or tags only.
+    table (default), catalog metadata, comments and tags, or tags alone.
 
     Note on dropping columns: Delta only permits ``ALTER TABLE ... DROP COLUMN``
     when ``delta.columnMapping.mode`` is ``name``. Declare it in ``properties``
@@ -639,16 +639,22 @@ class DeltaTable:
             scope: What this declaration manages. ``"full"`` (the default)
                 manages the whole table. ``"metadata"`` restricts the sync to
                 catalog metadata: comments, tags, and primary/foreign key
-                constraints. ``"tags"`` restricts it to table and column tags
-                — for tables owned elsewhere whose Unity Catalog tags this
-                engine should still govern. Streaming tables are supported
-                under this scope and only this scope: their definition
-                belongs to the owning pipeline, so any wider scope against
-                one fails validation. A
-                restricted scope still declares the full table shape; aspects
-                outside the scope are never changed, and drift on them fails
-                validation. Properties are the exception: a declaration that
-                does not manage properties never compares them at all.
+                constraints. ``"annotations"`` restricts it further to the
+                table comment, column comments, table tags, and column tags —
+                for a table whose structure and keys belong to someone else.
+                ``"tags"`` restricts it to table and column tags alone. The
+                scopes nest: tags ⊂ annotations ⊂ metadata ⊂ full.
+                Streaming tables are supported under ``"annotations"`` and
+                ``"tags"``, and no wider scope: their definition — schema,
+                properties, and keys — belongs to the owning pipeline, so a
+                declaration managing more than comments and tags fails
+                validation. A restricted scope still declares the full table
+                shape; aspects outside the scope are never changed, and drift
+                on them fails validation. A key the pipeline declared must
+                therefore be mirrored in ``primary_key`` — it is never
+                applied, and mirroring it is what keeps it from reading as
+                drift. Properties are the exception: a declaration that does
+                not manage properties never compares them at all.
 
         """
         declaration = _normalize_declaration(

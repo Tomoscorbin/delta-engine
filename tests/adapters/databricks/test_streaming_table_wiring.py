@@ -1,10 +1,13 @@
 """
-End-to-end dry run against an observed streaming table.
+The observed relation kind reaches the compiler and the safety rules.
 
-Wires the real warehouse reader, engine, validation, and SQL compiler over a
-canned DESCRIBE AS JSON document: a tags-scope declaration against a streaming
-table plans ALTER STREAMING TABLE statements, and any wider scope fails
-validation before SQL is planned.
+A streaming table is discovered, never declared: the reader derives the kind
+from DESCRIBE ... AS JSON, and every downstream decision depends on the engine
+carrying that kind through. The statement text belongs to
+tests/adapters/databricks/sql/test_compile.py and the refusal rule to
+tests/application/test_validation.py, both of which take the kind as given.
+What is pinned here is only that the kind the reader observed is the kind they
+are handed.
 """
 
 import json
@@ -29,6 +32,8 @@ from delta_engine.schema import Column, DeltaTable, Integer
 
 QN = QualifiedName("cat", "sch", "clicks")
 
+# The comments are stale on purpose: a declaration that differs from them plans
+# the statement under test, and one that mirrors them plans nothing at all.
 _STREAMING_DOC = json.dumps(
     {
         "table_name": "clicks",
@@ -36,8 +41,10 @@ _STREAMING_DOC = json.dumps(
         "schema_name": "sch",
         "type": "STREAMING_TABLE",
         "provider": "delta",
-        "columns": [{"name": "id", "type": {"name": "int"}, "nullable": True}],
-        "comment": "",
+        "columns": [
+            {"name": "id", "type": {"name": "int"}, "nullable": True, "comment": "stale id"}
+        ],
+        "comment": "stale table comment",
         "table_properties": {},
     }
 )
@@ -87,46 +94,51 @@ def _engine() -> Engine:
     )
 
 
-def test_tags_scope_dry_run_plans_streaming_table_ddl():
-    # Given a tags-scope declaration over a described streaming table with
-    # one tag to set, one to unset, and one column tag to set
+def test_an_observed_streaming_table_compiles_in_the_streaming_dialect():
+    # Given an annotations-scope declaration whose column comment differs from
+    # the observed streaming table's
     declaration = DeltaTable(
         "cat",
         "sch",
         "clicks",
-        columns=(Column("id", Integer(), tags={"pii": "low"}),),
-        tags={"owner": "governance"},
-        scope="tags",
+        columns=(Column("id", Integer(), comment="the id"),),
+        comment="stale table comment",
+        tags={"stale": "remove-me"},
+        scope="annotations",
     )
 
     # When dry-running a sync
     report = _engine().sync(declaration, dry_run=True)
 
-    # Then the planned SQL carries the streaming-table dialect end to end
+    # Then the column work carries the streaming prefix and nothing falls back
+    # to the plain one. Nothing declares the kind, so this is the only check
+    # that the compiler was handed the kind the reader observed
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    assert set(table_report.planned_sql_statements) == {
-        "ALTER STREAMING TABLE `cat`.`sch`.`clicks` SET TAGS ('owner'='governance')",
-        "ALTER STREAMING TABLE `cat`.`sch`.`clicks` UNSET TAGS ('stale')",
-        "ALTER STREAMING TABLE `cat`.`sch`.`clicks` ALTER COLUMN `id` SET TAGS ('pii'='low')",
-    }
+    planned = table_report.planned_sql_statements
+    assert (
+        "ALTER STREAMING TABLE `cat`.`sch`.`clicks` ALTER COLUMN `id` COMMENT 'the id'" in planned
+    )
+    assert not any(statement.startswith("ALTER TABLE ") for statement in planned)
 
 
-def test_full_scope_dry_run_fails_validation_against_a_streaming_table():
-    # Given a full-scope declaration whose shape exactly matches the streaming
-    # table — zero drift, but the declaration claims the whole table
+def test_an_observed_streaming_table_refuses_a_wider_scope_before_planning():
+    # Given a full-scope declaration whose shape exactly matches the observed
+    # streaming table — zero drift, but the declaration claims the whole table
     declaration = DeltaTable(
         "cat",
         "sch",
         "clicks",
-        columns=(Column("id", Integer()),),
+        columns=(Column("id", Integer(), comment="stale id"),),
+        comment="stale table comment",
         tags={"stale": "remove-me"},
     )
 
     # When dry-running a sync
     report = _engine().sync(declaration, dry_run=True)
 
-    # Then validation rejects the declaration on kind alone; no SQL is planned
+    # Then the observed kind reaches validation, which refuses the declaration
+    # on kind alone and leaves nothing to execute
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert table_report.planned_sql_statements == ()
@@ -135,4 +147,4 @@ def test_full_scope_dry_run_fails_validation_against_a_streaming_table():
         for failure in table_report.failures
         if isinstance(failure, ValidationFailure)
     }
-    assert "StreamingTableTagsOnly" in rule_names
+    assert "StreamingTableAnnotationsOnly" in rule_names

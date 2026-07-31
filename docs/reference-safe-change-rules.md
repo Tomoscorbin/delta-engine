@@ -75,7 +75,7 @@ regardless of the rule set. They are the `ELIGIBILITY_CHECKS` in
 | `ColumnSpellingMustMatchCatalog` | A declared column (or `renamed_from` reference) spelled differently from the catalog — case must match exactly | Update the declaration to the catalog's exact spelling (`DESCRIBE TABLE` shows it)     |
 | `UnmanagedAspectDrift`           | An unmanaged aspect (e.g. column structure) has drifted from the declaration in a restricted-scope sync  | Sync the table fully, or update the declaration to match the live schema              |
 | `MissingTableUnmanaged`          | The table does not exist but this definition does not manage table existence                            | Create the table out-of-band first, or manage it fully                                |
-| `StreamingTableTagsOnly`         | The observed table is a streaming table and the declaration manages more than tags                      | Declare it with `scope="tags"`; the table's definition belongs to its owning pipeline |
+| `StreamingTableAnnotationsOnly`  | The observed table is a streaming table and the declaration manages more than comments and tags | Declare it with `scope="annotations"` or `scope="tags"`; the table's schema, properties, and keys belong to its owning pipeline |
 
 `ColumnSpellingMustMatchCatalog` is judged at every scope, because a misspelled
 column reference is a defect in the declaration rather than drift in one of the
@@ -84,11 +84,13 @@ columns, and naming them wrongly is wrong whatever else it declines to manage.
 It is reported first when several of these fire, so the actionable root defect
 leads rather than a consequence of it.
 
-`StreamingTableTagsOnly` judges the declaration against the observed relation
-kind, not against drift, so it fires even when the streaming table is
-currently in sync. Comments and properties stay unmanageable on streaming
-tables deliberately: the pipeline definition owns them and a refresh can
-revert out-of-band changes, whereas Unity Catalog tags persist.
+`StreamingTableAnnotationsOnly` judges the declaration against the observed
+relation kind, not against drift, so it fires even when the streaming table is
+currently in sync. The line it draws is the defining SQL: schema, properties,
+and keys belong to `CREATE OR REFRESH` and stay unmanageable, while comments
+and Unity Catalog tags are alterable from outside the pipeline and are
+manageable. A key the pipeline declared must be mirrored in the declaration to
+keep it from reading as unmanaged drift.
 
 ## Declaration-time checks
 
