@@ -8,41 +8,23 @@ from delta_engine.application.scopes import (
 )
 from delta_engine.domain.model import ALL_ASPECTS, TableAspect
 
+COMMENTS = frozenset({TableAspect.TABLE_COMMENT, TableAspect.COLUMN_COMMENTS})
+TAGS = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+KEYS = frozenset({TableAspect.PRIMARY_KEY, TableAspect.FOREIGN_KEYS})
+
 
 @pytest.mark.parametrize(
     ("scope", "expected"),
     [
         ("full", ALL_ASPECTS),
-        (
-            "metadata",
-            frozenset(
-                {
-                    TableAspect.TABLE_COMMENT,
-                    TableAspect.COLUMN_COMMENTS,
-                    TableAspect.TABLE_TAGS,
-                    TableAspect.COLUMN_TAGS,
-                    TableAspect.PRIMARY_KEY,
-                    TableAspect.FOREIGN_KEYS,
-                }
-            ),
-        ),
-        (
-            "annotations",
-            frozenset(
-                {
-                    TableAspect.TABLE_COMMENT,
-                    TableAspect.COLUMN_COMMENTS,
-                    TableAspect.TABLE_TAGS,
-                    TableAspect.COLUMN_TAGS,
-                }
-            ),
-        ),
-        ("tags", frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})),
+        ("metadata", COMMENTS | TAGS | KEYS),
+        ("annotations", COMMENTS | TAGS),
+        ("tags", TAGS),
     ],
 )
 def test_each_scope_name_resolves_to_its_aspects(scope, expected):
-    # Spelled out rather than compared against the module's own constants, so
-    # this states each scope's definition instead of restating it
+    # Built from groups named here rather than from the module's own constants,
+    # so this states each scope's definition instead of restating it
     assert managed_aspects_for(scope) == expected
 
 

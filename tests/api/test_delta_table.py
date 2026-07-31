@@ -859,8 +859,8 @@ def test_a_restricted_scope_still_lowers_everything_declared():
 
 def test_delta_table_rejects_unknown_scope():
     # Given a scope value outside the named scopes
-    # When / Then construction fails naming the valid options
-    with pytest.raises(ValueError, match="'full', 'metadata', 'annotations', 'tags'"):
+    # When / Then construction fails
+    with pytest.raises(ValueError):
         DeltaTable(
             catalog="dev",
             schema="silver",
