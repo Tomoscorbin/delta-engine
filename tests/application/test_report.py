@@ -37,6 +37,7 @@ from delta_engine.domain.model import (
 )
 from delta_engine.domain.plan.actions import (
     ActionPlan,
+    CreateTable,
     EnableTableFeature,
     SetTableComment,
     SetTableTag,
@@ -246,6 +247,61 @@ def test_sync_report_has_no_changes_when_no_table_plans_actions():
     )
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
     assert report.has_changes is False
+
+
+def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
+    # Given a run with one changed, one unchanged, and one failed table
+    changed = _report(
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
+    )
+    unchanged = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+    failed = _report(
+        desired=_a_desired_table("c"),
+        read=ReadFailure(exception_type="AnalysisException", message="nope"),
+    )
+    report = SyncReport(
+        started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged, failed)
+    )
+
+    # Then each is counted once, and the total is their sum
+    counts = report.counts
+    assert (counts.changed, counts.unchanged, counts.failed) == (1, 1, 1)
+    assert counts.total == len(report.table_reports)
+
+
+def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
+    # Given a table that planned a change but whose execution failed
+    statement = "COMMENT ON TABLE `cat`.`schema`.`a` IS 'hello'"
+    failed = _report(
+        desired=_a_desired_table("a"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
+        planned_sql_statements=(statement,),
+        execution=ExecutionSummary(
+            results=(
+                ExecutionFailure(
+                    statement_index=0,
+                    exception_type="SparkException",
+                    message="boom",
+                    statement=statement,
+                ),
+            )
+        ),
+    )
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(failed,))
+
+    # Then it counts as failed, not changed: the change was planned, not applied
+    assert report.counts == (0, 0, 1)
+
+
+def test_sync_report_reports_its_own_duration():
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=())
+    assert report.duration_seconds == 300.0
 
 
 def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
@@ -468,6 +524,61 @@ def _a_changed_table_report():
         plan=_plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
         planned_sql_statements=("COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'",),
     )
+
+
+def test_a_table_report_knows_whether_its_plan_creates_the_table():
+    # Given one report whose plan creates the table and one that alters it
+    creating = _report(
+        desired=_a_desired_table("orders"),
+        read=TableAbsent(),
+        plan=_plan("orders", CreateTable(table=_a_desired_table("orders"))),
+    )
+
+    # Then only the creating plan says so, and a table that failed to read says no
+    assert creating.creates_table is True
+    assert _a_changed_table_report().creates_table is False
+    assert (
+        _report(
+            desired=_a_desired_table("orders"),
+            read=ReadFailure(exception_type="AnalysisException", message="nope"),
+        ).creates_table
+        is False
+    )
+
+
+def test_statement_progress_is_absent_until_execution_runs():
+    # Given a planned but unexecuted table
+    # Then there is no progress to report, rather than a zero-applied count
+    assert _a_changed_table_report().statement_progress is None
+
+
+def test_statement_progress_counts_applied_against_planned():
+    # Given a table whose execution applied one of two planned statements
+    statements = ("SQL 0", "SQL 1")
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_plan(
+            "orders",
+            SetTableComment(desired_comment="hello", observed_comment=""),
+            SetTableComment(desired_comment="hello", observed_comment=""),
+        ),
+        planned_sql_statements=statements,
+        execution=ExecutionSummary(
+            results=(
+                ExecutionSucceeded(statement_index=0, statement="SQL 0"),
+                ExecutionFailure(
+                    statement_index=1,
+                    exception_type="SparkException",
+                    message="boom",
+                    statement="SQL 1",
+                ),
+            )
+        ),
+    )
+
+    # Then progress counts what was applied against everything planned
+    assert report.statement_progress == (1, 2)
 
 
 def test_table_to_dict_states_the_planned_change():

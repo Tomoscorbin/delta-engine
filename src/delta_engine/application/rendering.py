@@ -20,7 +20,7 @@ from delta_engine.application.diff_entries import (
 )
 from delta_engine.application.failures import ReadFailure
 from delta_engine.application.report import SyncReport, TableRunReport
-from delta_engine.domain.plan import ActionPlan, CreateTable
+from delta_engine.domain.plan import ActionPlan
 
 # Shown wherever a report has a readable state but no planned actions. One
 # spelling, two presentations: bare in the grid's DETAIL cell, parenthesised as
@@ -30,10 +30,6 @@ _NO_CHANGES: Final[str] = "no changes"
 _DETAIL_MAX_CHARS: Final[int] = 60
 
 _GRID_HEADERS: Final[tuple[str, str, str, str]] = ("TABLE", "STATUS", "STATEMENTS", "DETAIL")
-
-
-def _plan_creates_table(plan: ActionPlan) -> bool:
-    return any(isinstance(action, CreateTable) for action in plan)
 
 
 def _aligned_rows(rows: Sequence[Sequence[str]]) -> list[str]:
@@ -78,15 +74,16 @@ def render_diff_block(report: TableRunReport) -> str:
         if report.has_failures:
             return f"{header}\n  ({_NO_CHANGES} — see failures)"
         return f"{header}\n  ({_NO_CHANGES})"
-    if _plan_creates_table(plan):
+    if report.creates_table:
         header = f"{header}  (CREATE)"
     return "\n".join([header, *_render_entry_groups(plan_entries(plan))])
 
 
 def _grid_statements_cell(report: TableRunReport) -> str:
     """STATEMENTS cell: applied/planned when execution ran, — on a failure, else planned count."""
-    if report.execution is not None:
-        return f"{report.execution.applied_count}/{len(report.planned_sql_statements)}"
+    progress = report.statement_progress
+    if progress is not None:
+        return f"{progress.applied}/{progress.planned}"
     if report.has_failures:
         return "—"
     return str(len(report.planned_sql_statements))
@@ -134,19 +131,10 @@ def render_grid(reports: tuple[TableRunReport, ...]) -> str:
 
 def run_summary_footer(report: SyncReport) -> str:
     """One-line summary: table total, changed/unchanged/failed counts, duration."""
-    changed = unchanged = failed = 0
-    for table_report in report.table_reports:
-        if table_report.has_failures:
-            failed += 1
-        elif table_report.plan:
-            changed += 1
-        else:
-            unchanged += 1
-    seconds = (report.ended_at - report.started_at).total_seconds()
-    total = len(report.table_reports)
+    counts = report.counts
     return (
-        f"{total} tables: {changed} changed, {unchanged} unchanged, "
-        f"{failed} failed ({seconds:.1f}s)"
+        f"{counts.total} tables: {counts.changed} changed, {counts.unchanged} unchanged, "
+        f"{counts.failed} failed ({report.duration_seconds:.1f}s)"
     )
 
 
