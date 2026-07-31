@@ -149,13 +149,22 @@ class ForeignKeyFailure(Failure):
     references: QualifiedName
     reason: ForeignKeyFailureReason
 
+    @property
+    def _constraint(self) -> str:
+        """
+        How a message names the constraint that failed.
+
+        A table may carry several foreign keys, so the local columns and the
+        referenced table are what identify one to a reader — the constraint
+        name is generated and means nothing to them.
+        """
+        return f"({', '.join(self.local_columns)}) → {self.references}"
+
     def format_lines(self) -> tuple[str, ...]:
-        columns = ", ".join(self.local_columns)
         return (
-            f"Foreign key ({columns}) → {self.references} on {self.table} was not applied: "
+            f"Foreign key {self._constraint} on {self.table} was not applied: "
             f"{self.reason.detail}.",
         )
 
     def headline(self) -> str:
-        columns = ", ".join(self.local_columns)
-        return f"Foreign key ({columns}) → {self.references} not applied"
+        return f"Foreign key {self._constraint} not applied"
