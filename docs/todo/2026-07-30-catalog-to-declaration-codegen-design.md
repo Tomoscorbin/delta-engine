@@ -12,33 +12,46 @@ every column, type, nullability, comment, tag, property, and key.
 Transcription errors are punished asymmetrically. The engine owns the full
 column set and the full key set, so an *omission* is not a smaller declaration,
 it is a destructive one: a column left out becomes `DropColumn`, a key left out
-becomes `DropForeignKey` (`domain/plan/diff.py:488,518`). The safety rules catch
+becomes `DropForeignKey` (`domain/plan/diff.py:400,518`). The safety rules catch
 some of this — `ColumnMappingRequiredForDrop` blocks a column drop without
 column mapping — but nothing blocks dropping a constraint. Hand transcription is
 therefore most dangerous on exactly the tables that most need adopting: the
 large, old, key-bearing ones.
 
-A generator closes this, and it can be verified rather than trusted: a generated
-declaration is correct if and only if planning it against the table it came from
-is a no-op.
+A generator closes this, and it can be verified rather than trusted. For the v1
+baseline — an ordinary table with no outbound foreign keys — importing the
+generated module and running a full dry-run sync against the state it came from
+must produce no failures and no changes.
+
+Two inputs deliberately produce scaffolds rather than that clean round trip in
+v1. Foreign keys are omitted uniformly and reported as known `DropForeignKey`
+actions; streaming tables keep the separate scope warning described below. The
+generator names both limitations in source and on stderr instead of silently
+claiming that those outputs reproduce the whole table.
 
 ## Scope
 
 `delta-engine generate CATALOG.SCHEMA.TABLE` prints one importable Python module
 to stdout. One table per invocation. Schema-wide discovery is out of scope
-(see below).
+(see below). Every outbound foreign key, including a self-reference, is omitted
+uniformly in v1 and recorded in one consequence-only warning.
 
 ## What already exists
 
-The translation this feature needs is half-built. `_lower_declaration`
-(`api/delta_table.py:550`) is exactly `DeltaTable → DesiredTable`; nothing goes
-the other way. And the public surface is close to round-trippable already: every
-`DeltaTable.__init__` parameter except `scope` has a matching read-only
-property, and `ObservedColumn`'s fields are a subset of `DesiredColumn`'s.
+The building blocks this feature needs are half-built. `_lower_declaration`
+(`api/delta_table.py:550`) defines `DeltaTable → DesiredTable`; generation
+applies the deliberately narrower v1 projection in the other direction. The
+public surface exposes nearly all supported state: every `DeltaTable.__init__`
+parameter except `scope` has a matching read-only property, and
+`ObservedColumn`'s fields are a subset of `DesiredColumn`'s.
 
-The correctness oracle also already exists. `diff_table(desired, observed)` is
-the authority on whether two states agree, so every generated declaration can be
-checked against the table it came from with machinery the engine already owns.
+The correctness machinery also already exists. `diff_table` establishes whether
+desired and observed state agree, but relationship resolution and validation can
+still reject a clean diff. The supported-path oracle therefore imports the
+generated `tables` collection and runs `Engine.sync(..., dry_run=True)` against
+the captured observed state, asserting no failures, no changes, and no execution.
+Focused `diff_table` assertions remain useful for pinning the deliberately known
+FK-drop limitation.
 
 ## Why there is no serialisation layer
 
@@ -46,8 +59,8 @@ This was considered explicitly and rejected. Recording it here because the
 question recurs: the codebase has nine translation sites and they *look* like
 they belong together.
 
-| Site | Wire format | Domain end | Layer |
-| ---- | ----------- | ---------- | ----- |
+| Site | External representation | Domain end | Layer |
+| ---- | ----------------------- | ---------- | ----- |
 | `sql/describe.py` | DESCRIBE … AS JSON document | `ObservedColumn`, layout, properties | adapters |
 | `sql/rows.py` | information_schema rows | `PrimaryKeyConstraint`, `ForeignKeyConstraint`, tags | adapters |
 | `sql/types.py:115` | AS JSON type object | `DataType` | adapters |
@@ -56,12 +69,14 @@ they belong together.
 | `api/delta_table.py:550` | `DeltaTable` | `DesiredTable` | api |
 | `report.py:203` | JSON dict | `SyncReport` | application |
 | `application/rendering.py` | terminal text | `SyncReport` | application |
-| `api/codegen.py` (new) | Python source | `ObservedTable` | api |
+| `api/declaration_source.py` (new) | Python source | `DeltaTable` | api |
 
-Four wire formats, five target languages. **No two sites share both endpoints**
-— pairwise they share at most one. The single true inverse pair is
-`render_data_type` / `data_type_from_json`, and those already live in one file
-for precisely that reason. What the nine share is a verb, not logic.
+These are distinct boundary contracts. **No two sites share both endpoints** —
+pairwise they share at most one. Even `render_data_type` and
+`data_type_from_json` are not inverses: one emits a Spark SQL string and the
+other reads an AS JSON object. They are correctly co-located because both hide
+Databricks type-mapping knowledge. What the nine sites share is a verb, not
+logic.
 
 ### A `serialisation/` package has no legal position
 
@@ -111,26 +126,40 @@ operation, subject cells — not the emission. Its docstring says so: *"presenta
 Applied here: a Python-source type renderer shares only a verb with
 `render_data_type` (same `match` shape, different target language), but it
 shares an *interpretation* with `_lower_declaration` — that a
-`PrimaryKeyConstraint` means `primary_key=[...]`, that `managed_aspects` means
-`scope`. That is the extraction to make, and it belongs beside the lowering.
+`PrimaryKeyConstraint` means `primary_key=[...]` and observable column state
+maps to `Column` fields. That is the extraction to make, and it belongs beside
+the lowering. Scope is deliberately not inferred in v1.
 
-## Decision: raise, then render
+There is one smaller duplication to remove locally. Rendering a Python type
+expression and discovering the `delta_engine.schema` names it imports traverse
+the same closed type tree for the same reason. The private renderer therefore
+returns both `source` and `schema_names` in one `_SourceFragment`. This is a
+cohesive result inside codegen, not a generic serialisation abstraction.
 
-Three modules, each with one job.
+## Decision: raise, then render the supported subset
+
+Four collaborating units, each with one job.
 
 ```
-api/codegen.py       pure: ObservedTable → Python source. No I/O, no backend.
-databricks.py        build_sql_reader(connection) — mirrors build_sql_engine.
-cli/generate.py      wires them; owns stdout/stderr and exit codes.
+api/declaration_source.py       internal source rendering for generated state.
+api/codegen.py                  pure: ObservedTable → Python source. No I/O.
+warehouse/factory.py            constructs the internal catalog reader.
+cli/app.py                      composition root; owns I/O and exit codes.
 ```
 
 ```python
-def raise_declaration(observed: ObservedTable) -> DeltaTable:
-    """Invert _lower_declaration. Foreign keys are never carried."""
+def _raise_declaration(observed: ObservedTable) -> DeltaTable:
+    """Internal mapping for the non-FK declaration state supported by v1."""
 
 
-def render_declaration(table: DeltaTable, *, variable: str) -> str:
-    """Render any DeltaTable as source — including hand-written ones."""
+@dataclass(frozen=True, slots=True)
+class _SourceFragment:
+    source: str
+    schema_names: frozenset[str]
+
+
+def _render_declaration(table: DeltaTable, *, variable: str) -> _SourceFragment:
+    """Internal one-pass renderer for declarations and their imports."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,21 +168,25 @@ class GeneratedModule:
     warnings: tuple[str, ...]
 
 
-def generate_module(observed: ObservedTable, *, variable: str) -> GeneratedModule:
-    """Header, imports, declaration, warnings, and the plan-able collection."""
+def generate_module(observed: ObservedTable) -> GeneratedModule:
+    """Header, imports, declaration, warnings, and the runnable collection."""
 ```
 
-`raise_declaration` validates by construction: if `DeltaTable(...)` builds, the
-emitted source imports. `render_declaration` accepting any `DeltaTable` is what
-makes it reusable past codegen — it normalises hand-written declaration modules
-too.
+`generate_module` and `GeneratedModule` form the codegen module's internal
+use-case boundary; the CLI command is the only supported public surface.
+`_raise_declaration`, source rendering, and variable naming are private steps
+split out to keep each implementation unit testable. Import discovery belongs
+to the same recursive rendering pass, not a parallel walker. The renderer
+deliberately supports the narrow FK-free, default-scope shape produced by the
+generator; it is not a general normaliser for hand-written `DeltaTable`
+declarations. The codegen modules are not re-exported through a public facade.
 
 `GeneratedModule` earns its place for one concrete reason: the CLI writes
 `source` to stdout and `warnings` to stderr. Without that split, anyone
 redirecting stdout to a file never sees the warnings until they open the file —
 which defeats their purpose.
 
-### The inversions
+### The v1 projection
 
 | Observed | Declared |
 | -------- | -------- |
@@ -163,43 +196,40 @@ which defeats their purpose.
 | `TableKind.TABLE` | no scope declared; the `"full"` default is already correct |
 | `properties` | direct copy; the reader has already projected to managed keys |
 | `comment`, `tags`, `partitioned_by`, `clustered_by` | direct copy |
-| `foreign_keys` | **never carried** — becomes a warning |
+| `foreign_keys` | all owned keys, including self-references, are omitted uniformly and recorded in one warning |
 | `supported_features`, `referencing_foreign_keys` | not declarable; dropped silently |
 
 `supported_features` and `referencing_foreign_keys` are dropped without a
 warning because neither is declaration state: features are derived from the
 column tree at planning time, and inbound keys are owned by other tables.
 
-## Foreign keys
+## Foreign keys: one uniform v1 warning
 
-`ForeignKey.references` holds a `DeltaTable` **object**, not a name
-(`api/delta_table.py:314`), so a single-table module cannot construct one. And
-omission is not free: `_diff_foreign_keys` (`domain/plan/diff.py:518`) compares
-observed against declared with no unmanaged branch, so an undeclared key becomes
+Foreign keys are deliberately outside the first implementation slice. A
+self-reference is locally expressible through `Self`, while an external
+relationship requires another declaration object; composite mappings add
+another rendering branch. Implementing only the easy subset would create
+several policies and a repair language before the basic adoption path exists.
+V1 therefore treats every outbound foreign key the same way: it does not render
+one and it does not suggest executable repair code.
+
+Omission is not free. `_diff_foreign_keys` (`domain/plan/diff.py:518`) compares
+observed against declared with no unmanaged branch, so every omitted key becomes
 `DropForeignKey`. No scope avoids this — `METADATA_ASPECTS` (`scope="metadata"`)
 includes `FOREIGN_KEYS`, and out-of-scope drift fails validation rather than
 being ignored.
 
-**One exception, and v1 knowingly leaves it on the table.** A key onto its *own*
-table needs no second object: `Self` is public (`schema.__all__`), the
-`_SelfReference` sentinel lives at `api/delta_table.py:79-88`, and
-`ForeignKey.columns` accepts a `Mapping[str, str]` (`:313`), so
-`ForeignKey(columns={"parent_id": "id"}, references=Self)` is expressible today
-and would round-trip losslessly. v1 still warns rather than rendering it — the
-renderer would need a `foreign_keys=` branch and the import line would have to
-carry `ForeignKey` and `Self` — but the warning suggests the `Self` form rather
-than a variable name the reader cannot use, and rendering it is the cheapest
-follow-on on the list. The blanket claim that no key can cross is wrong, and is
-corrected here so the next iteration starts from the true statement.
+**Decision: emit one consequence-only warning as a commented block and on
+stderr.** It lists each observed constraint and states that applying the module
+as written drops it when the table is otherwise eligible. It does not emit
+`ForeignKey(...)`, `Self`, imports, repair instructions, or
+variable-name guesses. The module remains importable and directly inspectable,
+but an FK-bearing module is explicitly an incomplete scaffold rather than a
+clean round trip.
 
-**Decision: emit the keys as a commented block with a warning that names the
-consequence.** The generated module stays importable and immediately plan-able;
-the cost is that planning it as written drops the table's foreign keys until the
-user wires them up.
-
-This was chosen over the alternatives in *Rejected alternatives* below. The
-mitigations are all three of: the comment block, the stderr warning, and a test
-that pins exactly which actions a generated FK-bearing table produces.
+The test pins the limitation: every observed FK is omitted uniformly, the
+warning names it, and the only resulting actions are the corresponding
+`DropForeignKey`s.
 
 The warning names the constraint **semantically, not as DDL**. `api` cannot
 import `adapters` — layers separated by `|` are independent, which is why
@@ -207,23 +237,23 @@ import `adapters` — layers separated by `|` are independent, which is why
 reaching for `compile_plan` to quote the real `ALTER TABLE` text would be the
 first crack in the boundary this design otherwise respects.
 
-## Streaming tables: the second accepted trap
+## Streaming tables: a separate limitation
 
 Generated declarations never pass `scope`, so they take the `"full"` default.
 For an ordinary table that is exactly right. For a streaming table it is not:
-`StreamingTableAnnotationsOnly` (`application/validation.py:661`) is an
+`StreamingTableAnnotationsOnly` (`application/validation.py:604`) is an
 eligibility check, so it runs unconditionally, cannot be suppressed via
 `rules`, and judges the declaration's *claimed aspects* against the observed
 kind rather than the drift — meaning it fires even when the table is perfectly
 in sync. A generated streaming-table module therefore diffs clean and then
 fails validation.
 
-**Decision: warn, exactly as with foreign keys.** The warning names the check
-and gives the one line that fixes it — `scope="annotations"`, the widest scope
-a streaming table admits, and the one that keeps comment management rather than
-narrowing to tags. The same three mitigations apply: the commented block in the
-source, the stderr warning, and a test pinning that a generated streaming table
-produces exactly that one validation failure.
+**Decision: warn.** This is independent of FK omission: it is an eligibility
+failure rather than known state drift. The warning names the check and gives the
+one line that fixes it — `scope="annotations"`, the widest scope a streaming
+table admits, and the one that keeps comment management rather than narrowing
+to tags. It appears in source and on stderr, and a test pins that a generated
+streaming table produces exactly that one validation failure.
 
 The alternative — a `DeltaTable.scope` property, letting the generator emit the
 correct scope per kind — is recorded under *Rejected alternatives*. It is the
@@ -269,15 +299,10 @@ orders = DeltaTable(
     primary_key=["order_id"],
 )
 
-# WARNING: dev.silver.orders has 1 foreign key, not declared above.
-# ForeignKey references its parent as a DeltaTable object, which a
-# single-table module does not have.
+# WARNING: dev.silver.orders has 1 foreign key, not generated in v1.
 #
-# Planning this declaration as written will DROP the constraint
-# `orders_customer_id_fk` (customer_id -> dev.silver.customers).
-#
-# To keep it, declare or import dev.silver.customers and add:
-#     foreign_keys=[ForeignKey("customer_id", references=customers)],
+# On an otherwise eligible table, applying this declaration will DROP:
+# - orders_customer_id_fk: (customer_id) -> dev.silver.customers(id)
 
 tables = [orders]
 ```
@@ -285,9 +310,11 @@ tables = [orders]
 Four properties of this output are deliberate.
 
 **`tables = [orders]`** makes the module directly runnable through
-`delta-engine plan generated:tables`, closing the round trip at the CLI. It also
-satisfies `load_declarations`, which rejects a bare `DeltaTable` and requires a
-non-empty ordered sequence.
+`delta-engine plan generated:tables`. For the supported ordinary, FK-free case,
+that closes the round trip at the CLI. For a documented limitation, the same
+entry point exposes the warning's stated consequence. It also satisfies
+`load_declarations`, which rejects a bare `DeltaTable` and requires a non-empty
+ordered sequence.
 
 **No timestamp or version in the header.** Regenerating an unchanged table
 produces byte-identical output, which makes `generate | diff` a usable drift
@@ -297,31 +324,31 @@ check for free and keeps regeneration quiet in git.
 property mappings, and `nullable=True` do not appear. The generated module reads
 like one a person would write.
 
-**Imports are derived from what is rendered**, walking nested types so an
-`Array(Struct(...))` column pulls in all three names, and sorted to match
-ruff's isort so the output lands clean.
+**Imports are returned by the rendering pass**, so an `Array(Struct(...))`
+column produces its expression and all three required names together. The
+module assembly only sorts that dependency set for the import line; it does not
+walk the type tree again.
 
 ### Variable naming
 
-The table name, sanitised to a Python identifier: non-identifier characters
-become `_`, a leading digit gets a `t_` prefix, a Python keyword gets a `_`
-suffix. Deterministic, with no override flag in v1. Unity Catalog stores
-catalog, schema and table names lowercased, so this is mostly a no-op.
+The table name, sanitised to an ASCII Python identifier: every character outside
+`[A-Za-z0-9_]` becomes `_`, a leading digit gets a `t_` prefix, and a Python
+keyword gets a `_` suffix. Restricting the generated variable to ASCII handles
+Unicode word characters that Python does not accept in identifiers. The rule is
+deterministic, with no override flag in v1.
 
-## The reader seam
+## The reader seam stays internal
 
-The CLI needs one observed table, not an engine. `databricks.py` gains a
-six-line `build_sql_reader(connection)` mirroring `build_sql_engine`, and
-`warehouse/factory.py` gains the matching `build_reader`.
+The CLI needs one observed table, not an engine. The existing warehouse factory
+therefore gains `build_reader(connection)`, hiding the
+`WarehouseReader(WarehouseSqlRunner(...))` assembly from the command.
 
-This is preferred over the CLI constructing `WarehouseReader(WarehouseSqlRunner(...))`
-directly. That import is legal (`cli → adapters`), but public entry points go
-through the facade, and the facade is where the Spark twin
-(`build_spark_reader`) will slot in when the notebook path is wanted. Leaving
-the seam costs nothing now.
-
-`ObservedTable` is not newly exposed by this: `TableRunReport.read` is already
-public and yields `TablePresent`, whose `.table` is an `ObservedTable`.
+The CLI is the composition root, so its direct `cli → adapters` dependency is
+legal. `delta_engine.databricks.__all__` does **not** gain a reader builder:
+doing so would expose the internal `CatalogStateReader`/`ObservedTable`
+vocabulary solely for one CLI workflow and would create a shallow public seam.
+If a real Python generation API is wanted later, it should expose curated
+public inputs and results rather than leaking this internal port.
 
 ## CLI surface
 
@@ -351,15 +378,22 @@ its message is surfaced.
 
 ## Testing
 
-**The round-trip oracle is the primary test.** For each `ObservedTable` fixture:
-`generate_module` → `exec` the source in a fresh namespace → take `tables[0]` →
-`diff_table(table.to_desired_table(), observed)` → assert no actions and no
-unresolvables.
+**The supported-path oracle is the primary test.** For an ordinary, FK-free
+`ObservedTable`: `generate_module` → `exec` the source in a fresh namespace →
+pass its complete `tables` collection to `Engine.sync(..., dry_run=True)` using
+a reader backed by that exact observed state. The report has no failures and no
+changes. The recording executor's `compile` method runs as part of the dry-run
+pipeline; its `execute` method is never called.
 
 For fixtures carrying foreign keys, assert the actions are **exactly** the
 expected `DropForeignKey`s and nothing else. That pins the blast radius of the
-accepted trap instead of merely documenting it, and it fails loudly if omitting
-a key ever starts costing more than the key.
+accepted limitation instead of calling the scaffold a round trip. The warning
+must name every omitted constraint and its consequence, and must contain no
+`ForeignKey(...)`, `Self`, import instructions, or variable-name repair guesses.
+One streaming-plus-FK fixture asserts that the two warnings remain independent:
+the scope warning describes an eligibility failure, while the FK warning's
+apply consequence is explicitly conditional on the table otherwise being
+eligible.
 
 The repo already has Hypothesis wired up, so this generalises to a property test
 over generated `ObservedTable`s.
@@ -374,48 +408,58 @@ properties, partitioning and a key, so format changes are reviewable in diffs.
 
 **Determinism**: generating the same fixture twice is byte-identical.
 
-**Live** (`tests/live/`): create a table, generate, plan the generated module,
-assert no changes. The real proof.
+**Live** (`tests/live/`): create an ordinary FK-free table, generate, import its
+`tables` collection, and run a complete engine dry run; assert no failures and
+no changes. The real proof.
 
 Gates: `uv run pytest`, `ruff check`, `ruff format --check`, `mypy .`,
 `lint-imports`, `sphinx-build -W`.
 
 ## Files
 
-**`src/` (5)**
+**`src/` (4)**
 
 | File | Change |
 | ---- | ------ |
-| `api/codegen.py` | new — the raise, the renderers, `GeneratedModule` |
-| `cli/generate.py` | new — the command |
-| `cli/app.py` | register `generate` on the Typer app |
-| `databricks.py` | `build_sql_reader`, added to `__all__` |
+| `api/declaration_source.py` | new — internal Python-source rendering for the supported subset |
+| `api/codegen.py` | new — observed-state mapping and `GeneratedModule` assembly |
+| `cli/app.py` | register and implement `generate` beside the shared CLI helpers |
 | `adapters/databricks/warehouse/factory.py` | `build_reader` |
 
-**`tests/` (4)**
+**`tests/` (7)**
 
-`tests/api/test_codegen.py`, `tests/cli/test_generate.py`,
-`tests/e2e/` round-trip oracle, `tests/live/` generate-then-plan.
+`tests/api/test_declaration_source.py`, `tests/api/test_codegen.py`,
+`tests/adapters/databricks/warehouse/test_factory.py`, `tests/cli/conftest.py`,
+`tests/cli/test_app_plan.py`, `tests/cli/test_app_generate.py`, and
+`tests/live/test_sql_warehouse_live_generate.py`.
 
-**`docs/` (3)**
+**`docs/` (5)**
 
 | File | Change |
 | ---- | ------ |
 | `reference-cli.md` | says "has one read-only workflow"; becomes two commands |
 | `README.md` | CLI paragraph names only `plan` |
-| `index.md` | if it enumerates CLI capability |
+| this design and its implementation plan | keep the shipped boundary and task state aligned |
+| `todo.md` | record the uniform FK omission and deferred FK feature |
 
-Release: `feat:`. New public API (`api/codegen.py`, `build_sql_reader`); nothing
-existing moves, so no `BREAKING CHANGE:` footer.
+Release: `feat:`. The CLI is additive; the reader factory and codegen modules
+are implementation details. Nothing existing moves, so no `BREAKING CHANGE:`
+footer.
 
 ## Out of scope
 
-- **Schema-wide discovery.** Needs a table-listing read the engine does not
-  have (`information_schema.tables`) and a new port method. It is also the only
-  mode in which foreign keys could be generated properly, so it is the natural
-  follow-on rather than a competing design.
-- **The Spark/notebook path.** The reader port is already backend-agnostic;
-  `build_spark_reader` is the same six lines whenever it is wanted.
+- **Foreign-key source generation.** Self references, explicit composite
+  mappings, external-parent reads, dependency closure and ordering, variable
+  allocation, unique-backed references, and cycle handling are all deferred.
+  They need not ship together; v1 makes no sequencing commitment and emits
+  facts and consequences rather than partial repair code.
+- **Schema-wide discovery.** Needs a table-listing read the engine does not have
+  (`information_schema.tables`) and a new port method. It may complement later
+  FK work, but FK support can also follow referenced names directly; the two
+  capabilities are not the same requirement.
+- **The Spark/notebook path.** The reader port is already backend-agnostic, but
+  Spark composition and any curated Python generation API are separate design
+  work; v1 adds neither to a public facade.
 - **`--output FILE`.** stdout redirects.
 - **External table `LOCATION`.** Not declarable at all yet — separate open todo.
 - **Struct field nullability.** Domain gap, separate open todo. Not a
@@ -423,16 +467,16 @@ existing moves, so no `BREAKING CHANGE:` footer.
 
 ## Risks
 
-**The foreign-key trap is mitigated, not eliminated.** Someone who pipes stdout
-to a file and ignores stderr can still plan a key drop. Three defences (comment,
-stderr warning, pinned test); none stops a determined pipe. Accepted knowingly.
+**Foreign keys are a hard v1 limitation.** The source comment and mirrored stderr
+warning make the limitation visible, and the test pins its exact blast radius;
+they do not make an FK-bearing scaffold safe to apply unchanged. The CLI
+reference says so without embedding a partial repair recipe.
 
-**Silent fidelity gaps are benign but worth naming.** `char(n)` and `varchar(n)`
+**Other fidelity gaps are benign but worth naming.** `char(n)` and `varchar(n)`
 read as `String()` and struct field nullability is unmodelled, so the generated
 declaration is narrower than the physical table. Because the reader normalises
-identically on the next read, the round trip still plans clean — the generated
-declaration is faithful to what the *engine can see*, which is the contract
-everywhere else in the system.
+identically on the next read, the supported ordinary FK-free path still plans
+clean — the generated declaration is faithful to what the *engine can see*.
 
 ## Rejected alternatives
 
@@ -446,27 +490,30 @@ contract. `schema_version: 2` is a **run report** projection with its own
 stability guarantee, and it carries no declaration vocabulary. Pure indirection.
 
 **Rendering straight from `ObservedTable`, with no intermediate `DeltaTable`.**
-One function, no failure mode. Rejected because the inversion logic still has to
+One function, no failure mode. Rejected because the projection logic still has to
 exist — it just lives inline in a renderer instead of behind a name — and the
 generated source loses its import guarantee. The `DeltaTable` gets constructed
 in tests anyway to run the oracle, so the raise is paid for either way and this
 just declines to ship it.
 
-**Following the foreign-key references** — read the referenced tables too and
-emit them in the same module, ordered so the object references resolve.
-Produces a module that plans clean, and is the only option that renders real
-`ForeignKey(...)` declarations. Rejected for v1 as scope: it turns "one table"
-into "one table and its transitive closure", needs cycle handling (a mutual
-A↔B reference is inexpressible in the declaration language at all, since
-references are objects and one side must be defined first), and belongs with
-schema-wide generation, where the closure is already being read.
+**Rendering only self-referential foreign keys.** Expressible through `Self`, but
+rejected for v1 because it creates two FK policies and an FK-specific rendering
+surface before the basic generator exists. Future FK work may be staged, but v1
+has one omission policy.
+
+**Following external foreign-key references.** Reading the referenced names and
+emitting their transitive closure can produce a clean module, but it introduces
+dependency ordering, collision-free variable allocation, and cycle handling.
+Rejected for the basic single-table slice; schema-wide listing is not required
+for this approach and remains a separate capability.
 
 **Refusing when foreign keys are present.** Never wrong, but pushes the ordering
 problem onto the user exactly when the schema is most complex.
 
-**Emitting every declaration with `scope="tags"`.** Safe by construction —
-nothing outside tags is ever compared, so nothing is ever dropped — but the
-result is close to useless as a starting point for managing the table.
+**Emitting every declaration with `scope="tags"`.** No out-of-scope action can
+enter an accepted plan, but omitted FKs still appear as out-of-scope drift and
+make the scaffold ineligible. Even without keys, tag-only output is close to
+useless as a starting point for managing the table.
 
 **Adding a `DeltaTable.scope` property so the generator can emit the right scope
 per relation kind.** This is what an earlier draft of the plan did, and it is
@@ -474,9 +521,9 @@ the only option that makes a generated streaming-table module plan cleanly with
 no hand edit. Rejected because it widens the public surface to serve one
 relation kind: every ordinary table — the overwhelming majority, and the whole
 point of the on-ramp — already wants the `"full"` default, so the property would
-exist to be read back by one branch of one renderer. The streaming case is
-instead handled the same way as foreign keys, which it closely resembles: state
-a single-table module cannot express, reported rather than guessed.
+exist to be read back by one branch of one renderer. Streaming remains a
+separate warned limitation: its default scope causes an eligibility failure
+rather than an expected state-drift action.
 
 **A structured `Undeclarable` residue type** carrying aspect, reason,
 consequence and remedy, with foreign keys as one member. Attractive while it

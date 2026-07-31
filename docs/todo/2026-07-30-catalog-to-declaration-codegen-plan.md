@@ -1,10 +1,23 @@
 # Catalog-to-Declaration Codegen Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For implementers:** Execute the tasks in order and keep the checkbox
+> (`- [ ]`) markers current. Each task establishes the seam consumed by the
+> next one.
 
-**Goal:** Add `delta-engine generate CATALOG.SCHEMA.TABLE`, which reads one live Unity Catalog table and prints an importable Python module declaring it as a `DeltaTable`.
+**Goal:** Add `delta-engine generate CATALOG.SCHEMA.TABLE`, which reads one live Unity Catalog table and prints an importable Python module declaring its supported state as a `DeltaTable`. V1 omits every outbound foreign key uniformly and emits one consequence-only warning.
 
-**Architecture:** Two pure functions in the `api` layer — `raise_declaration` inverts `_lower_declaration` (`ObservedTable → DeltaTable`), and `render_declaration` emits the Python source for any `DeltaTable`. A thin CLI command reads the table through a new `build_sql_reader` facade and prints the result. Correctness is verified with machinery the engine already owns: a generated declaration is right if and only if `diff_table(generated.to_desired_table(), observed)` is empty.
+**Architecture:** The CLI command is the only supported public surface.
+Internally, `generate_module` and `GeneratedModule` form one deep codegen
+boundary. Private pure helpers project the non-FK state of an `ObservedTable`
+and render the generated subset; rendering source and discovering imports are
+one traversal, not a general `DeltaTable` serialisation API. Neither codegen
+module is re-exported through a public facade. The CLI composition root reads
+through the warehouse adapter's internal `build_reader` factory and prints the
+result. For an ordinary FK-free table, correctness is proved by importing the
+complete generated `tables` collection and running
+`Engine.sync(..., dry_run=True)` against the captured observed state: no
+failures, no changes, and no execution. FK-bearing and streaming inputs are
+explicit warned limitations with separately pinned consequences.
 
 **Tech Stack:** Python 3.12+, Typer (CLI extra), pytest, ruff, mypy, import-linter.
 
@@ -12,6 +25,11 @@ Design: [2026-07-30-catalog-to-declaration-codegen-design.md](2026-07-30-catalog
 
 ## Global Constraints
 
+- **Target-base prerequisite.** Execute this plan only after the PR branch
+  incorporates current `main`, including #310's `scope="annotations"` and
+  `StreamingTableAnnotationsOnly`. The current PR head predates that change;
+  mixing its checked-out tags-only names with the target branch will make the
+  streaming tests internally inconsistent.
 - **Layering.** `api` must not import `adapters` — those are independent siblings in the `cli → databricks | schema | adapters | api → application → domain` contract (`pyproject.toml:205`). `api/codegen.py` and `api/declaration_source.py` stay backend-free. `lint-imports` enforces this.
 - **Line length 100**, ruff format with double quotes, isort with `force-sort-within-sections = true` and `known-first-party = ["delta_engine"]`.
 - **Docstrings required** (`D` rules are on) on every public module, class, and function.
@@ -28,16 +46,23 @@ Gates for every task: `uv run pytest`, `ruff check`, `ruff format --check`, `myp
 
 | File | Responsibility |
 | ---- | -------------- |
-| `src/delta_engine/api/declaration_source.py` | **New.** Text emission: a `DeltaTable` → the Python source that reconstructs it. Knows the public vocabulary; knows nothing about catalogs. |
-| `src/delta_engine/api/codegen.py` | **New.** Semantic inversion: an `ObservedTable` → a `DeltaTable`, plus the `generate_module` use case that composes it with the renderer. |
-| `src/delta_engine/databricks.py` | Add `build_sql_reader`. |
+| `src/delta_engine/api/declaration_source.py` | **New.** Internal text emission for the FK-free, default-scope declaration subset produced by codegen. Knows the public vocabulary; knows nothing about catalogs. |
+| `src/delta_engine/api/codegen.py` | **New.** The `generate_module` use case, its non-FK observed-state projection, warnings, and module assembly. |
 | `src/delta_engine/adapters/databricks/warehouse/factory.py` | Add `build_reader`. |
 | `src/delta_engine/cli/app.py` | Add the `generate` command. |
 | `tests/api/test_declaration_source.py` | **New.** Renderer behaviour and the vocabulary/exhaustiveness pins. |
-| `tests/api/test_codegen.py` | **New.** The raise, the module assembly, and the round-trip oracle. |
+| `tests/api/test_codegen.py` | **New.** Projection, module assembly, the full-engine supported-path oracle, and warned-limitation pins. |
+| `tests/adapters/databricks/warehouse/test_factory.py` | **New.** Internal reader construction. |
+| `tests/cli/conftest.py` | Add the fake reader boundary. |
+| `tests/cli/test_app_plan.py` | Keep shared help text aligned with both commands. |
 | `tests/cli/test_app_generate.py` | **New.** Command behaviour, exit codes, stdout/stderr split. |
+| `tests/live/test_sql_warehouse_live_generate.py` | **New.** Credentialed read/generate/full-dry-run proof. |
 
-**Deviation from the design doc:** the design listed `cli/generate.py`. The command goes in `cli/app.py` instead — that is where the Typer app and its shared `_anticipated_errors` / `_engine_logging` helpers live, and `tests/cli/conftest.py` already monkeypatches names on `cli_app`. Splitting would force a second patch target for no benefit. Task 7 updates the design doc's file table to match.
+**CLI placement:** the command goes in `cli/app.py`, where the Typer app and its
+shared `_anticipated_errors` / `_engine_logging` helpers already live.
+`tests/cli/conftest.py` also monkeypatches names on `cli_app`; splitting one
+command into `cli/generate.py` would add a pass-through module and a second
+patch target without hiding any complexity.
 
 ---
 
@@ -47,10 +72,13 @@ Gates for every task: `uv run pytest`, `ruff check`, `ruff format --check`, `myp
 - Create: `src/delta_engine/api/declaration_source.py`
 - Test: `tests/api/test_declaration_source.py`
 
-**Interfaces:**
+**Internal interfaces:**
 - Produces:
-  - `render_data_type_source(data_type: DataType) -> str`
-  - `schema_names_for(data_type: DataType) -> set[str]` — every `delta_engine.schema` name the rendered expression mentions, used later to build the import line.
+  - `_SourceFragment` — frozen internal value carrying `source: str` and the
+    `schema_names: frozenset[str]` that source requires.
+  - `_render_data_type_source(data_type: DataType) -> _SourceFragment` — one
+    recursive operation that renders the expression and discovers its imports
+    together.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -61,11 +89,7 @@ Create `tests/api/test_declaration_source.py`:
 
 import pytest
 
-from delta_engine.api.declaration_source import (
-    render_data_type_source,
-    schema_names_for,
-)
-import delta_engine.schema as schema
+from delta_engine.api.declaration_source import _render_data_type_source
 from delta_engine.domain.model import (
     Array,
     DataType,
@@ -76,6 +100,7 @@ from delta_engine.domain.model import (
     Struct,
     StructField,
 )
+import delta_engine.schema as schema
 
 
 def _concrete_data_types() -> set[type[DataType]]:
@@ -102,17 +127,24 @@ def _concrete_data_types() -> set[type[DataType]]:
             Struct([StructField("a", String()), StructField("b", Integer())]),
             'Struct([StructField("a", String()), StructField("b", Integer())])',
         ),
-        (Array(Struct([StructField("a", String())])), 'Array(Struct([StructField("a", String())]))'),
+        (
+            Array(Struct([StructField("a", String())])),
+            'Array(Struct([StructField("a", String())]))',
+        ),
     ],
 )
 def test_renders_the_expression_that_reconstructs_the_type(data_type, expected):
-    assert render_data_type_source(data_type) == expected
+    assert _render_data_type_source(data_type).source == expected
 
 
-@pytest.mark.parametrize("data_type", [Integer(), Decimal(10, 2), Array(Map(String(), Integer()))])
+@pytest.mark.parametrize(
+    "data_type",
+    [Integer(), Decimal(10, 2), Array(Map(String(), Integer()))],
+)
 def test_rendered_source_evaluates_back_to_an_equal_type(data_type):
     # Given the rendered expression evaluated against the public vocabulary
-    reconstructed = eval(render_data_type_source(data_type), vars(schema).copy())  # noqa: S307
+    source = _render_data_type_source(data_type).source
+    reconstructed = eval(source, vars(schema).copy())  # noqa: S307
 
     # Then it is the type it came from
     assert reconstructed == data_type
@@ -131,18 +163,22 @@ def test_every_concrete_data_type_variant_can_be_rendered():
     # Then none of them raises — a new variant must be handled explicitly
     for variant in _concrete_data_types():
         sample = _PARAMETERISED_SAMPLES.get(variant) or variant()
-        assert render_data_type_source(sample).startswith(variant.__name__)
+        rendered = _render_data_type_source(sample)
+        assert rendered.source.startswith(variant.__name__)
+        assert rendered.schema_names <= set(schema.__all__)
 
 
 def test_every_name_the_renderer_emits_is_publicly_importable():
-    # Given the names needed to reconstruct a deeply nested type
-    names = schema_names_for(
+    # Given a deeply nested type rendered through the one recursive operation
+    rendered = _render_data_type_source(
         Map(String(), Array(Struct([StructField("a", Decimal(10, 2))])))
     )
 
-    # Then all of them are exported from delta_engine.schema
-    assert names == {"Map", "String", "Array", "Struct", "StructField", "Decimal"}
-    assert names <= set(schema.__all__)
+    # Then its source carries the complete import dependency set
+    assert rendered.schema_names == frozenset(
+        {"Map", "String", "Array", "Struct", "StructField", "Decimal"}
+    )
+    assert rendered.schema_names <= set(schema.__all__)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -156,12 +192,13 @@ Create `src/delta_engine/api/declaration_source.py`:
 
 ```python
 """
-Render a ``DeltaTable`` as the Python source that reconstructs it.
+Render the Python-source fragments used by catalog codegen.
 
-The textual half of catalog-to-declaration generation: given a declaration —
-generated by :mod:`delta_engine.api.codegen` or hand-written — emit source
-that imports from ``delta_engine.schema`` and evaluates back to an equal
-declaration.
+The textual half of catalog-to-declaration generation: given the FK-free,
+default-scope declaration projected by :mod:`delta_engine.api.codegen`, emit
+source that imports from ``delta_engine.schema`` and evaluates back to an equal
+declaration. This is an internal codegen renderer, not a normaliser for
+hand-written declarations.
 
 Every name emitted here must be one ``delta_engine.schema`` exports, which is
 why columns render as ``Column`` rather than the domain's ``DesiredColumn``.
@@ -173,6 +210,8 @@ vocabulary, never SQL. The Databricks type renderer is the unrelated twin in
 deliberately not shared.
 """
 
+from dataclasses import dataclass
+import json
 from typing import Final
 
 from delta_engine.domain.model import (
@@ -196,6 +235,15 @@ from delta_engine.domain.model import (
     Variant,
 )
 
+
+@dataclass(frozen=True, slots=True)
+class _SourceFragment:
+    """Python source and the public schema names needed to evaluate it."""
+
+    source: str
+    schema_names: frozenset[str]
+
+
 # The variants whose source form is a bare no-argument constructor. Listed
 # rather than inferred so a new parameterised variant cannot silently render
 # as `NewType()` and lose its arguments.
@@ -218,46 +266,64 @@ _PARAMETERLESS_TYPES: Final[frozenset[type[DataType]]] = frozenset(
 )
 
 
-def render_data_type_source(data_type: DataType) -> str:
-    """Return the Python expression that reconstructs ``data_type``."""
+def _render_string(value: str) -> str:
+    """Render a stable, double-quoted Python string literal."""
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _render_data_type_source(data_type: DataType) -> _SourceFragment:
+    """Render ``data_type`` and collect its imports in the same traversal."""
     match data_type:
         case Decimal(precision, scale):
-            return f"Decimal({precision}, {scale})"
-        case Array(element):
-            return f"Array({render_data_type_source(element)})"
-        case Map(key, value):
-            return f"Map({render_data_type_source(key)}, {render_data_type_source(value)})"
-        case Struct(fields):
-            rendered = ", ".join(
-                f"StructField({str(field.name)!r}, {render_data_type_source(field.data_type)})"
-                for field in fields
+            return _SourceFragment(
+                source=f"Decimal({precision}, {scale})",
+                schema_names=frozenset({"Decimal"}),
             )
-            return f"Struct([{rendered}])"
+        case Array(element):
+            rendered = _render_data_type_source(element)
+            return _SourceFragment(
+                source=f"Array({rendered.source})",
+                schema_names=rendered.schema_names | {"Array"},
+            )
+        case Map(key, value):
+            rendered_key = _render_data_type_source(key)
+            rendered_value = _render_data_type_source(value)
+            return _SourceFragment(
+                source=f"Map({rendered_key.source}, {rendered_value.source})",
+                schema_names=(
+                    rendered_key.schema_names | rendered_value.schema_names | {"Map"}
+                ),
+            )
+        case Struct(fields):
+            field_sources: list[str] = []
+            schema_names = {"Struct", "StructField"}
+            for field in fields:
+                rendered = _render_data_type_source(field.data_type)
+                field_sources.append(
+                    f"StructField({_render_string(field.name)}, {rendered.source})"
+                )
+                schema_names.update(rendered.schema_names)
+            return _SourceFragment(
+                source=f"Struct([{', '.join(field_sources)}])",
+                schema_names=frozenset(schema_names),
+            )
         case _ if type(data_type) in _PARAMETERLESS_TYPES:
-            return f"{type(data_type).__name__}()"
+            name = type(data_type).__name__
+            return _SourceFragment(
+                source=f"{name}()",
+                schema_names=frozenset({name}),
+            )
         case _:
             raise TypeError(
                 f"No declaration source for DataType variant {type(data_type).__name__}:"
                 " add an explicit case above, or list it in _PARAMETERLESS_TYPES"
             )
-
-
-def schema_names_for(data_type: DataType) -> set[str]:
-    """Return every ``delta_engine.schema`` name the rendered type mentions."""
-    names = {type(data_type).__name__}
-    match data_type:
-        case Array(element):
-            names |= schema_names_for(element)
-        case Map(key, value):
-            names |= schema_names_for(key) | schema_names_for(value)
-        case Struct(fields):
-            names.add("StructField")
-            for field in fields:
-                names |= schema_names_for(field.data_type)
-    return names
 ```
 
-Note `ruff format` will use double quotes, and `{str(field.name)!r}` produces double quotes because Python's `repr` prefers them for strings without embedded double quotes. `str(...)` is applied first because `field.name` is an `Identifier`; the conversion keeps the output stable if `Identifier` ever gains its own `__repr__`.
+`_render_string` uses JSON's string escaping because a JSON string is also a
+valid Python string expression and already uses the repository's double-quote
+style. Converting with `str(...)` keeps the output stable if `Identifier` ever
+gains its own `__repr__`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -284,25 +350,34 @@ git commit -m "feat(api): render domain data types as declaration source"
 - Modify: `src/delta_engine/api/declaration_source.py`
 - Test: `tests/api/test_declaration_source.py`
 
-**Interfaces:**
-- Consumes: `render_data_type_source`, `schema_names_for` (Task 1).
+**Internal interfaces:**
+- Consumes: `_SourceFragment`, `_render_data_type_source` (Task 1).
 - Produces:
-  - `render_declaration(table: DeltaTable, *, variable: str) -> str` — the `variable = DeltaTable(...)` statement, no imports.
-  - `render_import_line(table: DeltaTable) -> str` — the `from delta_engine.schema import ...` line, wrapped in parentheses when it would exceed 100 characters.
+  - `_render_declaration(table: DeltaTable, *, variable: str) -> _SourceFragment`
+    — the generated declaration statement and all names it imports.
+  - `_render_import_line(schema_names: frozenset[str]) -> str` — the
+    `from delta_engine.schema import ...` line, wrapped in parentheses when it
+    would exceed 100 characters.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/api/test_declaration_source.py`:
+Merge `_render_declaration` and `_render_import_line` into the existing
+`delta_engine.api.declaration_source` import, add `TimestampNtz` to the existing
+domain-model import, and add this top-level import:
 
 ```python
-from delta_engine.api.declaration_source import render_declaration, render_import_line
 from delta_engine.schema import Column, DeltaTable
+```
+
+Then append the tests, below all imports:
+
+```python
 
 
 def test_renders_a_minimal_declaration_omitting_every_default():
     table = DeltaTable("dev", "silver", "orders", columns=(Column("id", String()),))
 
-    assert render_declaration(table, variable="orders") == (
+    assert _render_declaration(table, variable="orders").source == (
         "orders = DeltaTable(\n"
         '    catalog="dev",\n'
         '    schema="silver",\n'
@@ -314,7 +389,7 @@ def test_renders_a_minimal_declaration_omitting_every_default():
     )
 
 
-def test_renders_every_non_default_argument():
+def test_renders_every_supported_non_default_argument():
     table = DeltaTable(
         "dev",
         "silver",
@@ -330,7 +405,7 @@ def test_renders_every_non_default_argument():
         primary_key=["id"],
     )
 
-    source = render_declaration(table, variable="orders")
+    source = _render_declaration(table, variable="orders").source
 
     assert '    comment="Orders",' in source
     assert '    properties={"delta.enableChangeDataFeed": "true"},' in source
@@ -351,7 +426,8 @@ def test_rendering_is_deterministic_for_mappings():
         tags={"z": "1", "a": "2"},
     )
 
-    assert '    tags={"a": "2", "z": "1"},' in render_declaration(table, variable="orders")
+    source = _render_declaration(table, variable="orders").source
+    assert '    tags={"a": "2", "z": "1"},' in source
 
 
 def test_import_line_covers_exactly_the_names_used():
@@ -362,7 +438,9 @@ def test_import_line_covers_exactly_the_names_used():
         columns=(Column("id", Integer()), Column("payload", Array(String()))),
     )
 
-    assert render_import_line(table) == (
+    rendered = _render_declaration(table, variable="orders")
+
+    assert _render_import_line(rendered.schema_names) == (
         "from delta_engine.schema import Array, Column, DeltaTable, Integer, String"
     )
 
@@ -379,19 +457,18 @@ def test_long_import_lines_are_parenthesised():
         ),
     )
 
-    line = render_import_line(table)
+    rendered = _render_declaration(table, variable="orders")
+    line = _render_import_line(rendered.schema_names)
 
     assert line.startswith("from delta_engine.schema import (\n")
     assert line.endswith(")")
     assert all(len(part) <= 100 for part in line.splitlines())
 ```
 
-Add `TimestampNtz` to the existing `delta_engine.domain.model` import at the top of the test file.
-
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/api/test_declaration_source.py -v`
-Expected: FAIL, `ImportError: cannot import name 'render_declaration'`
+Expected: FAIL, `ImportError: cannot import name '_render_declaration'`
 
 - [ ] **Step 3: Write the declaration renderer**
 
@@ -413,50 +490,61 @@ _MAX_LINE_LENGTH: Final[int] = 100
 
 def _render_string_list(values: Sequence[str]) -> str:
     """Render a list of identifiers as a source list literal, order preserved."""
-    return "[" + ", ".join(repr(str(value)) for value in values) + "]"
+    return "[" + ", ".join(_render_string(value) for value in values) + "]"
 
 
 def _render_mapping(mapping: Mapping[str, str | None]) -> str:
     """Render a mapping as a source dict literal, key-sorted so output is stable."""
-    items = ", ".join(f"{key!r}: {value!r}" for key, value in sorted(mapping.items()))
+    items = ", ".join(
+        f"{_render_string(key)}: "
+        f"{_render_string(value) if value is not None else 'None'}"
+        for key, value in sorted(mapping.items())
+    )
     return "{" + items + "}"
 
 
-def _render_column(column: DesiredColumn) -> str:
-    """Render one column, omitting every argument still at its default."""
-    parts = [repr(str(column.name)), render_data_type_source(column.data_type)]
+def _render_column(column: DesiredColumn) -> _SourceFragment:
+    """Render one column and the schema names its source requires."""
+    rendered_type = _render_data_type_source(column.data_type)
+    parts = [_render_string(column.name), rendered_type.source]
     if not column.nullable:
         parts.append("nullable=False")
     if column.comment:
-        parts.append(f"comment={column.comment!r}")
+        parts.append(f"comment={_render_string(column.comment)}")
     if column.tags:
         parts.append(f"tags={_render_mapping(column.tags)}")
     if column.renamed_from is not None:
-        parts.append(f"renamed_from={str(column.renamed_from)!r}")
-    return f"Column({', '.join(parts)})"
+        parts.append(f"renamed_from={_render_string(column.renamed_from)}")
+    return _SourceFragment(
+        source=f"Column({', '.join(parts)})",
+        schema_names=rendered_type.schema_names | {"Column"},
+    )
 
 
-def render_declaration(table: DeltaTable, *, variable: str) -> str:
+def _render_declaration(table: DeltaTable, *, variable: str) -> _SourceFragment:
     """
-    Return the ``variable = DeltaTable(...)`` statement that reconstructs ``table``.
+    Render one declaration produced by the v1 observed-state projection.
 
-    Arguments still at their default are omitted, so the output reads like a
-    declaration a person would write. Imports are not included; pair this with
-    :func:`render_import_line`.
+    Foreign keys and non-default scopes are outside this internal renderer's
+    contract. Other arguments still at their default are omitted, so the output
+    reads like a declaration a person would write. The returned dependency set
+    feeds :func:`_render_import_line`; import discovery never walks the table a
+    second time.
     """
     arguments = [
-        f"catalog={table.catalog!r}",
-        f"schema={table.schema!r}",
-        f"name={table.name!r}",
+        f"catalog={_render_string(table.catalog)}",
+        f"schema={_render_string(table.schema)}",
+        f"name={_render_string(table.name)}",
     ]
 
+    rendered_columns = tuple(_render_column(column) for column in table.columns)
     columns = "".join(
-        f"{_INDENT * 2}{_render_column(column)},\n" for column in table.columns
+        f"{_INDENT * 2}{column.source},\n" for column in rendered_columns
     )
     arguments.append(f"columns=[\n{columns}{_INDENT}]")
 
     if table.comment:
-        arguments.append(f"comment={table.comment!r}")
+        arguments.append(f"comment={_render_string(table.comment)}")
     if table.properties:
         arguments.append(f"properties={_render_mapping(table.properties)}")
     if table.tags:
@@ -469,15 +557,18 @@ def render_declaration(table: DeltaTable, *, variable: str) -> str:
         arguments.append(f"primary_key={_render_string_list(table.primary_key)}")
 
     body = "".join(f"{_INDENT}{argument},\n" for argument in arguments)
-    return f"{variable} = DeltaTable(\n{body})"
+    schema_names = frozenset({"DeltaTable"}).union(
+        *(column.schema_names for column in rendered_columns)
+    )
+    return _SourceFragment(
+        source=f"{variable} = DeltaTable(\n{body})",
+        schema_names=schema_names,
+    )
 
 
-def render_import_line(table: DeltaTable) -> str:
-    """Return the ``delta_engine.schema`` import covering every name ``table`` renders."""
-    names = {"Column", "DeltaTable"}
-    for column in table.columns:
-        names |= schema_names_for(column.data_type)
-    sorted_names = sorted(names)
+def _render_import_line(schema_names: frozenset[str]) -> str:
+    """Render the import for one already-rendered declaration."""
+    sorted_names = sorted(schema_names)
 
     single = f"from delta_engine.schema import {', '.join(sorted_names)}"
     if len(single) <= _MAX_LINE_LENGTH:
@@ -486,9 +577,17 @@ def render_import_line(table: DeltaTable) -> str:
     return f"from delta_engine.schema import (\n{wrapped})"
 ```
 
-`foreign_keys` is deliberately absent from the argument list: a generated declaration never carries them (Task 4 emits a warning instead), and `render_declaration` has no way to name the referenced `DeltaTable` variable. This is stated in the docstring rather than silently omitted — see Step 3 of Task 4.
+`foreign_keys` is deliberately absent from the argument list. V1 omits every key uniformly, including self-references, and Task 4 emits one consequence-only warning. Rendering FK expressions or repair instructions is outside this internal renderer's contract.
 
-`scope` is absent for a different reason, and the renderer could not emit it anyway: `DeltaTable` exposes no `scope` property. Generated declarations always take the `"full"` default, which is correct for an ordinary table and is the whole point of omitting it — the output reads as a declaration a person would write. For a streaming table it is *not* correct, because `StreamingTableAnnotationsOnly` (`application/validation.py:661`) is an eligibility check that cannot be suppressed via `rules`, and `"full"` claims more than `ANNOTATION_ASPECTS`. That gap is handled the same way as the foreign-key trap — a warning and a commented block in Task 4 — rather than by widening the public surface.
+`scope` is absent for a different reason, and the renderer could not emit it
+anyway: `DeltaTable` exposes no `scope` property. Generated declarations always
+take the `"full"` default, which is correct for an ordinary table and is the
+whole point of omitting it — the output reads as a declaration a person would
+write. For a streaming table it is *not* correct, because
+`StreamingTableAnnotationsOnly` (`application/validation.py:604`) is an eligibility
+check that cannot be suppressed via `rules`, and `"full"` claims more than
+`ANNOTATION_ASPECTS`. This is a separate limitation from FK state drift: Task 4 emits
+its own warning and commented block rather than widening the public surface.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -504,7 +603,7 @@ Expected: all green. `lint-imports` matters here — it confirms `api/declaratio
 
 ```bash
 git add src/delta_engine/api/declaration_source.py tests/api/test_declaration_source.py
-git commit -m "feat(api): render a DeltaTable as declaration source"
+git commit -m "feat(api): render generated declaration source"
 ```
 
 ---
@@ -515,19 +614,19 @@ git commit -m "feat(api): render a DeltaTable as declaration source"
 - Create: `src/delta_engine/api/codegen.py`
 - Test: `tests/api/test_codegen.py`
 
-**Interfaces:**
-- Produces: `raise_declaration(observed: ObservedTable) -> DeltaTable`
+**Internal interface:**
+- Produces: `_raise_declaration(observed: ObservedTable) -> DeltaTable`
 
 - [ ] **Step 1: Write the failing tests**
 
 Create `tests/api/test_codegen.py`:
 
 ```python
-"""Turning observed catalog state back into a public declaration."""
+"""Projecting observed catalog state into generated declaration state."""
 
 import pytest
 
-from delta_engine.api.codegen import raise_declaration
+from delta_engine.api.codegen import _raise_declaration
 from delta_engine.domain.model import (
     ForeignKeyConstraint,
     Integer,
@@ -552,7 +651,7 @@ def observed(**overrides) -> ObservedTable:
 
 
 def test_columns_carry_every_observable_field():
-    declaration = raise_declaration(observed())
+    declaration = _raise_declaration(observed())
 
     id_column, region_column = declaration.columns
     assert (id_column.name, id_column.nullable) == ("id", False)
@@ -561,7 +660,7 @@ def test_columns_carry_every_observable_field():
 
 
 def test_the_qualified_name_survives():
-    declaration = raise_declaration(observed())
+    declaration = _raise_declaration(observed())
 
     assert (declaration.catalog, declaration.schema, declaration.name) == (
         "dev",
@@ -571,7 +670,7 @@ def test_the_qualified_name_survives():
 
 
 def test_the_primary_key_becomes_a_column_name_list_dropping_the_constraint_name():
-    declaration = raise_declaration(
+    declaration = _raise_declaration(
         observed(primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"))
     )
 
@@ -579,25 +678,31 @@ def test_the_primary_key_becomes_a_column_name_list_dropping_the_constraint_name
 
 
 def test_a_table_without_a_primary_key_declares_none():
-    assert raise_declaration(observed()).primary_key == ()
+    assert _raise_declaration(observed()).primary_key == ()
 
 
-def test_foreign_keys_are_never_carried():
-    # Given an observed table owning a foreign key
+@pytest.mark.parametrize(
+    "referenced_table",
+    [
+        QualifiedName("dev", "silver", "regions"),
+        QualifiedName("dev", "silver", "orders"),
+    ],
+)
+def test_foreign_keys_are_omitted_uniformly(referenced_table):
+    # Given either an external or self-referential observed foreign key
     table = observed(
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
         foreign_keys=(
             ForeignKeyConstraint(
-                local_columns=("region",),
-                referenced_table=QualifiedName("dev", "silver", "regions"),
-                referenced_columns=("code",),
-                constraint_name="orders_region_fk",
+                local_columns=("id",),
+                referenced_table=referenced_table,
+                referenced_columns=("id",),
+                constraint_name="orders_id_fk",
             ),
         ),
     )
 
-    # Then the declaration declares none: ForeignKey needs an object it cannot have
-    assert raise_declaration(table).foreign_keys == ()
+    # Then the same v1 policy omits it; Task 4 owns the required warning
+    assert _raise_declaration(table).foreign_keys == ()
 
 
 def test_layout_comment_properties_and_tags_survive():
@@ -608,7 +713,7 @@ def test_layout_comment_properties_and_tags_survive():
         partitioned_by=("region",),
     )
 
-    declaration = raise_declaration(table)
+    declaration = _raise_declaration(table)
 
     assert declaration.comment == "Orders"
     assert dict(declaration.properties) == {"delta.enableChangeDataFeed": "true"}
@@ -626,7 +731,7 @@ def test_an_undeclarable_observed_table_raises_the_declaration_error():
 
     # Then the raise does not work around it; the declaration rule speaks
     with pytest.raises(ValueError, match="Primary key column must be NOT NULL"):
-        raise_declaration(table)
+        _raise_declaration(table)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -640,36 +745,35 @@ Create `src/delta_engine/api/codegen.py`:
 
 ```python
 """
-Generate a public declaration from observed catalog state.
+Generate declaration source from observed catalog state.
 
-The semantic half of catalog-to-declaration generation, and the inverse of
-``delta_table._lower_declaration``: it recovers the declaration a table would
-need in order to be reconciled to its current state. The textual half — turning
-that declaration into source — is :mod:`delta_engine.api.declaration_source`.
+The semantic half of catalog-to-declaration generation: it projects the
+non-relationship state supported by v1 into a public declaration. The textual
+half — turning that declaration into source — is
+:mod:`delta_engine.api.declaration_source`.
 
-Three things do not cross. Foreign keys cannot: ``ForeignKey`` references its
-parent as a ``DeltaTable`` object, which a single-table declaration does not
-have. The ownership scope is not inferred either — the declaration takes the
-``"full"`` default, which is what an ordinary table wants and what a streaming
-table must not have; :func:`generate_module` warns rather than guessing. And a
-table whose observed state no declaration can express — a nullable primary key
-column, an unsupported column mapping mode — is not worked around;
-``DeltaTable`` raises and the caller reports it. All three are deliberate; see
-the design doc for the alternatives weighed.
+Two things do not cross this internal projection. Every foreign key, including a
+self-reference, is deliberately omitted under one v1 policy; :func:`generate_module`
+owns the corresponding consequence-only warning. Ownership scope is not inferred
+either — the declaration takes the ``"full"`` default, which is what an ordinary
+table wants and what a streaming table must not have; :func:`generate_module`
+warns rather than guessing. A table whose other observed state no declaration
+can express — a nullable primary-key column or unsupported column-mapping mode —
+is not worked around: ``DeltaTable`` raises and the caller reports it.
 """
 
 from delta_engine.api.delta_table import DeltaTable
 from delta_engine.domain.model import DesiredColumn as Column, ObservedTable
 
 
-def raise_declaration(observed: ObservedTable) -> DeltaTable:
+def _raise_declaration(observed: ObservedTable) -> DeltaTable:
     """
     Return the declaration that reconciles to ``observed``.
 
-    Foreign keys are never carried, and the scope is always the ``"full"``
-    default. Every other observable aspect crosses verbatim, so diffing the
-    result against the table it came from is a no-op — but a streaming table's
-    full scope fails validation, which is :func:`generate_module`'s to report.
+    Foreign keys are uniformly omitted, and the scope is always the ``"full"``
+    default. Every other observable aspect crosses verbatim. An ordinary table
+    without foreign keys therefore reconciles cleanly; Task 4 separately pins
+    the known FK drops and streaming eligibility failure.
 
     Raises:
         ValueError: The observed state cannot be expressed as a declaration.
@@ -721,29 +825,63 @@ git commit -m "feat(api): raise observed catalog state into a declaration"
 
 ---
 
-## Task 4: Assemble the module, and prove the round trip
+## Task 4: Assemble the module, and prove the supported path
 
-This is the task that produces the deliverable, and the one carrying the correctness oracle. Do not skip Step 7.
+This task produces the deliverable and carries the full-engine correctness oracle for ordinary FK-free tables. It also pins the exact consequences of the two warned limitations. Do not skip Step 7.
 
 **Files:**
 - Modify: `src/delta_engine/api/codegen.py`
 - Test: `tests/api/test_codegen.py`
 
-**Interfaces:**
-- Consumes: `raise_declaration` (Task 3); `render_declaration`, `render_import_line` (Task 2).
+**Internal codegen boundary:**
+- Consumes: `_raise_declaration` (Task 3); `_render_declaration`, `_render_import_line` (Task 2).
 - Produces:
   - `GeneratedModule` — frozen dataclass with `source: str` and `warnings: tuple[str, ...]`.
-  - `generate_module(observed: ObservedTable, *, variable: str | None = None) -> GeneratedModule`
-  - `variable_name_for(table_name: str) -> str`
+  - `generate_module(observed: ObservedTable) -> GeneratedModule`
+  - `_variable_name_for(table_name: str) -> str` — internal deterministic naming helper.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/api/test_codegen.py`:
+Merge these names into the existing top-level imports: `cast` from `typing`;
+`generate_module` and `_variable_name_for` from codegen;
+`Array`, `Decimal`, `Struct`, `StructField`, and `TableKind` from the domain
+model. Add the following application and plan imports at the top as well:
 
 ```python
-from delta_engine.api.codegen import GeneratedModule, generate_module, variable_name_for
+from delta_engine.application.engine import Engine
+from delta_engine.application.ports import CatalogState, DesiredTableSource, TablePresent
 from delta_engine.application.validation import validate_diff
-from delta_engine.domain.plan import diff_table
+from delta_engine.domain.plan import ActionPlan, DropForeignKey, diff_table
+```
+
+Then append the test support and tests, below all imports:
+
+```python
+
+
+class _SnapshotReader:
+    """Serve the exact observed table used to generate the module."""
+
+    def __init__(self, table: ObservedTable) -> None:
+        self.table = table
+
+    def fetch_state(self, qualified_name: QualifiedName) -> CatalogState:
+        assert qualified_name == self.table.qualified_name
+        return TablePresent(self.table)
+
+
+class _RecordingExecutor:
+    """Compile dry-run plans and fail the test if execution is attempted."""
+
+    def __init__(self) -> None:
+        self.executed: list[str] = []
+
+    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        return ()
+
+    def execute(self, statement: str) -> None:
+        self.executed.append(statement)
+        raise AssertionError("dry-run generation oracle attempted execution")
 
 
 @pytest.mark.parametrize(
@@ -754,10 +892,11 @@ from delta_engine.domain.plan import diff_table
         ("2024_data", "t_2024_data"),
         ("class", "class_"),
         ("a b.c", "a_b_c"),
+        ("orders²", "orders_"),
     ],
 )
 def test_variable_names_are_valid_python_identifiers(table_name, expected):
-    assert variable_name_for(table_name) == expected
+    assert _variable_name_for(table_name) == expected
     assert expected.isidentifier()
 
 
@@ -765,7 +904,10 @@ def test_the_module_is_importable_and_exposes_a_plan_able_collection():
     module = generate_module(observed())
 
     namespace: dict[str, object] = {}
-    exec(compile(module.source, "<generated>", "exec"), namespace)  # noqa: S102
+    exec(  # noqa: S102
+        compile(module.source, "<generated>", "exec"),
+        namespace,
+    )
 
     assert namespace["tables"] == [namespace["orders"]]
 
@@ -792,19 +934,23 @@ def test_foreign_keys_produce_a_warning_naming_the_constraint_that_would_drop():
     assert len(module.warnings) == 1
     warning = module.warnings[0]
     assert "orders_region_fk" in warning
-    assert "dev.silver.regions" in warning
+    assert "(region) -> dev.silver.regions(code)" in warning
     assert "DROP" in warning
     # And the same information reaches anyone who only reads the file
     assert "orders_region_fk" in module.source
     assert "# " in module.source
+    assert "ForeignKey(" not in module.source
+    assert "references=" not in module.source
 
 
-def test_a_self_referencing_key_is_suggested_with_the_self_sentinel():
-    # Given a table whose foreign key points back at itself
+def test_external_and_self_referencing_keys_share_one_consequence_only_warning():
+    # Given one external and one self-referential key
     table = observed(
         columns=(
             ObservedColumn("id", Integer(), nullable=False),
             ObservedColumn("parent_id", Integer()),
+            ObservedColumn("region", String()),
+            ObservedColumn("country", String()),
         ),
         primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
         foreign_keys=(
@@ -814,15 +960,29 @@ def test_a_self_referencing_key_is_suggested_with_the_self_sentinel():
                 referenced_columns=("id",),
                 constraint_name="orders_parent_fk",
             ),
+            ForeignKeyConstraint(
+                local_columns=("region", "country"),
+                referenced_table=QualifiedName("dev", "silver", "regions"),
+                referenced_columns=("code", "country_code"),
+                constraint_name="orders_region_fk",
+            ),
         ),
     )
 
-    warning = generate_module(table).warnings[0]
+    module = generate_module(table)
 
-    # Then the suggested repair is one the reader can actually follow: the
-    # variable is not bound until its own constructor call returns
-    assert "references=Self" in warning
-    assert "references=orders" not in warning
+    assert len(module.warnings) == 1
+    warning = module.warnings[0]
+    assert "orders_parent_fk: (parent_id) -> dev.silver.orders(id)" in warning
+    assert (
+        "orders_region_fk: (region, country)"
+        " -> dev.silver.regions(code, country_code)"
+    ) in warning
+    assert "Self" not in warning
+    assert "ForeignKey(" not in warning
+    assert "references=" not in warning
+    assert "restore" not in warning.lower()
+    assert "declare or import" not in warning.lower()
 
 
 def test_a_streaming_table_warns_that_the_default_scope_will_not_validate():
@@ -836,42 +996,9 @@ def test_a_streaming_table_warns_that_the_default_scope_will_not_validate():
     assert 'scope="annotations"' in module.source
 
 
-def test_output_is_byte_identical_when_regenerated():
-    table = observed(tags={"z": "1", "a": "2"}, properties={"delta.enableTypeWidening": "true"})
-
-    assert generate_module(table).source == generate_module(table).source
-
-
-def test_generated_source_plans_as_a_no_op_against_the_table_it_came_from():
-    # Given a table exercising every aspect that crosses into a declaration
+def test_streaming_and_foreign_key_warnings_do_not_overpromise_a_valid_plan():
     table = observed(
-        columns=(
-            ObservedColumn("id", Integer(), nullable=False, comment="pk"),
-            ObservedColumn("region", String(), tags={"pii": "no"}),
-            ObservedColumn("payload", Array(Struct([StructField("a", Decimal(10, 2))]))),
-        ),
-        comment="Orders",
-        properties={"delta.enableChangeDataFeed": "true"},
-        tags={"team": "data"},
-        partitioned_by=("region",),
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
-    )
-
-    # When the generated module is imported and diffed against that same table
-    namespace: dict[str, object] = {}
-    exec(compile(generate_module(table).source, "<generated>", "exec"), namespace)  # noqa: S102
-    declaration = namespace["orders"]
-    drift = diff_table(declaration.to_desired_table(), table)
-
-    # Then there is nothing to do and nothing unresolvable
-    assert drift.actions == ()
-    assert drift.unresolvable == ()
-
-
-def test_a_generated_table_with_foreign_keys_plans_exactly_the_key_drops():
-    # Given a table whose only undeclarable aspect is its foreign key
-    table = observed(
-        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        kind=TableKind.STREAMING_TABLE,
         foreign_keys=(
             ForeignKeyConstraint(
                 local_columns=("region",),
@@ -882,22 +1009,103 @@ def test_a_generated_table_with_foreign_keys_plans_exactly_the_key_drops():
         ),
     )
 
-    namespace: dict[str, object] = {}
-    exec(compile(generate_module(table).source, "<generated>", "exec"), namespace)  # noqa: S102
-    drift = diff_table(namespace["orders"].to_desired_table(), table)
+    module = generate_module(table)
 
-    # Then the accepted trap is exactly one key drop, and nothing else
-    assert [type(action).__name__ for action in drift.actions] == ["DropForeignKey"]
+    assert len(module.warnings) == 2
+    assert any("StreamingTableAnnotationsOnly" in warning for warning in module.warnings)
+    assert any("otherwise eligible" in warning for warning in module.warnings)
+
+
+def test_output_is_byte_identical_when_regenerated():
+    table = observed(
+        tags={"z": "1", "a": "2"},
+        properties={"delta.enableTypeWidening": "true"},
+    )
+
+    assert generate_module(table).source == generate_module(table).source
+
+
+def test_supported_generated_source_passes_the_complete_dry_run_boundary():
+    # Given a table exercising every aspect that crosses into a declaration
+    table = observed(
+        columns=(
+            ObservedColumn("id", Integer(), nullable=False, comment="pk"),
+            ObservedColumn("region", String(), tags={"pii": "no"}),
+            ObservedColumn("payload", Array(Struct([StructField("a", Decimal(10, 2))]))),
+        ),
+        comment="Orders",
+        properties={"delta.enableChangeDataFeed": "true"},
+        tags={"team": "data"},
+        clustered_by=("region",),
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+    )
+
+    # When the complete generated collection is planned against that snapshot
+    namespace: dict[str, object] = {}
+    exec(  # noqa: S102
+        compile(generate_module(table).source, "<generated>", "exec"),
+        namespace,
+    )
+    tables = cast(list[DesiredTableSource], namespace["tables"])
+    executor = _RecordingExecutor()
+    report = Engine(reader=_SnapshotReader(table), executor=executor).sync(
+        *tables,
+        dry_run=True,
+    )
+
+    # Then every planning phase accepts it, nothing changes, and nothing executes
+    assert report.has_failures is False
+    assert report.has_changes is False
+    assert executor.executed == []
+
+
+@pytest.mark.parametrize(
+    "referenced_table",
+    [
+        QualifiedName("dev", "silver", "regions"),
+        QualifiedName("dev", "silver", "orders"),
+    ],
+)
+def test_a_generated_table_with_foreign_keys_plans_exactly_the_key_drops(
+    referenced_table,
+):
+    # Given a table whose only undeclarable aspect is its foreign key
+    table = observed(
+        primary_key=PrimaryKeyConstraint(columns=("id",), constraint_name="orders_pk"),
+        foreign_keys=(
+            ForeignKeyConstraint(
+                local_columns=("id",),
+                referenced_table=referenced_table,
+                referenced_columns=("id",),
+                constraint_name="orders_id_fk",
+            ),
+        ),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(  # noqa: S102
+        compile(generate_module(table).source, "<generated>", "exec"),
+        namespace,
+    )
+    declaration = cast(DesiredTableSource, namespace["orders"])
+    drift = diff_table(declaration.to_desired_table(), table)
+
+    # Then the documented v1 limitation is exactly one key drop, and nothing else
+    assert drift.actions == (DropForeignKey(constraint=table.foreign_keys[0]),)
     assert drift.unresolvable == ()
 
 
-def test_a_generated_streaming_table_fails_exactly_the_streaming_eligibility_check():
+def test_a_generated_streaming_table_fails_the_streaming_eligibility_check():
     # Given a streaming table already in sync with its generated declaration
     table = observed(kind=TableKind.STREAMING_TABLE)
 
     namespace: dict[str, object] = {}
-    exec(compile(generate_module(table).source, "<generated>", "exec"), namespace)  # noqa: S102
-    drift = diff_table(namespace["orders"].to_desired_table(), table)
+    exec(  # noqa: S102
+        compile(generate_module(table).source, "<generated>", "exec"),
+        namespace,
+    )
+    declaration = cast(DesiredTableSource, namespace["orders"])
+    drift = diff_table(declaration.to_desired_table(), table)
 
     # Then the diff is clean — the trap is the claimed scope, not the state
     assert drift.actions == ()
@@ -907,12 +1115,14 @@ def test_a_generated_streaming_table_fails_exactly_the_streaming_eligibility_che
     ]
 ```
 
-Add `Array`, `Decimal`, `Struct`, `StructField`, and `TableKind` to the `delta_engine.domain.model` import at the top of the test file. `TableKind` is new here rather than in Task 3 — Task 3 no longer distinguishes relation kinds, so importing it there would leave an unused import and fail `ruff check`.
+`TableKind` is new in Task 4 rather than Task 3: Task 3 no longer distinguishes
+relation kinds, so importing it there would leave an unused import and fail
+`ruff check`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/api/test_codegen.py -v`
-Expected: FAIL, `ImportError: cannot import name 'GeneratedModule'`
+Expected: FAIL, `ImportError: cannot import name 'generate_module'`
 
 - [ ] **Step 3: Write the module assembly**
 
@@ -924,8 +1134,8 @@ import keyword
 import re
 from typing import assert_never
 
-from delta_engine.api.declaration_source import render_declaration, render_import_line
-from delta_engine.domain.model import ForeignKeyConstraint, QualifiedName, TableKind
+from delta_engine.api.declaration_source import _render_declaration, _render_import_line
+from delta_engine.domain.model import TableKind
 ```
 
 Then:
@@ -945,9 +1155,9 @@ class GeneratedModule:
     warnings: tuple[str, ...] = ()
 
 
-def variable_name_for(table_name: str) -> str:
+def _variable_name_for(table_name: str) -> str:
     """Return a valid Python identifier naming a table's declaration."""
-    candidate = re.sub(r"\W", "_", table_name)
+    candidate = re.sub(r"\W", "_", table_name, flags=re.ASCII)
     if not candidate or candidate[0].isdigit():
         candidate = f"t_{candidate}"
     if keyword.iskeyword(candidate):
@@ -956,57 +1166,29 @@ def variable_name_for(table_name: str) -> str:
 
 
 def _foreign_key_warning(observed: ObservedTable) -> str:
-    """Warn that undeclared foreign keys will be dropped, and how to keep them."""
+    """Name every FK omitted by v1 and its conditional apply consequence."""
     keys = observed.foreign_keys
     plural = "" if len(keys) == 1 else "s"
     listed = "\n".join(
-        f"    {key.constraint_name}"
-        f"  ({', '.join(str(column) for column in key.local_columns)}"
-        f" -> {key.referenced_table})"
+        f"- {key.constraint_name}:"
+        f" ({', '.join(str(column) for column in key.local_columns)})"
+        f" -> {key.referenced_table}"
+        f"({', '.join(str(column) for column in key.referenced_columns)})"
         for key in keys
-    )
-    suggested = "\n".join(
-        f"    {_suggested_foreign_key(key, observed.qualified_name)}" for key in keys
     )
     return (
         f"{observed.qualified_name} has {len(keys)} foreign key{plural},"
-        " not declared in the generated module.\n"
-        "ForeignKey references its parent as a DeltaTable object, which a"
-        " single-table module does not have. A key onto this same table is the"
-        " exception and can use the Self sentinel — see the suggestion below.\n"
+        " not generated in v1.\n"
         "\n"
-        f"Planning this declaration as written will DROP the constraint{plural}:\n"
+        "On an otherwise eligible table, applying this declaration will"
+        f" DROP the constraint{plural}:\n"
         "\n"
-        f"{listed}\n"
-        "\n"
-        "To keep them, declare or import the referenced tables, add ForeignKey to"
-        " the delta_engine.schema import, and pass:\n"
-        "\n"
-        "    foreign_keys=[\n"
-        f"{suggested}\n"
-        "    ],"
+        f"{listed}"
     )
-
-
-def _suggested_foreign_key(key: ForeignKeyConstraint, owner: QualifiedName) -> str:
-    """Render the ForeignKey call that would restore one observed constraint."""
-    columns = (
-        repr(str(key.local_columns[0]))
-        if len(key.local_columns) == 1
-        else "[" + ", ".join(repr(str(column)) for column in key.local_columns) + "]"
-    )
-    # A key onto its own table cannot name the variable it sits inside — that
-    # name is not bound until the constructor call returns. Self is the public
-    # sentinel for exactly this, so suggesting the variable would be advice the
-    # reader cannot follow.
-    parent = (
-        "Self" if key.referenced_table == owner else variable_name_for(key.referenced_table.name)
-    )
-    return f"ForeignKey({columns}, references={parent}),"
 
 
 def _streaming_scope_warning(observed: ObservedTable) -> str | None:
-    """Warn that a streaming table's generated declaration claims a scope it may not."""
+    """Warn that a generated streaming declaration claims an invalid scope."""
     match observed.kind:
         case TableKind.TABLE:
             return None
@@ -1023,7 +1205,7 @@ def _streaming_scope_warning(observed: ObservedTable) -> str | None:
                 " StreamingTableAnnotationsOnly, an eligibility check that no rules="
                 " setting can suppress.\n"
                 "\n"
-                "To plan it, add:\n"
+                "To correct this scope limitation, add:\n"
                 "\n"
                 '    scope="annotations",'
             )
@@ -1036,11 +1218,7 @@ def _commented(text: str) -> str:
     return "\n".join(f"# {line}".rstrip() for line in text.splitlines())
 
 
-def generate_module(
-    observed: ObservedTable,
-    *,
-    variable: str | None = None,
-) -> GeneratedModule:
+def generate_module(observed: ObservedTable) -> GeneratedModule:
     """
     Return an importable module declaring ``observed``, plus any warnings.
 
@@ -1048,23 +1226,24 @@ def generate_module(
     with ``delta-engine plan <module>:tables``. Output is deterministic: the
     same observed table always produces byte-identical source.
 
-    Two aspects of the live table cannot be declared by a single-table module
-    and are reported instead of guessed: its foreign keys, and — for a streaming
-    table — the restricted scope its declaration needs. Each produces a warning
-    and a matching commented block in the source, so the module still imports
-    and the reader is told what planning it as written would do.
+    V1 deliberately omits every foreign key under one policy and reports the
+    resulting drops without suggesting repair code. A streaming table's missing
+    restricted scope is a separate warned limitation. Each produces a matching
+    commented block in the source, so the module still imports and the reader is
+    told what planning it as written would do.
 
     Raises:
         ValueError: The observed state cannot be expressed as a declaration.
 
     """
-    declaration = raise_declaration(observed)
-    name = variable if variable is not None else variable_name_for(observed.qualified_name.name)
+    declaration = _raise_declaration(observed)
+    name = _variable_name_for(observed.qualified_name.name)
+    rendered = _render_declaration(declaration, variable=name)
 
     blocks = [
         f"# Generated by delta-engine from {observed.qualified_name}.",
-        render_import_line(declaration),
-        render_declaration(declaration, variable=name),
+        _render_import_line(rendered.schema_names),
+        rendered.source,
     ]
 
     warnings: list[str] = []
@@ -1107,13 +1286,21 @@ print(generate_module(ObservedTable(
 )).source)"
 ```
 
-Confirm by eye: the import line is complete, the warning names `orders_region_fk`, and `tables = [orders]` is last. Then check the output is actually clean by ruff's standards:
+Confirm by eye: the import line is complete, the warning names
+`orders_region_fk` and its referenced columns, no repair expression appears,
+and `tables = [orders]` is last. Then lint and format-check this representative
+output under the repository configuration:
 
 ```bash
-uv run python -c "..." > /tmp/generated_check.py && ruff check --isolated /tmp/generated_check.py
+uv run python -c "..." > /tmp/generated_check.py
+ruff check --config pyproject.toml /tmp/generated_check.py
+ruff format --check --config pyproject.toml /tmp/generated_check.py
 ```
 
-Expected: no errors. If ruff complains, fix the renderer rather than the test — generated code that a formatter immediately rewrites is a defect.
+Expected: no errors for this representative fixture. This is a smoke check, not
+a promise that unusually long comments, tags, or nested types are already laid
+out exactly as a formatter would choose; deterministic, importable output is the
+v1 contract.
 
 - [ ] **Step 6: Run the full gates**
 
@@ -1124,7 +1311,7 @@ Expected: all green
 
 ```bash
 git add src/delta_engine/api/codegen.py tests/api/test_codegen.py
-git commit -m "feat(api): assemble a plan-able declaration module from observed state"
+git commit -m "feat(api): assemble a warned declaration module from observed state"
 ```
 
 ---
@@ -1133,13 +1320,11 @@ git commit -m "feat(api): assemble a plan-able declaration module from observed 
 
 **Files:**
 - Modify: `src/delta_engine/adapters/databricks/warehouse/factory.py`
-- Modify: `src/delta_engine/databricks.py`
 - Test: `tests/adapters/databricks/warehouse/test_factory.py` (create if absent)
 
-**Interfaces:**
+**Internal interface:**
 - Produces:
   - `delta_engine.adapters.databricks.warehouse.factory.build_reader(connection) -> WarehouseReader`
-  - `delta_engine.databricks.build_sql_reader(connection) -> CatalogStateReader`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1165,22 +1350,12 @@ def test_build_engine_still_returns_a_usable_engine():
     assert build_engine(_StubConnection()) is not None
 ```
 
-And in `tests/test_public_api.py`, append:
-
-```python
-def test_build_sql_reader_is_exported_from_the_databricks_facade():
-    import delta_engine.databricks as databricks
-
-    assert "build_sql_reader" in databricks.__all__
-    assert callable(databricks.build_sql_reader)
-```
-
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/adapters/databricks/warehouse/test_factory.py tests/test_public_api.py -v`
+Run: `uv run pytest tests/adapters/databricks/warehouse/test_factory.py -v`
 Expected: FAIL, `ImportError: cannot import name 'build_reader'`
 
-- [ ] **Step 3: Add both factories**
+- [ ] **Step 3: Add the reader factory**
 
 In `src/delta_engine/adapters/databricks/warehouse/factory.py`, append:
 
@@ -1195,49 +1370,26 @@ def build_reader(connection: Connection) -> WarehouseReader:
     return WarehouseReader(WarehouseSqlRunner(connection))
 ```
 
-In `src/delta_engine/databricks.py`, add `"build_sql_reader"` to `__all__` (keeping it sorted) and append:
-
-```python
-def build_sql_reader(connection: Connection) -> CatalogStateReader:
-    """
-    Create a catalog-state reader backed by a Databricks SQL warehouse connection.
-
-    The read-only counterpart to :func:`build_sql_engine`, for callers that
-    inspect a table's current state rather than reconcile it — the CLI's
-    ``generate`` command is one. The caller owns the connection.
-    """
-    from delta_engine.adapters.databricks.warehouse.factory import build_reader as _build_reader
-
-    return _build_reader(connection)
-```
-
-`databricks.py` already has `from __future__ import annotations`, so the return annotation is never evaluated at runtime and the import belongs under `TYPE_CHECKING`. Extend the existing block:
-
-```python
-if TYPE_CHECKING:
-    from databricks.sql.client import Connection
-    from pyspark.sql import SparkSession
-
-    from delta_engine.application.ports import CatalogStateReader
-```
-
-Keeping it there preserves the module's whole point: importing `delta_engine.databricks` must not drag in a backend.
+Keep this factory internal to the warehouse adapter. The CLI is the composition
+root and may import it directly under the existing layer contract; do not add a
+reader returning internal application-port types to `delta_engine.databricks.__all__`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `uv run pytest tests/adapters/databricks/warehouse/test_factory.py tests/test_public_api.py -v`
+Run: `uv run pytest tests/adapters/databricks/warehouse/test_factory.py -v`
 Expected: all passed
 
 - [ ] **Step 5: Run the full gates**
 
 Run: `uv run pytest && ruff check && ruff format --check && uv run mypy . && uv run lint-imports`
-Expected: all green. `lint-imports` confirms the lazy import keeps the facade's exemptions intact.
+Expected: all green. `lint-imports` confirms the internal factory stays within
+the existing adapter boundary.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/delta_engine/databricks.py src/delta_engine/adapters/databricks/warehouse/factory.py tests/
-git commit -m "feat(databricks): expose a catalog-state reader alongside the engine"
+git add src/delta_engine/adapters/databricks/warehouse/factory.py tests/adapters/databricks/warehouse/test_factory.py
+git commit -m "feat(databricks): build an internal warehouse catalog reader"
 ```
 
 ---
@@ -1247,10 +1399,11 @@ git commit -m "feat(databricks): expose a catalog-state reader alongside the eng
 **Files:**
 - Modify: `src/delta_engine/cli/app.py`
 - Modify: `tests/cli/conftest.py`
+- Modify: `tests/cli/test_app_plan.py`
 - Test: `tests/cli/test_app_generate.py`
 
 **Interfaces:**
-- Consumes: `generate_module`, `GeneratedModule` (Task 4); `build_sql_reader` (Task 5).
+- Consumes: `generate_module` (Task 4); internal `build_reader` (Task 5).
 
 - [ ] **Step 1: Extend the CLI fixtures**
 
@@ -1273,7 +1426,13 @@ def fake_reader(monkeypatch):
         )
 
     monkeypatch.setattr(cli_app, "open_connection", fake_connection)
-    monkeypatch.setattr(cli_app, "build_sql_reader", lambda connection: reader)
+    # The first red test runs before the command imports this name into cli.app.
+    monkeypatch.setattr(
+        cli_app,
+        "build_reader",
+        lambda connection: reader,
+        raising=False,
+    )
     return reader
 ```
 
@@ -1336,6 +1495,12 @@ def test_foreign_keys_warn_on_stderr_as_well_as_in_the_source(
     assert result.exit_code == 0
     assert "orders_id_fk" in result.stderr
     assert "orders_id_fk" in result.stdout
+    assert "ForeignKey(" not in result.stderr
+    assert "ForeignKey(" not in result.stdout
+    assert "references=" not in result.stderr
+    assert "references=" not in result.stdout
+    assert "Self" not in result.stderr
+    assert "Self" not in result.stdout
 
 
 def test_an_absent_table_reports_it_and_exits_one(runner, fake_reader, databricks_env):
@@ -1359,11 +1524,42 @@ def test_a_read_failure_reports_it_and_exits_one(runner, fake_reader, databricks
     assert "permission denied" in result.stderr
 
 
+def test_undeclarable_state_names_the_table_and_exits_one(
+    runner, fake_reader, databricks_env
+):
+    fake_reader.states["dev.silver.orders"] = TablePresent(
+        table=ObservedTable(
+            qualified_name=QualifiedName("dev", "silver", "orders"),
+            columns=(ObservedColumn("id", String(), nullable=True),),
+            primary_key=PrimaryKeyConstraint(
+                columns=("id",),
+                constraint_name="orders_pk",
+            ),
+        )
+    )
+
+    result = runner.invoke(app, ["generate", "dev.silver.orders"])
+
+    assert result.exit_code == 1
+    assert "dev.silver.orders" in result.stderr
+    assert "Primary key column must be NOT NULL" in result.stderr
+    assert result.stdout == ""
+
+
 def test_a_malformed_table_name_is_rejected_before_connecting(runner, databricks_env):
     result = runner.invoke(app, ["generate", "silver.orders"])
 
     assert result.exit_code == 1
     assert "CATALOG.SCHEMA.TABLE" in result.stderr
+```
+
+In `tests/cli/test_app_plan.py`, update the module docstring so it no longer
+calls `plan` the single workflow. Rename
+`test_help_and_version_keep_the_minimal_public_surface` to
+`test_help_and_version_keep_the_read_only_public_surface` and add:
+
+```python
+    assert "generate" in help_result.stdout
 ```
 
 - [ ] **Step 3: Run the tests to verify they fail**
@@ -1373,13 +1569,20 @@ Expected: FAIL — `generate` is not a command
 
 - [ ] **Step 4: Add the command**
 
+Update `src/delta_engine/cli/app.py`'s module docstring to describe both
+read-only workflows, and change the Typer app help to:
+
+```python
+help="Read-only planning and declaration generation for Delta Lake tables on Databricks."
+```
+
 In `src/delta_engine/cli/app.py`, add to the imports:
 
 ```python
+from delta_engine.adapters.databricks.warehouse.factory import build_reader
 from delta_engine.api.codegen import generate_module
 from delta_engine.application.errors import ReadError
 from delta_engine.application.ports import TablePresent
-from delta_engine.databricks import build_sql_reader
 from delta_engine.domain.model import QualifiedName
 ```
 
@@ -1411,15 +1614,18 @@ Then the command:
 ```python
 @app.command()
 def generate(table: TableArgument) -> None:
-    """Read one live table and print the declaration module that reproduces it."""
+    """Print one table's supported declaration state and known limitations."""
     with _anticipated_errors():
         qualified_name = _parse_qualified_name(table)
         with _engine_logging():
             with open_connection() as (_, connection):
-                state = build_sql_reader(connection).fetch_state(qualified_name)
+                state = build_reader(connection).fetch_state(qualified_name)
         if not isinstance(state, TablePresent):
             raise ConfigError(f"{qualified_name} does not exist")
-        module = generate_module(state.table)
+        try:
+            module = generate_module(state.table)
+        except ValueError as error:
+            raise ConfigError(f"cannot generate {qualified_name}: {error}") from None
         for warning in module.warnings:
             typer.echo(f"warning: {warning}", err=True)
         typer.echo(module.source, nl=False)
@@ -1472,24 +1678,45 @@ git commit -m "feat(cli): add generate, printing a declaration for one live tabl
 
 - [ ] **Step 1: Update the CLI reference**
 
-`docs/reference-cli.md` opens with *"The `delta-engine` command has one read-only workflow"*. Change it to two, and add a `generate` section after the `plan` one covering: the `CATALOG.SCHEMA.TABLE` argument, that source goes to stdout and warnings to stderr, that the output is a plan-able module ending in `tables = [...]`, that output is deterministic so `generate | diff` works as a drift check, and — stated plainly, not buried — the two accepted traps: foreign keys are not declared and planning the output as written drops them, and a generated streaming table declares no scope, so it fails `StreamingTableAnnotationsOnly` until `scope="annotations"` is added.
+`docs/reference-cli.md` opens with *"The `delta-engine` command has one read-only
+workflow"*. Change it to two, and add a `generate` section after the `plan` one
+covering: the `CATALOG.SCHEMA.TABLE` argument, that source goes to stdout and
+warnings to stderr, that the output is an importable module ending in
+`tables = [...]`, and that output is deterministic so `generate | diff` works
+as a drift check. State plainly, not buried, that v1 omits every foreign key,
+including self-references; the warning lists each complete observed relationship
+and states the conditional apply consequence; and no executable
+repair expression is generated. Document streaming-table scope as a separate
+limitation: a generated streaming table declares no scope, so it fails
+`StreamingTableAnnotationsOnly` until `scope="annotations"` is added.
 
 - [ ] **Step 2: Update the README**
 
 The CLI paragraph names only `plan`. Add one sentence for `generate` describing it as the adoption on-ramp.
 
-- [ ] **Step 3: Correct the design doc's file table**
+- [ ] **Step 3: Reconcile the design document**
 
-The design lists `cli/generate.py`; the command went into `cli/app.py`. Update the Files table and the module list in the "Decision" section so the design does not contradict the shipped code.
+Verify that the design's file table matches this plan
+(`api/declaration_source.py`, `api/codegen.py`, `warehouse/factory.py`, and
+`cli/app.py`) and that it
+describes the CLI command as the only supported public operation, with
+`generate_module` as its internal codegen boundary. Keep raising, rendering,
+import discovery, and variable naming as private implementation details.
 
-- [ ] **Step 4: Mark the backlog entry resolved**
+- [ ] **Step 4: Update the backlog entry, but keep it open**
 
-In `docs/todo/todo.md`, change the codegen entry from `- [ ]` to `- [x]` and append what was actually built, what was deferred (schema-wide discovery, the Spark path), and the two accepted traps (foreign keys, streaming-table scope).
+In `docs/todo/todo.md`, record what was built and what was deferred (all
+foreign-key source generation, relationship closure, schema-wide discovery,
+and the Spark path). Record the uniform consequence-only FK warning and the
+separate streaming-table scope limitation. Keep the entry at `- [ ]`: Task 8's
+required live proof has not passed yet.
 
 - [ ] **Step 5: Verify the docs build**
 
-Run: `uv run sphinx-build -W docs docs/_build`
-Expected: no warnings. `docs/todo/` is excluded (`docs/conf.py:81`), so only `reference-cli.md` is built.
+Run: `uv run --group docs sphinx-build -W docs docs/_build`
+Expected: the complete included documentation tree builds without warnings.
+`docs/todo/` is excluded (`docs/conf.py:81`); of the files changed in this task,
+only `reference-cli.md` is part of the Sphinx build.
 
 - [ ] **Step 6: Commit**
 
@@ -1506,28 +1733,32 @@ Requires a real workspace. Run before considering the feature proven; it is the 
 
 **Files:**
 - Create: `tests/live/test_sql_warehouse_live_generate.py`
+- Modify: `docs/todo/todo.md`
 
 - [ ] **Step 1: Write the live test**
 
 ```python
 """
-Generating a declaration from a real Unity Catalog table plans as a no-op.
+Generating a supported ordinary declaration from a real table plans as a no-op.
 
 The only test that runs the generator against a real ``DESCRIBE … AS JSON``
 document rather than a hand-built ``ObservedTable``. Everything the unit
-round-trip proves rests on the fixtures being faithful; this proves the
+supported-path tests prove rests on the fixtures being faithful; this proves the
 catalog agrees.
 """
+
+from typing import cast
 
 import pytest
 
 pytest.importorskip("databricks.sql")
 
 
-from delta_engine.api.codegen import generate_module, variable_name_for
-from delta_engine.databricks import build_sql_engine, build_sql_reader
+from delta_engine.adapters.databricks.warehouse.factory import build_reader
+from delta_engine.api.codegen import generate_module
+from delta_engine.application.ports import DesiredTableSource, TablePresent
+from delta_engine.databricks import build_sql_engine
 from delta_engine.domain.model import QualifiedName
-from delta_engine.domain.plan import diff_table
 from delta_engine.schema import Column, Decimal, DeltaTable, Integer, String
 from tests.live.sql_warehouse_live_helpers import live_catalog, live_schema
 
@@ -1556,15 +1787,19 @@ def test_a_generated_declaration_plans_clean_against_the_table_it_came_from(
 
     # When we read it back and generate a declaration from the observed state
     qualified_name = QualifiedName(live_catalog(), live_schema(), name)
-    state = build_sql_reader(live_connection).fetch_state(qualified_name)
+    state = build_reader(live_connection).fetch_state(qualified_name)
+    assert isinstance(state, TablePresent)
     namespace: dict[str, object] = {}
-    exec(compile(generate_module(state.table).source, "<generated>", "exec"), namespace)  # noqa: S102
+    exec(  # noqa: S102
+        compile(generate_module(state.table).source, "<generated>", "exec"),
+        namespace,
+    )
 
-    # Then planning the generated declaration against that same state is a no-op
-    declaration = namespace[variable_name_for(name)]
-    drift = diff_table(declaration.to_desired_table(), state.table)
-    assert drift.actions == ()
-    assert drift.unresolvable == ()
+    # Then the complete dry-run pipeline accepts it and reports no changes
+    generated_tables = cast(list[DesiredTableSource], namespace["tables"])
+    report = build_sql_engine(live_connection).sync(*generated_tables, dry_run=True)
+    assert report.has_failures is False
+    assert report.has_changes is False
 ```
 
 Notes on the fixtures, which differ from the rest of the suite:
@@ -1579,10 +1814,15 @@ Notes on the fixtures, which differ from the rest of the suite:
 Run: `uv run pytest tests/live/test_sql_warehouse_live_generate.py -m databricks_e2e --no-cov -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Close the backlog only after the live proof passes**
+
+Change the codegen entry in `docs/todo/todo.md` from `- [ ]` to `- [x]`. Do not
+close it when the live test is skipped, unavailable, or failing.
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add tests/live/test_sql_warehouse_live_generate.py
+git add tests/live/test_sql_warehouse_live_generate.py docs/todo/todo.md
 git commit -m "test: pin generated declarations against a live workspace"
 ```
 
@@ -1595,27 +1835,29 @@ is added: `test_renders_a_minimal_declaration_omitting_every_default` (Task 2)
 already asserts the complete rendered text character-for-character, and
 `test_output_is_byte_identical_when_regenerated` (Task 4) pins determinism.
 Between them a format change fails a diff-reviewable assertion, which is what
-the golden file was for. Task 4's Step 5 covers the remaining concern the
-design raised — that the output survives a formatter untouched — by running
-`ruff check --isolated` over real generated source.
+the golden file was for. Task 4's Step 5 also lint- and format-checks one
+representative generated module under the repository configuration; it is a
+style smoke test, not a universal formatter-stability guarantee.
 
-Everything else in the design maps to a task: the raise and its inversion table
-(Task 3), the renderer and the omit-defaults rule (Task 2), both warnings and
-the stdout/stderr split (Tasks 4 and 6), the undeclarable cases (Task 3's final
-test), the reader seam (Task 5), the CLI surface and its named failure paths
-(Task 6), and the vocabulary pin (Task 1).
+Everything else in the design maps to a task: the observed-state projection
+(Task 3), the narrow renderer and omit-defaults rule (Task 2), uniform omission
+of external and self-referential foreign keys, their consequence-only warning,
+and the absence of generated repair source (Tasks 3, 4, and 6), the full-engine
+supported-path oracle (Tasks 4 and 8), the remaining undeclarable cases (Task
+3's final test), the reader seam (Task 5), the CLI surface and its named failure
+paths (Task 6), and the vocabulary pin (Task 1).
 
 No task adds a `scope` property to `DeltaTable`. Generated modules never pass
 `scope` and take the `"full"` default, which is correct for an ordinary table
-and wrong for a streaming table; the streaming case is an accepted trap carried
-by a warning, exactly as foreign keys are. The design records why, under
-*Rejected alternatives*.
+and wrong for a streaming table. That eligibility failure is a separate warned
+limitation, not part of the foreign-key omission policy. The design records why
+under *Rejected alternatives*.
 
 ## Definition of done
 
-- `delta-engine generate dev.silver.orders` prints a module that `delta-engine plan generated:tables` reports as no changes.
+- For an ordinary table without foreign keys, `delta-engine generate dev.silver.orders` prints a module that passes the full dry-run pipeline with no failures and no changes.
 - Regenerating an unchanged table is byte-identical.
-- A generated FK-bearing table plans exactly the expected `DropForeignKey` actions and nothing else.
-- A generated streaming table diffs clean and fails exactly `StreamingTableAnnotationsOnly`, and its warning names the `scope="annotations"` fix.
+- External and self-referential foreign keys are all omitted under one policy; one diagnostic warning lists their complete signatures without a repair expression, and direct diffing produces exactly the corresponding `DropForeignKey` actions.
+- A generated FK-free streaming table diffs clean and fails exactly `StreamingTableAnnotationsOnly`, and its warning names the `scope="annotations"` fix.
 - Every name the renderer emits is in `schema.__all__`; every `DataType` variant renders.
 - All six gates green, live suite included.
