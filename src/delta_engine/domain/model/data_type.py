@@ -70,7 +70,11 @@ class Decimal(DataType):
     scale: int = 0
 
     def __post_init__(self) -> None:
-        """Validate that 0 < precision <= 38 and 0 <= scale <= precision."""
+        if type(self.precision) is not int and type(self.scale) is not int:
+            raise ValueError(
+                "precision and scale must by type int;"
+                f" got precision: {type(self.precision)}, scale: {type(self.scale)}"
+            )
         # The cap is checked first so an over-limit precision always gets the
         # message naming the limit, even when the scale is also out of range.
         if self.precision > _MAX_DECIMAL_PRECISION:

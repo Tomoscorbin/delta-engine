@@ -41,6 +41,12 @@ def test_decimal_accepts_maximum_precision_and_scale() -> None:
     assert Decimal(38, 38).precision == 38
 
 
+@pytest.mark.parametrize("value", ["1", 1.0, True])
+def test_decimal_rejects_non_integer_precision_and_scale(value) -> None:
+    with pytest.raises(ValueError):
+        Decimal(value, value)
+
+
 def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
