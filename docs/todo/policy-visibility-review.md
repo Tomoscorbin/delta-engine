@@ -77,8 +77,9 @@ mechanism and its deterministic evaluation order in one short block.
 
 `application/scopes.py` owns the public scope names, their aspect sets, and
 the name-to-aspects translation. `DeltaTable` resolves its `scope` at the API
-boundary, while `StreamingTableTagsOnly` reuses `TAG_ASPECTS`; the public
-`"tags"` definition and streaming-table allowance cannot diverge.
+boundary, while `StreamingTableAnnotationsOnly` reuses `ANNOTATION_ASPECTS`;
+the public `"annotations"` definition and streaming-table allowance cannot
+diverge.
 
 The domain continues to receive only `managed_aspects`. Its property exception
 in `domain/plan/diff.py` and the managed foreign-key filtering in

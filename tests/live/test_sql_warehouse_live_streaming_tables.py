@@ -256,7 +256,7 @@ def test_tags_are_the_only_aspect_the_engine_manages_on_a_streaming_table(
 
     [table_report] = error.value.report.table_reports
     assert table_report.status is TableRunStatus.PLANNING_FAILED
-    assert "StreamingTableTagsOnly" in {
+    assert "StreamingTableAnnotationsOnly" in {
         failure.rule_name
         for failure in table_report.failures
         if isinstance(failure, ValidationFailure)

@@ -843,7 +843,7 @@ def test_tag_scope_manages_only_table_and_column_tags():
 def test_delta_table_rejects_unknown_scope():
     # Given a scope value outside the named scopes
     # When / Then construction fails naming the valid options
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="'full', 'metadata', 'annotations', 'tags'"):
         DeltaTable(
             catalog="dev",
             schema="silver",

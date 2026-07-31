@@ -11,7 +11,7 @@ from delta_engine.application.properties import (
     Property,
     PropertyPolicy,
 )
-from delta_engine.application.scopes import TAG_ASPECTS
+from delta_engine.application.scopes import ANNOTATION_ASPECTS
 from delta_engine.domain.model import (
     Byte,
     DataType,
@@ -601,21 +601,29 @@ class MissingTableUnmanaged:
                 assert_never(unreachable)
 
 
-class StreamingTableTagsOnly:
+class StreamingTableAnnotationsOnly:
     """
-    Fail any declaration that manages more than tags on a streaming table.
+    Fail any declaration that manages more than annotations on a streaming table.
 
     One of the ``ELIGIBILITY_CHECKS``: it runs unconditionally and cannot be
-    suppressed via ``rules``. A streaming table's definition is owned by its
-    pipeline; Unity Catalog tags are the one aspect durably manageable from
-    outside it. It judges the declaration's claimed aspects against the
-    observed kind — not the drift — so it fires even when the table is
+    suppressed via ``rules``. A streaming table's definition — schema,
+    properties, and keys — is owned by its pipeline and belongs to
+    ``CREATE OR REFRESH``; comments and Unity Catalog tags are alterable from
+    outside it, and are exactly what ``ALTER STREAMING TABLE`` and
+    ``COMMENT ON`` reach. It judges the declaration's claimed aspects against
+    the observed kind — not the drift — so it fires even when the table is
     currently in sync, and a dry run surfaces the misdeclaration immediately.
-    ``TAG_ASPECTS`` is shared with the public ``"tags"`` scope so the two
-    policies cannot diverge.
+    ``ANNOTATION_ASPECTS`` is shared with the public ``"annotations"`` scope so
+    the two policies cannot diverge.
+
+    Keys are excluded rather than silently ignored: a declaration mirrors the
+    pipeline's key to keep the aspect quiet, exactly as it already mirrors the
+    pipeline's columns. If the pipeline later changes the key, the mirror stops
+    matching and ``UnmanagedAspectDrift`` reports it — late, but loud, and the
+    only honest answer available for an aspect the engine cannot reconcile.
     """
 
-    name: ClassVar[str] = "StreamingTableTagsOnly"
+    name: ClassVar[str] = "StreamingTableAnnotationsOnly"
 
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
@@ -626,30 +634,31 @@ class StreamingTableTagsOnly:
             case TableDrift() as drift:
                 if drift.observed.kind is not TableKind.STREAMING_TABLE:
                     return ()
-                if drift.desired.managed_aspects <= TAG_ASPECTS:
+                if drift.desired.managed_aspects <= ANNOTATION_ASPECTS:
                     return ()
                 return (
                     ValidationFailure(
                         rule_name=self.name,
                         message=(
                             "Operation not allowed: this relation is a streaming table,"
-                            " whose definition is owned by its pipeline. Only Unity"
-                            " Catalog tags can be managed on it: declare the table with"
-                            ' scope="tags", or change its definition in the owning'
-                            " pipeline."
+                            " whose definition — schema, properties, and keys — is owned"
+                            " by its pipeline. Only comments and Unity Catalog tags can"
+                            " be managed on it: declare the table with"
+                            ' scope="annotations" (or scope="tags"), or change its'
+                            " definition in the owning pipeline."
                         ),
                     ),
                 )
 
 
 # Position is report order, so a root defect leads what it causes: spelling
-# before the two it can co-fire with, then StreamingTableTagsOnly before
+# before the two it can co-fire with, then StreamingTableAnnotationsOnly before
 # UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
 # TableMissing, so it never co-fires.
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     MissingTableUnmanaged(),
-    StreamingTableTagsOnly(),
+    StreamingTableAnnotationsOnly(),
     UnmanagedAspectDrift(),
 )
 
@@ -677,7 +686,7 @@ def validate_diff(
     Eligibility is settled before any safety rule. A column spelled differently
     from the catalog, a drifted aspect the declaration does not manage, a
     missing table it may not create, or a streaming table it claims more than
-    tags on all fail here and short-circuit, so the safety rules never run on a
+    annotations on all fail here and short-circuit, so the safety rules never run on a
     diff the engine has already rejected. This is what makes an unmanaged
     difference produce exactly the scope failure rather than also tripping rules
     for work the user never requested, and a misspelled column produce the

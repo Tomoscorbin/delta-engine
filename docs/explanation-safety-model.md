@@ -70,10 +70,11 @@ metadata scope in practice, and [tags](how-to-configure-table.md#manage-tags-onl
 for tag-only declarations.
 
 Streaming tables make the scope boundary literal. Their definition is owned by
-a pipeline, so the engine reads one for tag governance only: the relation kind
-is discovered at read time, and a declaration that manages anything beyond
-tags fails validation (`StreamingTableTagsOnly`) before any SQL runs — even
-with zero drift. See
+a pipeline, so the engine reads one for annotation governance only: the
+relation kind is discovered at read time, and a declaration that manages
+anything beyond comments and tags fails validation
+(`StreamingTableAnnotationsOnly`) before any SQL runs — even with zero drift.
+See
 [safe-change rules](reference-safe-change-rules.md) for the invariant and
 [tag a streaming table](how-to-deploy-metadata-only.md#tag-a-streaming-table)
 for the workflow.

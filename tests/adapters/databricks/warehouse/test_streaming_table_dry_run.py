@@ -2,9 +2,9 @@
 End-to-end dry run against an observed streaming table.
 
 Wires the real warehouse reader, engine, validation, and SQL compiler over a
-canned DESCRIBE AS JSON document: a tags-scope declaration against a streaming
-table plans ALTER STREAMING TABLE statements, and any wider scope fails
-validation before SQL is planned.
+canned DESCRIBE AS JSON document: an annotations-scope declaration against a
+streaming table plans the comment and tag statements in the streaming-table
+dialect, and any wider scope fails validation before SQL is planned.
 """
 
 import json
@@ -87,28 +87,35 @@ def _engine() -> Engine:
     )
 
 
-def test_tags_scope_dry_run_plans_streaming_table_ddl():
-    # Given a tags-scope declaration over a described streaming table with
-    # one tag to set, one to unset, and one column tag to set
+def test_annotations_scope_dry_run_plans_streaming_table_ddl():
+    # Given an annotations-scope declaration over a described streaming table
+    # with one tag to set, one to unset, one column tag to set, and both
+    # comments to write — the described table carries neither
     declaration = DeltaTable(
         "cat",
         "sch",
         "clicks",
-        columns=(Column("id", Integer(), tags={"pii": "low"}),),
+        columns=(Column("id", Integer(), comment="the id", tags={"pii": "low"}),),
+        comment="click events",
         tags={"owner": "governance"},
-        scope="tags",
+        scope="annotations",
     )
 
     # When dry-running a sync
     report = _engine().sync(declaration, dry_run=True)
 
-    # Then the planned SQL carries the streaming-table dialect end to end
+    # Then the planned SQL carries the streaming-table dialect end to end. The
+    # column comment takes the ALTER STREAMING TABLE prefix; COMMENT ON TABLE is
+    # kind-independent. Both are pinned live in
+    # tests/live/test_sql_warehouse_live_streaming_tables.py
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
     assert set(table_report.planned_sql_statements) == {
         "ALTER STREAMING TABLE `cat`.`sch`.`clicks` SET TAGS ('owner'='governance')",
         "ALTER STREAMING TABLE `cat`.`sch`.`clicks` UNSET TAGS ('stale')",
         "ALTER STREAMING TABLE `cat`.`sch`.`clicks` ALTER COLUMN `id` SET TAGS ('pii'='low')",
+        "ALTER STREAMING TABLE `cat`.`sch`.`clicks` ALTER COLUMN `id` COMMENT 'the id'",
+        "COMMENT ON TABLE `cat`.`sch`.`clicks` IS 'click events'",
     }
 
 
@@ -135,4 +142,4 @@ def test_full_scope_dry_run_fails_validation_against_a_streaming_table():
         for failure in table_report.failures
         if isinstance(failure, ValidationFailure)
     }
-    assert "StreamingTableTagsOnly" in rule_names
+    assert "StreamingTableAnnotationsOnly" in rule_names

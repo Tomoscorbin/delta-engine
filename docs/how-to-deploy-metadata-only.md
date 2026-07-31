@@ -68,14 +68,16 @@ Both failures are laws rather than rules, listed in
 
 ## Tag a streaming table
 
-`scope="tags"` extends to streaming tables. A streaming table's definition —
-schema, comments, properties — is owned by its pipeline, and out-of-band
-changes to those can be reverted on refresh; Unity Catalog tags persist, so
-tags are the one aspect the engine can durably manage there. The engine
-discovers the relation kind when it reads the table (nothing is declared),
-compiles tag changes as `ALTER STREAMING TABLE`, and rejects any wider scope:
-a `"full"` or `"metadata"` declaration against a streaming table fails
-validation (`StreamingTableTagsOnly`) even when nothing has drifted.
+`scope="tags"` extends to streaming tables, as does the wider
+`scope="annotations"`. A streaming table's definition — schema, properties,
+keys — is owned by its pipeline, and out-of-band changes to those can be
+reverted on refresh; comments and Unity Catalog tags are alterable from
+outside the pipeline and persist, so they are the aspects the engine can
+durably manage there. The engine discovers the relation kind when it reads the
+table (nothing is declared), compiles the changes in the streaming-table
+dialect, and rejects any wider scope: a `"full"` or `"metadata"` declaration
+against a streaming table fails validation
+(`StreamingTableAnnotationsOnly`) even when nothing has drifted.
 
 ```python
 from delta_engine.schema import Column, DeltaTable, Integer

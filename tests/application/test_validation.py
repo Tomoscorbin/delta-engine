@@ -1,7 +1,9 @@
 from typing import ClassVar
 
+import pytest
+
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.application.scopes import METADATA_ASPECTS
+from delta_engine.application.scopes import ANNOTATION_ASPECTS, METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
     ELIGIBILITY_CHECKS,
@@ -60,6 +62,7 @@ def _desired_table(
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
     managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    primary_key: PrimaryKeyConstraint | None = None,
 ) -> DesiredTable:
     return DesiredTable(
         qualified_name=_QUALIFIED_NAME,
@@ -68,6 +71,7 @@ def _desired_table(
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
         managed_aspects=managed_aspects,
+        primary_key=primary_key,
     )
 
 
@@ -79,6 +83,7 @@ def _observed_table(
     clustered_by: tuple[str, ...] = (),
     kind: TableKind = TableKind.TABLE,
     referencing_foreign_keys: tuple[ForeignKeyReference, ...] = (),
+    primary_key: PrimaryKeyConstraint | None = None,
 ) -> ObservedTable:
     source = (DesiredColumn("id", Integer()),) if columns is None else columns
     return ObservedTable(
@@ -89,6 +94,7 @@ def _observed_table(
         clustered_by=clustered_by,
         kind=kind,
         referencing_foreign_keys=referencing_foreign_keys,
+        primary_key=primary_key,
     )
 
 
@@ -139,7 +145,7 @@ def test_eligibility_checks_cover_all_laws_in_evaluation_order():
     assert check_names == (
         "ColumnSpellingMustMatchCatalog",
         "MissingTableUnmanaged",
-        "StreamingTableTagsOnly",
+        "StreamingTableAnnotationsOnly",
         "UnmanagedAspectDrift",
     )
 
@@ -1081,134 +1087,111 @@ def test_column_spelling_check_reports_before_unmanaged_aspect_drift():
 
 def test_column_spelling_check_reports_before_the_streaming_table_check():
     # Given a streaming table whose declaration both misspells a column and
-    # claims more than tags. UnmanagedAspectDrift stays silent — the case drift
-    # is the one difference it passes over — so this isolates the spelling and
-    # kind checks against each other
+    # claims more than annotations. UnmanagedAspectDrift stays silent — the case
+    # drift is the one difference it passes over — so this isolates the spelling
+    # and kind checks against each other
     diff = _drift(
         ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
-        managed_aspects=frozenset(
-            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
-        ),
+        managed_aspects=METADATA_ASPECTS,
         kind=TableKind.STREAMING_TABLE,
     )
 
     failures = validate_diff(diff)
 
-    # Then the spelling leads. Narrowing the scope to "tags" is what the kind
-    # failure asks for, and it would not make the misspelling right — so the
-    # defect that survives the suggested fix is reported first
+    # Then the spelling leads. Narrowing the scope is what the kind failure asks
+    # for, and it would not make the misspelling right — so the defect that
+    # survives the suggested fix is reported first
     assert [failure.rule_name for failure in failures] == [
         "ColumnSpellingMustMatchCatalog",
-        "StreamingTableTagsOnly",
+        "StreamingTableAnnotationsOnly",
     ]
 
 
 # ---- streaming tables
 
 
-_TAG_ASPECTS_ONLY = frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS})
+_PIPELINE_KEY = PrimaryKeyConstraint(("id",), "test_pk")
+# Unity Catalog will not key a nullable column and the engine will not declare
+# one, so the key column of a pipeline-declared key is NOT NULL on both sides
+_KEYED_COLUMNS = (DesiredColumn("id", Integer(), nullable=False),)
 
 
-def test_streaming_table_passes_when_the_declaration_manages_only_tags():
-    # Given a tags-scope declaration over a streaming table with tag drift
-    diff = _drift(
-        SetColumnTag(column_name="id", name="pii", desired_value="true", observed_value=None),
-        managed_aspects=_TAG_ASPECTS_ONLY,
-        kind=TableKind.STREAMING_TABLE,
-    )
+@pytest.mark.parametrize(
+    "managed_aspects", [TAG_ASPECTS, ANNOTATION_ASPECTS], ids=["tags", "annotations"]
+)
+def test_streaming_table_admits_a_declaration_within_annotations(managed_aspects):
+    # Given a declaration claiming no more than comments and tags — the aspects
+    # a pipeline does not own
+    diff = _drift(managed_aspects=managed_aspects, kind=TableKind.STREAMING_TABLE)
 
-    # Then the tag work is allowed
+    # Then the engine may manage them
     assert not validate_diff(diff)
 
 
-def test_streaming_table_fails_a_full_scope_declaration_even_with_zero_drift():
-    # Given a fully-managed declaration over an in-sync streaming table
-    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
+@pytest.mark.parametrize(
+    "managed_aspects", [METADATA_ASPECTS, ALL_ASPECTS], ids=["metadata", "full"]
+)
+def test_streaming_table_refuses_a_declaration_beyond_annotations(managed_aspects):
+    # Given a declaration claiming keys as well, over an in-sync table — zero
+    # drift, so there is nothing to do either way
+    diff = _drift(managed_aspects=managed_aspects, kind=TableKind.STREAMING_TABLE)
 
     # When validating
     failures = validate_diff(diff)
 
-    # Then the declaration is rejected on kind alone: it claims authority the
-    # engine must never exercise on a pipeline-owned table
-    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
-    assert 'scope="tags"' in failures[0].message
-
-
-def test_streaming_table_fails_a_metadata_scope_declaration():
-    # Given a declaration managing comments as well as tags
-    diff = _drift(
-        managed_aspects=frozenset(
-            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
-        ),
-        kind=TableKind.STREAMING_TABLE,
-    )
-
-    # Then managing anything beyond tags is rejected
-    failures = validate_diff(diff)
-    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
-
-
-def test_streaming_table_gate_cannot_be_suppressed_by_empty_rules():
-    diff = _drift(managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
-
-    failures = validate_diff(diff, rules=())
-
-    assert failures[0].rule_name == "StreamingTableTagsOnly"
-
-
-def test_streaming_table_gate_short_circuits_safety_rules():
-    # Given a full-scope declaration over a streaming table with an unsafe
-    # type change
-    diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS, kind=TableKind.STREAMING_TABLE)
-
-    # Then the kind violation is reported alone; no safety rule runs
-    failures = validate_diff(diff)
-    assert [failure.rule_name for failure in failures] == ["StreamingTableTagsOnly"]
+    # Then it is rejected on the claim alone rather than on any difference, so a
+    # dry run surfaces the misdeclaration before the table has drifted at all
+    assert [failure.rule_name for failure in failures] == ["StreamingTableAnnotationsOnly"]
+    assert 'scope="annotations"' in failures[0].message
 
 
 def test_streaming_table_check_reports_before_unmanaged_aspect_drift():
-    # Given a metadata-ish scope with structure drift on a streaming table —
+    # Given a metadata scope with structure drift on a streaming table —
     # both eligibility checks fire, kind first
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=frozenset(
-            {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS, TableAspect.TABLE_COMMENT}
-        ),
+        managed_aspects=METADATA_ASPECTS,
         kind=TableKind.STREAMING_TABLE,
     )
 
     failures = validate_diff(diff)
 
     assert [failure.rule_name for failure in failures] == [
-        "StreamingTableTagsOnly",
+        "StreamingTableAnnotationsOnly",
         "UnmanagedAspectDrift",
     ]
 
 
-def test_streaming_table_under_tags_scope_still_fails_unmanaged_drift():
-    # Given a tags-scope declaration over a streaming table whose comment drifted
-    diff = _drift(
-        SetTableComment(desired_comment="new", observed_comment="old"),
-        managed_aspects=_TAG_ASPECTS_ONLY,
-        kind=TableKind.STREAMING_TABLE,
+def test_annotations_scope_refuses_to_drop_a_pipeline_declared_key():
+    # Given a streaming table whose key was declared in the pipeline's defining
+    # SQL, and an annotations-scope declaration that does not restate it
+    desired = _desired_table(columns=_KEYED_COLUMNS, managed_aspects=ANNOTATION_ASPECTS)
+    observed = _observed_table(
+        columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
     )
 
-    # Then the kind check stays silent (tags scope is allowed here) and the
-    # unmanaged comment drift is the failure
-    failures = validate_diff(diff)
+    # When validating the real diff of the two
+    failures = _validate(desired, observed)
+
+    # Then the kind check stays silent — annotations is a scope it admits — and
+    # the omitted key reads as a drop this declaration has no authority to make
     assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
+    assert "primary key" in failures[0].message.lower()
 
 
-def test_an_absent_streaming_table_under_tags_scope_still_fails_missing_table():
-    # Given a tags-scope declaration whose table does not exist — absence has
-    # no observed kind, so the existing TableMissing arm judges it unchanged
-    desired = _desired_table(managed_aspects=_TAG_ASPECTS_ONLY)
+def test_a_declaration_mirroring_the_pipeline_key_leaves_it_alone():
+    # Given the same table, with the declaration restating the pipeline's key
+    desired = _desired_table(
+        columns=_KEYED_COLUMNS, managed_aspects=ANNOTATION_ASPECTS, primary_key=_PIPELINE_KEY
+    )
+    observed = _observed_table(
+        columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
+    )
 
-    # When validating the diff of a missing table
-    failures = _validate(desired, None)
-
-    # Then tags scope does not manage existence; nothing streaming-specific fires
-    assert [failure.rule_name for failure in failures] == ["MissingTableUnmanaged"]
+    # Then the key yields no action to disown. Mirroring is what the engine asks
+    # of a declaration over a pipeline-owned table, and it costs the declaration
+    # nothing: the key stays out of the managed aspects either way
+    assert not _validate(desired, observed)
 
 
 def test_scope_failure_prevents_safety_evaluation():
