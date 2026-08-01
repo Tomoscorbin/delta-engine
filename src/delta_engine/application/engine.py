@@ -253,7 +253,7 @@ class Engine:
         report = SyncReport.assemble(
             started_at=run_started,
             ended_at=datetime.now(UTC),
-            table_reports=tuple(run.to_report() for run in runs),
+            table_reports=[run.to_report() for run in runs],
             dry_run=dry_run,
         )
 
@@ -450,4 +450,4 @@ class Engine:
                 )
             )
 
-        return ExecutionSummary(compiled_plan=compiled, results=tuple(results))
+        return ExecutionSummary(compiled_plan=compiled, results=results)

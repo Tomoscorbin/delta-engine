@@ -65,7 +65,7 @@ def read_primary_key(
     if not ordered:
         return None
     return PrimaryKeyConstraint(
-        columns=tuple(row.column_name for row in ordered),
+        columns=[row.column_name for row in ordered],
         constraint_name=ordered[0].constraint_name,
     )
 
@@ -86,13 +86,13 @@ def read_foreign_keys(
         grouped.setdefault(row.constraint_name, []).append(row)
     return tuple(
         ForeignKeyConstraint(
-            local_columns=tuple(row.local_column for row in group),
+            local_columns=[row.local_column for row in group],
             referenced_table=QualifiedName(
                 group[0].referenced_catalog,
                 group[0].referenced_schema,
                 group[0].referenced_table,
             ),
-            referenced_columns=tuple(row.referenced_column for row in group),
+            referenced_columns=[row.referenced_column for row in group],
             constraint_name=constraint_name,
         )
         for constraint_name, group in grouped.items()

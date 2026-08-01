@@ -8,11 +8,13 @@ together rather than being scattered across its producers.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from typing import ClassVar, Final, assert_never
 
 from delta_engine.domain.model import QualifiedName
+from delta_engine.domain.model.frozen import freeze_strings
 
 
 class FailurePhase(IntEnum):
@@ -131,7 +133,10 @@ class ValidationFailure(Failure):
     phase: ClassVar[FailurePhase] = FailurePhase.PLANNING
     rule_name: str
     message: str
-    details: tuple[str, ...] = ()
+    details: Sequence[str] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", freeze_strings(self.details, field_name="details"))
 
     def format_lines(self) -> tuple[str, ...]:
         return (f"Validation failed: {self.rule_name} - {self.message}", *self.details)
@@ -167,9 +172,16 @@ class ForeignKeyFailure(Failure):
 
     phase: ClassVar[FailurePhase] = FailurePhase.FOREIGN_KEY
     table: QualifiedName
-    local_columns: tuple[str, ...]
+    local_columns: Sequence[str]
     references: QualifiedName
     reason: ForeignKeyFailureReason
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "local_columns",
+            freeze_strings(self.local_columns, field_name="local_columns"),
+        )
 
     @property
     def _constraint(self) -> str:

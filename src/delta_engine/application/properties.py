@@ -25,7 +25,7 @@ DETAIL's properties: if the platform auto-writes the key, do not add it to
 the policy. Additions are called out in release notes.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from enum import StrEnum
 import re
@@ -95,7 +95,10 @@ class PropertyDefinition:
     key: Property
     value_description: str
     is_valid_value: Callable[[str], bool]
-    permitted_transitions: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
+    permitted_transitions: Set[tuple[str, str | None]] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "permitted_transitions", frozenset(self.permitted_transitions))
 
     def reject_declared_value(self, value: str | None) -> str | None:
         """
@@ -129,12 +132,13 @@ class PropertyDefinition:
 class PropertyPolicy:
     """Validate declarations and transitions for the managed properties."""
 
-    definitions: tuple[PropertyDefinition, ...]
+    definitions: Sequence[PropertyDefinition]
     _definitions_by_name: Mapping[str, PropertyDefinition] = field(
         init=False, repr=False, compare=False
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "definitions", tuple(self.definitions))
         definitions_by_name = {definition.key.value: definition for definition in self.definitions}
 
         if len(definitions_by_name) != len(self.definitions):

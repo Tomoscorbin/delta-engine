@@ -34,7 +34,7 @@ All graph-traversal implementation details (adjacency map, Tarjan's
 strongly-connected-components algorithm) are hidden behind that interface.
 """
 
-from collections.abc import Mapping, Set as AbstractSet
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 
 from delta_engine.application.failures import (
@@ -69,15 +69,19 @@ class TableResolution:
     """
 
     desired: DesiredTable
-    dependencies: tuple[ForeignKeyConstraint, ...]
-    structural_failures: tuple[ForeignKeyFailure, ...]
+    dependencies: Sequence[ForeignKeyConstraint]
+    structural_failures: Sequence[ForeignKeyFailure]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "dependencies", tuple(self.dependencies))
+        object.__setattr__(self, "structural_failures", tuple(self.structural_failures))
 
     @property
     def qualified_name(self) -> QualifiedName:
         """The identity of the declaration these facts were judged from."""
         return self.desired.qualified_name
 
-    def blocked_by(self, unconverged: AbstractSet[QualifiedName]) -> tuple[ForeignKeyFailure, ...]:
+    def blocked_by(self, unconverged: Set[QualifiedName]) -> tuple[ForeignKeyFailure, ...]:
         """
         Return one failure per dependency edge that will not converge this sync.
 
@@ -127,7 +131,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     )
 
 
-def _managed_foreign_keys(table: DesiredTable) -> tuple[ForeignKeyConstraint, ...]:
+def _managed_foreign_keys(table: DesiredTable) -> Sequence[ForeignKeyConstraint]:
     """Return foreign keys this declaration is responsible for reconciling."""
     if TableAspect.FOREIGN_KEYS not in table.managed_aspects:
         return ()
@@ -165,7 +169,7 @@ def _foreign_key_types_match(
 
 def _build_dependencies(
     tables: tuple[DesiredTable, ...],
-    registered_names: AbstractSet[QualifiedName],
+    registered_names: Set[QualifiedName],
 ) -> dict[QualifiedName, tuple[ForeignKeyConstraint, ...]]:
     """
     Build the dependency edges for every table.
@@ -306,7 +310,7 @@ def _order_tables(
 
 def _classify_structural_failures(
     tables: tuple[DesiredTable, ...],
-    registered_names: AbstractSet[QualifiedName],
+    registered_names: Set[QualifiedName],
     cycle_partners_by_table: dict[QualifiedName, frozenset[QualifiedName]],
 ) -> dict[QualifiedName, tuple[ForeignKeyFailure, ...]]:
     """

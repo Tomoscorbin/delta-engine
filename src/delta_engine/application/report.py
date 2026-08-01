@@ -5,7 +5,7 @@ Run reports: per-table and run-level outcome aggregates.
 engine run; `SyncReport` aggregates those table snapshots.
 """
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -162,10 +162,11 @@ class TableRunReport:
     compiled: CompiledPlan | None
     resolution: TableResolution
     execution: ExecutionSummary | None
-    blocked_failures: tuple[ForeignKeyFailure, ...] = ()
+    blocked_failures: Sequence[ForeignKeyFailure] = ()
     diff: TableDiff | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "blocked_failures", tuple(self.blocked_failures))
         read_failed = isinstance(self.read, ReadFailure)
         planning_failed = isinstance(self.planning, PlanningFailed)
         resolution_failed = bool(self.resolution.structural_failures)
@@ -301,8 +302,11 @@ class SyncReport:
 
     started_at: datetime
     ended_at: datetime
-    table_reports: tuple[TableRunReport, ...]
+    table_reports: Sequence[TableRunReport]
     dry_run: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "table_reports", tuple(self.table_reports))
 
     @classmethod
     def assemble(
@@ -310,7 +314,7 @@ class SyncReport:
         *,
         started_at: datetime,
         ended_at: datetime,
-        table_reports: tuple[TableRunReport, ...],
+        table_reports: Sequence[TableRunReport],
         dry_run: bool,
     ) -> "SyncReport":
         """
@@ -337,7 +341,7 @@ class SyncReport:
         return cls(
             started_at=started_at,
             ended_at=ended_at,
-            table_reports=tuple(derived),
+            table_reports=derived,
             dry_run=dry_run,
         )
 

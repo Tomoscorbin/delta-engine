@@ -137,7 +137,7 @@ def _grid_row_cells(report: TableRunReport) -> tuple[str, str, str, str]:
     )
 
 
-def render_grid(reports: tuple[TableRunReport, ...]) -> str:
+def render_grid(reports: Sequence[TableRunReport]) -> str:
     """Render an aligned TABLE | STATUS | STATEMENTS | DETAIL grid for ``reports``."""
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
     return "\n".join(_aligned_rows(rows))
@@ -162,7 +162,7 @@ def _dry_run_banner(report: SyncReport) -> str:
     return "PLAN — no planned SQL executed" if report.dry_run else ""
 
 
-def render_failures_section(reports: tuple[TableRunReport, ...]) -> str:
+def render_failures_section(reports: Sequence[TableRunReport]) -> str:
     """Render full per-table failure detail for every failed table; empty when none failed."""
     failed = [report for report in reports if report.has_failures]
     if not failed:

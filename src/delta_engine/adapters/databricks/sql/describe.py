@@ -12,7 +12,7 @@ document — they come from information_schema as structured rows (see
 string this document also carries is left unread.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
 from types import MappingProxyType
@@ -20,6 +20,7 @@ from types import MappingProxyType
 from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
 from delta_engine.domain.model import ObservedColumn, QualifiedName
+from delta_engine.domain.model.frozen import freeze_strings
 
 
 class MetadataParseError(Exception):
@@ -31,13 +32,27 @@ class TableDescription:
     """Backend-neutral relation facts, columns, and layout from one AS JSON document."""
 
     qualified_name: QualifiedName
-    columns: tuple[ObservedColumn, ...]
+    columns: Sequence[ObservedColumn]
     comment: str
-    partitioned_by: tuple[str, ...]
-    clustered_by: tuple[str, ...]
+    partitioned_by: Sequence[str]
+    clustered_by: Sequence[str]
     table_properties: Mapping[str, str]
     relation_type: str | None
     provider: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(
+            self,
+            "partitioned_by",
+            freeze_strings(self.partitioned_by, field_name="partitioned_by"),
+        )
+        object.__setattr__(
+            self,
+            "clustered_by",
+            freeze_strings(self.clustered_by, field_name="clustered_by"),
+        )
+        object.__setattr__(self, "table_properties", MappingProxyType(dict(self.table_properties)))
 
 
 def table_description_from_rows(rows: Rows, qualified_name: QualifiedName) -> TableDescription:
