@@ -13,8 +13,8 @@ from enum import IntEnum, StrEnum
 import functools
 from typing import Final, assert_never
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredColumn
-from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -145,10 +145,10 @@ class DiffEntry:
     category: DiffCategory
     operation: DiffOperation
     subject: str
-    detail: Sequence[str] = ()
+    detail: ListOrTuple[str] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "detail", freeze_strings(self.detail, field_name="detail"))
+        object.__setattr__(self, "detail", tuple(self.detail))
 
     @property
     def symbol(self) -> str:
