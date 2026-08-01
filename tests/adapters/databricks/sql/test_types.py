@@ -63,9 +63,28 @@ def test_primitive_aliases():
     assert data_type_from_json({"name": "boolean"}) == Boolean()
 
 
-def test_string_ignores_collation_and_length():
+def test_string_like_types_accept_the_default_collation() -> None:
+    assert data_type_from_json({"name": "string"}) == String()
     assert data_type_from_json({"name": "string", "collation": "UTF8_BINARY"}) == String()
     assert data_type_from_json({"name": "varchar", "length": 20}) == String()
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        {"name": "string", "collation": "UTF8_LCASE"},
+        {"name": "varchar", "length": 20, "collation": "UTF8_LCASE"},
+        {"name": "string", "collation": None},
+        {
+            "name": "array",
+            "element_type": {"name": "string", "collation": "UTF8_LCASE"},
+        },
+    ),
+)
+def test_string_like_types_reject_unsupported_or_malformed_collations(
+    document: dict[str, object],
+) -> None:
+    assert data_type_from_json(document) is None
 
 
 def test_timestamp_ltz_aliases_to_timestamp():
