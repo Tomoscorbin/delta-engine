@@ -387,7 +387,8 @@ def test_create_with_timestamp_ntz_enables_feature_and_resyncs_clean(live_connec
 
     # Then catalog observation prevents redundant feature enablement
     [table_report] = report.table_reports
-    assert not table_report.planned_sql_statements
+    assert table_report.compiled is not None
+    assert not table_report.compiled.statements
 
 
 def test_adding_timestamp_ntz_column_plans_feature_enable_before_add(live_connection, live_tables):
@@ -417,7 +418,8 @@ def test_adding_timestamp_ntz_column_plans_feature_enable_before_add(live_connec
 
     # Then feature enablement precedes the add and the table converges
     [table_report] = report.table_reports
-    statements = table_report.planned_sql_statements
+    assert table_report.compiled is not None
+    statements = table_report.compiled.statements
     enable_index = next(
         index
         for index, statement in enumerate(statements)
@@ -428,7 +430,9 @@ def test_adding_timestamp_ntz_column_plans_feature_enable_before_add(live_connec
     )
     assert enable_index < add_index
     assert "timestampNtz" in read_live_table(live_connection, table_name)["features"]
-    assert not engine.sync(extended).table_reports[0].planned_sql_statements
+    resync = engine.sync(extended).table_reports[0]
+    assert resync.compiled is not None
+    assert not resync.compiled.statements
 
 
 def test_variant_feature_enablement_round_trips(live_connection, live_tables):
@@ -456,7 +460,9 @@ def test_variant_feature_enablement_round_trips(live_connection, live_tables):
 
     # Then either catalog spelling is recognized and the table is stable
     assert {"variantType", "variantType-preview"} & set(features)
-    assert not resync.table_reports[0].planned_sql_statements
+    [table_report] = resync.table_reports
+    assert table_report.compiled is not None
+    assert not table_report.compiled.statements
 
     # Given an existing table without VARIANT support
     extended_name = live_tables("variant_add")
@@ -480,8 +486,11 @@ def test_variant_feature_enablement_round_trips(live_connection, live_tables):
 
     # Then the feature is enabled and the resulting table converges
     [table_report] = report.table_reports
+    assert table_report.compiled is not None
     assert any(
         "delta.feature.variantType" in statement
-        for statement in table_report.planned_sql_statements
+        for statement in table_report.compiled.statements
     )
-    assert not engine.sync(extended).table_reports[0].planned_sql_statements
+    resync = engine.sync(extended).table_reports[0]
+    assert resync.compiled is not None
+    assert not resync.compiled.statements

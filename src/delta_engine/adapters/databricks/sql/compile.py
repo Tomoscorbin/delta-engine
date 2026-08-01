@@ -18,6 +18,7 @@ from delta_engine.adapters.databricks.sql.dialect import (
 )
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
+from delta_engine.application.ports import CompiledAction, CompiledPlan
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
     Action,
@@ -81,7 +82,7 @@ class _Target:
         return f"{_ALTER_CLAUSES[self.kind]} {self.name}"
 
 
-def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
+def compile_plan(plan: ActionPlan) -> CompiledPlan:
     """
     Compile an :class:`ActionPlan` into SQL statements, in plan order.
 
@@ -90,13 +91,20 @@ def compile_plan(plan: ActionPlan) -> tuple[str, ...]:
     ON) use the same plan target but are unaffected by the relation kind.
     """
     target = _Target(qualified_name=plan.target, kind=plan.kind)
-    return tuple(_compile_action(action, target) for action in plan)
+    compiled_actions = tuple(
+        CompiledAction(action=action, statement=_compile_action(action, target)) for action in plan
+    )
+
+    return CompiledPlan(
+        plan=plan,
+        compiled_actions=compiled_actions,
+    )
 
 
 @singledispatch
 def _compile_action(action: Action, target: _Target) -> str:
     """Dispatch to action-specific SQL compiler."""
-    raise NotImplementedError(f"No SQL compiler for action {type(action).__name__}")
+    raise NotImplementedError(f"No SQL compiler for action {action}")
 
 
 @_compile_action.register

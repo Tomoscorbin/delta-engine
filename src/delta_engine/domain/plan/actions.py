@@ -74,7 +74,6 @@ class Action(ABC):
         """Identifier targeted within the phase; subclasses must override."""
         ...
 
-
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
     """Create a missing table from its complete desired definition."""

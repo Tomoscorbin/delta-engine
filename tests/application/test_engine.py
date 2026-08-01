@@ -18,6 +18,7 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.ports import (
     CatalogState,
+    CompiledPlan,
     ExecutionSucceeded,
     TableAbsent,
     TablePresent,
@@ -41,7 +42,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
-from tests.builders import as_observed_columns
+from tests.builders import as_observed_columns, build_compiled_plan
 
 # ---------------------------------------------------------------------------
 # Helpers and fakes
@@ -188,6 +189,29 @@ def _metadata_scoped_spec(fqn: str) -> DeltaTable:
     )
 
 
+def _spec_with_metadata_drift(fqn: str) -> DeltaTable:
+    """Build a full declaration with several metadata changes and the standard primary key."""
+    catalog, schema, table_name = _split_fqn(fqn)
+
+    return DeltaTable(
+        catalog,
+        schema,
+        table_name,
+        columns=(
+            Column(
+                "id",
+                String(),
+                nullable=False,
+                comment="surrogate key",
+                tags={"pii": "false"},
+            ),
+        ),
+        primary_key=["id"],
+        comment="reference table",
+        tags={"domain": "customers"},
+    )
+
+
 def _tag_scoped_spec(fqn: str) -> DeltaTable:
     """Build a tag-scoped declaration that manages only tags."""
     catalog, schema, table_name = _split_fqn(fqn)
@@ -269,10 +293,11 @@ class _RecordingExecutor:
         self._per_table_errors = None if per_table_errors is None else list(per_table_errors)
         self._active_table: str | None = None
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
+        statements = tuple(
             f"STATEMENT {index} AS {plan.kind.name} FOR {plan.target}" for index in range(len(plan))
         )
+        return build_compiled_plan(plan, statements)
 
     def execute(self, statement: str) -> None:
         self.calls.append(statement)
@@ -305,7 +330,7 @@ class _SqlRecordingExecutor:
     def __init__(self) -> None:
         self.executed_statements: list[str] = []
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
         return compile_plan(plan)
 
     def execute(self, statement: str) -> None:
@@ -313,13 +338,14 @@ class _SqlRecordingExecutor:
 
 
 class _FailingMultiStatementExecutor:
-    """Compile three statements and fail the middle one for every table."""
+    """Compile one statement per action and fail the second for every table."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(3))
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
+        statements = tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
+        return build_compiled_plan(plan, statements)
 
     def execute(self, statement: str) -> None:
         self.calls.append(statement)
@@ -567,9 +593,10 @@ def test_all_reads_complete_before_execution_and_a_read_failure_blocks_only_its_
             return TableAbsent()
 
     class _EventRecordingExecutor:
-        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+        def compile(self, plan: ActionPlan) -> CompiledPlan:
             # The name is embedded so execute can recover the target table.
-            return tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
+            statements = tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
+            return build_compiled_plan(plan, statements)
 
         def execute(self, statement: str) -> None:
             events.append(f"execute:{statement.split(' FOR ', 1)[1]}")
@@ -703,17 +730,17 @@ def test_execution_failure_is_reported_but_independent_later_table_still_execute
 
 
 def test_execution_stops_after_first_failure_and_retains_attempted_results():
-    # Given one table compiles to three statements and the middle one fails
+    # Given one table compiles to several statements and the second one fails
     fqn = "c.s.exec_fail"
-    reader = _RecordingReader({fqn: TableAbsent()})
+    reader = _RecordingReader({fqn: _existing_tag_drifted_table(fqn)})
     executor = _FailingMultiStatementExecutor()
     engine = Engine(reader=reader, executor=executor)
 
     # When syncing
     with pytest.raises(SyncFailedError) as exc_info:
-        engine.sync(_spec(fqn))
+        engine.sync(_tag_scoped_spec(fqn))
 
-    # Then only the attempted prefix is recorded and the third statement is not run
+    # Then only the attempted prefix is recorded and trailing statements are not run
     [table_report] = list(exc_info.value.report)
     assert table_report.status is TableRunStatus.EXECUTION_FAILED
     assert table_report.execution is not None
@@ -734,8 +761,8 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 
 def test_unexpected_executor_exception_propagates():
     class BuggyExecutor:
-        def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-            return (f"STATEMENT FOR {plan.target}",)
+        def compile(self, plan: ActionPlan) -> CompiledPlan:
+            return build_compiled_plan(plan, (f"STATEMENT FOR {plan.target}",))
 
         def execute(self, _statement: str) -> None:
             raise RuntimeError("adapter bug")
@@ -1035,7 +1062,8 @@ def test_execution_failure_in_fk_parent_blocks_dependent_before_execution():
 
     # The blocked plan keeps its SQL preview: compilation happened before
     # resolution blocked execution
-    assert orders.planned_sql_statements != ()
+    assert orders.compiled is not None
+    assert orders.compiled.statements != ()
 
     _assert_has_fk_failure(
         orders,
@@ -1082,7 +1110,7 @@ def test_execution_failure_blocks_transitively_along_fk_chain():
 
 def test_partial_execution_failure_in_parent_blocks_dependent():
     # Given customers' plan fails on one action among successful ones
-    reader = _RecordingReader()
+    reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
     executor = _FailingMultiStatementExecutor()
     engine = Engine(reader=reader, executor=executor)
 
@@ -1090,7 +1118,7 @@ def test_partial_execution_failure_in_parent_blocks_dependent():
     with pytest.raises(SyncFailedError) as exc_info:
         engine.sync(
             _spec_with_fk("cat.sch.orders", "cat.sch.customers"),
-            _spec("cat.sch.customers"),
+            _spec_with_metadata_drift("cat.sch.customers"),
         )
 
     # Then a partially failed parent still blocks its dependent
@@ -1350,8 +1378,9 @@ def test_dry_run_records_the_sql_that_would_execute():
     [table_report] = list(report)
     assert table_report.has_changes is True
     assert table_report.execution is None
-    assert len(table_report.planned_sql_statements) == len(table_report.plan)
-    assert all("STATEMENT" in statement for statement in table_report.planned_sql_statements)
+    assert table_report.compiled is not None
+    assert len(table_report.compiled.statements) == len(table_report.plan)
+    assert all("STATEMENT" in statement for statement in table_report.compiled.statements)
 
 
 def test_failed_table_records_no_planned_sql():
@@ -1367,7 +1396,7 @@ def test_failed_table_records_no_planned_sql():
     # Then no statements are recorded for the failed table
     [table_report] = list(report)
     assert table_report.has_failures is True
-    assert table_report.planned_sql_statements == ()
+    assert table_report.compiled is None
 
 
 def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
@@ -1386,7 +1415,8 @@ def test_fk_failed_table_still_reports_its_planned_sql_without_executing():
     [orders] = list(report)
     assert orders.status is TableRunStatus.FOREIGN_KEY_FAILED
     assert orders.has_changes is True
-    assert orders.planned_sql_statements != ()
+    assert orders.compiled is not None
+    assert orders.compiled.statements != ()
 
     # And nothing executed
     assert orders.execution is None
@@ -1482,8 +1512,9 @@ def test_foreign_key_failed_table_still_carries_its_planned_sql():
     # Then resolution failed but the preview still includes the constraint SQL
     [orders] = list(report)
     assert orders.resolution.structural_failures != ()
-    assert orders.planned_sql_statements != ()
-    assert any("ADD CONSTRAINT" in statement for statement in orders.planned_sql_statements)
+    assert orders.compiled is not None
+    assert orders.compiled.statements != ()
+    assert any("ADD CONSTRAINT" in statement for statement in orders.compiled.statements)
     assert executor.executed_statements == []
 
 
@@ -1631,10 +1662,11 @@ def test_planned_sql_targets_the_observed_relation_kind():
     # Then the compiled statements carry the observed kind through the port
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    assert table_report.planned_sql_statements != ()
+    assert table_report.compiled is not None
+    assert table_report.compiled.statements != ()
     assert all(
         f"AS STREAMING_TABLE FOR {fqn}" in statement
-        for statement in table_report.planned_sql_statements
+        for statement in table_report.compiled.statements
     )
 
 
@@ -1651,10 +1683,9 @@ def test_created_tables_compile_as_ordinary_tables():
 
     # Then the create path compiles with the ordinary kind
     [table_report] = list(report)
-    assert table_report.planned_sql_statements != ()
-    assert all(
-        f"AS TABLE FOR {fqn}" in statement for statement in table_report.planned_sql_statements
-    )
+    assert table_report.compiled is not None
+    assert table_report.compiled.statements != ()
+    assert all(f"AS TABLE FOR {fqn}" in statement for statement in table_report.compiled.statements)
 
 
 def test_executed_sql_is_byte_for_byte_the_planned_sql_for_constraint_ddl():
@@ -1687,7 +1718,8 @@ def test_executed_sql_is_byte_for_byte_the_planned_sql_for_constraint_ddl():
     # Then the executed SQL is byte-for-byte the planned SQL, with the
     # primary-key action carrying the declared name
     [table_report] = list(dry_report)
-    assert tuple(executor.executed_statements) == table_report.planned_sql_statements
+    assert table_report.compiled is not None
+    assert tuple(executor.executed_statements) == table_report.compiled.statements
     assert any(
         "PRIMARY KEY (`requestid`)" in statement for statement in executor.executed_statements
     )
@@ -1720,7 +1752,7 @@ def test_case_drifted_declaration_is_rejected_with_no_sql():
     # Then the sync rejects the declaration by name and plans no SQL
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.PLANNING_FAILED
-    assert table_report.planned_sql_statements == ()
+    assert table_report.compiled is None
     assert any(
         failure.rule_name == "ColumnSpellingMustMatchCatalog"
         for failure in table_report.failures
@@ -1778,9 +1810,10 @@ def test_foreign_key_sql_uses_the_declared_names_from_both_registered_tables():
     # Then the FK statement wears the declared names, which validation has
     # required to equal the catalog's
     child_report = _reports_by_name(report)["c.s.child"]
+    assert child_report.compiled is not None
     assert any(
         "FOREIGN KEY (`orderref`) REFERENCES `c`.`s`.`parent` (`orderid`)" in statement
-        for statement in child_report.planned_sql_statements
+        for statement in child_report.compiled.statements
     )
 
 

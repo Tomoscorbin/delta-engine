@@ -182,7 +182,7 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
         for failure in table_report.failures
         if isinstance(failure, ValidationFailure)
     }
-    assert table_report.planned_sql_statements == ()
+    assert table_report.compiled is None
     refused = read_live_table(live_connection, table_name)
     assert refused["table_tags"] == table_tags
     assert refused["column_tags"] == {("id", "pii"): "low"}
