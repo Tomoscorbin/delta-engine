@@ -44,7 +44,7 @@ path currently produces an incorrect result.
 | 6 ✅ | Medium | Identifier normalization disagrees with Unity Catalog | Valid names can change identity; invalid object names pass locally |
 | 7 ✅ | Medium | Layout and map-type validation is too permissive | Unsupported declarations reach execution |
 | 8 ✅ | Medium | `CREATE TABLE IF NOT EXISTS` can report false success | A concurrent incompatible create is treated as success |
-| 9 | High | Non-default `STRING` collations are erased on observation | Collation drift can be reported as synchronized |
+| 9 ✅ | High | Non-default `STRING` collations are erased on observation | Collation drift can be reported as synchronized |
 | 10 ✅ | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
 | 12 | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
@@ -475,6 +475,20 @@ and supports collation in column definitions and alterations; see
 
 Failing closed is the narrow correctness fix; adding collation declarations is
 a separate product capability.
+
+### Resolved (2026-08-01)
+
+Fixed in [PR #319](https://github.com/Tomoscorbin/delta-engine/pull/319). The
+structured type mapper now admits only absent or `UTF8_BINARY` collation for
+string-like types and returns an unmappable type for every other value, including
+inside nested types. The existing shared read boundary turns that result into a
+`ReadError`, so synchronization stops before diffing or planning instead of
+reporting false convergence. Focused mapper and shared-reader regressions cover
+the local contract; the SQL warehouse type suite pins the same behavior against
+a real `STRING COLLATE UTF8_LCASE` column. The targeted credentialed run
+[passed on 2026-08-01](https://github.com/Tomoscorbin/delta-engine/actions/runs/30708020824):
+Databricks reported `{"name":"string","collation":"UTF8_LCASE"}` and the
+reader surfaced the unsupported type as a `ReadError` before diffing or planning.
 
 ## 10. Remove column tags before dropping governed-tagged columns
 

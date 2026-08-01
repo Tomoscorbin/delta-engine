@@ -102,7 +102,6 @@ _SIMPLE_TYPES: Final[dict[str, DataType]] = {
     "real": Float(),
     "double": Double(),
     "boolean": Boolean(),
-    "string": String(),
     "date": Date(),
     "timestamp": Timestamp(),
     "timestamp_ltz": Timestamp(),
@@ -137,10 +136,13 @@ def _data_type_from_json(type_obj: object) -> DataType | None:
         return None
     name = name.lower()
 
+    if name in ("string", "char", "varchar", "character"):
+        collation = type_obj.get("collation", "UTF8_BINARY")
+        if collation != "UTF8_BINARY":
+            return None
+        return String()  # length bound not modeled (matches the write path)
     if name in _SIMPLE_TYPES:
         return _SIMPLE_TYPES[name]
-    if name in ("char", "varchar", "character"):
-        return String()  # length bound not modeled (matches the write path)
     if name in ("decimal", "dec", "numeric"):
         return _decimal_from_json(type_obj)
     if name == "array":
