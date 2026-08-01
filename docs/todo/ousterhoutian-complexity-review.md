@@ -77,7 +77,7 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 4 | Medium | One aspect set represents three reconciliation modes | Every consumer interprets an unmanaged aspect differently |
 | 5 | Medium | The shared reader catches beyond the backend boundary | Programming defects become ordinary per-table read failures |
 | 6 | Medium | Rename name frames are documented but not enforced | A valid `ActionPlan` can compile actions against stale column names |
-| 7 | High | Compiled execution does not prove plan coverage | A changed table can report success without executing work |
+| 7 ✅ | High | Compiled execution does not prove plan coverage | A changed table can report success without executing work |
 | 8 | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
 | 9 | High | The machine report reuses lossy display rendering | Structured diagnostics are truncated and wire names follow Python symbols |
 | 10 | High | The closed data-type vocabulary is operationally open | Invalid types fail late or bypass feature policy |
@@ -782,7 +782,7 @@ API declares no depth limit. The existing TODO identifies this accurately.
 An iterative traversal would keep the graph limit inside the relationship
 module instead of leaking an interpreter implementation detail.
 
-### Validate decimal parameter types
+### Validate decimal parameter types ✅
 
 `Decimal.__post_init__` checks numeric ranges but not that `precision` and
 `scale` are integers. `Decimal(10.5, 2.5)` is accepted and renders as invalid
