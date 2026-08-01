@@ -200,7 +200,7 @@ def test_message_renders_execution_failure_detail_with_sql():
 
     # Then both the failure line and the SQL statement is present
     assert "cat.sch.tbl [EXECUTION_FAILED]" in message
-    assert "Execution failed at statement 2: SparkException - boom" in message
+    assert "Execution failed at statement 3: SparkException - boom" in message
     assert "ALTER TABLE cat.sch.tbl ADD COLUMN x INT" in message
 
 

@@ -40,8 +40,32 @@ def test_execution_failure_formats_itself_as_two_lines_including_the_sql():
 
     # Then it renders the error line and the SQL together
     lines = failure.format_lines()
-    assert lines[0] == "Execution failed at statement 2: SparkException - boom"
+    # The stored index is zero-based; readers see a one-based statement number.
+    assert lines[0] == "Execution failed at statement 3: SparkException - boom"
     assert "ALTER TABLE t ADD COLUMN x INT" in lines[1]
+
+
+def test_a_validation_headline_names_its_subject_when_it_has_one():
+    failure = ValidationFailure(
+        rule_name="NonNullableColumnAdd",
+        message="Operation not allowed: cannot add non-nullable column 'email'.",
+        subject="email",
+    )
+
+    assert failure.headline() == "Validation failed: NonNullableColumnAdd (email)"
+
+
+def test_a_validation_headline_omits_an_absent_subject():
+    failure = ValidationFailure(rule_name="ColumnMappingRequiredForDrop", message="nope")
+
+    assert failure.headline() == "Validation failed: ColumnMappingRequiredForDrop"
+
+
+def test_adding_a_subject_preserves_positional_details_compatibility():
+    failure = ValidationFailure("UnmanagedAspectDrift", "nope", ("+ email String",))
+
+    assert failure.subject == ""
+    assert failure.details == ("+ email String",)
 
 
 def test_failure_display_shows_only_the_head_of_a_long_message():
@@ -118,7 +142,7 @@ def test_failure_headlines_summarize_without_the_detail_message():
             message="boom",
             statement="SQL",
         ).headline()
-        == "Execution failed at statement 2: SparkException"
+        == "Execution failed at statement 3: SparkException"
     )
     assert (
         ForeignKeyFailure(

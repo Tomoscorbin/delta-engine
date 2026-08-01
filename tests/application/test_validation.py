@@ -334,6 +334,9 @@ def test_rejects_adding_non_nullable_columns_to_existing_table():
     ]
     assert "a" in failures[0].message
     assert "b" in failures[1].message
+    assert [failure.subject for failure in failures] == ["a", "b"]
+    assert "backfill" in failures[0].message
+    assert "nullable=False" in failures[0].message
 
 
 def test_allows_adding_nullable_column_to_existing_table():
@@ -378,6 +381,7 @@ def test_rejects_tightening_existing_columns_to_not_null():
     ]
     assert "id" in failures[0].message
     assert "email" in failures[1].message
+    assert [failure.subject for failure in failures] == ["id", "email"]
 
 
 def test_allows_loosening_existing_column_to_nullable():
@@ -405,6 +409,7 @@ def test_rejects_widening_type_change_without_type_widening_declared():
     assert failures[0].rule_name == "TypeWideningRequiredForTypeChange"
     assert "id" in failures[0].message
     assert "delta.enableTypeWidening" in failures[0].message
+    assert failures[0].subject == "id"
 
 
 def test_widening_type_change_passes_with_type_widening_declared():
@@ -434,6 +439,7 @@ def test_rejects_non_widening_type_change_even_with_type_widening_declared():
 
     assert failures[0].rule_name == "NonWideningColumnTypeChange"
     assert "recreate the table" in failures[0].message
+    assert failures[0].subject == "id"
 
 
 def test_rejects_narrowing_type_change():
@@ -780,6 +786,7 @@ def test_blocks_column_mapping_downgrade():
     # Then validation rejects the transition
     assert failures[0].rule_name == "PropertyTransitionNotSupported"
     assert "delta.columnMapping.mode" in failures[0].message
+    assert failures[0].subject == "delta.columnMapping.mode"
 
 
 def test_allows_column_mapping_upgrade():
@@ -825,6 +832,7 @@ def test_blocks_none_declaration_on_removal_forbidden_key():
     # Then validation rejects the removal
     assert failures[0].rule_name == "PropertyTransitionNotSupported"
     assert "cannot be removed" in failures[0].message
+    assert failures[0].subject == "delta.columnMapping.mode"
 
 
 def test_allows_none_declaration_on_unrestricted_key():
@@ -851,6 +859,7 @@ def test_fails_undeclared_unrestricted_property_and_suggests_none():
     # Then validation tells the user to declare it or declare None
     assert failures[0].rule_name == "PropertyMustBeDeclared"
     assert "None" in failures[0].message
+    assert failures[0].subject == "delta.enableChangeDataFeed"
 
 
 def test_fails_undeclared_removal_forbidden_property_without_suggesting_none():
@@ -980,6 +989,7 @@ def test_ambiguous_rename_fails_when_source_and_target_both_exist():
     assert len(rename_failures) == 1
     message = rename_failures[0].message
     assert "customer_nm" in message and "customer_name" in message
+    assert rename_failures[0].subject == "customer_nm"
 
 
 def test_removed_column_that_is_not_a_rename_source_is_not_ambiguous():
@@ -1017,6 +1027,7 @@ def test_column_case_drift_fails_validation_naming_both_spellings():
     assert len(spelling_failures) == 1
     assert "'OrderId'" in spelling_failures[0].message
     assert "'orderid'" in spelling_failures[0].message
+    assert spelling_failures[0].subject == "OrderId"
 
 
 def test_agreeing_spelling_passes_the_case_rule():
@@ -1262,6 +1273,7 @@ def test_unmanaged_drift_reports_one_failure_per_aspect():
 
     # Then each aspect gets its own failure, each naming only its own differences
     assert len(failures) == 2
+    assert [failure.subject for failure in failures] == ["column structure", "partitioning"]
     assert [failure.details for failure in failures] == [
         ("+ legacy_region String",),
         ("~ partitioning (country) → (region)",),

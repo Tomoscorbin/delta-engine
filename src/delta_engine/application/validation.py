@@ -129,8 +129,14 @@ class NonNullableColumnAdd:
             ValidationFailure(
                 rule_name=self.name,
                 message=(
-                    f"Operation not allowed: cannot add non-nullable column '{change.column.name}'"
+                    f"Operation not allowed: cannot add non-nullable column"
+                    f" '{change.column.name}'. Delta cannot safely add a NOT NULL column"
+                    " directly to an existing table. Add it nullable, backfill any NULLs,"
+                    " set NOT NULL outside the engine"
+                    " (ALTER TABLE ... ALTER COLUMN ... SET NOT NULL), then declare"
+                    " nullable=False — the next sync sees no drift."
                 ),
+                subject=str(change.column.name),
             )
             for change in drift.actions
             if isinstance(change, AddColumn) and not change.column.nullable
@@ -154,6 +160,7 @@ class NullabilityTighteningOnExistingColumn:
                     " (ALTER TABLE ... SET NOT NULL), then declare"
                     " nullable=False — the next sync sees no drift."
                 ),
+                subject=str(change.column_name),
             )
             for change in drift.actions
             if isinstance(change, SetColumnNullability) and not change.desired_nullable
@@ -200,6 +207,7 @@ class NonWideningColumnTypeChange:
                     " wide Decimal, Float to Double, Decimal digit growth, Date to"
                     " TimestampNtz); recreate the table to make any other type change."
                 ),
+                subject=str(change.column_name),
             )
             for change in drift.actions
             if isinstance(change, AlterColumnType)
@@ -232,6 +240,7 @@ class TypeWideningRequiredForTypeChange:
                     f" {Property.TYPE_WIDENING}='true'. Declare"
                     f" properties={{'{Property.TYPE_WIDENING}': 'true'}} on this table."
                 ),
+                subject=str(change.column_name),
             )
             for change in drift.actions
             if isinstance(change, AlterColumnType)
@@ -292,6 +301,7 @@ class PropertyTransitionNotSupported:
                                 f" from '{observed_value}' to '{desired_value}'."
                                 " Update the declaration to match the catalog value."
                             ),
+                            subject=name,
                         )
                     )
                 case UnsetProperty(name=name, observed_value=observed_value) if self._is_blocked(
@@ -305,6 +315,7 @@ class PropertyTransitionNotSupported:
                                 " the change is permanent on the table. Declare its"
                                 " current value."
                             ),
+                            subject=name,
                         )
                     )
                 case _:
@@ -330,7 +341,11 @@ class PropertyMustBeDeclared:
     def evaluate(self, drift: TableDrift) -> tuple[ValidationFailure, ...]:
         """Flag every managed key set on the table but absent from the declaration."""
         return tuple(
-            ValidationFailure(rule_name=self.name, message=self._message(unresolvable))
+            ValidationFailure(
+                rule_name=self.name,
+                message=self._message(unresolvable),
+                subject=unresolvable.name,
+            )
             for unresolvable in drift.unresolvable
             if isinstance(unresolvable, PropertyUndeclared)
         )
@@ -401,6 +416,7 @@ class AmbiguousColumnRename:
                     " on the table. If the old column should be dropped, remove the"
                     " renamed_from hint and drop it in its own sync."
                 ),
+                subject=str(unresolvable.old_name),
             )
             for unresolvable in drift.unresolvable
             if isinstance(unresolvable, ColumnRenameConflict)
@@ -504,6 +520,7 @@ class ColumnSpellingMustMatchCatalog:
                             f" '{unresolvable.observed_name}' in the catalog. Update the"
                             " declaration to match the catalog's spelling exactly."
                         ),
+                        subject=str(unresolvable.declared_name),
                     )
                     for unresolvable in drift.unresolvable
                     if isinstance(unresolvable, ColumnCaseDrift)
@@ -582,6 +599,7 @@ class UnmanagedAspectDrift:
                             " to match the live table, or widen its scope to manage"
                             " this aspect."
                         ),
+                        subject=aspect.label,
                         details=lines,
                     )
                     for aspect, lines in lines_by_aspect.items()

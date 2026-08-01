@@ -8,7 +8,7 @@ together rather than being scattered across its producers.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import ClassVar, Final, assert_never
 
@@ -121,6 +121,9 @@ class ValidationFailure(Failure):
     """
     Description of a validation rule failure.
 
+    ``subject`` is what the failure is about — a column, property key, or
+    aspect — used by the compact headline in the report grid. Rules that judge
+    the table as a whole leave it empty.
     ``details`` are the individual differences behind a summary judgment, for
     a rule whose message names a whole aspect rather than one column. They are
     separate lines rather than newlines inside ``message`` so the report
@@ -132,6 +135,7 @@ class ValidationFailure(Failure):
     phase: ClassVar[FailurePhase] = FailurePhase.PLANNING
     rule_name: str
     message: str
+    subject: str = field(default="", kw_only=True)
     details: ListOrTuple[str] = ()
 
     def __post_init__(self) -> None:
@@ -141,7 +145,8 @@ class ValidationFailure(Failure):
         return (f"Validation failed: {self.rule_name} - {self.message}", *self.details)
 
     def headline(self) -> str:
-        return f"Validation failed: {self.rule_name}"
+        subject = f" ({self.subject})" if self.subject else ""
+        return f"Validation failed: {self.rule_name}{subject}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,13 +161,24 @@ class ExecutionFailure(Failure):
 
     def format_lines(self) -> tuple[str, ...]:
         return (
-            f"Execution failed at statement {self.statement_index}: "
+            f"Execution failed at statement {self.statement_number}: "
             f"{self.exception_type} - {_message_head(self.message)}",
             f"SQL: {self.statement}",
         )
 
     def headline(self) -> str:
-        return f"Execution failed at statement {self.statement_index}: {self.exception_type}"
+        return f"Execution failed at statement {self.statement_number}: {self.exception_type}"
+
+    @property
+    def statement_number(self) -> int:
+        """
+        The failing statement's one-based display position.
+
+        ``statement_index`` remains zero-based so it indexes the compiled
+        statements. Only the reader-facing number shifts, making "statement
+        3" agree with a report-grid progress count of "2/3".
+        """
+        return self.statement_index + 1
 
 
 @dataclass(frozen=True, slots=True)
