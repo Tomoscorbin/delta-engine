@@ -38,7 +38,7 @@ path currently produces an incorrect result.
 | --- | --- | --- | --- |
 | 1 ✅ | High | Non-Delta objects are not rejected | Invalid or partial plans against views, Iceberg, or other formats |
 | 2 ✅ | High | Unparseable columns are silently omitted | Existing drift can be reported as synchronized |
-| 3 | High | Required Delta table features are not planned | Valid-looking plans fail during execution |
+| 3 ✅ | High | Required Delta table features are not planned | Valid-looking plans fail during execution |
 | 4 ✅ | High | Foreign-key types are checked against the wrong parent object | Invalid constraints pass declaration and resolution |
 | 5 ✅ | Medium | Clearing a column comment generates invalid SQL | Warehouse execution fails on `UNSET COMMENT` |
 | 6 ✅ | Medium | Identifier normalization disagrees with Unity Catalog | Valid names can change identity; invalid object names pass locally |
