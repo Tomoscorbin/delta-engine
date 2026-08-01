@@ -70,7 +70,7 @@ class Decimal(DataType):
     scale: int = 0
 
     def __post_init__(self) -> None:
-        if type(self.precision) is not int and type(self.scale) is not int:
+        if type(self.precision) is not int or type(self.scale) is not int:
             raise ValueError(
                 "precision and scale must by type int;"
                 f" got precision: {type(self.precision)}, scale: {type(self.scale)}"

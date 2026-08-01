@@ -41,10 +41,13 @@ def test_decimal_accepts_maximum_precision_and_scale() -> None:
     assert Decimal(38, 38).precision == 38
 
 
-@pytest.mark.parametrize("value", ["1", 1.0, True])
-def test_decimal_rejects_non_integer_precision_and_scale(value) -> None:
+@given(
+    precision=st.sampled_from(["1", 1.0, True, False]),
+    scale=st.sampled_from(["1", 1.0, True, False]),
+)
+def test_decimal_rejects_non_integer_precision_and_scale(precision, scale) -> None:
     with pytest.raises(ValueError):
-        Decimal(value, value)
+        Decimal(precision, scale)
 
 
 def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
