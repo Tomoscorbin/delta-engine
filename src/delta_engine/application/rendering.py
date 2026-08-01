@@ -143,11 +143,17 @@ def render_grid(reports: Sequence[TableRunReport]) -> str:
     return "\n".join(_aligned_rows(rows))
 
 
+def _count_phrase(count: int, singular: str, plural: str) -> str:
+    """Render a count with the noun that agrees with it."""
+    return f"{count} {singular if count == 1 else plural}"
+
+
 def run_summary_footer(report: SyncReport) -> str:
     """One-line summary: table total, changed/unchanged/failed counts, duration."""
     counts = report.counts
     return (
-        f"{counts.total} tables: {counts.changed} changed, {counts.unchanged} unchanged, "
+        f"{_count_phrase(counts.total, 'table', 'tables')}: "
+        f"{counts.changed} changed, {counts.unchanged} unchanged, "
         f"{counts.failed} failed ({report.duration_seconds:.1f}s)"
     )
 

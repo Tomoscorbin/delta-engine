@@ -697,6 +697,23 @@ def test_grid_detail_shows_first_failure_and_extra_count_when_multiple():
     assert data_row.endswith("(+1 more)")
 
 
+def test_grid_detail_names_the_subject_a_rule_rejected():
+    report = _grid_report(
+        "orders",
+        failures=(
+            ValidationFailure(
+                rule_name="NonNullableColumnAdd",
+                message="Operation not allowed: cannot add non-nullable column 'email'.",
+                subject="email",
+            ),
+        ),
+    )
+
+    data_row = render_grid((report,)).splitlines()[1]
+
+    assert "NonNullableColumnAdd (email)" in data_row
+
+
 def test_grid_detail_truncates_an_overlong_detail_with_an_ellipsis():
     # Given a failure whose headline exceeds the detail width
     report = _grid_report(
@@ -751,6 +768,16 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
 
     # Then each table is classified by its outcome
     assert footer == "3 tables: 1 changed, 1 unchanged, 1 failed (3.0s)"
+
+
+def test_a_single_table_run_uses_the_singular_noun():
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(_grid_report("orders"),),
+    )
+
+    assert run_summary_footer(sync).startswith("1 table:")
 
 
 # ---------- whole-report rendering ----------
@@ -839,7 +866,7 @@ def test_failures_section_nests_supporting_detail_under_its_error_line():
 
     # Then the error line sits under its table, and the SQL nests below it —
     # depth is the renderer's decision, so the failure itself carries none
-    assert "    Execution failed at statement 0: AnalysisException - boom" in lines
+    assert "    Execution failed at statement 1: AnalysisException - boom" in lines
     assert "        SQL: SQL 0" in lines
 
 
