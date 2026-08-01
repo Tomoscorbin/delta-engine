@@ -16,7 +16,6 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
-    CompiledAction,
     CompiledPlan,
     ExecutionSucceeded,
     ExecutionSummary,
@@ -31,6 +30,7 @@ from delta_engine.application.report import (
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
 from delta_engine.domain.plan import ActionPlan, SetTableComment
+from tests.builders import build_compiled_plan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
@@ -44,13 +44,7 @@ def _compiled(*statements: str) -> CompiledPlan:
             for index in range(len(statements))
         ),
     )
-    return CompiledPlan(
-        plan=plan,
-        compiled_actions=tuple(
-            CompiledAction(action=action, statement=statement)
-            for action, statement in zip(plan.actions, statements, strict=True)
-        ),
-    )
+    return build_compiled_plan(plan, statements)
 
 
 def test_duplicate_table_definition_error_is_a_value_error_with_the_name():

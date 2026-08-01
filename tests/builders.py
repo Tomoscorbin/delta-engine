@@ -1,8 +1,24 @@
-"""Shared test builders for observed catalog state."""
+"""Small shared builders for constructing real test values."""
 
 from collections.abc import Iterable
 
+from delta_engine.application.ports import CompiledAction, CompiledPlan
 from delta_engine.domain.model import DesiredColumn, ObservedColumn
+from delta_engine.domain.plan import ActionPlan
+
+
+def build_compiled_plan(
+    plan: ActionPlan,
+    statements: Iterable[str],
+) -> CompiledPlan:
+    """Pair a real action plan with one deterministic statement per action."""
+    return CompiledPlan(
+        plan=plan,
+        compiled_actions=tuple(
+            CompiledAction(action=action, statement=statement)
+            for action, statement in zip(plan.actions, statements, strict=True)
+        ),
+    )
 
 
 def as_observed_columns(

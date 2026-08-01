@@ -18,7 +18,6 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.ports import (
     CatalogState,
-    CompiledAction,
     CompiledPlan,
     ExecutionSucceeded,
     TableAbsent,
@@ -43,7 +42,7 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.schema import Column, DeltaTable, ForeignKey, Long, String
-from tests.builders import as_observed_columns
+from tests.builders import as_observed_columns, build_compiled_plan
 
 # ---------------------------------------------------------------------------
 # Helpers and fakes
@@ -277,16 +276,6 @@ class _RecordingReader:
         return [str(qualified_name) for qualified_name in self.calls]
 
 
-def _compiled(plan: ActionPlan, statements: tuple[str, ...]) -> CompiledPlan:
-    return CompiledPlan(
-        plan=plan,
-        compiled_actions=tuple(
-            CompiledAction(action=action, statement=statement)
-            for action, statement in zip(plan.actions, statements, strict=True)
-        ),
-    )
-
-
 class _RecordingExecutor:
     """
     Record statement attempts and raise configured execution errors.
@@ -306,10 +295,9 @@ class _RecordingExecutor:
 
     def compile(self, plan: ActionPlan) -> CompiledPlan:
         statements = tuple(
-            f"STATEMENT {index} AS {plan.kind.name} FOR {plan.target}"
-            for index in range(len(plan))
+            f"STATEMENT {index} AS {plan.kind.name} FOR {plan.target}" for index in range(len(plan))
         )
-        return _compiled(plan, statements)
+        return build_compiled_plan(plan, statements)
 
     def execute(self, statement: str) -> None:
         self.calls.append(statement)
@@ -357,7 +345,7 @@ class _FailingMultiStatementExecutor:
 
     def compile(self, plan: ActionPlan) -> CompiledPlan:
         statements = tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
-        return _compiled(plan, statements)
+        return build_compiled_plan(plan, statements)
 
     def execute(self, statement: str) -> None:
         self.calls.append(statement)
@@ -607,10 +595,8 @@ def test_all_reads_complete_before_execution_and_a_read_failure_blocks_only_its_
     class _EventRecordingExecutor:
         def compile(self, plan: ActionPlan) -> CompiledPlan:
             # The name is embedded so execute can recover the target table.
-            statements = tuple(
-                f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan))
-            )
-            return _compiled(plan, statements)
+            statements = tuple(f"STATEMENT {index} FOR {plan.target}" for index in range(len(plan)))
+            return build_compiled_plan(plan, statements)
 
         def execute(self, statement: str) -> None:
             events.append(f"execute:{statement.split(' FOR ', 1)[1]}")
@@ -776,7 +762,7 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
 def test_unexpected_executor_exception_propagates():
     class BuggyExecutor:
         def compile(self, plan: ActionPlan) -> CompiledPlan:
-            return _compiled(plan, (f"STATEMENT FOR {plan.target}",))
+            return build_compiled_plan(plan, (f"STATEMENT FOR {plan.target}",))
 
         def execute(self, _statement: str) -> None:
             raise RuntimeError("adapter bug")
@@ -1124,9 +1110,7 @@ def test_execution_failure_blocks_transitively_along_fk_chain():
 
 def test_partial_execution_failure_in_parent_blocks_dependent():
     # Given customers' plan fails on one action among successful ones
-    reader = _RecordingReader(
-        {"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")}
-    )
+    reader = _RecordingReader({"cat.sch.customers": _existing_id_table_synced("cat.sch.customers")})
     executor = _FailingMultiStatementExecutor()
     engine = Engine(reader=reader, executor=executor)
 
@@ -1701,9 +1685,7 @@ def test_created_tables_compile_as_ordinary_tables():
     [table_report] = list(report)
     assert table_report.compiled is not None
     assert table_report.compiled.statements != ()
-    assert all(
-        f"AS TABLE FOR {fqn}" in statement for statement in table_report.compiled.statements
-    )
+    assert all(f"AS TABLE FOR {fqn}" in statement for statement in table_report.compiled.statements)
 
 
 def test_executed_sql_is_byte_for_byte_the_planned_sql_for_constraint_ddl():

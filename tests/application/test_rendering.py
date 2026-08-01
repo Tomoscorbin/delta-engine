@@ -12,8 +12,6 @@ from delta_engine.application.diff_entries import (
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
-    CompiledAction,
-    CompiledPlan,
     ExecutionSucceeded,
     ExecutionSummary,
     TablePresent,
@@ -76,6 +74,7 @@ from delta_engine.domain.plan.actions import (
     UnsetProperty,
     UnsetTableTag,
 )
+from tests.builders import build_compiled_plan
 
 
 def _primary_key(
@@ -97,16 +96,6 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
     return ActionPlan(
         target=QualifiedName("cat", "sch", name),
         actions=actions,
-    )
-
-
-def _compiled(plan: ActionPlan, statements: tuple[str, ...]) -> CompiledPlan:
-    return CompiledPlan(
-        plan=plan,
-        compiled_actions=tuple(
-            CompiledAction(action=action, statement=statement)
-            for action, statement in zip(plan.actions, statements, strict=True)
-        ),
     )
 
 
@@ -524,7 +513,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     healthy = TableRunReport(
         read=report.read,
         planning=PlanningSucceeded(plan),
-        compiled=_compiled(plan, ()),
+        compiled=build_compiled_plan(plan, ()),
         resolution=report.resolution,
         execution=None,
     )
@@ -610,13 +599,13 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
     )
     planning = PlanningFailed(planning_failures) if planning_failures else PlanningSucceeded(plan)
     statements = tuple(f"SQL {index}" for index in range(len(plan) if plan is not None else 0))
-    compiled = (
-        None
-        if planning_failures
-        else execution.compiled_plan
-        if execution is not None
-        else _compiled(plan, statements)
-    )
+    if planning_failures:
+        compiled = None
+    elif execution is not None:
+        compiled = execution.compiled_plan
+    else:
+        assert plan is not None
+        compiled = build_compiled_plan(plan, statements)
     return TableRunReport(
         read=TablePresent(
             table=ObservedTable(
@@ -630,24 +619,21 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
     )
 
 
-def _execution(plan: ActionPlan, *, applied: int, failed: int) -> ExecutionSummary:
+def _failed_execution(plan: ActionPlan, *, applied: int) -> ExecutionSummary:
     succeeded = tuple(
         ExecutionSucceeded(statement_index=index, statement=f"SQL {index}")
         for index in range(applied)
     )
-    failures = tuple(
-        ExecutionFailure(
-            statement_index=applied + index,
-            exception_type="AnalysisException",
-            message="boom",
-            statement=f"SQL {applied + index}",
-        )
-        for index in range(failed)
+    failure = ExecutionFailure(
+        statement_index=applied,
+        exception_type="AnalysisException",
+        message="boom",
+        statement=f"SQL {applied}",
     )
     statements = tuple(f"SQL {index}" for index in range(len(plan)))
     return ExecutionSummary(
-        compiled_plan=_compiled(plan, statements),
-        results=succeeded + failures,
+        compiled_plan=build_compiled_plan(plan, statements),
+        results=(*succeeded, failure),
     )
 
 
@@ -682,7 +668,7 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
     report = _grid_report(
         "orders",
         plan=plan,
-        execution=_execution(plan, applied=2, failed=1),
+        execution=_failed_execution(plan, applied=2),
     )
 
     # When rendering the grid row
@@ -841,7 +827,7 @@ def test_failures_section_nests_supporting_detail_under_its_error_line():
     failed = _grid_report(
         "orders",
         plan=plan,
-        execution=_execution(plan, applied=0, failed=1),
+        execution=_failed_execution(plan, applied=0),
     )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),

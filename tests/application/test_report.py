@@ -13,8 +13,6 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
-    CompiledAction,
-    CompiledPlan,
     ExecutionResult,
     ExecutionSucceeded,
     ExecutionSummary,
@@ -48,6 +46,7 @@ from delta_engine.domain.plan.actions import (
     SetTableTag,
     UnsetTableTag,
 )
+from tests.builders import build_compiled_plan
 
 # ---------- test builders
 
@@ -105,29 +104,25 @@ def _plan(name: str, *actions) -> ActionPlan:
     )
 
 
-def _compiled(plan: ActionPlan, statements: tuple[str, ...]) -> CompiledPlan:
-    return CompiledPlan(
-        plan=plan,
-        compiled_actions=tuple(
-            CompiledAction(action=action, statement=statement)
-            for action, statement in zip(plan.actions, statements, strict=True)
-        ),
-    )
-
-
-def _execution(name: str, *results: ExecutionResult) -> ExecutionSummary:
-    plan = _plan(
+def _comment_plan(name: str, statement_count: int = 1) -> ActionPlan:
+    return _plan(
         name,
         *(
             SetTableComment(
                 desired_comment=f"new {index}",
                 observed_comment=f"old {index}",
             )
-            for index in range(len(results))
+            for index in range(statement_count)
         ),
     )
+
+
+def _execution(plan: ActionPlan, *results: ExecutionResult) -> ExecutionSummary:
     return ExecutionSummary(
-        compiled_plan=_compiled(plan, tuple(result.statement for result in results)),
+        compiled_plan=build_compiled_plan(
+            plan,
+            tuple(result.statement for result in results),
+        ),
         results=results,
     )
 
@@ -178,7 +173,7 @@ def _report(
     else:
         if not statements:
             statements = tuple(f"SQL {index}" for index in range(len(report_plan)))
-        compiled = _compiled(report_plan, statements)
+        compiled = build_compiled_plan(report_plan, statements)
 
     resolution = TableResolution(
         desired=desired,
@@ -203,7 +198,8 @@ def _report(
 def test_table_status_success_when_all_actions_succeed():
     # Given successful read, no pre-execution failures, and only successful actions
     read = TablePresent(table=_an_observed_table())
-    execution = _execution("tbl", _ok_exec(0), _ok_exec(1))
+    plan = _comment_plan("tbl", statement_count=2)
+    execution = _execution(plan, _ok_exec(0), _ok_exec(1))
 
     # When aggregating
     report = _report(
@@ -220,15 +216,17 @@ def test_table_status_success_when_all_actions_succeed():
 
 def test_sync_report_has_failures_true_if_any_table_has_failures():
     # Given two tables: one success, one with execution failure
+    ok_plan = _comment_plan("a")
+    failed_plan = _comment_plan("b")
     t_ok = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution("a", _ok_exec(0)),
+        execution=_execution(ok_plan, _ok_exec(0)),
     )
     t_bad = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution("b", _failed_exec(0)),
+        execution=_execution(failed_plan, _failed_exec(0)),
     )
 
     # When aggregating the sync
@@ -319,24 +317,19 @@ def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
 def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
     # Given a table that planned a change but whose execution failed
     statement = "COMMENT ON TABLE `cat`.`schema`.`a` IS 'hello'"
+    plan = _plan("a", SetTableComment(desired_comment="hello", observed_comment=""))
     failed = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        plan=_plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
-        statements=(statement,),
-        execution=ExecutionSummary(
-            compiled_plan=_compiled(
-                _plan("a", SetTableComment(desired_comment="hello", observed_comment="")),
-                (statement,),
+        plan=plan,
+        execution=_execution(
+            plan,
+            ExecutionFailure(
+                statement_index=0,
+                exception_type="SparkException",
+                message="boom",
+                statement=statement,
             ),
-            results=(
-                ExecutionFailure(
-                    statement_index=0,
-                    exception_type="SparkException",
-                    message="boom",
-                    statement=statement,
-                ),
-            )
         ),
     )
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(failed,))
@@ -368,10 +361,11 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
 def test_sync_report_failures_by_table_maps_only_failed_tables():
     # Given one failed and one successful table
     failed_name = QualifiedName("cat", "schema", "y")
+    successful_plan = _comment_plan("x")
     t_ok = _report(
         desired=_a_desired_table("x"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution("x", _ok_exec(0)),
+        execution=_execution(successful_plan, _ok_exec(0)),
     )
     t_bad = _report(
         desired=_a_desired_table("y"),
@@ -472,10 +466,11 @@ def test_multi_phase_failure_reports_the_earliest_pipeline_phase():
 
 def test_table_run_report_with_no_failures_is_success():
     # Given a clean table with no failures
+    plan = _comment_plan("ok")
     report = _report(
         desired=_a_desired_table("ok"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution("ok", _ok_exec(0)),
+        execution=_execution(plan, _ok_exec(0)),
     )
 
     # Then it is a success and carries no failures
@@ -486,10 +481,11 @@ def test_table_run_report_with_no_failures_is_success():
 def test_status_reflects_the_earliest_failing_phase():
     # Given a table with an execution failure only
     read = TablePresent(table=_an_observed_table())
+    plan = _comment_plan("e")
     exec_only = _report(
         desired=_a_desired_table("e"),
         read=read,
-        execution=_execution("e", _failed_exec(0)),
+        execution=_execution(plan, _failed_exec(0)),
     )
     # Then it is EXECUTION_FAILED
     assert exec_only.status is TableRunStatus.EXECUTION_FAILED
@@ -531,10 +527,38 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
         )
 
 
+def test_table_run_report_rejects_successful_planning_without_compilation():
+    desired = _a_desired_table("orders")
+
+    with pytest.raises(ValueError, match="requires compilation"):
+        TableRunReport(
+            read=TableAbsent(),
+            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            compiled=None,
+            resolution=TableResolution(desired, (), ()),
+            execution=None,
+        )
+
+
+def test_table_run_report_rejects_compilation_of_another_plan():
+    desired = _a_desired_table("orders")
+    plan = _comment_plan("orders")
+    other_plan = ActionPlan(target=desired.qualified_name)
+
+    with pytest.raises(ValueError, match="must match the successful planning outcome"):
+        TableRunReport(
+            read=TableAbsent(),
+            planning=PlanningSucceeded(plan),
+            compiled=build_compiled_plan(other_plan, ()),
+            resolution=TableResolution(desired, (), ()),
+            execution=None,
+        )
+
+
 def test_table_run_report_rejects_execution_after_failed_resolution():
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
-    compiled = _compiled(plan, ("SQL",))
+    compiled = build_compiled_plan(plan, ("SQL",))
     failure = ForeignKeyFailure(
         table=desired.qualified_name,
         local_columns=("customer_id",),
@@ -558,8 +582,8 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
 def test_table_run_report_rejects_execution_of_another_compiled_plan():
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
-    reported = _compiled(plan, ("REPORTED SQL",))
-    executed = _compiled(plan, ("EXECUTED SQL",))
+    reported = build_compiled_plan(plan, ("REPORTED SQL",))
+    executed = build_compiled_plan(plan, ("EXECUTED SQL",))
 
     with pytest.raises(ValueError, match="reported compiled plan"):
         TableRunReport(
@@ -612,33 +636,20 @@ def test_statement_progress_is_absent_until_execution_runs():
 def test_statement_progress_counts_applied_against_planned():
     # Given a table whose execution applied one of two planned statements
     statements = ("SQL 0", "SQL 1")
+    plan = _comment_plan("orders", statement_count=2)
     report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=_plan(
-            "orders",
-            SetTableComment(desired_comment="hello", observed_comment=""),
-            SetTableComment(desired_comment="hello", observed_comment=""),
-        ),
-        statements=statements,
-        execution=ExecutionSummary(
-            compiled_plan=_compiled(
-                _plan(
-                    "orders",
-                    SetTableComment(desired_comment="hello", observed_comment=""),
-                    SetTableComment(desired_comment="hello", observed_comment=""),
-                ),
-                statements,
+        plan=plan,
+        execution=_execution(
+            plan,
+            ExecutionSucceeded(statement_index=0, statement=statements[0]),
+            ExecutionFailure(
+                statement_index=1,
+                exception_type="SparkException",
+                message="boom",
+                statement=statements[1],
             ),
-            results=(
-                ExecutionSucceeded(statement_index=0, statement="SQL 0"),
-                ExecutionFailure(
-                    statement_index=1,
-                    exception_type="SparkException",
-                    message="boom",
-                    statement="SQL 1",
-                ),
-            )
         ),
     )
 
@@ -700,11 +711,7 @@ def test_table_to_dict_spells_every_operation_as_one_of_three_plain_words():
             UnsetTableTag(name="legacy"),
             SetTableComment(desired_comment="hello", observed_comment=""),
         ),
-        statements=(
-            "SQL 0",
-            "SQL 1",
-            "ALTER TABLE ... SET TAGS (...)"
-        ),
+        statements=("SQL 0", "SQL 1", "ALTER TABLE ... SET TAGS (...)"),
     )
 
     # When serializing the public report
@@ -737,18 +744,12 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
 def test_table_to_dict_reports_execution_counts_when_executed():
     # The counts are statement-denominated: statements applied of statements planned.
     statement = "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
+    plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
     report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        plan=_plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
-        statements=(statement,),
-        execution=ExecutionSummary(
-            compiled_plan=_compiled(
-                _plan("orders", SetTableComment(desired_comment="hello", observed_comment="")),
-                (statement,),
-            ),
-            results=(_ok_exec(0, preview=statement),),
-        ),
+        plan=plan,
+        execution=_execution(plan, _ok_exec(0, preview=statement)),
     )
     assert report.to_dict()["execution"] == {"applied": 1, "total": 1}
 
@@ -901,11 +902,13 @@ def test_baked_blocked_failures_flatten_into_the_report_failures():
 
 
 def test_blocked_failures_reject_a_recorded_execution_outcome():
+    plan = _plan("b")
+
     with pytest.raises(ValueError, match="records no execution outcome"):
         _report(
             desired=_a_desired_table("b"),
             read=TablePresent(table=_an_observed_table()),
-            execution=_execution("b"),
+            execution=_execution(plan),
             blocked_failures=(_blocked_failure(),),
         )
 
