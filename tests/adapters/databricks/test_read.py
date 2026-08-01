@@ -371,19 +371,33 @@ def test_rejection_names_the_found_relation_and_the_supported_kinds():
     assert "delta" in str(error)
 
 
-def test_unmappable_column_type_reads_as_failed_not_present():
+@pytest.mark.parametrize(
+    ("type_document", "diagnostic"),
+    (
+        pytest.param({"name": "geography"}, "geography", id="unknown-type"),
+        pytest.param(
+            {"name": "string", "collation": "UTF8_LCASE"},
+            "UTF8_LCASE",
+            id="unsupported-string-collation",
+        ),
+    ),
+)
+def test_unmappable_column_type_reads_as_failed_not_present(
+    type_document: dict[str, object], diagnostic: str
+) -> None:
     # A column whose type the domain cannot model fails the parse, which the
     # read boundary turns into ReadError rather than a partial present state that
     # silently omits the column.
     doc = _describe_doc(
         columns=[
             {"name": "id", "type": {"name": "int"}, "nullable": False},
-            {"name": "region", "type": {"name": "geography"}, "nullable": True},
+            {"name": "region", "type": type_document, "nullable": True},
         ]
     )
     responses = _describe_responses(**{describe_json_query(QN): [(doc,)]})
 
-    _read_error(responses)
+    error = _read_error(responses)
+    assert diagnostic in str(error)
 
 
 def test_a_streaming_table_reads_as_present_with_its_kind():

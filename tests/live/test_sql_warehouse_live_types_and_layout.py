@@ -4,7 +4,11 @@ import pytest
 
 pytest.importorskip("databricks.sql")
 
+from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
+from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
+from delta_engine.application.errors import ReadError
 from delta_engine.databricks import build_sql_engine
+from delta_engine.domain.model import QualifiedName
 from delta_engine.schema import (
     Array,
     Binary,
@@ -116,6 +120,23 @@ def test_sync_creates_and_round_trips_every_supported_column_type(live_connectio
     # declaration, or the table would re-diff forever. A converged resync
     # proves the whole type surface round-trips through the engine's reader.
     assert engine.sync(table).has_changes is False
+
+
+def test_reader_rejects_non_default_string_collation(live_connection, live_tables):
+    """A real non-default STRING collation fails closed at the catalog read boundary."""
+    table_name = live_tables("collation")
+    execute_sql(
+        live_connection,
+        f"CREATE TABLE {qualified_table(table_name)} "
+        "(value STRING COLLATE UTF8_LCASE) USING DELTA",
+    )
+    reader = WarehouseReader(WarehouseSqlRunner(live_connection))
+
+    with pytest.raises(ReadError) as exc_info:
+        reader.fetch_state(QualifiedName(live_catalog(), live_schema(), table_name))
+
+    assert exc_info.value.exception_type == "MetadataParseError"
+    assert "UTF8_LCASE" in str(exc_info.value)
 
 
 def test_sync_creates_every_managed_table_property(live_connection, live_tables):
