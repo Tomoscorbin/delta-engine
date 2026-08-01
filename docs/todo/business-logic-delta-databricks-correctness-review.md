@@ -485,7 +485,10 @@ inside nested types. The existing shared read boundary turns that result into a
 `ReadError`, so synchronization stops before diffing or planning instead of
 reporting false convergence. Focused mapper and shared-reader regressions cover
 the local contract; the SQL warehouse type suite pins the same behavior against
-a real `STRING COLLATE UTF8_LCASE` column.
+a real `STRING COLLATE UTF8_LCASE` column. The targeted credentialed run
+[passed on 2026-08-01](https://github.com/Tomoscorbin/delta-engine/actions/runs/30708020824):
+Databricks reported `{"name":"string","collation":"UTF8_LCASE"}` and the
+reader surfaced the unsupported type as a `ReadError` before diffing or planning.
 
 ## 10. Remove column tags before dropping governed-tagged columns
 
