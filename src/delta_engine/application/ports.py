@@ -102,7 +102,9 @@ class CompiledPlan:
     compiled_actions: tuple[CompiledAction, ...]
 
     def __post_init__(self) -> None:
-        source_actions = tuple(compiled.action for compiled in self.compiled_actions)
+        compiled_actions = tuple(self.compiled_actions)
+        object.__setattr__(self, "compiled_actions", compiled_actions)
+        source_actions = tuple(compiled.action for compiled in compiled_actions)
 
         if source_actions != self.plan.actions:
             raise ValueError("Compiled actions must correspond exactly to plan actions")
@@ -148,19 +150,21 @@ class ExecutionSummary:
 
     def __post_init__(self) -> None:
         """Reject result histories that the engine's execution loop cannot produce."""
+        results = tuple(self.results)
+        object.__setattr__(self, "results", results)
         statements = self.compiled_plan.statements
         execution_failed = False
-        for expected_index, result in enumerate(self.results):
+        for expected_index, result in enumerate(results):
             if result.statement_index != expected_index:
                 raise ValueError("Execution result indexes must be contiguous")
             if expected_index >= len(statements) or result.statement != statements[expected_index]:
                 raise ValueError("Execution results must match the compiled statement prefix")
             if isinstance(result, ExecutionFailure):
-                if expected_index != len(self.results) - 1:
+                if expected_index != len(results) - 1:
                     raise ValueError("Execution must stop at its first failure")
                 execution_failed = True
 
-        if not execution_failed and len(self.results) != len(statements):
+        if not execution_failed and len(results) != len(statements):
             raise ValueError("Successful execution must cover the complete compiled plan")
 
     @property

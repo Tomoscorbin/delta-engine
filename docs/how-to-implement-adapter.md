@@ -46,27 +46,35 @@ Execution is a two-stage boundary. `compile` turns a domain plan into the backen
 
 ```python
 from delta_engine.application.errors import ExecutionError
-from delta_engine.application.ports import PlanExecutor
+from delta_engine.application.ports import CompiledAction, CompiledPlan, PlanExecutor
 from delta_engine.domain.plan.actions import ActionPlan
 
 class MyExecutor:
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
-        return tuple(
-            self._render(plan.target, plan.kind, action)
-            for action in plan.actions
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
+        return CompiledPlan(
+            plan=plan,
+            compiled_actions=tuple(
+                CompiledAction(
+                    action=action,
+                    statement=self._render(plan.target, plan.kind, action),
+                )
+                for action in plan.actions
+            ),
         )
 ```
 
 The engine calls `compile` only with the `ActionPlan` carried by a
 `PlanningSucceeded` result, on every dry or real run, and records the
-statements on the table's report. A rejected diff has no plan and never reaches
-this port. `compile` is **not** total: compiling an accepted plan is a pure,
-local operation that cannot fail against a backend, so it may raise on a
-genuine programming error rather than swallowing it. The plan carries both
-the qualified table target (`plan.target`) and the relation kind its actions
-lower against (`plan.kind`). Backends whose DDL dialect differs by kind
-(Databricks streaming tables take `ALTER STREAMING TABLE`) read both facts
-from the plan; a backend with one dialect may ignore the kind.
+compiled plan on the table's report. Each `CompiledAction` pairs one source
+action with the single statement that applies it; `CompiledPlan` rejects
+missing, additional, or reordered actions. A rejected diff has no plan and
+never reaches this port. `compile` is **not** total: compiling an accepted plan
+is a pure, local operation that cannot fail against a backend, so it may raise
+on a genuine programming error rather than swallowing it. The plan carries
+both the qualified table target (`plan.target`) and the relation kind its
+actions lower against (`plan.kind`). Backends whose DDL dialect differs by
+kind (Databricks streaming tables take `ALTER STREAMING TABLE`) read both
+facts from the plan; a backend with one dialect may ignore the kind.
 
 The engine passes those same compiled statements to `execute` one at a time.
 The table they target is already baked into each statement. Returning normally

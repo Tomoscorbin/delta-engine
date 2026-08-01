@@ -58,6 +58,38 @@ def test_compiled_plan_rejects_an_omitted_action():
         CompiledPlan(plan=plan, compiled_actions=())
 
 
+def test_compiled_plan_copies_mutable_compiled_actions_to_a_tuple():
+    action = SetTableComment(desired_comment="new", observed_comment="old")
+    plan = ActionPlan(
+        target=QualifiedName("cat", "schema", "table"),
+        actions=(action,),
+    )
+    compiled_action = CompiledAction(action=action, statement="SQL")
+    compiled_actions = [compiled_action]
+
+    compiled = CompiledPlan(
+        plan=plan,
+        compiled_actions=compiled_actions,  # type: ignore[arg-type]
+    )
+    compiled_actions.clear()
+
+    assert compiled.compiled_actions == (compiled_action,)
+
+
+def test_execution_summary_copies_mutable_results_to_a_tuple():
+    compiled = _compiled("SQL")
+    succeeded = _ok_exec(0, "SQL")
+    results = [succeeded]
+
+    summary = ExecutionSummary(
+        compiled_plan=compiled,
+        results=results,  # type: ignore[arg-type]
+    )
+    results.clear()
+
+    assert summary.results == (succeeded,)
+
+
 def test_execution_summary_reports_no_failure_when_every_statement_succeeds():
     # Given a run whose statements all executed
     compiled = _compiled("SQL 0", "SQL 1")
