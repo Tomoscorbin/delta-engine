@@ -12,6 +12,8 @@ from delta_engine.application.diff_entries import (
 from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
+    CompiledAction,
+    CompiledPlan,
     ExecutionSucceeded,
     ExecutionSummary,
     TablePresent,
@@ -95,6 +97,16 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
     return ActionPlan(
         target=QualifiedName("cat", "sch", name),
         actions=actions,
+    )
+
+
+def _compiled(plan: ActionPlan, statements: tuple[str, ...]) -> CompiledPlan:
+    return CompiledPlan(
+        plan=plan,
+        compiled_actions=tuple(
+            CompiledAction(action=action, statement=statement)
+            for action, statement in zip(plan.actions, statements, strict=True)
+        ),
     )
 
 
@@ -491,7 +503,7 @@ def _report_with_empty_plan_and_failure() -> TableRunReport:
         planning=PlanningFailed(
             (ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),)
         ),
-        planned_sql_statements=(),
+        compiled=None,
         resolution=TableResolution(desired, (), ()),
         execution=None,
     )
@@ -508,10 +520,11 @@ def test_diff_block_points_to_failures_when_no_plan_exists_and_failures_exist():
 def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
+    plan = ActionPlan(target=report.desired.qualified_name)
     healthy = TableRunReport(
         read=report.read,
-        planning=PlanningSucceeded(ActionPlan(target=report.desired.qualified_name)),
-        planned_sql_statements=(),
+        planning=PlanningSucceeded(plan),
+        compiled=_compiled(plan, ()),
         resolution=report.resolution,
         execution=None,
     )
@@ -567,7 +580,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     report = TableRunReport(
         read=failure,
         planning=None,
-        planned_sql_statements=(),
+        compiled=None,
         resolution=TableResolution(
             DesiredTable(qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),)),
             (),
@@ -596,6 +609,14 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
         failure for failure in failures if isinstance(failure, ValidationFailure)
     )
     planning = PlanningFailed(planning_failures) if planning_failures else PlanningSucceeded(plan)
+    statements = tuple(f"SQL {index}" for index in range(len(plan) if plan is not None else 0))
+    compiled = (
+        None
+        if planning_failures
+        else execution.compiled_plan
+        if execution is not None
+        else _compiled(plan, statements)
+    )
     return TableRunReport(
         read=TablePresent(
             table=ObservedTable(
@@ -603,16 +624,13 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
             )
         ),
         planning=planning,
-        # One fake statement per action, as the engine would have compiled.
-        planned_sql_statements=tuple(
-            f"SQL {index}" for index in range(len(plan) if plan is not None else 0)
-        ),
+        compiled=compiled,
         resolution=TableResolution(desired, (), ()),
         execution=execution,
     )
 
 
-def _execution(*, applied: int, failed: int) -> ExecutionSummary:
+def _execution(plan: ActionPlan, *, applied: int, failed: int) -> ExecutionSummary:
     succeeded = tuple(
         ExecutionSucceeded(statement_index=index, statement=f"SQL {index}")
         for index in range(applied)
@@ -626,7 +644,11 @@ def _execution(*, applied: int, failed: int) -> ExecutionSummary:
         )
         for index in range(failed)
     )
-    return ExecutionSummary(results=succeeded + failures)
+    statements = tuple(f"SQL {index}" for index in range(len(plan)))
+    return ExecutionSummary(
+        compiled_plan=_compiled(plan, statements),
+        results=succeeded + failures,
+    )
 
 
 def test_grid_detail_summarizes_changes_by_category_not_class_names():
@@ -660,7 +682,7 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
     report = _grid_report(
         "orders",
         plan=plan,
-        execution=_execution(applied=2, failed=1),
+        execution=_execution(plan, applied=2, failed=1),
     )
 
     # When rendering the grid row
@@ -815,10 +837,11 @@ def test_render_report_shows_a_full_failures_section_for_failed_tables():
 
 def test_failures_section_nests_supporting_detail_under_its_error_line():
     # Given a table whose execution failed, so its failure carries the SQL
+    plan = _plan("orders", AddColumn(DesiredColumn("age", Integer())))
     failed = _grid_report(
         "orders",
-        plan=_plan("orders", AddColumn(DesiredColumn("age", Integer()))),
-        execution=_execution(applied=0, failed=1),
+        plan=plan,
+        execution=_execution(plan, applied=0, failed=1),
     )
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -1033,7 +1056,7 @@ def test_a_rejected_table_shows_the_drift_that_was_refused():
         planning=PlanningFailed(
             (ValidationFailure(rule_name="NonNullableColumnAdd", message="nope"),)
         ),
-        planned_sql_statements=(),
+        compiled=None,
         resolution=TableResolution(desired, (), ()),
         execution=None,
         diff=diff_table(desired, observed),
@@ -1068,7 +1091,7 @@ def test_a_rejected_table_shows_the_differences_no_action_could_close():
         planning=PlanningFailed(
             (ValidationFailure(rule_name="PartitioningIsImmutable", message="nope"),)
         ),
-        planned_sql_statements=(),
+        compiled=None,
         resolution=TableResolution(desired, (), ()),
         execution=None,
         diff=diff_table(desired, observed),

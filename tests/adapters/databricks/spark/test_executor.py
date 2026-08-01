@@ -32,7 +32,7 @@ def _dummy_qualified_name() -> QualifiedName:
 def _apply(spark, plan: ActionPlan) -> None:
     """Compile and execute each statement, as the engine drives the adapter."""
     executor = SparkExecutor(SparkSqlRunner(spark))
-    for statement in executor.compile(plan):
+    for statement in executor.compile(plan).statements:
         executor.execute(statement)
 
 
@@ -277,15 +277,15 @@ def test_compile_returns_the_statements_execute_would_run():
     executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
 
     # When compiling without executing
-    statements = executor.compile(plan)
+    compiled = executor.compile(plan)
 
     # Then the statements match the SQL compiler's output, in plan order
-    assert statements == compile_plan(plan)
-    assert len(statements) == 1
-    assert "COMMENT" in statements[0].upper()
+    assert compiled == compile_plan(plan)
+    assert len(compiled.statements) == 1
+    assert "COMMENT" in compiled.statements[0].upper()
 
 
 def test_compile_of_empty_plan_returns_no_statements():
     executor = SparkExecutor(SparkSqlRunner(_FakeSpark()))
     plan = ActionPlan(target=QualifiedName("cat", "schema", "tbl"))
-    assert executor.compile(plan) == ()
+    assert executor.compile(plan).statements == ()

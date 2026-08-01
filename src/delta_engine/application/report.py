@@ -25,7 +25,7 @@ from delta_engine.application.planning import (
     PlanningResult,
     accepted_plan,
 )
-from delta_engine.application.ports import ExecutionSummary, ReadResult
+from delta_engine.application.ports import CompiledPlan, ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, CreateTable, TableDiff, TableDrift
@@ -146,8 +146,8 @@ class TableRunReport:
     canonical phase outcomes into this immutable snapshot.
     ``plan`` is ``None`` when reading or planning failed; a successfully
     planned no-op retains an empty, target-bearing plan.
-    ``planned_sql_statements`` is populated on dry and real runs so planned
-    changes remain inspectable even when execution is skipped or blocked.
+    ``compiled`` is populated on dry and real runs so the accepted plan and its
+    statements remain inspectable even when execution is skipped or blocked.
     ``blocked_failures`` is the derived consequence of other tables' fates,
     baked in at assembly — a blocked table records no execution outcome of its
     own.
@@ -159,7 +159,7 @@ class TableRunReport:
 
     read: ReadResult
     planning: PlanningResult | None
-    planned_sql_statements: tuple[str, ...]
+    compiled: CompiledPlan | None
     resolution: TableResolution
     execution: ExecutionSummary | None
     blocked_failures: tuple[ForeignKeyFailure, ...] = ()
@@ -180,10 +180,16 @@ class TableRunReport:
         plan = self.plan
         if plan is not None and plan.target != self.qualified_name:
             raise ValueError("Planned action target must match the reported table")
-        if self.planned_sql_statements and plan is None:
-            raise ValueError("Compiled statements require a successful planning outcome")
+        if plan is None and self.compiled is not None:
+            raise ValueError("Compilation requires a successful planning outcome")
+        if plan is not None and self.compiled is None:
+            raise ValueError("A successful planning outcome requires compilation")
+        if self.compiled is not None and self.compiled.plan != plan:
+            raise ValueError("Compiled plan must match the successful planning outcome")
         if self.execution is not None and (read_failed or planning_failed or resolution_failed):
             raise ValueError("Execution cannot follow a failed earlier phase")
+        if self.execution is not None and self.execution.compiled_plan != self.compiled:
+            raise ValueError("Execution must refer to the reported compiled plan")
         if self.blocked_failures:
             if self.execution is not None:
                 raise ValueError("A blocked table records no execution outcome")
@@ -192,11 +198,6 @@ class TableRunReport:
                 for failure in self.blocked_failures
             ):
                 raise ValueError("Blocked failures must carry the dependency-blocking reason")
-
-        if self.execution is not None:
-            executed = tuple(result.statement for result in self.execution.results)
-            if executed != self.planned_sql_statements[: len(executed)]:
-                raise ValueError("Execution results must match the planned statement prefix")
 
     @property
     def plan(self) -> ActionPlan | None:
@@ -264,7 +265,8 @@ class TableRunReport:
         if self.execution is None:
             return None
         return StatementProgress(
-            applied=self.execution.applied_count, planned=len(self.planned_sql_statements)
+            applied=self.execution.applied_count,
+            planned=len(self.execution.compiled_plan.statements),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -285,7 +287,9 @@ class TableRunReport:
             "has_failures": self.has_failures,
             "changes": _change_records(self.plan),
             "rejected_changes": _rejected_change_records(self.diff, self.plan),
-            "planned_sql_statements": list(self.planned_sql_statements),
+            "planned_sql_statements": list(
+                self.compiled.statements if self.compiled is not None else ()
+            ),
             "failures": _failure_records(self.failures),
             "execution": execution_record,
         }
@@ -381,9 +385,9 @@ class SyncReport:
     def planned_sql_statements(self) -> dict[str, tuple[str, ...]]:
         """Dotted table name → the SQL its plan compiles to; no-op tables omitted."""
         return {
-            str(table_report.qualified_name): table_report.planned_sql_statements
+            str(table_report.qualified_name): table_report.compiled.statements
             for table_report in self.table_reports
-            if table_report.planned_sql_statements
+            if table_report.compiled is not None and table_report.compiled.statements
         }
 
     @property

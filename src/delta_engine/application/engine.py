@@ -62,6 +62,7 @@ from delta_engine.application.planning import (
 )
 from delta_engine.application.ports import (
     CatalogStateReader,
+    CompiledPlan,
     DesiredTableSource,
     ExecutionResult,
     ExecutionSucceeded,
@@ -134,8 +135,8 @@ class _TableRun:
     resolution: TableResolution
     read: ReadResult | None = None
     diff: TableDiff | None = None
-    planning: PlanningResult | None = None
-    planned_sql_statements: tuple[str, ...] = ()
+    planning: PlanningResult | None = None  # TODO: diff should be on PlanningResult
+    compiled: CompiledPlan | None = None
     execution: ExecutionSummary | None = None
 
     @property
@@ -169,10 +170,11 @@ class _TableRun:
         """Freeze this run into its public, immutable report."""
         if self.read is None:
             raise RuntimeError(f"Run was frozen before its read completed: {self.qualified_name}")
+
         return TableRunReport(
             read=self.read,
             planning=self.planning,
-            planned_sql_statements=self.planned_sql_statements,
+            compiled=self.compiled,
             resolution=self.resolution,
             execution=self.execution,
             diff=self.diff,
@@ -336,22 +338,23 @@ class Engine:
         Lower every accepted plan to the exact statements exposed and executed.
 
         Compilation is a distinct backend boundary after planning: a dry run
-        reports these statements, while a real run passes the same tuple to
+        reports the compiled plan, while a real run passes that same value to
         execution. Runs rejected by an earlier phase carry no compiled SQL.
         """
         for run in runs:
-            plan = run.plan
-            if plan is None:
-                continue
+            match run.planning:
+                case PlanningSucceeded(plan=plan):
+                    run.compiled = self.executor.compile(plan)
 
-            run.planned_sql_statements = self.executor.compile(
-                plan,
-            )
-            logger.info(
-                "Compiled %d statement(s) for %s",
-                len(run.planned_sql_statements),
-                run.qualified_name,
-            )
+                    logger.info(  # TODO: should this log live on executor.compile()?
+                        "Compiled %d statement(s) for %s",
+                        len(
+                            run.compiled.statements
+                        ),  # TODO: should we put a __len__ on CompiledPlan?
+                        run.qualified_name,
+                    )
+                case PlanningFailed() | None:  # TODO: why can this be None?
+                    continue
 
     def _resolve(self, tables: tuple[DesiredTable, ...]) -> tuple[_TableRun, ...]:
         """
@@ -376,15 +379,15 @@ class Engine:
 
     def _execute(self, runs: tuple[_TableRun, ...]) -> None:
         """
-        Execute every convergent run's plan, skipping dependents of failure.
+        Execute every convergent run's compiled plan, skipping dependents of failure.
 
         One walk in dependency order applies the single blocking rule: a run
         with failures of its own, or with a dependency that will not converge,
         joins the not-converged set and is skipped. Nothing is recorded on the
         run either way — the account derives blocking from the same edges — so
-        the two arms differ only in what they can say about the skip. Plan
-        emptiness gates only statement execution: a no-op run still joins the
-        set through the same rule when its dependency failed, so blocking
+        the two arms differ only in what they can say about the skip. Compiled
+        plan emptiness gates only statement execution: a no-op run still joins
+        the set through the same rule when its dependency failed, so blocking
         propagates through tables with no work of their own.
         """
         not_converged: set[QualifiedName] = set()
@@ -404,13 +407,13 @@ class Engine:
                 )
                 continue
 
-            plan = run.plan
-            if plan is None:
-                raise RuntimeError(f"Executable table was not planned: {run.qualified_name}")
-            if not plan:
+            compiled = run.compiled
+            if compiled is None:
+                raise RuntimeError(f"Executable table was not compiled: {run.qualified_name}")
+            if not compiled.compiled_actions:
                 continue
 
-            summary = self._execute_statements(run.planned_sql_statements)
+            summary = self._execute_compiled(compiled)
             run.execution = summary
 
             if summary.failures:
@@ -423,10 +426,10 @@ class Engine:
                 len(summary.failures),
             )
 
-    def _execute_statements(self, statements: tuple[str, ...]) -> ExecutionSummary:
+    def _execute_compiled(self, compiled: CompiledPlan) -> ExecutionSummary:
         """Execute statements in order and stop after the first expected failure."""
         results: list[ExecutionResult] = []
-        for index, statement in enumerate(statements):
+        for index, statement in enumerate(compiled.statements):
             try:
                 self.executor.execute(statement)
             except ExecutionError as error:
@@ -447,4 +450,4 @@ class Engine:
                 )
             )
 
-        return ExecutionSummary(tuple(results))
+        return ExecutionSummary(compiled_plan=compiled, results=tuple(results))

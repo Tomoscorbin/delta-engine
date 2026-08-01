@@ -100,7 +100,7 @@ def _grid_statements_cell(report: TableRunReport) -> str:
         return f"{progress.applied}/{progress.planned}"
     if report.has_failures:
         return "—"
-    return str(len(report.planned_sql_statements))
+    return str(len(report.compiled.statements)) if report.compiled is not None else "0"
 
 
 def _humanized_action_summary(plan: ActionPlan | None) -> str:

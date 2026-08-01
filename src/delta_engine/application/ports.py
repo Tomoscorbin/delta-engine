@@ -14,6 +14,7 @@ from typing import Protocol
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
 from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan.actions import Action
 
 # ---------- DesiredTableSource ----------
 
@@ -80,6 +81,39 @@ class CatalogStateReader(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class CompiledAction:
+    """One domain action paired with the single statement that applies it."""
+
+    action: Action
+    statement: str
+
+    def __post_init__(self) -> None:
+        if not self.statement.strip():
+            raise ValueError(
+                f"{type(self.action).__name__} compiled to an empty statement"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledPlan:
+    """An accepted action plan paired exactly with its compiled statements."""
+
+    plan: ActionPlan
+    compiled_actions: tuple[CompiledAction, ...]
+
+    def __post_init__(self) -> None:
+        source_actions = tuple(compiled.action for compiled in self.compiled_actions)
+
+        if source_actions != self.plan.actions:
+            raise ValueError("Compiled actions must correspond exactly to plan actions")
+
+    @property
+    def statements(self) -> tuple[str, ...]:
+        """Statements in the source plan's execution order."""
+        return tuple(item.statement for item in self.compiled_actions)
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionSucceeded:
     """
     A single statement that executed without error.
@@ -104,21 +138,30 @@ class ExecutionSummary:
     """
     The outcome of running a plan's compiled statements.
 
-    A frozen container over the phase's raw results that owns the single pass
-    separating failed statements from successful ones, so callers read
-    ``failures`` instead of re-deriving the split with ``isinstance``. The
-    executor stops at the first failure, so ``failures`` holds at most one.
+    Results must cover the compiled statements in order. A successful history
+    covers the complete plan; a failed history is the prefix ending at the
+    first failed statement. Therefore ``failures`` holds at most one.
     """
 
+    compiled_plan: CompiledPlan
     results: tuple[ExecutionResult, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject histories that the stop-at-first-failure executor cannot produce."""
+        """Reject result histories that the engine's execution loop cannot produce."""
+        statements = self.compiled_plan.statements
+        execution_failed = False
         for expected_index, result in enumerate(self.results):
             if result.statement_index != expected_index:
                 raise ValueError("Execution result indexes must be contiguous")
-            if expected_index and isinstance(self.results[expected_index - 1], ExecutionFailure):
-                raise ValueError("Execution cannot continue after a failure")
+            if expected_index >= len(statements) or result.statement != statements[expected_index]:
+                raise ValueError("Execution results must match the compiled statement prefix")
+            if isinstance(result, ExecutionFailure):
+                if expected_index != len(self.results) - 1:
+                    raise ValueError("Execution must stop at its first failure")
+                execution_failed = True
+
+        if not execution_failed and len(self.results) != len(statements):
+            raise ValueError("Successful execution must cover the complete compiled plan")
 
     @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
@@ -149,9 +192,9 @@ class PlanExecutor(Protocol):
     :class:`ExecutionFailure`; unexpected programming errors still propagate.
     """
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
         """
-        Return the statements that apply ``plan``, in execution order.
+        Return ``plan`` paired exactly with its statements in execution order.
 
         The plan carries the qualified table target and relation kind its
         actions lower against (``plan.target`` and ``plan.kind``). Backends

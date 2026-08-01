@@ -107,17 +107,17 @@ def test_compile_returns_backend_statements_without_touching_connection():
         actions=(SetTableComment(desired_comment="hello", observed_comment=""),),
     )
 
-    statements = executor.compile(plan)
+    compiled = executor.compile(plan)
 
-    assert statements == compile_plan(plan)
-    assert len(statements) == 1
+    assert compiled == compile_plan(plan)
+    assert len(compiled.statements) == 1
     assert connection.cursor_requests == 0
 
 
 def test_compile_of_empty_plan_returns_no_statements():
     connection = FakeConnection()
 
-    statements = _executor(connection).compile(ActionPlan(target=QN))
+    compiled = _executor(connection).compile(ActionPlan(target=QN))
 
-    assert statements == ()
+    assert compiled.statements == ()
     assert connection.cursor_requests == 0

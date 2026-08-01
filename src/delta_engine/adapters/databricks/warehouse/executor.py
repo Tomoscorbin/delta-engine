@@ -3,6 +3,7 @@
 from delta_engine.adapters.databricks.execution import execute_statement
 from delta_engine.adapters.databricks.sql import compile_plan
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
+from delta_engine.application.ports import CompiledPlan
 from delta_engine.domain.plan import ActionPlan
 
 
@@ -12,7 +13,7 @@ class WarehouseExecutor:
     def __init__(self, runner: WarehouseSqlRunner) -> None:
         self._runner = runner
 
-    def compile(self, plan: ActionPlan) -> tuple[str, ...]:
+    def compile(self, plan: ActionPlan) -> CompiledPlan:
         """
         Compile ``plan`` to its SQL statements in execution order.
 

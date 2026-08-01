@@ -105,7 +105,7 @@ def _plan(
 
 
 def _compile_single(action: Action, kind: TableKind = TableKind.TABLE) -> str:
-    (statement,) = compile_plan(_plan(action, kind=kind))
+    (statement,) = compile_plan(_plan(action, kind=kind)).statements
     return statement
 
 
@@ -125,8 +125,13 @@ def _concrete_action_types() -> list[type[Action]]:
     ]
 
 
-def test_compile_empty_plan_returns_empty_tuple():
-    assert compile_plan(_plan()) == ()
+def test_compile_empty_plan_returns_an_empty_compiled_plan():
+    plan = _plan()
+
+    compiled = compile_plan(plan)
+
+    assert compiled.plan is plan
+    assert compiled.statements == ()
 
 
 def test_compile_plan_compiles_each_action_in_action_plan_order():
@@ -138,10 +143,11 @@ def test_compile_plan_compiles_each_action_in_action_plan_order():
     )
 
     # When compiling the plan
-    statements = compile_plan(plan)
+    compiled = compile_plan(plan)
 
     # Then each action in the normalized ActionPlan is compiled to its SQL statement
-    assert statements == tuple(_compile_single(action) for action in plan)
+    assert compiled.plan is plan
+    assert compiled.statements == tuple(_compile_single(action) for action in plan)
 
 
 def test_compile_backticks_table_and_column_identifiers():
@@ -150,7 +156,7 @@ def test_compile_backticks_table_and_column_identifiers():
     plan = _plan(AddColumn(DesiredColumn("weird column", Integer())), target=target)
 
     # When compiling
-    (statement,) = compile_plan(plan)
+    (statement,) = compile_plan(plan).statements
 
     # Then table and column identifiers are backticked
     assert statement == ("ALTER TABLE `cat-alog`.`sch ema`.`select` ADD COLUMN `weird column` INT")
@@ -499,8 +505,8 @@ def test_set_property_sql_ignores_observed_value():
     )
 
     # When compiling both
-    (first_statement,) = compile_plan(_plan(first_write))
-    (update_statement,) = compile_plan(_plan(update))
+    (first_statement,) = compile_plan(_plan(first_write)).statements
+    (update_statement,) = compile_plan(_plan(update)).statements
 
     # Then observed_value has no effect on rendered SQL
     assert first_statement == update_statement
@@ -573,7 +579,7 @@ def test_compile_rename_column():
         RenameColumn(old_name="customer_nm", new_name="customer_name"),
         target=QualifiedName("dev", "silver", "customers"),
     )
-    statements = compile_plan(plan)
+    statements = compile_plan(plan).statements
     assert statements == (
         "ALTER TABLE `dev`.`silver`.`customers` RENAME COLUMN `customer_nm` TO `customer_name`",
     )
@@ -688,7 +694,7 @@ def test_set_primary_key_emits_the_exact_bound_spelling():
     )
     plan = ActionPlan(target=_TARGET, actions=(action,))
 
-    [statement] = compile_plan(plan)
+    [statement] = compile_plan(plan).statements
 
     assert statement == (
         "ALTER TABLE `cat`.`sch`.`tbl` ADD CONSTRAINT `tbl_pk` PRIMARY KEY (`requestId`)"
@@ -704,7 +710,7 @@ def test_create_table_emits_declared_spelling_for_columns_and_inline_key():
     )
     plan = ActionPlan(target=_TARGET, actions=(CreateTable(table),))
 
-    [statement] = compile_plan(plan)
+    [statement] = compile_plan(plan).statements
 
     # Then both the column definition and the inline key carry the declared spelling
     assert "`requestId` STRING NOT NULL" in statement
@@ -721,7 +727,7 @@ def test_foreign_key_emits_exact_spelling_on_both_sides():
     )
     plan = ActionPlan(target=_TARGET, actions=(SetForeignKey(constraint=constraint),))
 
-    [statement] = compile_plan(plan)
+    [statement] = compile_plan(plan).statements
 
     # Then both sides carry their exact declared spelling
     assert "FOREIGN KEY (`orderRef`)" in statement
@@ -737,6 +743,6 @@ def test_drop_foreign_key_emits_the_exact_observed_constraint_name():
     )
     plan = ActionPlan(target=_TARGET, actions=(DropForeignKey(constraint=constraint),))
 
-    [statement] = compile_plan(plan)
+    [statement] = compile_plan(plan).statements
 
     assert "DROP CONSTRAINT IF EXISTS `Legacy_FK_Name`" in statement

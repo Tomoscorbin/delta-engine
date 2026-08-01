@@ -115,7 +115,8 @@ def test_an_observed_streaming_table_compiles_in_the_streaming_dialect():
     # that the compiler was handed the kind the reader observed
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.SUCCESS
-    planned = table_report.planned_sql_statements
+    assert table_report.compiled is not None
+    planned = table_report.compiled.statements
     assert (
         "ALTER STREAMING TABLE `cat`.`sch`.`clicks` ALTER COLUMN `id` COMMENT 'the id'" in planned
     )
@@ -141,7 +142,7 @@ def test_an_observed_streaming_table_refuses_a_wider_scope_before_planning():
     # on kind alone and leaves nothing to execute
     [table_report] = list(report)
     assert table_report.status is TableRunStatus.PLANNING_FAILED
-    assert table_report.planned_sql_statements == ()
+    assert table_report.compiled is None
     rule_names = {
         failure.rule_name
         for failure in table_report.failures

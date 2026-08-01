@@ -16,6 +16,8 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
+    CompiledAction,
+    CompiledPlan,
     ExecutionSucceeded,
     ExecutionSummary,
     ReadResult,
@@ -28,10 +30,27 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import ActionPlan
+from delta_engine.domain.plan import ActionPlan, SetTableComment
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _QN = QualifiedName("cat", "sch", "tbl")
+
+
+def _compiled(*statements: str) -> CompiledPlan:
+    plan = ActionPlan(
+        target=_QN,
+        actions=tuple(
+            SetTableComment(desired_comment=f"new {index}", observed_comment=f"old {index}")
+            for index in range(len(statements))
+        ),
+    )
+    return CompiledPlan(
+        plan=plan,
+        compiled_actions=tuple(
+            CompiledAction(action=action, statement=statement)
+            for action, statement in zip(plan.actions, statements, strict=True)
+        ),
+    )
 
 
 def test_duplicate_table_definition_error_is_a_value_error_with_the_name():
@@ -59,22 +78,21 @@ def _table_report(
     execution: ExecutionSummary | None = None,
 ) -> TableRunReport:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
-    statements = (
-        () if execution is None else tuple(result.statement for result in execution.results)
-    )
     planning_failures = tuple(
         failure for failure in failures if isinstance(failure, ValidationFailure)
     )
     resolution_failures = tuple(
         failure for failure in failures if isinstance(failure, ForeignKeyFailure)
     )
-    planning = (
-        None
-        if isinstance(read, ReadFailure)
-        else PlanningFailed(planning_failures)
-        if planning_failures
-        else PlanningSucceeded(ActionPlan(target=desired.qualified_name))
-    )
+    if isinstance(read, ReadFailure):
+        planning = None
+        compiled = None
+    elif planning_failures:
+        planning = PlanningFailed(planning_failures)
+        compiled = None
+    else:
+        compiled = execution.compiled_plan if execution is not None else _compiled()
+        planning = PlanningSucceeded(compiled.plan)
     resolution = TableResolution(
         desired=desired,
         dependencies=(),
@@ -84,7 +102,7 @@ def _table_report(
     return TableRunReport(
         read=read,
         planning=planning,
-        planned_sql_statements=statements,
+        compiled=compiled,
         resolution=resolution,
         execution=execution,
     )
@@ -159,20 +177,27 @@ def test_message_renders_every_validation_failure_when_a_table_breaks_several_ru
 
 def test_message_renders_execution_failure_detail_with_sql():
     # Given a table whose execution phase failed on one action
+    statements = (
+        "ALTER TABLE cat.sch.tbl STEP 0",
+        "ALTER TABLE cat.sch.tbl STEP 1",
+        "ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
+    )
+    compiled = _compiled(*statements)
     failed_result = ExecutionFailure(
         statement_index=2,
         exception_type="SparkException",
         message="boom",
-        statement="ALTER TABLE cat.sch.tbl ADD COLUMN x INT",
+        statement=statements[2],
     )
     report = _table_report(
         read=TableAbsent(),
         execution=ExecutionSummary(
-            (
-                ExecutionSucceeded(0, "ALTER TABLE cat.sch.tbl STEP 0"),
-                ExecutionSucceeded(1, "ALTER TABLE cat.sch.tbl STEP 1"),
+            compiled_plan=compiled,
+            results=(
+                ExecutionSucceeded(0, statements[0]),
+                ExecutionSucceeded(1, statements[1]),
                 failed_result,
-            )
+            ),
         ),
     )
 

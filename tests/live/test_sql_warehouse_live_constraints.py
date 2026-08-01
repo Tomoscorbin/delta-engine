@@ -321,7 +321,7 @@ def test_primary_key_declared_in_the_wrong_case_is_rejected(live_connection, liv
     assert failure.rule_name == "ColumnSpellingMustMatchCatalog"
     assert "'requestid'" in failure.message
     assert "'requestId'" in failure.message
-    assert table_report.planned_sql_statements == ()
+    assert table_report.compiled is None
     assert read_live_table(live_connection, table_name) == before
 
 
@@ -419,6 +419,6 @@ def test_foreign_key_declared_in_the_wrong_case_is_rejected(live_connection, liv
         assert failure.rule_name == "ColumnSpellingMustMatchCatalog"
         assert f"'{declared}'" in failure.message
         assert f"'{observed}'" in failure.message
-        assert table_report.planned_sql_statements == ()
+        assert table_report.compiled is None
     assert read_live_table(live_connection, parent_name) == parent_before
     assert read_live_table(live_connection, child_name) == child_before
