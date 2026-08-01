@@ -1,11 +1,12 @@
 """Canonical domain vocabulary for executable table actions."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     DataType,
     DesiredColumn,
@@ -19,7 +20,6 @@ from delta_engine.domain.model import (
     TableFeature,
     TableKind,
 )
-from delta_engine.domain.model.frozen import freeze_strings
 
 
 class ActionPhase(IntEnum):
@@ -394,19 +394,15 @@ class SetForeignKey(Action):
 class AlterClustering(Action):
     """Set or clear liquid-clustering keys, preserving desired and observed state."""
 
-    desired_clustering: Sequence[str]
-    observed_clustering: Sequence[str]
+    desired_clustering: ListOrTuple[str]
+    observed_clustering: ListOrTuple[str]
 
     aspect: ClassVar[TableAspect] = TableAspect.CLUSTERING
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
 
     def __post_init__(self) -> None:
-        desired_clustering = freeze_strings(
-            self.desired_clustering, field_name="desired_clustering"
-        )
-        observed_clustering = freeze_strings(
-            self.observed_clustering, field_name="observed_clustering"
-        )
+        desired_clustering = tuple(self.desired_clustering)
+        observed_clustering = tuple(self.observed_clustering)
         object.__setattr__(
             self, "desired_clustering", tuple(Identifier(n) for n in desired_clustering)
         )
@@ -463,7 +459,7 @@ class ActionPlan:
     """
 
     target: QualifiedName
-    actions: Sequence[Action] = ()
+    actions: ListOrTuple[Action] = ()
     kind: TableKind = TableKind.TABLE
 
     def __post_init__(self) -> None:

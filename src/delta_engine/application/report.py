@@ -5,7 +5,7 @@ Run reports: per-table and run-level outcome aggregates.
 engine run; `SyncReport` aggregates those table snapshots.
 """
 
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -27,6 +27,7 @@ from delta_engine.application.planning import (
 )
 from delta_engine.application.ports import CompiledPlan, ExecutionSummary, ReadResult
 from delta_engine.application.relationships import TableResolution
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan, CreateTable, TableDiff, TableDrift
 
@@ -162,7 +163,7 @@ class TableRunReport:
     compiled: CompiledPlan | None
     resolution: TableResolution
     execution: ExecutionSummary | None
-    blocked_failures: Sequence[ForeignKeyFailure] = ()
+    blocked_failures: ListOrTuple[ForeignKeyFailure] = ()
     diff: TableDiff | None = None
 
     def __post_init__(self) -> None:
@@ -302,7 +303,7 @@ class SyncReport:
 
     started_at: datetime
     ended_at: datetime
-    table_reports: Sequence[TableRunReport]
+    table_reports: ListOrTuple[TableRunReport]
     dry_run: bool = False
 
     def __post_init__(self) -> None:
@@ -314,7 +315,7 @@ class SyncReport:
         *,
         started_at: datetime,
         ended_at: datetime,
-        table_reports: Sequence[TableRunReport],
+        table_reports: ListOrTuple[TableRunReport],
         dry_run: bool,
     ) -> "SyncReport":
         """

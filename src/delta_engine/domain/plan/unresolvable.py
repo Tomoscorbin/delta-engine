@@ -1,11 +1,10 @@
 """Canonical domain vocabulary for differences no action can close."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import Identifier, TableAspect
-from delta_engine.domain.model.frozen import freeze_strings
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +59,8 @@ class PropertyUndeclared:
 class PartitioningChanged:
     """Partitioning drift, which has no supported in-place action."""
 
-    desired_partitioning: Sequence[str]
-    observed_partitioning: Sequence[str]
+    desired_partitioning: ListOrTuple[str]
+    observed_partitioning: ListOrTuple[str]
 
     aspect: ClassVar[TableAspect] = TableAspect.PARTITIONING
 
@@ -69,12 +68,12 @@ class PartitioningChanged:
         object.__setattr__(
             self,
             "desired_partitioning",
-            freeze_strings(self.desired_partitioning, field_name="desired_partitioning"),
+            tuple(self.desired_partitioning),
         )
         object.__setattr__(
             self,
             "observed_partitioning",
-            freeze_strings(self.observed_partitioning, field_name="observed_partitioning"),
+            tuple(self.observed_partitioning),
         )
         if self.desired_partitioning == self.observed_partitioning:
             raise ValueError(

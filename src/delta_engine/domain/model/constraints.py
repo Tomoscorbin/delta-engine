@@ -1,9 +1,9 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from delta_engine.domain.model.frozen import freeze_strings
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
@@ -33,7 +33,7 @@ class PrimaryKeyConstraint:
 
     """
 
-    columns: Sequence[str]
+    columns: ListOrTuple[str]
     constraint_name: str
 
     @property
@@ -42,7 +42,7 @@ class PrimaryKeyConstraint:
         return key_signature(self.columns)
 
     def __post_init__(self) -> None:
-        columns = freeze_strings(self.columns, field_name="columns")
+        columns = tuple(self.columns)
         object.__setattr__(self, "columns", tuple(Identifier(column) for column in columns))
         if not self.columns:
             raise ValueError("columns must not be empty")
@@ -83,22 +83,14 @@ class ForeignKeyConstraint:
 
     """
 
-    local_columns: Sequence[str]
+    local_columns: ListOrTuple[str]
     referenced_table: QualifiedName
-    referenced_columns: Sequence[str]
+    referenced_columns: ListOrTuple[str]
     constraint_name: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "local_columns",
-            freeze_strings(self.local_columns, field_name="local_columns"),
-        )
-        object.__setattr__(
-            self,
-            "referenced_columns",
-            freeze_strings(self.referenced_columns, field_name="referenced_columns"),
-        )
+        object.__setattr__(self, "local_columns", tuple(self.local_columns))
+        object.__setattr__(self, "referenced_columns", tuple(self.referenced_columns))
         if not self.local_columns:
             raise ValueError("local_columns must not be empty")
 

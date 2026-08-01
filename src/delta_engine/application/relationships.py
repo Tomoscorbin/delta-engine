@@ -41,6 +41,7 @@ from delta_engine.application.failures import (
     ForeignKeyFailure,
     ForeignKeyFailureReason,
 )
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     DataType,
     DesiredTable,
@@ -69,8 +70,8 @@ class TableResolution:
     """
 
     desired: DesiredTable
-    dependencies: Sequence[ForeignKeyConstraint]
-    structural_failures: Sequence[ForeignKeyFailure]
+    dependencies: ListOrTuple[ForeignKeyConstraint]
+    structural_failures: ListOrTuple[ForeignKeyFailure]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "dependencies", tuple(self.dependencies))

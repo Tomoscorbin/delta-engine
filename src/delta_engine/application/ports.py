@@ -8,11 +8,11 @@ the whole contract. ``DesiredTableSource`` is the inbound counterpart: the
 contract a user-facing declaration satisfies to enter a sync.
 """
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from delta_engine.application.failures import ExecutionFailure, ReadFailure
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, ObservedTable, QualifiedName
 from delta_engine.domain.plan import ActionPlan
 from delta_engine.domain.plan.actions import Action
@@ -98,7 +98,7 @@ class CompiledPlan:
     """An accepted action plan paired exactly with its compiled statements."""
 
     plan: ActionPlan
-    compiled_actions: Sequence[CompiledAction]
+    compiled_actions: ListOrTuple[CompiledAction]
 
     def __post_init__(self) -> None:
         compiled_actions = tuple(self.compiled_actions)
@@ -145,7 +145,7 @@ class ExecutionSummary:
     """
 
     compiled_plan: CompiledPlan
-    results: Sequence[ExecutionResult] = ()
+    results: ListOrTuple[ExecutionResult] = ()
 
     def __post_init__(self) -> None:
         """Reject result histories that the engine's execution loop cannot produce."""

@@ -25,12 +25,14 @@ DETAIL's properties: if the platform auto-writes the key, do not add it to
 the policy. Additions are called out in release notes.
 """
 
-from collections.abc import Callable, Mapping, Sequence, Set
+from collections.abc import Callable, Mapping, Set
 from dataclasses import dataclass, field
 from enum import StrEnum
 import re
 from types import MappingProxyType
 from typing import Final
+
+from delta_engine.domain.collection_types import ListOrTuple
 
 # A single `interval <n> <unit>` term only — deliberately stricter than the
 # catalog, which also accepts compound intervals ("interval 1 hour 30
@@ -132,7 +134,7 @@ class PropertyDefinition:
 class PropertyPolicy:
     """Validate declarations and transitions for the managed properties."""
 
-    definitions: Sequence[PropertyDefinition]
+    definitions: ListOrTuple[PropertyDefinition]
     _definitions_by_name: Mapping[str, PropertyDefinition] = field(
         init=False, repr=False, compare=False
     )

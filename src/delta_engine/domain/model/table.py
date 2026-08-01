@@ -6,13 +6,13 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Final
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.constraints import (
     ForeignKeyConstraint,
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
-from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
@@ -145,13 +145,13 @@ class DesiredTable:
     """
 
     qualified_name: QualifiedName
-    columns: Sequence[DesiredColumn]
+    columns: ListOrTuple[DesiredColumn]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
-    partitioned_by: Sequence[str] = ()
-    clustered_by: Sequence[str] = ()
+    partitioned_by: ListOrTuple[str] = ()
+    clustered_by: ListOrTuple[str] = ()
     primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: Sequence[ForeignKeyConstraint] = ()
+    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
     properties: Mapping[str, str | None] = field(default_factory=dict)
     managed_aspects: Set[TableAspect] = field(default_factory=lambda: ALL_ASPECTS)
 
@@ -187,8 +187,8 @@ class DesiredTable:
         """
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        partitioned_by = freeze_strings(self.partitioned_by, field_name="partitioned_by")
-        clustered_by = freeze_strings(self.clustered_by, field_name="clustered_by")
+        partitioned_by = tuple(self.partitioned_by)
+        clustered_by = tuple(self.clustered_by)
         object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
@@ -302,16 +302,16 @@ class ObservedTable:
     """
 
     qualified_name: QualifiedName
-    columns: Sequence[ObservedColumn]
+    columns: ListOrTuple[ObservedColumn]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
-    partitioned_by: Sequence[str] = ()
-    clustered_by: Sequence[str] = ()
+    partitioned_by: ListOrTuple[str] = ()
+    clustered_by: ListOrTuple[str] = ()
     primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: Sequence[ForeignKeyConstraint] = ()
+    foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
     supported_features: Set[TableFeature] = frozenset()
-    referencing_foreign_keys: Sequence[ForeignKeyReference] = ()
+    referencing_foreign_keys: ListOrTuple[ForeignKeyReference] = ()
     kind: TableKind = TableKind.TABLE
 
     @property
@@ -322,8 +322,8 @@ class ObservedTable:
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        partitioned_by = freeze_strings(self.partitioned_by, field_name="partitioned_by")
-        clustered_by = freeze_strings(self.clustered_by, field_name="clustered_by")
+        partitioned_by = tuple(self.partitioned_by)
+        clustered_by = tuple(self.clustered_by)
         object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))

@@ -1,8 +1,8 @@
 """Domain data type variants used to describe table schemas."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.identifier import Identifier
 
 _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
@@ -140,7 +140,7 @@ class StructField:
 class Struct(DataType):
     """Struct of named fields; identity is the ordered (name, type) tuple."""
 
-    fields: Sequence[StructField]
+    fields: ListOrTuple[StructField]
 
     def __post_init__(self) -> None:
         # Accept any sequence at the public boundary; store a tuple so

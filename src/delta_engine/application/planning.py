@@ -1,11 +1,11 @@
 """Validated boundary from complete table diffs to executable action plans."""
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import validate_diff
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
@@ -25,7 +25,7 @@ class PlanningSucceeded:
 class PlanningFailed:
     """Rejected diff; no action plan exists for this result variant."""
 
-    failures: Sequence[ValidationFailure]
+    failures: ListOrTuple[ValidationFailure]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "failures", tuple(self.failures))

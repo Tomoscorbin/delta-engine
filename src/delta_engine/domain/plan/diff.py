@@ -12,6 +12,7 @@ from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, replace
 from typing import Final
 
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     Array,
     DataType,
@@ -27,7 +28,6 @@ from delta_engine.domain.model import (
     TimestampNtz,
     Variant,
 )
-from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
@@ -100,8 +100,8 @@ class TableDrift:
 
     desired: DesiredTable
     observed: ObservedTable
-    actions: Sequence[Action] = ()
-    unresolvable: Sequence[Unresolvable] = ()
+    actions: ListOrTuple[Action] = ()
+    unresolvable: ListOrTuple[Unresolvable] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "actions", tuple(self.actions))
@@ -243,24 +243,16 @@ class _RenameResolution:
     drops them.
     """
 
-    columns: Sequence[ObservedColumn]
-    partitioned_by: Sequence[str]
-    clustered_by: Sequence[str]
-    actions: Sequence[RenameColumn]
-    conflicts: Sequence[ColumnRenameConflict]
+    columns: ListOrTuple[ObservedColumn]
+    partitioned_by: ListOrTuple[str]
+    clustered_by: ListOrTuple[str]
+    actions: ListOrTuple[RenameColumn]
+    conflicts: ListOrTuple[ColumnRenameConflict]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
-        object.__setattr__(
-            self,
-            "partitioned_by",
-            freeze_strings(self.partitioned_by, field_name="partitioned_by"),
-        )
-        object.__setattr__(
-            self,
-            "clustered_by",
-            freeze_strings(self.clustered_by, field_name="clustered_by"),
-        )
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
         object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "conflicts", tuple(self.conflicts))
 
@@ -316,9 +308,9 @@ def _project_names(names: Sequence[str], renames: Mapping[str, str]) -> tuple[st
 class _ColumnAlignment:
     """Desired and rename-projected observed columns classified by name."""
 
-    added: Sequence[DesiredColumn]
-    removed: Sequence[ObservedColumn]
-    matched: Sequence[tuple[DesiredColumn, ObservedColumn]]
+    added: ListOrTuple[DesiredColumn]
+    removed: ListOrTuple[ObservedColumn]
+    matched: ListOrTuple[tuple[DesiredColumn, ObservedColumn]]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "added", tuple(self.added))

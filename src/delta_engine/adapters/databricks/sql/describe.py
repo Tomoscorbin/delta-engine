@@ -12,15 +12,15 @@ document — they come from information_schema as structured rows (see
 string this document also carries is left unread.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from types import MappingProxyType
 
 from delta_engine.adapters.databricks.sql.rows import Rows
 from delta_engine.adapters.databricks.sql.types import data_type_from_json
+from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import ObservedColumn, QualifiedName
-from delta_engine.domain.model.frozen import freeze_strings
 
 
 class MetadataParseError(Exception):
@@ -32,26 +32,18 @@ class TableDescription:
     """Backend-neutral relation facts, columns, and layout from one AS JSON document."""
 
     qualified_name: QualifiedName
-    columns: Sequence[ObservedColumn]
+    columns: ListOrTuple[ObservedColumn]
     comment: str
-    partitioned_by: Sequence[str]
-    clustered_by: Sequence[str]
+    partitioned_by: ListOrTuple[str]
+    clustered_by: ListOrTuple[str]
     table_properties: Mapping[str, str]
     relation_type: str | None
     provider: str | None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
-        object.__setattr__(
-            self,
-            "partitioned_by",
-            freeze_strings(self.partitioned_by, field_name="partitioned_by"),
-        )
-        object.__setattr__(
-            self,
-            "clustered_by",
-            freeze_strings(self.clustered_by, field_name="clustered_by"),
-        )
+        object.__setattr__(self, "partitioned_by", tuple(self.partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(self.clustered_by))
         object.__setattr__(self, "table_properties", MappingProxyType(dict(self.table_properties)))
 
 
