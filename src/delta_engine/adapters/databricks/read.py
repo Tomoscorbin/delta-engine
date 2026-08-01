@@ -154,10 +154,10 @@ def _read_observed_table(
     """Read the information_schema metadata (tags, keys, inbound FKs) and assemble the table."""
     qualified_name = description.qualified_name
     column_tags = read_column_tags(run_query, qualified_name)
-    tagged_columns = tuple(
+    tagged_columns = [
         replace(column, tags=column_tags.get(column.name, MappingProxyType({})))
         for column in description.columns
-    )
+    ]
     return ObservedTable(
         qualified_name=qualified_name,
         columns=tagged_columns,

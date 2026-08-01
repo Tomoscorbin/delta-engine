@@ -1,5 +1,6 @@
 """Validated boundary from complete table diffs to executable action plans."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import assert_never
 
@@ -24,7 +25,10 @@ class PlanningSucceeded:
 class PlanningFailed:
     """Rejected diff; no action plan exists for this result variant."""
 
-    failures: tuple[ValidationFailure, ...]
+    failures: Sequence[ValidationFailure]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "failures", tuple(self.failures))
 
 
 type PlanningResult = PlanningSucceeded | PlanningFailed

@@ -551,7 +551,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
     """Lower a valid public declaration into the domain model."""
     column_names = {column.name: column.name for column in declaration.columns}
     primary_key_columns = (
-        tuple(column_names.get(name, name) for name in declaration.primary_key)
+        [column_names.get(name, name) for name in declaration.primary_key]
         if declaration.primary_key is not None
         else None
     )
@@ -563,15 +563,17 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         if primary_key_columns is not None
         else None
     )
-    owner_primary_key = primary_key_constraint.columns if primary_key_constraint is not None else ()
-    foreign_keys = tuple(
+    owner_primary_key = (
+        tuple(primary_key_constraint.columns) if primary_key_constraint is not None else ()
+    )
+    foreign_keys = [
         foreign_key._to_constraint(
             declaration.qualified_name,
             declaration.columns,
             owner_primary_key,
         )
         for foreign_key in declaration.foreign_key_declarations
-    )
+    ]
 
     # DesiredTable enforces domain invariants (non-empty and unique columns,
     # existing layout/key columns, and coherent constraints) at construction.
@@ -581,8 +583,8 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         comment=declaration.comment,
         properties=declaration.properties,
         tags=declaration.tags,
-        partitioned_by=tuple(column_names.get(name, name) for name in declaration.partitioned_by),
-        clustered_by=tuple(column_names.get(name, name) for name in declaration.clustered_by),
+        partitioned_by=[column_names.get(name, name) for name in declaration.partitioned_by],
+        clustered_by=[column_names.get(name, name) for name in declaration.clustered_by],
         primary_key=primary_key_constraint,
         foreign_keys=foreign_keys,
         managed_aspects=declaration.managed_aspects,
@@ -693,7 +695,7 @@ class DeltaTable:
     @property
     def columns(self) -> tuple[Column, ...]:
         """Declared columns, in declaration order."""
-        return self._desired_table.columns
+        return tuple(self._desired_table.columns)
 
     @property
     def comment(self) -> str:
@@ -717,12 +719,12 @@ class DeltaTable:
     @property
     def partitioned_by(self) -> tuple[str, ...]:
         """Partition column names, in declaration order."""
-        return self._desired_table.partitioned_by
+        return tuple(self._desired_table.partitioned_by)
 
     @property
     def clustered_by(self) -> tuple[str, ...]:
         """Clustering key column names, in declaration order."""
-        return self._desired_table.clustered_by
+        return tuple(self._desired_table.clustered_by)
 
     @property
     def primary_key(self) -> tuple[str, ...]:

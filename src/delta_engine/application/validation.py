@@ -582,7 +582,7 @@ class UnmanagedAspectDrift:
                             " to match the live table, or widen its scope to manage"
                             " this aspect."
                         ),
-                        details=tuple(lines),
+                        details=lines,
                     )
                     for aspect, lines in lines_by_aspect.items()
                 )

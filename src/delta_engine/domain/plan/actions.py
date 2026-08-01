@@ -1,7 +1,7 @@
 """Canonical domain vocabulary for executable table actions."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from typing import ClassVar
@@ -19,6 +19,7 @@ from delta_engine.domain.model import (
     TableFeature,
     TableKind,
 )
+from delta_engine.domain.model.frozen import freeze_strings
 
 
 class ActionPhase(IntEnum):
@@ -73,6 +74,7 @@ class Action(ABC):
     def subject(self) -> str:
         """Identifier targeted within the phase; subclasses must override."""
         ...
+
 
 @dataclass(frozen=True, slots=True)
 class CreateTable(Action):
@@ -392,18 +394,24 @@ class SetForeignKey(Action):
 class AlterClustering(Action):
     """Set or clear liquid-clustering keys, preserving desired and observed state."""
 
-    desired_clustering: tuple[str, ...]
-    observed_clustering: tuple[str, ...]
+    desired_clustering: Sequence[str]
+    observed_clustering: Sequence[str]
 
     aspect: ClassVar[TableAspect] = TableAspect.CLUSTERING
     phase: ClassVar[ActionPhase] = ActionPhase.SET_CLUSTERING
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "desired_clustering", tuple(Identifier(n) for n in self.desired_clustering)
+        desired_clustering = freeze_strings(
+            self.desired_clustering, field_name="desired_clustering"
+        )
+        observed_clustering = freeze_strings(
+            self.observed_clustering, field_name="observed_clustering"
         )
         object.__setattr__(
-            self, "observed_clustering", tuple(Identifier(n) for n in self.observed_clustering)
+            self, "desired_clustering", tuple(Identifier(n) for n in desired_clustering)
+        )
+        object.__setattr__(
+            self, "observed_clustering", tuple(Identifier(n) for n in observed_clustering)
         )
         if set(self.desired_clustering) == set(self.observed_clustering):
             raise ValueError(f"AlterClustering carries no difference: {self.desired_clustering!r}")
@@ -455,7 +463,7 @@ class ActionPlan:
     """
 
     target: QualifiedName
-    actions: tuple[Action, ...] = ()
+    actions: Sequence[Action] = ()
     kind: TableKind = TableKind.TABLE
 
     def __post_init__(self) -> None:

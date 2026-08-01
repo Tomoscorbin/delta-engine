@@ -8,6 +8,7 @@ the whole contract. ``DesiredTableSource`` is the inbound counterpart: the
 contract a user-facing declaration satisfies to enter a sync.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -89,9 +90,7 @@ class CompiledAction:
 
     def __post_init__(self) -> None:
         if not self.statement.strip():
-            raise ValueError(
-                f"{type(self.action).__name__} compiled to an empty statement"
-            )
+            raise ValueError(f"{type(self.action).__name__} compiled to an empty statement")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +98,7 @@ class CompiledPlan:
     """An accepted action plan paired exactly with its compiled statements."""
 
     plan: ActionPlan
-    compiled_actions: tuple[CompiledAction, ...]
+    compiled_actions: Sequence[CompiledAction]
 
     def __post_init__(self) -> None:
         compiled_actions = tuple(self.compiled_actions)
@@ -146,7 +145,7 @@ class ExecutionSummary:
     """
 
     compiled_plan: CompiledPlan
-    results: tuple[ExecutionResult, ...] = ()
+    results: Sequence[ExecutionResult] = ()
 
     def __post_init__(self) -> None:
         """Reject result histories that the engine's execution loop cannot produce."""

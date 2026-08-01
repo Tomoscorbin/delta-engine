@@ -5,7 +5,7 @@ Uses `functools.singledispatch` to render SQL per action type and returns the
 statements in plan order, ready to execute against a Spark session.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import singledispatch
 from types import MappingProxyType
@@ -91,9 +91,9 @@ def compile_plan(plan: ActionPlan) -> CompiledPlan:
     ON) use the same plan target but are unaffected by the relation kind.
     """
     target = _Target(qualified_name=plan.target, kind=plan.kind)
-    compiled_actions = tuple(
+    compiled_actions = [
         CompiledAction(action=action, statement=_compile_action(action, target)) for action in plan
-    )
+    ]
 
     return CompiledPlan(
         plan=plan,
@@ -336,7 +336,7 @@ def _properties_clause(props: Mapping[str, str | None]) -> str:
     return f"TBLPROPERTIES ({pairs})"
 
 
-def _partitioned_by_clause(partitioned_by: tuple[str, ...]) -> str:
+def _partitioned_by_clause(partitioned_by: Sequence[str]) -> str:
     """Return PARTITIONED BY (...) or '' if unpartitioned."""
     if not partitioned_by:
         return ""
@@ -344,7 +344,7 @@ def _partitioned_by_clause(partitioned_by: tuple[str, ...]) -> str:
     return f"PARTITIONED BY ({quoted_columns})"
 
 
-def _clustered_by_clause(clustered_by: tuple[str, ...]) -> str:
+def _clustered_by_clause(clustered_by: Sequence[str]) -> str:
     """Return CLUSTER BY (...) or '' when the table declares no clustering."""
     if not clustered_by:
         return ""

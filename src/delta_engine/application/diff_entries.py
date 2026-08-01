@@ -7,12 +7,14 @@ what each action *means* (category, operation, subject, detail); presentation
 (grouping, grids, dict shapes) belongs to the consumers.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 import functools
 from typing import Final, assert_never
 
 from delta_engine.domain.model import DesiredColumn
+from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.plan import (
     Action,
     ActionPlan,
@@ -143,7 +145,10 @@ class DiffEntry:
     category: DiffCategory
     operation: DiffOperation
     subject: str
-    detail: tuple[str, ...] = ()
+    detail: Sequence[str] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "detail", freeze_strings(self.detail, field_name="detail"))
 
     @property
     def symbol(self) -> str:
@@ -161,9 +166,7 @@ def _column_add_entry(column: DesiredColumn) -> DiffEntry:
     detail = [str(column.data_type)]
     if not column.nullable:
         detail.append("NOT NULL")
-    return DiffEntry(
-        DiffCategory.COLUMNS, DiffOperation.ADD, subject=column.name, detail=tuple(detail)
-    )
+    return DiffEntry(DiffCategory.COLUMNS, DiffOperation.ADD, subject=column.name, detail=detail)
 
 
 def _named_value_entry(
@@ -187,7 +190,7 @@ def _named_value_entry(
     )
 
 
-def _columns_detail(columns: tuple[str, ...]) -> tuple[str, ...]:
+def _columns_detail(columns: Sequence[str]) -> tuple[str, ...]:
     """Render a column list as the single parenthesised detail phrase it reads as."""
     return (f"({', '.join(columns)})",)
 

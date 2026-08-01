@@ -8,7 +8,7 @@ lives in ``application/relationships.py``; validation, safety policy,
 execution ordering, and backend compilation live elsewhere.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -27,6 +27,7 @@ from delta_engine.domain.model import (
     TimestampNtz,
     Variant,
 )
+from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.plan.actions import (
     Action,
     AddColumn,
@@ -99,10 +100,12 @@ class TableDrift:
 
     desired: DesiredTable
     observed: ObservedTable
-    actions: tuple[Action, ...] = ()
-    unresolvable: tuple[Unresolvable, ...] = ()
+    actions: Sequence[Action] = ()
+    unresolvable: Sequence[Unresolvable] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "actions", tuple(self.actions))
+        object.__setattr__(self, "unresolvable", tuple(self.unresolvable))
         _require_same_table(self.desired, self.observed)
 
     @property
@@ -171,7 +174,7 @@ def _diff_existing_table(desired: DesiredTable, observed: ObservedTable) -> Tabl
 
 def _diff_required_features(
     columns: Iterable[DesiredColumn],
-    supported_features: frozenset[TableFeature],
+    supported_features: Set[TableFeature],
 ) -> tuple[EnableTableFeature, ...]:
     """Return upgrades required by the desired column type trees."""
     required_features = {
@@ -240,11 +243,26 @@ class _RenameResolution:
     drops them.
     """
 
-    columns: tuple[ObservedColumn, ...]
-    partitioned_by: tuple[str, ...]
-    clustered_by: tuple[str, ...]
-    actions: tuple[RenameColumn, ...]
-    conflicts: tuple[ColumnRenameConflict, ...]
+    columns: Sequence[ObservedColumn]
+    partitioned_by: Sequence[str]
+    clustered_by: Sequence[str]
+    actions: Sequence[RenameColumn]
+    conflicts: Sequence[ColumnRenameConflict]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(
+            self,
+            "partitioned_by",
+            freeze_strings(self.partitioned_by, field_name="partitioned_by"),
+        )
+        object.__setattr__(
+            self,
+            "clustered_by",
+            freeze_strings(self.clustered_by, field_name="clustered_by"),
+        )
+        object.__setattr__(self, "actions", tuple(self.actions))
+        object.__setattr__(self, "conflicts", tuple(self.conflicts))
 
 
 def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _RenameResolution:
@@ -273,23 +291,23 @@ def _resolve_column_renames(desired: DesiredTable, observed: ObservedTable) -> _
         new_names_by_old[old_name] = target.name
         actions.append(RenameColumn(old_name=observed_column.name, new_name=target.name))
 
-    projected_columns = tuple(
+    projected_columns = [
         replace(column, name=new_names_by_old[column.name])
         if column.name in new_names_by_old
         else column
         for column in observed.columns
         if column.name not in conflicted_sources
-    )
+    ]
     return _RenameResolution(
         columns=projected_columns,
         partitioned_by=_project_names(observed.partitioned_by, new_names_by_old),
         clustered_by=_project_names(observed.clustered_by, new_names_by_old),
-        actions=tuple(actions),
-        conflicts=tuple(conflicts),
+        actions=actions,
+        conflicts=conflicts,
     )
 
 
-def _project_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[str, ...]:
+def _project_names(names: Sequence[str], renames: Mapping[str, str]) -> tuple[str, ...]:
     """Project column names through the applied rename mapping."""
     return tuple(renames.get(name, name) for name in names)
 
@@ -298,14 +316,19 @@ def _project_names(names: tuple[str, ...], renames: Mapping[str, str]) -> tuple[
 class _ColumnAlignment:
     """Desired and rename-projected observed columns classified by name."""
 
-    added: tuple[DesiredColumn, ...]
-    removed: tuple[ObservedColumn, ...]
-    matched: tuple[tuple[DesiredColumn, ObservedColumn], ...]
+    added: Sequence[DesiredColumn]
+    removed: Sequence[ObservedColumn]
+    matched: Sequence[tuple[DesiredColumn, ObservedColumn]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "added", tuple(self.added))
+        object.__setattr__(self, "removed", tuple(self.removed))
+        object.__setattr__(self, "matched", tuple(self.matched))
 
 
 def _diff_columns(
-    desired_columns: tuple[DesiredColumn, ...],
-    observed_columns: tuple[ObservedColumn, ...],
+    desired_columns: Sequence[DesiredColumn],
+    observed_columns: Sequence[ObservedColumn],
 ) -> tuple[Action, ...]:
     """Return every action required to converge the table's columns."""
     alignment = _align_columns(desired_columns, observed_columns)
@@ -324,20 +347,20 @@ def _diff_columns(
 
 
 def _align_columns(
-    desired_columns: tuple[DesiredColumn, ...],
-    observed_columns: tuple[ObservedColumn, ...],
+    desired_columns: Sequence[DesiredColumn],
+    observed_columns: Sequence[ObservedColumn],
 ) -> _ColumnAlignment:
     """Classify columns in stable desired and observed order."""
     desired_by_name = {column.name: column for column in desired_columns}
     observed_by_name = {column.name: column for column in observed_columns}
 
-    added = tuple(column for column in desired_columns if column.name not in observed_by_name)
-    removed = tuple(column for column in observed_columns if column.name not in desired_by_name)
-    matched = tuple(
+    added = [column for column in desired_columns if column.name not in observed_by_name]
+    removed = [column for column in observed_columns if column.name not in desired_by_name]
+    matched = [
         (column, observed_by_name[column.name])
         for column in desired_columns
         if column.name in observed_by_name
-    )
+    ]
 
     return _ColumnAlignment(
         added=added,

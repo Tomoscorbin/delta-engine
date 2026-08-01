@@ -1,8 +1,9 @@
 """Domain value objects representing key constraints (primary and foreign)."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 
@@ -32,7 +33,7 @@ class PrimaryKeyConstraint:
 
     """
 
-    columns: tuple[str, ...]
+    columns: Sequence[str]
     constraint_name: str
 
     @property
@@ -41,9 +42,10 @@ class PrimaryKeyConstraint:
         return key_signature(self.columns)
 
     def __post_init__(self) -> None:
+        columns = freeze_strings(self.columns, field_name="columns")
+        object.__setattr__(self, "columns", tuple(Identifier(column) for column in columns))
         if not self.columns:
             raise ValueError("columns must not be empty")
-        object.__setattr__(self, "columns", tuple(Identifier(column) for column in self.columns))
 
         seen: set[str] = set()
         for column in self.columns:
@@ -81,12 +83,22 @@ class ForeignKeyConstraint:
 
     """
 
-    local_columns: tuple[str, ...]
+    local_columns: Sequence[str]
     referenced_table: QualifiedName
-    referenced_columns: tuple[str, ...]
+    referenced_columns: Sequence[str]
     constraint_name: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "local_columns",
+            freeze_strings(self.local_columns, field_name="local_columns"),
+        )
+        object.__setattr__(
+            self,
+            "referenced_columns",
+            freeze_strings(self.referenced_columns, field_name="referenced_columns"),
+        )
         if not self.local_columns:
             raise ValueError("local_columns must not be empty")
 
@@ -142,7 +154,7 @@ class ForeignKeyConstraint:
         ``constraint_name`` so generated and catalog names still match by
         content.
         """
-        return (self.local_columns, self.referenced_table, self.referenced_columns)
+        return (tuple(self.local_columns), self.referenced_table, tuple(self.referenced_columns))
 
     @property
     def referenced_key_signature(self) -> KeySignature:

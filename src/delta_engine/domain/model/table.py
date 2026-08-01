@@ -1,6 +1,6 @@
 """Domain models for desired and observed table state."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from types import MappingProxyType
@@ -12,12 +12,13 @@ from delta_engine.domain.model.constraints import (
     ForeignKeyReference,
     PrimaryKeyConstraint,
 )
+from delta_engine.domain.model.frozen import freeze_strings
 from delta_engine.domain.model.identifier import Identifier
 from delta_engine.domain.model.qualified_name import QualifiedName
 from delta_engine.domain.model.table_feature import TableFeature
 
 
-def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: set[str]) -> None:
+def _validate_key_column_list(kind: str, names: Sequence[str], column_names: set[str]) -> None:
     """Rules shared by partition and clustering key lists: existing and unique."""
     missing = [name for name in names if str(name) not in column_names]
     if missing:
@@ -31,12 +32,12 @@ def _validate_key_column_list(kind: str, names: tuple[str, ...], column_names: s
 
 
 def _validate_table_structure(
-    columns: tuple[DesiredColumn | ObservedColumn, ...],
+    columns: Sequence[DesiredColumn | ObservedColumn],
     tags: Mapping[str, str],
-    partitioned_by: tuple[str, ...],
-    clustered_by: tuple[str, ...],
+    partitioned_by: Sequence[str],
+    clustered_by: Sequence[str],
     primary_key: PrimaryKeyConstraint | None,
-    foreign_keys: tuple[ForeignKeyConstraint, ...],
+    foreign_keys: Sequence[ForeignKeyConstraint],
 ) -> None:
     """
     Validate the structural invariants shared by desired and observed tables.
@@ -144,20 +145,20 @@ class DesiredTable:
     """
 
     qualified_name: QualifiedName
-    columns: tuple[DesiredColumn, ...]
+    columns: Sequence[DesiredColumn]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
-    partitioned_by: tuple[str, ...] = ()
-    clustered_by: tuple[str, ...] = ()
+    partitioned_by: Sequence[str] = ()
+    clustered_by: Sequence[str] = ()
     primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
+    foreign_keys: Sequence[ForeignKeyConstraint] = ()
     properties: Mapping[str, str | None] = field(default_factory=dict)
-    managed_aspects: frozenset[TableAspect] = field(default_factory=lambda: ALL_ASPECTS)
+    managed_aspects: Set[TableAspect] = field(default_factory=lambda: ALL_ASPECTS)
 
     @property
     def primary_key_columns(self) -> tuple[str, ...]:
         """Primary key column names, or ``()`` when the table has no primary key."""
-        return self.primary_key.columns if self.primary_key is not None else ()
+        return tuple(self.primary_key.columns) if self.primary_key is not None else ()
 
     def __post_init__(self) -> None:
         """
@@ -184,12 +185,15 @@ class DesiredTable:
         representable.
 
         """
+        object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(
-            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
-        )
-        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
+        partitioned_by = freeze_strings(self.partitioned_by, field_name="partitioned_by")
+        clustered_by = freeze_strings(self.clustered_by, field_name="clustered_by")
+        object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
+        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
 
         _validate_table_structure(
             columns=self.columns,
@@ -206,7 +210,7 @@ class DesiredTable:
                 " declares nothing for the engine to do"
             )
         seen: set[frozenset[str]] = set()
-        local_columns_by_constraint_name: dict[str, tuple[str, ...]] = {}
+        local_columns_by_constraint_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
             local_column_set = frozenset(foreign_key.local_columns)
             if local_column_set in seen:
@@ -298,30 +302,34 @@ class ObservedTable:
     """
 
     qualified_name: QualifiedName
-    columns: tuple[ObservedColumn, ...]
+    columns: Sequence[ObservedColumn]
     comment: str = ""
     tags: Mapping[str, str] = field(default_factory=dict)
-    partitioned_by: tuple[str, ...] = ()
-    clustered_by: tuple[str, ...] = ()
+    partitioned_by: Sequence[str] = ()
+    clustered_by: Sequence[str] = ()
     primary_key: PrimaryKeyConstraint | None = None
-    foreign_keys: tuple[ForeignKeyConstraint, ...] = ()
+    foreign_keys: Sequence[ForeignKeyConstraint] = ()
     properties: Mapping[str, str] = field(default_factory=dict)
-    supported_features: frozenset[TableFeature] = frozenset()
-    referencing_foreign_keys: tuple[ForeignKeyReference, ...] = ()
+    supported_features: Set[TableFeature] = frozenset()
+    referencing_foreign_keys: Sequence[ForeignKeyReference] = ()
     kind: TableKind = TableKind.TABLE
 
     @property
     def primary_key_columns(self) -> tuple[str, ...]:
         """Primary key column names, or ``()`` when the table has no primary key."""
-        return self.primary_key.columns if self.primary_key is not None else ()
+        return tuple(self.primary_key.columns) if self.primary_key is not None else ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        object.__setattr__(
-            self, "partitioned_by", tuple(Identifier(n) for n in self.partitioned_by)
-        )
-        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in self.clustered_by))
+        partitioned_by = freeze_strings(self.partitioned_by, field_name="partitioned_by")
+        clustered_by = freeze_strings(self.clustered_by, field_name="clustered_by")
+        object.__setattr__(self, "partitioned_by", tuple(Identifier(n) for n in partitioned_by))
+        object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
+        object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
+        object.__setattr__(self, "supported_features", frozenset(self.supported_features))
+        object.__setattr__(self, "referencing_foreign_keys", tuple(self.referencing_foreign_keys))
 
         _validate_table_structure(
             columns=self.columns,
