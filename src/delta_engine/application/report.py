@@ -44,6 +44,17 @@ class TableRunStatus(StrEnum):
     EXECUTION_FAILED = "EXECUTION_FAILED"
 
 
+class TableChangeState(StrEnum):
+    """What happened to the catalog change intended for one table."""
+
+    NOT_PLANNED = "NOT_PLANNED"
+    UNCHANGED = "UNCHANGED"
+    PLANNED = "PLANNED"
+    NOT_APPLIED = "NOT_APPLIED"
+    PARTIALLY_APPLIED = "PARTIALLY_APPLIED"
+    APPLIED = "APPLIED"
+
+
 # ---------- Derived run facts ----------
 
 
@@ -297,6 +308,26 @@ class TableRunReport:
         }
 
 
+def table_change_state(report: TableRunReport, *, dry_run: bool) -> TableChangeState:
+    """Derive what happened to a table's intended catalog change."""
+    plan = report.plan
+    if plan is None:
+        return TableChangeState.NOT_PLANNED
+    if not plan:
+        return TableChangeState.UNCHANGED
+    if dry_run:
+        return TableChangeState.PLANNED
+
+    execution = report.execution
+    if execution is None:
+        return TableChangeState.NOT_APPLIED
+    if not execution.failures:
+        return TableChangeState.APPLIED
+    if execution.applied_count == 0:
+        return TableChangeState.NOT_APPLIED
+    return TableChangeState.PARTIALLY_APPLIED
+
+
 @dataclass(frozen=True, slots=True)
 class SyncReport:
     """Aggregate report for a run across all tables."""
@@ -308,6 +339,16 @@ class SyncReport:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "table_reports", tuple(self.table_reports))
+        if self.dry_run and any(report.execution is not None for report in self.table_reports):
+            raise ValueError("A dry run cannot contain execution results")
+        if not self.dry_run and any(
+            report.has_changes and report.execution is None and not report.has_failures
+            for report in self.table_reports
+        ):
+            raise ValueError(
+                "A real run with a non-empty plan requires execution or a failure explaining"
+                " why execution did not run"
+            )
 
     @classmethod
     def assemble(

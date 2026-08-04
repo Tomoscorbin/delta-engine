@@ -31,6 +31,18 @@ Version 2 renamed the planning-phase status from `VALIDATION_FAILED` to
 backwards-compatible, and a reader that does not know the key sees exactly the
 payload it saw before.
 
+## Consistency
+
+`SyncReport` rejects combinations that a completed engine run cannot produce.
+A dry run cannot contain execution results. A real run with a non-empty plan
+must either contain its execution result or a failure explaining why execution
+did not run. Empty plans and plans rejected before compilation require no
+execution result.
+
+These checks apply when constructing a report directly as well as when the
+engine assembles one. `ExecutionSummary` separately validates the statement
+history inside an execution result.
+
 ## Run-level fields
 
 `SyncReport.to_dict()` returns:

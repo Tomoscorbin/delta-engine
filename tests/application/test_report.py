@@ -23,8 +23,10 @@ from delta_engine.application.ports import (
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
+    TableChangeState,
     TableRunReport,
     TableRunStatus,
+    table_change_state,
 )
 from delta_engine.domain.model import (
     DesiredColumn,
@@ -276,7 +278,12 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged))
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(changed, unchanged),
+        dry_run=True,
+    )
     assert report.has_changes is True
 
 
@@ -305,7 +312,10 @@ def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
         read=ReadFailure(exception_type="AnalysisException", message="nope"),
     )
     report = SyncReport(
-        started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged, failed)
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(changed, unchanged, failed),
+        dry_run=True,
     )
 
     # Then each is counted once, and the total is their sum
@@ -354,7 +364,12 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(with_sql, without_sql))
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(with_sql, without_sql),
+        dry_run=True,
+    )
     assert report.planned_sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
 
 
@@ -657,6 +672,188 @@ def test_statement_progress_counts_applied_against_planned():
     assert report.statement_progress == (1, 2)
 
 
+# ---------- Catalog change state
+
+
+def test_change_state_is_not_planned_when_no_plan_was_accepted():
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure("AnalysisException", "boom"),
+    )
+
+    assert table_change_state(report, dry_run=False) is TableChangeState.NOT_PLANNED
+
+
+def test_change_state_is_not_planned_when_planning_rejected_the_diff():
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="UnsafeChange", message="nope"),),
+    )
+
+    assert report.status is TableRunStatus.PLANNING_FAILED
+    assert table_change_state(report, dry_run=False) is TableChangeState.NOT_PLANNED
+
+
+def test_change_state_is_unchanged_for_an_empty_plan_even_when_the_run_failed():
+    desired = _a_desired_table("orders")
+    report = _report(
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+        failures=(
+            ForeignKeyFailure(
+                table=desired.qualified_name,
+                local_columns=("customer_id",),
+                references=_name("customers"),
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert table_change_state(report, dry_run=False) is TableChangeState.UNCHANGED
+
+
+def test_change_state_is_planned_for_a_dry_run_with_changes():
+    report = _a_changed_table_report()
+
+    assert table_change_state(report, dry_run=True) is TableChangeState.PLANNED
+
+
+def test_change_state_is_not_applied_when_a_real_change_was_blocked():
+    desired = _a_desired_table("orders")
+    report = _report(
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("orders"),
+        failures=(
+            ForeignKeyFailure(
+                table=desired.qualified_name,
+                local_columns=("customer_id",),
+                references=_name("customers"),
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    assert table_change_state(report, dry_run=False) is TableChangeState.NOT_APPLIED
+
+
+def test_first_and_later_execution_failures_have_distinct_change_states():
+    statements = ("SQL 0", "SQL 1")
+    plan = _comment_plan("orders", statement_count=2)
+    first_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=ExecutionSummary(
+            compiled_plan=build_compiled_plan(plan, statements),
+            results=(_failed_exec(0, statements[0]),),
+        ),
+    )
+    later_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(
+            plan,
+            _ok_exec(0, statements[0]),
+            _failed_exec(1, statements[1]),
+        ),
+    )
+
+    assert first_failed.status is later_failed.status is TableRunStatus.EXECUTION_FAILED
+    assert table_change_state(first_failed, dry_run=False) is TableChangeState.NOT_APPLIED
+    assert table_change_state(later_failed, dry_run=False) is TableChangeState.PARTIALLY_APPLIED
+
+
+def test_change_state_is_applied_after_complete_successful_execution():
+    plan = _comment_plan("orders", statement_count=2)
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(plan, _ok_exec(0), _ok_exec(1)),
+    )
+
+    assert table_change_state(report, dry_run=False) is TableChangeState.APPLIED
+
+
+# ---------- Run consistency
+
+
+def test_sync_report_rejects_execution_results_on_a_dry_run():
+    plan = _comment_plan("orders")
+    executed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(plan, _ok_exec()),
+    )
+
+    with pytest.raises(ValueError, match="dry run cannot contain execution results"):
+        SyncReport(
+            started_at=_t0(),
+            ended_at=_t1(),
+            table_reports=(executed,),
+            dry_run=True,
+        )
+
+
+def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
+    changed = _a_changed_table_report()
+
+    with pytest.raises(ValueError, match="requires execution or a failure"):
+        SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,))
+
+
+def test_sync_report_accepts_a_real_change_blocked_by_a_failure():
+    desired = _a_desired_table("orders")
+    blocked = _report(
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("orders"),
+        failures=(
+            ForeignKeyFailure(
+                table=desired.qualified_name,
+                local_columns=("customer_id",),
+                references=_name("customers"),
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(blocked,))
+
+    assert report.table_reports == (blocked,)
+
+
+def test_sync_report_accepts_an_unexecuted_dry_run_change():
+    changed = _a_changed_table_report()
+
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,), dry_run=True)
+
+    assert report.table_reports == (changed,)
+
+
+def test_sync_report_accepts_an_unexecuted_unchanged_real_run():
+    unchanged = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+    )
+
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
+
+    assert report.table_reports == (unchanged,)
+
+
+def test_change_state_does_not_extend_the_structured_report_schema():
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
+    )
+
+    assert "change_state" not in report.to_dict()["tables"][0]
+
+
 def test_table_to_dict_states_the_planned_change():
     payload = _a_changed_table_report().to_dict()
 
@@ -775,7 +972,10 @@ def test_sync_report_to_dict_is_json_serialisable_and_complete():
 
 def test_to_dict_is_deterministic():
     report = SyncReport(
-        started_at=_t0(), ended_at=_t1(), table_reports=(_a_changed_table_report(),)
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
     )
     assert report.to_dict() == report.to_dict()
 
