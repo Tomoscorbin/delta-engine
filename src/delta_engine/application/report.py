@@ -47,12 +47,12 @@ class TableRunStatus(StrEnum):
 class TableChangeState(StrEnum):
     """What happened to one table's intended catalog change within a run."""
 
-    NOT_PLANNED = "NOT_PLANNED"
-    UNCHANGED = "UNCHANGED"
-    PLANNED = "PLANNED"
-    NOT_APPLIED = "NOT_APPLIED"
-    PARTIALLY_APPLIED = "PARTIALLY_APPLIED"
-    APPLIED = "APPLIED"
+    NOT_PLANNED = "not planned"
+    UNCHANGED = "unchanged"
+    PLANNED = "planned"
+    NOT_APPLIED = "not applied"
+    PARTIALLY_APPLIED = "partially applied"
+    APPLIED = "applied"
 
 
 # ---------- Derived run facts ----------

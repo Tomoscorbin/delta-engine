@@ -32,12 +32,12 @@ _DETAIL_MAX_CHARS: Final[int] = 60
 
 _GRID_HEADERS: Final[tuple[str, str, str, str]] = ("TABLE", "STATUS", "STATEMENTS", "DETAIL")
 
-_REAL_RUN_OUTCOMES: Final[tuple[tuple[TableChangeState, str], ...]] = (
-    (TableChangeState.APPLIED, "applied"),
-    (TableChangeState.PARTIALLY_APPLIED, "partially applied"),
-    (TableChangeState.NOT_APPLIED, "not applied"),
-    (TableChangeState.UNCHANGED, "unchanged"),
-    (TableChangeState.NOT_PLANNED, "not planned"),
+_REAL_RUN_OUTCOME_ORDER: Final[tuple[TableChangeState, ...]] = (
+    TableChangeState.APPLIED,
+    TableChangeState.PARTIALLY_APPLIED,
+    TableChangeState.NOT_APPLIED,
+    TableChangeState.UNCHANGED,
+    TableChangeState.NOT_PLANNED,
 )
 
 
@@ -78,12 +78,12 @@ def _change_outcome_marker(
 ) -> str | None:
     """Describe an incomplete real-run outcome; omit previews and complete outcomes."""
     if change_state is TableChangeState.NOT_APPLIED:
-        return "not applied"
+        return change_state.value
     if change_state is TableChangeState.PARTIALLY_APPLIED:
         progress = report.statement_progress
         if progress is None:
             raise ValueError("A partially applied change requires execution progress")
-        return f"partially applied, {progress.applied}/{progress.planned}"
+        return f"{change_state.value}, {progress.applied}/{progress.planned}"
     return None
 
 
@@ -215,7 +215,7 @@ def _real_run_summary(report: SyncReport) -> str:
     """Count each table by the catalog change state derived by the aggregate."""
     counts = Counter(report.table_change_states)
     return ", ".join(
-        f"{counts[state]} {label}" for state, label in _REAL_RUN_OUTCOMES if counts[state]
+        f"{counts[state]} {state.value}" for state in _REAL_RUN_OUTCOME_ORDER if counts[state]
     )
 
 

@@ -51,14 +51,14 @@ For Python callers, `SyncReport.table_change_states` returns one
 between a planned dry-run change and an unapplied real-run change depends on
 the run's `dry_run` mode, not on the table report alone.
 
-| Value               | Meaning                                                        |
-| ------------------- | -------------------------------------------------------------- |
-| `NOT_PLANNED`       | Reading or planning failed before a plan was accepted          |
-| `UNCHANGED`         | The accepted plan contained no catalog changes                 |
-| `PLANNED`           | A dry run compiled a non-empty plan without executing it       |
-| `NOT_APPLIED`       | A real-run change was blocked, or its first statement failed   |
-| `PARTIALLY_APPLIED` | Some statements succeeded before a later statement failed      |
-| `APPLIED`           | Every statement in a non-empty real-run plan succeeded         |
+| Member              | Value               | Meaning                                                        |
+| ------------------- | ------------------- | -------------------------------------------------------------- |
+| `NOT_PLANNED`       | `not planned`       | Reading or planning failed before a plan was accepted          |
+| `UNCHANGED`         | `unchanged`         | The accepted plan contained no catalog changes                 |
+| `PLANNED`           | `planned`           | A dry run compiled a non-empty plan without executing it       |
+| `NOT_APPLIED`       | `not applied`       | A real-run change was blocked, or its first statement failed   |
+| `PARTIALLY_APPLIED` | `partially applied` | Some statements succeeded before a later statement failed      |
+| `APPLIED`           | `applied`           | Every statement in a non-empty real-run plan succeeded         |
 
 Change state is deliberately separate from `TableRunStatus`: status explains
 which phase failed, while change state describes the effect on the catalog. A
