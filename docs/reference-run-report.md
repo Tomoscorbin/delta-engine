@@ -51,20 +51,26 @@ For Python callers, `SyncReport.table_change_states` returns one
 between a planned dry-run change and an unapplied real-run change depends on
 the run's `dry_run` mode, not on the table report alone.
 
-| Value               | Meaning                                                        |
-| ------------------- | -------------------------------------------------------------- |
-| `NOT_PLANNED`       | Reading or planning failed before a plan was accepted          |
-| `UNCHANGED`         | The accepted plan contained no catalog changes                 |
-| `PLANNED`           | A dry run compiled a non-empty plan without executing it       |
-| `NOT_APPLIED`       | A real-run change was blocked, or its first statement failed   |
-| `PARTIALLY_APPLIED` | Some statements succeeded before a later statement failed      |
-| `APPLIED`           | Every statement in a non-empty real-run plan succeeded         |
+| Member              | Value               | Meaning                                                        |
+| ------------------- | ------------------- | -------------------------------------------------------------- |
+| `NOT_PLANNED`       | `not planned`       | Reading or planning failed before a plan was accepted          |
+| `UNCHANGED`         | `unchanged`         | The accepted plan contained no catalog changes                 |
+| `PLANNED`           | `planned`           | A dry run compiled a non-empty plan without executing it       |
+| `NOT_APPLIED`       | `not applied`       | A real-run change was blocked, or its first statement failed   |
+| `PARTIALLY_APPLIED` | `partially applied` | Some statements succeeded before a later statement failed      |
+| `APPLIED`           | `applied`           | Every statement in a non-empty real-run plan succeeded         |
 
 Change state is deliberately separate from `TableRunStatus`: status explains
 which phase failed, while change state describes the effect on the catalog. A
 table can therefore be `EXECUTION_FAILED` with either `NOT_APPLIED` or
 `PARTIALLY_APPLIED`, and an unchanged table can still carry a foreign-key
 failure. Import the enum with `from delta_engine import TableChangeState`.
+
+The human-readable renderers use these states on real runs. `render_diff`
+marks non-empty plans that were not applied or only partially applied, while
+the `render_report` footer counts catalog outcomes. A compiled plan blocked
+before execution shows statement progress as `0/n`. Dry-run diff blocks and
+their changed/unchanged/failed footer keep describing planned work instead.
 
 This Python-level derived view does not add fields to `SyncReport.to_dict()` or
 `TableRunReport.to_dict()`; the structured schema below remains version 2.

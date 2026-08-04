@@ -9,7 +9,13 @@ from delta_engine.application.diff_entries import (
     action_entries,
     unresolvable_entries,
 )
-from delta_engine.application.failures import ExecutionFailure, ReadFailure, ValidationFailure
+from delta_engine.application.failures import (
+    ExecutionFailure,
+    ForeignKeyFailure,
+    ForeignKeyFailureReason,
+    ReadFailure,
+    ValidationFailure,
+)
 from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
 from delta_engine.application.ports import (
     ExecutionSucceeded,
@@ -588,7 +594,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
 # ---------- grid rendering ----------
 
 
-def _grid_report(name, *, plan=None, failures=(), execution=None):
+def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failures=()):
     qualified_name = QualifiedName("cat", "sch", name)
     columns = (DesiredColumn("id", Integer()),)
     desired = DesiredTable(qualified_name=qualified_name, columns=columns)
@@ -616,6 +622,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None):
         compiled=compiled,
         resolution=TableResolution(desired, (), ()),
         execution=execution,
+        blocked_failures=blocked_failures,
     )
 
 
@@ -645,6 +652,15 @@ def _successful_execution(plan: ActionPlan) -> ExecutionSummary:
             ExecutionSucceeded(statement_index=index, statement=statement)
             for index, statement in enumerate(statements)
         ),
+    )
+
+
+def _blocked_failure(name: str) -> ForeignKeyFailure:
+    return ForeignKeyFailure(
+        table=QualifiedName("cat", "sch", name),
+        local_columns=("parent_id",),
+        references=QualifiedName("cat", "sch", "parent"),
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
     )
 
 
@@ -687,6 +703,48 @@ def test_grid_statements_cell_shows_applied_over_planned_on_partial_failure():
 
     # Then the STATEMENTS cell reads applied/planned
     assert "2/3" in data_row
+
+
+def test_grid_statement_counts_distinguish_blocking_from_pre_compilation_failure():
+    # Given a compiled two-statement plan blocked in real and dry runs, plus a rejected plan
+    blocked = _grid_report(
+        "blocked",
+        plan=_plan(
+            "blocked",
+            AddColumn(DesiredColumn("a", Integer())),
+            AddColumn(DesiredColumn("b", Integer())),
+        ),
+        blocked_failures=(_blocked_failure("blocked"),),
+    )
+    rejected = _grid_report(
+        "rejected",
+        failures=(ValidationFailure(rule_name="R", message="m"),),
+    )
+    started_at = datetime(2025, 1, 1, 0, 0, 0)
+    ended_at = datetime(2025, 1, 1, 0, 0, 3)
+    real_run = SyncReport(
+        started_at=started_at,
+        ended_at=ended_at,
+        table_reports=(blocked, rejected),
+    )
+    dry_run = SyncReport(
+        started_at=started_at,
+        ended_at=ended_at,
+        table_reports=(blocked,),
+        dry_run=True,
+    )
+
+    # When rendering both reports
+    real_lines = render_report(real_run).splitlines()
+    dry_lines = render_report(dry_run).splitlines()
+    blocked_row = next(line for line in real_lines if line.startswith("cat.sch.blocked"))
+    rejected_row = next(line for line in real_lines if line.startswith("cat.sch.rejected"))
+    dry_blocked_row = next(line for line in dry_lines if line.startswith("cat.sch.blocked"))
+
+    # Then only the real blocked work is counted; rejected and previewed work stay unknown
+    assert "0/2" in blocked_row
+    assert "—" in rejected_row
+    assert "—" in dry_blocked_row
 
 
 def test_grid_detail_shows_first_failure_and_extra_count_when_multiple():
@@ -782,6 +840,49 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
     assert footer == "3 tables: 1 changed, 1 unchanged, 1 failed (3.0s)"
 
 
+def test_real_run_footer_counts_each_catalog_change_outcome():
+    # Given a real run containing every possible non-preview catalog outcome
+    applied_plan = _plan("applied", AddColumn(DesiredColumn("a", Integer())))
+    applied = _grid_report(
+        "applied",
+        plan=applied_plan,
+        execution=_successful_execution(applied_plan),
+    )
+    partial_plan = _plan(
+        "partial",
+        AddColumn(DesiredColumn("a", Integer())),
+        AddColumn(DesiredColumn("b", Integer())),
+    )
+    partial = _grid_report(
+        "partial",
+        plan=partial_plan,
+        execution=_failed_execution(partial_plan, applied=1),
+    )
+    blocked = _grid_report(
+        "blocked",
+        plan=_plan("blocked", AddColumn(DesiredColumn("a", Integer()))),
+        blocked_failures=(_blocked_failure("blocked"),),
+    )
+    unchanged = _grid_report("unchanged")
+    not_planned = _grid_report(
+        "not_planned",
+        failures=(ValidationFailure(rule_name="R", message="m"),),
+    )
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(applied, partial, blocked, unchanged, not_planned),
+    )
+
+    # When rendering the real-run footer
+    footer = run_summary_footer(sync)
+
+    # Then it reports catalog outcomes rather than planned-change and failure counts
+    assert footer == (
+        "5 tables: 1 applied, 1 partially applied, 1 not applied, 1 unchanged, 1 not planned (3.0s)"
+    )
+
+
 def test_a_single_table_run_uses_the_singular_noun():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
@@ -830,12 +931,12 @@ def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
     # When rendering the whole report
     rendered = render_report(sync)
 
-    # Then the title, grid header, and a zero-count footer are shown -- no empty-run sentinel
+    # Then the title, grid header, and an outcome-free footer are shown -- no empty-run sentinel
     lines = rendered.splitlines()
     assert lines[0] == "SYNC REPORT"
     grid_header = next(line for line in lines if line.startswith("TABLE"))
     assert grid_header.split() == ["TABLE", "STATUS", "STATEMENTS", "DETAIL"]
-    assert rendered.endswith("0 tables: 0 changed, 0 unchanged, 0 failed (3.0s)")
+    assert rendered.endswith("0 tables (3.0s)")
 
 
 def test_render_report_shows_a_full_failures_section_for_failed_tables():
@@ -995,8 +1096,48 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
 
     # Then each table's change block appears, in report order
     assert rendered.index("cat.sch.a") < rendered.index("cat.sch.b")
+    assert "cat.sch.a" in rendered.splitlines()
+    assert "cat.sch.b" in rendered.splitlines()
     assert "~ table  'c'" in rendered
     assert "+ age  Integer" in rendered
+
+
+def test_render_diff_marks_unapplied_real_run_changes_in_their_headers():
+    # Given a real run with applied, blocked, and partially applied plans
+    applied_plan = _plan("applied", AddColumn(DesiredColumn("a", Integer())))
+    applied = _grid_report(
+        "applied",
+        plan=applied_plan,
+        execution=_successful_execution(applied_plan),
+    )
+    blocked = _grid_report(
+        "blocked",
+        plan=_plan("blocked", AddColumn(DesiredColumn("a", Integer()))),
+        blocked_failures=(_blocked_failure("blocked"),),
+    )
+    partial_plan = _plan(
+        "partial",
+        AddColumn(DesiredColumn("a", Integer())),
+        AddColumn(DesiredColumn("b", Integer())),
+    )
+    partial = _grid_report(
+        "partial",
+        plan=partial_plan,
+        execution=_failed_execution(partial_plan, applied=1),
+    )
+    sync = SyncReport(
+        started_at=datetime(2025, 1, 1, 0, 0, 0),
+        ended_at=datetime(2025, 1, 1, 0, 0, 3),
+        table_reports=(applied, blocked, partial),
+    )
+
+    # When rendering the real run's diff
+    lines = render_diff(sync).splitlines()
+
+    # Then only incomplete outcomes are marked with how much reached the catalog
+    assert "cat.sch.applied" in lines
+    assert "cat.sch.blocked  (not applied)" in lines
+    assert "cat.sch.partial  (partially applied, 1/2)" in lines
 
 
 def test_enable_table_feature_renders_a_permanent_features_entry():
@@ -1097,12 +1238,18 @@ def test_a_rejected_table_shows_the_drift_that_was_refused():
         diff=diff_table(desired, observed),
     )
 
-    # When the block is rendered
-    block = render_diff_block(report)
+    # When the rejected report is rendered as part of a real run
+    block = render_diff(
+        SyncReport(
+            started_at=datetime(2025, 1, 1, 0, 0, 0),
+            ended_at=datetime(2025, 1, 1, 0, 0, 3),
+            table_reports=(report,),
+        )
+    )
 
     # Then it names the refused changes rather than claiming there were none
     assert "(no changes" not in block
-    assert "REJECTED" in block.splitlines()[0]
+    assert "cat.sch.orders  (REJECTED — no SQL planned)" in block.splitlines()
     assert "+ email" in block
     assert "- obsolete" in block
 
