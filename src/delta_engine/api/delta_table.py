@@ -140,6 +140,12 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
             )
 
 
+class _NestedStructFieldContext(NamedTuple):
+    path: str
+    nullable: bool
+    not_null_allowed: bool
+
+
 def _column_declared_names(column: Column) -> tuple[str, ...]:
     """
     Return every name a column declares under Delta's naming rules.
@@ -152,8 +158,8 @@ def _column_declared_names(column: Column) -> tuple[str, ...]:
     column named ``"payload"``.
     """
     nested_names = (
-        path
-        for path, *_ in _nested_struct_fields(
+        field.path
+        for field in _nested_struct_fields(
             column.name,
             column.data_type,
             not_null_allowed=not column.nullable,
@@ -166,13 +172,17 @@ def _nested_struct_fields(
     path: str,
     data_type: DataType,
     not_null_allowed: bool,
-) -> Iterator[tuple[str, bool, bool]]:
+) -> Iterator[_NestedStructFieldContext]:
     """Yield struct fields with the container context needed at the API boundary."""
     match data_type:
         case Struct(fields):
             for field in fields:
                 field_path = f"{path}.{field.name}"
-                yield field_path, field.nullable, not_null_allowed
+                yield _NestedStructFieldContext(
+                    path=field_path,
+                    nullable=field.nullable,
+                    not_null_allowed=not_null_allowed,
+                )
                 yield from _nested_struct_fields(
                     field_path,
                     field.data_type,
@@ -191,14 +201,14 @@ def _validate_nested_not_null(
     column: Column,
 ) -> None:
     """Reject nested NOT NULL declarations Databricks cannot deploy."""
-    for field_path, nullable, not_null_allowed in _nested_struct_fields(
+    for field in _nested_struct_fields(
         column.name,
         column.data_type,
         not_null_allowed=not column.nullable,
     ):
-        if not nullable and not not_null_allowed:
+        if not field.nullable and not field.not_null_allowed:
             raise ValueError(
-                f"NOT NULL struct field '{field_path}' is not deployable: every containing"
+                f"NOT NULL struct field '{field.path}' is not deployable: every containing"
                 " column and struct field must be NOT NULL, and ARRAY or MAP paths do not"
                 " support nested NOT NULL"
             )
