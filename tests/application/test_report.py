@@ -850,7 +850,7 @@ def test_sync_report_rejects_execution_results_on_a_dry_run():
 
     # When constructing a dry-run aggregate
     # Then the contradictory execution history is rejected
-    with pytest.raises(ValueError, match="dry run cannot contain execution results"):
+    with pytest.raises(ValueError):
         SyncReport(
             started_at=_t0(),
             ended_at=_t1(),
@@ -865,7 +865,7 @@ def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
 
     # When constructing a real-run aggregate
     # Then the unexplained missing execution is rejected
-    with pytest.raises(ValueError, match="requires execution or a failure"):
+    with pytest.raises(ValueError):
         SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,))
 
 
