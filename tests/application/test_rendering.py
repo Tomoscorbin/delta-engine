@@ -911,8 +911,11 @@ def test_render_report_has_no_failures_section_when_all_succeed():
         dry_run=True,
     )
 
+    # When rendering the complete report
+    rendered = render_report(sync)
+
     # Then no Failures section is rendered
-    assert "Failures" not in render_report(sync)
+    assert "Failures" not in rendered
 
 
 def test_render_report_shows_dry_run_banner_only_for_dry_runs():
@@ -925,6 +928,7 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
     )
 
+    # When rendering both valid aggregates
     dry_rendered = render_report(SyncReport(**base, table_reports=(planned,), dry_run=True))
     applied_rendered = render_report(SyncReport(**base, table_reports=(applied,)))
 
@@ -945,6 +949,7 @@ def test_render_report_is_titled():
         dry_run=True,
     )
 
+    # When rendering the complete report
     lines = render_report(sync).splitlines()
 
     # Then a SYNC REPORT title, underlined with a rule, heads the output
@@ -964,6 +969,7 @@ def test_render_diff_is_titled():
         dry_run=True,
     )
 
+    # When rendering the run's diff
     lines = render_diff(sync).splitlines()
 
     # Then a DIFF title, underlined with a rule, heads the output

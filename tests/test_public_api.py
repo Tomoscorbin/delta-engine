@@ -31,7 +31,7 @@ _EAGER = {
 
 def test_eager_names_are_importable_and_identical_to_their_source():
     # Given the curated root namespace
-    # Then every pyspark-free name resolves to the same object as its source module
+    # When importing every eagerly available, PySpark-free name
     from delta_engine import (
         DuplicateTableDefinitionError,
         Engine,
@@ -67,6 +67,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         render_report as render_report_impl,
     )
 
+    # Then each resolves to the same object as its source module
     assert DuplicateTableDefinitionError is DuplicateTableDefinitionErrorImpl
     assert Engine is EngineImpl
     assert Failure is FailureImpl
