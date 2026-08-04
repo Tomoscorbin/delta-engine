@@ -189,17 +189,32 @@ def test_observed_only_column_produces_column_removed_change():
     assert diff.actions == (DropColumn(ObservedColumn("stale", String())),)
 
 
-def test_type_drift_produces_column_data_type_changed():
-    # Given a column whose data type differs between desired and observed
+@pytest.mark.parametrize(
+    ("desired_type", "observed_type"),
+    [
+        (Integer(), Long()),
+        (
+            Struct((StructField("value", Integer(), nullable=False),)),
+            Struct((StructField("value", Integer(), nullable=True),)),
+        ),
+    ],
+    ids=["scalar-type", "struct-field-nullability"],
+)
+def test_type_drift_produces_column_data_type_changed(desired_type, observed_type):
+    # Given a column whose modeled data type differs between desired and observed
     diff = diff_table(
-        _desired(columns=(DesiredColumn("id", Integer()),)),
-        _observed(columns=(DesiredColumn("id", Long()),)),
+        _desired(columns=(DesiredColumn("id", desired_type),)),
+        _observed(columns=(DesiredColumn("id", observed_type),)),
     )
 
-    # Then a AlterColumnType change carries both sides
+    # Then an AlterColumnType change carries both complete modeled types
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        AlterColumnType(column_name="id", desired_type=Integer(), observed_type=Long()),
+        AlterColumnType(
+            column_name="id",
+            desired_type=desired_type,
+            observed_type=observed_type,
+        ),
     )
 
 
@@ -218,49 +233,17 @@ def test_type_nullability_and_comment_drift_on_one_column_each_produce_a_change(
     assert any(isinstance(change, SetColumnComment) for change in diff.actions)
 
 
-@pytest.mark.parametrize(
-    ("desired_column", "observed_column", "column_path"),
-    [
-        (
-            DesiredColumn("id", Integer(), nullable=False),
-            ObservedColumn("id", Integer(), nullable=True),
-            ("id",),
-        ),
-        (
-            DesiredColumn(
-                "payload",
-                Struct((StructField("id", Integer(), nullable=False),)),
-                nullable=False,
-            ),
-            ObservedColumn(
-                "payload",
-                Struct((StructField("id", Integer(), nullable=True),)),
-                nullable=False,
-            ),
-            ("payload", "id"),
-        ),
-    ],
-    ids=["column", "struct-field"],
-)
-def test_nullability_drift_produces_column_nullability_changed(
-    desired_column: DesiredColumn,
-    observed_column: ObservedColumn,
-    column_path: tuple[str, ...],
-) -> None:
-    # Given a top-level or nested column whose nullability differs
+def test_nullability_drift_produces_column_nullability_changed():
+    # Given a column whose nullability differs
     diff = diff_table(
-        _desired(columns=(desired_column,)),
-        _observed(columns=(observed_column,)),
+        _desired(columns=(DesiredColumn("id", Integer(), nullable=False),)),
+        _observed(columns=(DesiredColumn("id", Integer(), nullable=True),)),
     )
 
-    # Then one SetColumnNullability change carries its full path and direction
+    # Then a SetColumnNullability change carries the direction
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        SetColumnNullability(
-            column_path=column_path,
-            desired_nullable=False,
-            observed_nullable=True,
-        ),
+        SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
     )
 
 

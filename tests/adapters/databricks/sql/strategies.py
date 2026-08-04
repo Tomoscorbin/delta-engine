@@ -249,3 +249,26 @@ TYPE_CASES = st.recursive(
     _nested_type_cases,
     max_leaves=10,
 )
+
+
+def _parquet_preserves_nested_nullability(data_type: DataType) -> bool:
+    """Whether open-source Spark's Parquet catalog preserves this modeled type."""
+    match data_type:
+        case Struct(fields):
+            return all(
+                field.nullable and _parquet_preserves_nested_nullability(field.data_type)
+                for field in fields
+            )
+        case Array(element):
+            return _parquet_preserves_nested_nullability(element)
+        case Map(key, value):
+            return all(_parquet_preserves_nested_nullability(item) for item in (key, value))
+        case _:
+            return True
+
+
+# The Parquet catalog normalizes nested NOT NULL away even though Spark's SQL
+# parser accepts it. Keep that backend limitation out of the round-trip test.
+PARQUET_ROUND_TRIPPABLE_TYPE_CASES = TYPE_CASES.filter(
+    lambda case: _parquet_preserves_nested_nullability(case.data_type)
+)

@@ -267,28 +267,15 @@ def test_set_table_comment_sets_comment_on_table(spark, make_temp_table):
     assert _get_table_comment(spark, full_table_name) == "staging table"
 
 
-def test_set_column_nullability_sets_top_level_and_nested_fields_nullable(spark, make_temp_table):
-    # Given existing NOT NULL top-level and nested fields
-    full_table_name = make_temp_table(
-        "nullability",
-        "id INT NOT NULL, payload STRUCT<name: STRING NOT NULL> NOT NULL",
-    )
+def test_set_column_nullability_sets_nullable(spark, make_temp_table):
+    # Given an existing table with a NOT NULL id column
+    full_table_name = make_temp_table("nullability", "id INT NOT NULL, name STRING")
     qualified_name = QualifiedName(*full_table_name.split("."))
     plan = ActionPlan(
         target=qualified_name,
         actions=(
             SetColumnNullability(
-                column_path=("id",),
-                desired_nullable=True,
-                observed_nullable=False,
-            ),
-            SetColumnNullability(
-                column_path=("payload", "name"),
-                desired_nullable=True,
-                observed_nullable=False,
-            ),
-            SetColumnNullability(
-                column_path=("payload",),
+                column_name="id",
                 desired_nullable=True,
                 observed_nullable=False,
             ),
@@ -298,11 +285,8 @@ def test_set_column_nullability_sets_top_level_and_nested_fields_nullable(spark,
     # When applying the plan
     _apply(spark, plan)
 
-    # Then both targets become nullable
+    # Then the column becomes nullable
     assert _get_field(spark, full_table_name, "id").nullable is True
-    payload = _get_field(spark, full_table_name, "payload")
-    assert payload.nullable is True
-    assert payload.dataType["name"].nullable is True
 
 
 def test_compile_returns_the_statements_execute_would_run():

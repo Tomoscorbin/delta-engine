@@ -193,12 +193,11 @@ detection.
 `Struct` applies the same rule inside a modeled type. Struct fields carry name,
 type, and nullability: `DESCRIBE TABLE ... AS JSON` reports all three, and
 `StructField(..., nullable=False)` renders the corresponding nested `NOT NULL`.
-Nested comments remain unmanaged. A nullability-only difference on a direct
-struct path is a `SetColumnNullability` action, not a false type change:
-loosening is applied and tightening is blocked by the same safety rule as a
-top-level column. Databricks cannot address `NOT NULL` fields below an array or
-map, so a full declaration rejects those states rather than promising an
-unexecutable migration.
+Nested comments remain unmanaged. A nullability-only difference within a struct
+is visible as a change to the owning column's complete `Struct`
+type. Like other struct changes, it is blocked rather than translated into a
+special nested migration. Full declarations also reject non-null fields below a
+nullable parent or an array/map, because Databricks cannot deploy those states.
 
 The model is also a pinned vocabulary while the catalog's keeps growing:
 `TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column
@@ -584,9 +583,7 @@ The phase ordering exists because backend DDL has dependencies:
 - Primary keys are dropped before column mutations, so no key references a
   column being dropped or altered.
 - Column nullability changes run before primary keys are set, because primary
-  key columns must be non-nullable. Nested constraints are loosened from child
-  to parent (and tightened parent to child) so every intermediate schema is
-  valid.
+  key columns must be non-nullable.
 - Foreign keys are set last, after the referenced primary key exists.
 - Clustering keys are altered after columns are added (a new clustering key may
   name a column this same sync is still adding) but before columns are dropped,

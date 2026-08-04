@@ -11,7 +11,7 @@ it cannot resolve rather than re-checking existence.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, NamedTuple
@@ -151,78 +151,59 @@ def _column_declared_names(column: Column) -> tuple[str, ...]:
     ``"payload.order id"`` for a field named ``"order id"`` inside a struct
     column named ``"payload"``.
     """
-    return (column.name, *_nested_field_paths(column.name, column.data_type))
+    nested_names = (
+        path for path, *_ in _nested_struct_fields(column.name, column.data_type, column.nullable)
+    )
+    return (column.name, *nested_names)
 
 
-def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
-    """Recursively collect dotted struct-field paths reachable from `data_type`."""
+def _nested_struct_fields(
+    path: str,
+    data_type: DataType,
+    parent_nullable: bool,
+    below_collection: bool = False,
+) -> Iterator[tuple[str, bool, bool, bool]]:
+    """Yield struct fields with the container context needed at the API boundary."""
     match data_type:
         case Struct(fields):
-            paths: list[str] = []
             for field in fields:
                 field_path = f"{path}.{field.name}"
-                paths.append(field_path)
-                paths.extend(_nested_field_paths(field_path, field.data_type))
-            return tuple(paths)
+                yield field_path, field.nullable, parent_nullable, below_collection
+                yield from _nested_struct_fields(
+                    field_path,
+                    field.data_type,
+                    field.nullable,
+                    below_collection,
+                )
         case Array(element):
-            return _nested_field_paths(path, element)
+            yield from _nested_struct_fields(path, element, True, True)
         case Map(key, value):
-            return _nested_field_paths(path, key) + _nested_field_paths(path, value)
+            yield from _nested_struct_fields(path, key, True, True)
+            yield from _nested_struct_fields(path, value, True, True)
         case _:
-            return ()
+            return
 
 
 def _validate_nested_not_null(
-    path: str,
-    data_type: DataType,
-    *,
-    parent_nullable: bool,
-    below_collection: bool = False,
+    column: Column,
 ) -> None:
     """Reject nested NOT NULL declarations Databricks cannot deploy."""
-    match data_type:
-        case Struct(fields):
-            for field in fields:
-                field_path = f"{path}.{field.name}"
-                if not field.nullable:
-                    if below_collection:
-                        raise ValueError(
-                            f"NOT NULL struct field '{field_path}' cannot be declared"
-                            " below an ARRAY or MAP"
-                        )
-                    if parent_nullable:
-                        raise ValueError(
-                            f"NOT NULL struct field '{field_path}' requires its containing"
-                            " column or struct field to be NOT NULL"
-                        )
-                _validate_nested_not_null(
-                    field_path,
-                    field.data_type,
-                    parent_nullable=field.nullable,
-                    below_collection=below_collection,
-                )
-        case Array(element):
-            _validate_nested_not_null(
-                path,
-                element,
-                parent_nullable=True,
-                below_collection=True,
+    for field_path, nullable, parent_nullable, below_collection in _nested_struct_fields(
+        column.name,
+        column.data_type,
+        column.nullable,
+    ):
+        if nullable:
+            continue
+        if below_collection:
+            raise ValueError(
+                f"NOT NULL struct field '{field_path}' cannot be declared below an ARRAY or MAP"
             )
-        case Map(key, value):
-            _validate_nested_not_null(
-                path,
-                key,
-                parent_nullable=True,
-                below_collection=True,
+        if parent_nullable:
+            raise ValueError(
+                f"NOT NULL struct field '{field_path}' requires its containing"
+                " column or struct field to be NOT NULL"
             )
-            _validate_nested_not_null(
-                path,
-                value,
-                parent_nullable=True,
-                below_collection=True,
-            )
-        case _:
-            return
 
 
 def _validate_layout(
@@ -603,11 +584,7 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     for column in declaration.columns:
         _validate_tags(f"column '{column.name}'", column.tags)
         if TableAspect.COLUMN_STRUCTURE in declaration.managed_aspects:
-            _validate_nested_not_null(
-                column.name,
-                column.data_type,
-                parent_nullable=column.nullable,
-            )
+            _validate_nested_not_null(column)
 
     _validate_object_name_parts(declaration.qualified_name)
 

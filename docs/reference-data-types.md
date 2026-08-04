@@ -34,16 +34,14 @@ supported map key type except another `Map`; `Map(Map(...), value_type)` is
 rejected with `ValueError` when the type is constructed. A map remains valid as
 the value type.
 
-Struct-field nullability is read and compared. `NOT NULL` → nullable is applied
-for fields reachable directly through structs; nullable → `NOT NULL` is blocked
-until the data is backfilled, like a top-level column. A non-null field requires
-its containing column and struct fields to be non-null, and Databricks does not
-accept nested `NOT NULL` below an array or map.
+Struct-field nullability is read, rendered on table creation, and compared. A
+non-null field requires its containing column and struct fields to be non-null,
+and Databricks does not accept nested `NOT NULL` below an array or map.
 
-Any other change to a struct's fields (adding, removing, renaming, or retyping a
-field) surfaces as a column type change on the owning column and is blocked by
-`NonWideningColumnTypeChange`. Structs are never widened as a whole; recreate
-the table to make those changes.
+Any change to an existing struct's fields, including nullability, adding,
+removing, renaming, or retyping a field, surfaces as a column type change on the
+owning column and is blocked by `NonWideningColumnTypeChange`. Structs are never
+widened as a whole; recreate the table to make those changes.
 
 ## Unsupported types
 

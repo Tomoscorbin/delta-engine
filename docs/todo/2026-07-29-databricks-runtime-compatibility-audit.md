@@ -228,7 +228,8 @@ Known semantic gaps still need explicit decisions:
 - `CHAR(n)` and `VARCHAR(n)` are normalized to unbounded `String`.
 
 Nested struct-field nullability is now modeled from AS JSON, rendered on
-creation, and compared as nullability rather than as a type change.
+creation, and included when existing struct types are compared. Changes remain
+blocked as whole-column type changes.
 
 For new metadata, use a simple rule:
 

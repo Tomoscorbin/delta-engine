@@ -157,8 +157,7 @@ def test_plan_ordering_ignores_non_subject_fields():
         (UnsetColumnTag("email", "pii"), "email.pii"),
         (SetColumnComment("email", "customer email", ""), "email"),
         (SetTableComment("table comment", ""), ""),
-        (SetColumnNullability(("email",), False, True), "email"),
-        (SetColumnNullability(("payload", "email"), False, True), "payload.email"),
+        (SetColumnNullability("email", False, True), "email"),
         (_drop_primary_key(), ""),
         (SetPrimaryKey(_primary_key()), ""),
         (DropForeignKey(_foreign_key()), "table_customer_id_fk"),
@@ -186,7 +185,7 @@ def test_action_subject_identifies_the_within_phase_target(action: Action, expec
         (UnsetColumnTag("email", "pii"), TableAspect.COLUMN_TAGS),
         (SetColumnComment("email", "new", "old"), TableAspect.COLUMN_COMMENTS),
         (SetTableComment("new", "old"), TableAspect.TABLE_COMMENT),
-        (SetColumnNullability(("email",), False, True), TableAspect.COLUMN_STRUCTURE),
+        (SetColumnNullability("email", False, True), TableAspect.COLUMN_STRUCTURE),
         (_drop_primary_key(), TableAspect.PRIMARY_KEY),
         (SetPrimaryKey(_primary_key()), TableAspect.PRIMARY_KEY),
         (DropForeignKey(_foreign_key()), TableAspect.FOREIGN_KEYS),
@@ -207,7 +206,7 @@ _SAMPLE_ACTIONS: list[Action] = [
     SetProperty("k2", "v2", None),
     SetColumnComment("delta", "new", "old"),
     SetTableComment("new", "old"),
-    SetColumnNullability(("epsilon",), False, True),
+    SetColumnNullability("epsilon", False, True),
 ]
 
 
@@ -225,9 +224,7 @@ def test_plan_full_phase_order_with_all_action_types():
         AddColumn(_column("a_col")),
         SetProperty("p_set", "1", None),
         UnsetProperty("p_unset", "1"),
-        SetColumnNullability(("nn_col",), False, True),
-        SetColumnNullability(("payload",), True, False),
-        SetColumnNullability(("payload", "value"), True, False),
+        SetColumnNullability("nn_col", False, True),
         DropForeignKey(_foreign_key("t_old_fk")),
         _drop_primary_key(),
         RenameColumn("old", "new"),
@@ -261,15 +258,8 @@ def test_plan_full_phase_order_with_all_action_types():
         SetColumnComment,
         SetTableComment,
         SetColumnNullability,
-        SetColumnNullability,
-        SetColumnNullability,
         SetPrimaryKey,
         SetForeignKey,
-    ]
-    assert [action.column_path for action in plan if isinstance(action, SetColumnNullability)] == [
-        ("payload", "value"),
-        ("payload",),
-        ("nn_col",),
     ]
 
 
@@ -329,7 +319,7 @@ def test_plan_unsets_column_tags_before_dropping_columns():
         lambda: SetColumnTag("column", "tag", "same", "same"),
         lambda: SetColumnComment("id", "same", "same"),
         lambda: SetTableComment("same", "same"),
-        lambda: SetColumnNullability(("id",), True, True),
+        lambda: SetColumnNullability("id", True, True),
         lambda: AlterClustering(("a", "b"), ("b", "a")),
         lambda: AlterColumnType("id", Integer(), Integer()),
     ],

@@ -314,7 +314,8 @@ Tracked in `todo.md`, deliberately unchanged by this roadmap:
 - `Char(n)`/`Varchar(n)` fidelity — needs a migration story for the read-side
   normalisation flip; wait for demand.
 - Struct-field nullability is implemented from the structured AS JSON source;
-  direct struct paths support safe loosening and accurately blocked tightening.
+  creation and observation preserve it, while changes to existing structs stay
+  blocked as whole-column type changes until nested migrations are warranted.
 - Backend-agnostic application layer (rules and property policy injected
   from the composition root) — architectural refactor, own PR, not blocking
   any item above.

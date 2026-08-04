@@ -155,12 +155,12 @@ class NullabilityTighteningOnExistingColumn:
                 rule_name=self.name,
                 message=(
                     "Operation not allowed: cannot tighten existing column"
-                    f" '{change.subject}' to NOT NULL. Keep it nullable,"
+                    f" '{change.column_name}' to NOT NULL. Keep it nullable,"
                     " backfill any NULLs, set NOT NULL outside the engine"
                     " (ALTER TABLE ... SET NOT NULL), then declare"
                     " nullable=False — the next sync sees no drift."
                 ),
-                subject=change.subject,
+                subject=str(change.column_name),
             )
             for change in drift.actions
             if isinstance(change, SetColumnNullability) and not change.desired_nullable

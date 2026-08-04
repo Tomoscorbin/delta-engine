@@ -1073,9 +1073,22 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
 
 
 @pytest.mark.parametrize(
-    ("data_type", "column_nullable"),
+    ("data_type", "column_nullable", "error_match"),
     [
-        (Struct((StructField("value", Integer(), nullable=False),)), True),
+        (
+            Struct(
+                (
+                    StructField(
+                        "nested",
+                        Struct((StructField("value", Integer(), nullable=False),)),
+                        nullable=False,
+                    ),
+                )
+            ),
+            False,
+            None,
+        ),
+        (Struct((StructField("value", Integer(), nullable=False),)), True, "requires"),
         (
             Struct(
                 (
@@ -1086,45 +1099,27 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
                 )
             ),
             False,
+            "requires",
         ),
-        (Array(Struct((StructField("value", Integer(), nullable=False),))), False),
+        (Array(Struct((StructField("value", Integer(), nullable=False),))), False, "below"),
         (
             Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
             False,
+            "below",
         ),
     ],
-    ids=["nullable-column", "nullable-parent-field", "array", "map"],
+    ids=["valid", "nullable-column", "nullable-parent-field", "array", "map"],
 )
-def test_delta_table_rejects_non_nullable_struct_fields_without_deployable_parents(
-    data_type, column_nullable: bool
+def test_delta_table_validates_non_nullable_struct_field_placement(
+    data_type, column_nullable: bool, error_match: str | None
 ) -> None:
-    with pytest.raises(ValueError, match="NOT NULL struct field"):
-        DeltaTable(
-            "dev",
-            "silver",
-            "orders",
-            columns=[Column("payload", data_type, nullable=column_nullable)],
-        )
+    column = Column("payload", data_type, nullable=column_nullable)
+    if error_match is not None:
+        with pytest.raises(ValueError, match=error_match):
+            DeltaTable("dev", "silver", "orders", columns=[column])
+        return
 
-
-def test_delta_table_accepts_non_nullable_struct_fields_with_non_nullable_struct_parents():
-    data_type = Struct(
-        (
-            StructField(
-                "nested",
-                Struct((StructField("value", Integer(), nullable=False),)),
-                nullable=False,
-            ),
-        )
-    )
-
-    table = DeltaTable(
-        "dev",
-        "silver",
-        "orders",
-        columns=[Column("payload", data_type, nullable=False)],
-    )
-
+    table = DeltaTable("dev", "silver", "orders", columns=[column])
     assert table.to_desired_table().columns[0].data_type == data_type
 
 

@@ -242,9 +242,9 @@ def _(action: SetTableComment, target: _Target) -> str:
 
 @_compile_action.register
 def _(action: SetColumnNullability, target: _Target) -> str:
-    column_path = ".".join(backtick(part) for part in action.column_path)
+    column_name = backtick(action.column_name)
     sign = "DROP" if action.desired_nullable else "SET"
-    return f"{target.alter_clause} ALTER COLUMN {column_path} {sign} NOT NULL"
+    return f"{target.alter_clause} ALTER COLUMN {column_name} {sign} NOT NULL"
 
 
 @_compile_action.register
