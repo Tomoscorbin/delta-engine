@@ -120,7 +120,9 @@ def test_preferred_pure_imports_and_databricks_module_import_do_not_require_pysp
     program = (
         "import sys; sys.modules['pyspark'] = None; sys.modules['databricks'] = None\n"
         "from delta_engine.schema import Column, DeltaTable, Integer\n"
-        "from delta_engine import Engine, Failure, SyncFailedError, SyncReport, TableRunStatus\n"
+        "from delta_engine import (\n"
+        "    Engine, Failure, SyncFailedError, SyncReport, TableChangeState, TableRunStatus,\n"
+        ")\n"
         "from delta_engine.databricks import (\n"
         "    build_spark_engine, build_sql_engine, configure_logging,\n"
         ")\n"

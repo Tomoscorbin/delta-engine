@@ -3,8 +3,9 @@ Application layer: the engine and outcome types.
 
 The root ``delta_engine`` package re-exports this runtime surface for library
 users. The per-phase result types (`CatalogState`, `ExecutionSummary`, ...)
-remain internal, but `TableRunReport` and the concrete failure types are
-public so callers can annotate and inspect the objects a `SyncReport` yields.
+remain internal, but reports, their outcome enums, and concrete failure types
+are public so callers can annotate and inspect the objects a `SyncReport`
+yields.
 """
 
 from delta_engine.application.engine import Engine
@@ -18,7 +19,12 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.rendering import render_diff, render_report
-from delta_engine.application.report import SyncReport, TableRunReport, TableRunStatus
+from delta_engine.application.report import (
+    SyncReport,
+    TableChangeState,
+    TableRunReport,
+    TableRunStatus,
+)
 
 __all__ = [
     "DuplicateTableDefinitionError",
@@ -30,6 +36,7 @@ __all__ = [
     "ReadFailure",
     "SyncFailedError",
     "SyncReport",
+    "TableChangeState",
     "TableRunReport",
     "TableRunStatus",
     "ValidationFailure",

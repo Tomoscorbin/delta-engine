@@ -786,6 +786,14 @@ runs useful and makes failed runs explainable: a user can inspect what would
 have happened, which phase blocked it, and which downstream tables were blocked
 as a result.
 
+`SyncReport.table_change_states` combines those per-table facts with the run's
+`dry_run` mode. It distinguishes a dry-run plan from an unapplied real-run plan
+and distinguishes a first-statement execution failure from a later failure
+after partial application. The aggregate owns that derivation because a
+`TableRunReport` alone cannot tell whether absent execution means preview or
+blocking. `TableRunStatus` remains the independent answer to which phase
+failed.
+
 ## Lazy PySpark imports
 
 The top-level `delta_engine` package is designed to be importable without

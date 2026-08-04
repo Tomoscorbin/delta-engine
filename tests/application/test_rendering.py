@@ -637,6 +637,17 @@ def _failed_execution(plan: ActionPlan, *, applied: int) -> ExecutionSummary:
     )
 
 
+def _successful_execution(plan: ActionPlan) -> ExecutionSummary:
+    statements = tuple(f"SQL {index}" for index in range(len(plan)))
+    return ExecutionSummary(
+        compiled_plan=build_compiled_plan(plan, statements),
+        results=tuple(
+            ExecutionSucceeded(statement_index=index, statement=statement)
+            for index, statement in enumerate(statements)
+        ),
+    )
+
+
 def test_grid_detail_summarizes_changes_by_category_not_class_names():
     # Given a changed table with two column adds and one property set
     report = _grid_report(
@@ -761,6 +772,7 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(changed, unchanged, failed),
+        dry_run=True,
     )
 
     # When rendering the footer
@@ -793,6 +805,7 @@ def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(changed, failed),
+        dry_run=True,
     )
 
     # When rendering the whole report
@@ -895,29 +908,33 @@ def test_render_report_has_no_failures_section_when_all_succeed():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(changed,),
+        dry_run=True,
     )
 
+    # When rendering the complete report
+    rendered = render_report(sync)
+
     # Then no Failures section is rendered
-    assert "Failures" not in render_report(sync)
+    assert "Failures" not in rendered
 
 
 def test_render_report_shows_dry_run_banner_only_for_dry_runs():
-    # Given the same run rendered as a dry run and as an applied run
-    changed = _grid_report(
-        "a", plan=_plan("a", SetTableComment(desired_comment="c", observed_comment=""))
-    )
+    # Given the same planned change in a dry run and a completed real run
+    plan = _plan("a", SetTableComment(desired_comment="c", observed_comment=""))
+    planned = _grid_report("a", plan=plan)
+    applied = _grid_report("a", plan=plan, execution=_successful_execution(plan))
     base = dict(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(changed,),
     )
 
-    dry = render_report(SyncReport(**base, dry_run=True))
-    applied = render_report(SyncReport(**base, dry_run=False))
+    # When rendering both valid aggregates
+    dry_rendered = render_report(SyncReport(**base, table_reports=(planned,), dry_run=True))
+    applied_rendered = render_report(SyncReport(**base, table_reports=(applied,)))
 
     # Then the banner appears (below the title) for a dry run and is absent otherwise
-    assert "PLAN — no planned SQL executed" in dry.splitlines()
-    assert "PLAN — no planned SQL executed" not in applied
+    assert "PLAN — no planned SQL executed" in dry_rendered.splitlines()
+    assert "PLAN — no planned SQL executed" not in applied_rendered
 
 
 def test_render_report_is_titled():
@@ -929,8 +946,10 @@ def test_render_report_is_titled():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(changed,),
+        dry_run=True,
     )
 
+    # When rendering the complete report
     lines = render_report(sync).splitlines()
 
     # Then a SYNC REPORT title, underlined with a rule, heads the output
@@ -947,8 +966,10 @@ def test_render_diff_is_titled():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(first,),
+        dry_run=True,
     )
 
+    # When rendering the run's diff
     lines = render_diff(sync).splitlines()
 
     # Then a DIFF title, underlined with a rule, heads the output
@@ -966,6 +987,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
         table_reports=(first, second),
+        dry_run=True,
     )
 
     # When rendering the run's diff

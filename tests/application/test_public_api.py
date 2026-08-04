@@ -5,7 +5,7 @@ import delta_engine.application as application
 
 def test_public_api_exposes_the_intended_names():
     # Given the application package's declared public surface
-    # Then the runtime names re-exported by delta_engine are importable here
+    # When importing the runtime names re-exported by delta_engine
     from delta_engine.application import (
         DuplicateTableDefinitionError,
         Engine,
@@ -16,6 +16,7 @@ def test_public_api_exposes_the_intended_names():
         ReadFailure,
         SyncFailedError,
         SyncReport,
+        TableChangeState,
         TableRunReport,
         TableRunStatus,
         ValidationFailure,
@@ -41,10 +42,12 @@ def test_public_api_exposes_the_intended_names():
     )
     from delta_engine.application.report import (
         SyncReport as SyncReportImpl,
+        TableChangeState as TableChangeStateImpl,
         TableRunReport as TableRunReportImpl,
         TableRunStatus as TableRunStatusImpl,
     )
 
+    # Then it advertises exactly those names and each resolves to its implementation
     assert set(application.__all__) == {
         "DuplicateTableDefinitionError",
         "Engine",
@@ -55,17 +58,18 @@ def test_public_api_exposes_the_intended_names():
         "ReadFailure",
         "SyncFailedError",
         "SyncReport",
+        "TableChangeState",
         "TableRunReport",
         "TableRunStatus",
         "ValidationFailure",
         "render_diff",
         "render_report",
     }
-    # And each name resolves to the real type (single identity, not a shadow copy)
     assert DuplicateTableDefinitionError is DuplicateTableDefinitionErrorImpl
     assert Engine is EngineImpl
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
+    assert TableChangeState is TableChangeStateImpl
     assert TableRunReport is TableRunReportImpl
     assert Failure is FailureImpl
     assert FailurePhase is FailurePhaseImpl

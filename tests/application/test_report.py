@@ -23,6 +23,7 @@ from delta_engine.application.ports import (
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
+    TableChangeState,
     TableRunReport,
     TableRunStatus,
 )
@@ -91,6 +92,16 @@ def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom")
         exception_type=exc,
         message=msg,
         statement=preview,
+    )
+
+
+def _blocked_failure():
+    """Build the failure ``b`` earns when dependency ``a`` did not converge."""
+    return ForeignKeyFailure(
+        table=_name("b"),
+        local_columns=("parent_id",),
+        references=_name("a"),
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
     )
 
 
@@ -267,6 +278,7 @@ def test_validation_failed_table_has_failures_but_no_changes():
 
 
 def test_sync_report_has_changes_when_any_table_plans_actions():
+    # Given one changed table and one unchanged table
     changed = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
@@ -276,7 +288,16 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged))
+
+    # When aggregating a dry-run report
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(changed, unchanged),
+        dry_run=True,
+    )
+
+    # Then the aggregate reports planned changes
     assert report.has_changes is True
 
 
@@ -304,8 +325,13 @@ def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
         desired=_a_desired_table("c"),
         read=ReadFailure(exception_type="AnalysisException", message="nope"),
     )
+
+    # When aggregating the dry run
     report = SyncReport(
-        started_at=_t0(), ended_at=_t1(), table_reports=(changed, unchanged, failed)
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(changed, unchanged, failed),
+        dry_run=True,
     )
 
     # Then each is counted once, and the total is their sum
@@ -344,6 +370,7 @@ def test_sync_report_reports_its_own_duration():
 
 
 def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
+    # Given one table with compiled SQL and one with an empty plan
     with_sql = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
@@ -354,7 +381,16 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(with_sql, without_sql))
+
+    # When aggregating the dry run
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(with_sql, without_sql),
+        dry_run=True,
+    )
+
+    # Then only the changed table is mapped by its dotted name
     assert report.planned_sql_statements == {"cat.schema.a": ("ALTER TABLE a SET ...",)}
 
 
@@ -657,6 +693,215 @@ def test_statement_progress_counts_applied_against_planned():
     assert report.statement_progress == (1, 2)
 
 
+# ---------- Catalog change state
+
+
+def test_change_state_is_not_planned_when_no_plan_was_accepted():
+    # Given a table whose catalog read failed before planning
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure("AnalysisException", "boom"),
+    )
+
+    # When deriving change states through the completed real-run report
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+
+    # Then the table has no accepted plan to apply
+    assert sync.table_change_states == (TableChangeState.NOT_PLANNED,)
+
+
+def test_change_state_is_not_planned_when_planning_rejected_the_diff():
+    # Given a table whose planner rejected the observed difference
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="UnsafeChange", message="nope"),),
+    )
+
+    # When deriving change states through the completed real-run report
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+
+    # Then status explains the planning failure and no change was planned
+    assert report.status is TableRunStatus.PLANNING_FAILED
+    assert sync.table_change_states == (TableChangeState.NOT_PLANNED,)
+
+
+def test_change_state_is_unchanged_for_an_empty_plan_even_when_the_run_failed():
+    # Given a failed table whose accepted plan contains no catalog changes
+    desired = _a_desired_table("orders")
+    report = _report(
+        desired=desired,
+        read=TablePresent(table=_an_observed_table()),
+        failures=(
+            ForeignKeyFailure(
+                table=desired.qualified_name,
+                local_columns=("customer_id",),
+                references=_name("customers"),
+                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
+            ),
+        ),
+    )
+
+    # When deriving change states through the completed real-run report
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+
+    # Then failure status and catalog change state remain independent
+    assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
+    assert sync.table_change_states == (TableChangeState.UNCHANGED,)
+
+
+def test_change_state_is_planned_for_a_dry_run_with_changes():
+    # Given a dry-run table with a compiled, non-empty plan
+    report = _a_changed_table_report()
+
+    # When deriving change states through the validated aggregate
+    sync = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(report,),
+        dry_run=True,
+    )
+
+    # Then the intended change is planned rather than applied
+    assert sync.table_change_states == (TableChangeState.PLANNED,)
+
+
+def test_change_state_is_not_applied_when_a_real_change_is_dependency_blocked():
+    # Given a real-run table whose non-empty plan was blocked by a failed dependency
+    report = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+
+    # When deriving change states through the validated aggregate
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+
+    # Then none of the intended catalog change was applied
+    assert sync.table_change_states == (TableChangeState.NOT_APPLIED,)
+
+
+def test_first_and_later_execution_failures_have_distinct_change_states():
+    # Given one plan that failed immediately and one that applied a statement first
+    statements = ("SQL 0", "SQL 1")
+    first_plan = _comment_plan("first", statement_count=2)
+    first_failed = _report(
+        desired=_a_desired_table("first"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=ExecutionSummary(
+            compiled_plan=build_compiled_plan(first_plan, statements),
+            results=(_failed_exec(0, statements[0]),),
+        ),
+    )
+    later_plan = _comment_plan("later", statement_count=2)
+    later_failed = _report(
+        desired=_a_desired_table("later"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(
+            later_plan,
+            _ok_exec(0, statements[0]),
+            _failed_exec(1, statements[1]),
+        ),
+    )
+
+    # When both table outcomes are aggregated in report order
+    sync = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(first_failed, later_failed),
+    )
+
+    # Then their failure status matches but their catalog effects differ
+    assert first_failed.status is later_failed.status is TableRunStatus.EXECUTION_FAILED
+    assert sync.table_change_states == (
+        TableChangeState.NOT_APPLIED,
+        TableChangeState.PARTIALLY_APPLIED,
+    )
+
+
+def test_change_state_is_applied_after_complete_successful_execution():
+    # Given a real-run plan whose every statement succeeded
+    plan = _comment_plan("orders", statement_count=2)
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(plan, _ok_exec(0), _ok_exec(1)),
+    )
+
+    # When deriving change states through the validated aggregate
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+
+    # Then the intended catalog change is fully applied
+    assert sync.table_change_states == (TableChangeState.APPLIED,)
+
+
+# ---------- Run consistency
+
+
+def test_sync_report_rejects_execution_results_on_a_dry_run():
+    # Given a table carrying a completed execution result
+    plan = _comment_plan("orders")
+    executed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        execution=_execution(plan, _ok_exec()),
+    )
+
+    # When constructing a dry-run aggregate
+    # Then the contradictory execution history is rejected
+    with pytest.raises(ValueError):
+        SyncReport(
+            started_at=_t0(),
+            ended_at=_t1(),
+            table_reports=(executed,),
+            dry_run=True,
+        )
+
+
+def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
+    # Given a planned change with neither execution nor a blocking failure
+    changed = _a_changed_table_report()
+
+    # When constructing a real-run aggregate
+    # Then the unexplained missing execution is rejected
+    with pytest.raises(ValueError):
+        SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,))
+
+
+def test_sync_report_accepts_a_real_change_blocked_by_a_failed_dependency():
+    # Given a real-run change carrying the failure that blocked its execution
+    blocked = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+
+    # When constructing the aggregate
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(blocked,))
+
+    # Then the explained lack of execution is accepted
+    assert report.table_reports == (blocked,)
+
+
+def test_change_states_do_not_extend_the_structured_report_schema():
+    # Given a dry-run report exposing its Python-level change states
+    report = SyncReport(
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
+    )
+
+    # When projecting the report into its stable structured schema
+    payload = report.to_dict()
+
+    # Then neither the run nor table records gain a change-state field
+    assert "table_change_states" not in payload
+    assert "change_state" not in payload["tables"][0]
+
+
 def test_table_to_dict_states_the_planned_change():
     payload = _a_changed_table_report().to_dict()
 
@@ -774,10 +1019,20 @@ def test_sync_report_to_dict_is_json_serialisable_and_complete():
 
 
 def test_to_dict_is_deterministic():
+    # Given a valid dry-run report with a planned change
     report = SyncReport(
-        started_at=_t0(), ended_at=_t1(), table_reports=(_a_changed_table_report(),)
+        started_at=_t0(),
+        ended_at=_t1(),
+        table_reports=(_a_changed_table_report(),),
+        dry_run=True,
     )
-    assert report.to_dict() == report.to_dict()
+
+    # When projecting the same immutable report twice
+    first = report.to_dict()
+    second = report.to_dict()
+
+    # Then both structured values are identical
+    assert first == second
 
 
 # ---------- Derived dependency blocking
@@ -790,16 +1045,6 @@ def _fk_edge(parent: QualifiedName, constraint_name: str = "blocked_edge_fk"):
         referenced_table=parent,
         referenced_columns=("id",),
         constraint_name=constraint_name,
-    )
-
-
-def _blocked_failure():
-    """Build the failure ``b`` earns for its edge onto a parent ``a`` that did not converge."""
-    return ForeignKeyFailure(
-        table=_name("b"),
-        local_columns=("parent_id",),
-        references=_name("a"),
-        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
     )
 
 
