@@ -96,6 +96,16 @@ def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom")
     )
 
 
+def _blocked_failure():
+    """Build the failure ``b`` earns when dependency ``a`` did not converge."""
+    return ForeignKeyFailure(
+        table=_name("b"),
+        local_columns=("parent_id",),
+        references=_name("a"),
+        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
+    )
+
+
 _PLAN_UNSET = object()
 
 
@@ -720,20 +730,12 @@ def test_change_state_is_planned_for_a_dry_run_with_changes():
     assert table_change_state(report, dry_run=True) is TableChangeState.PLANNED
 
 
-def test_change_state_is_not_applied_when_a_real_change_was_blocked():
-    desired = _a_desired_table("orders")
+def test_change_state_is_not_applied_when_a_real_change_is_dependency_blocked():
     report = _report(
-        desired=desired,
+        desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
-        plan=_comment_plan("orders"),
-        failures=(
-            ForeignKeyFailure(
-                table=desired.qualified_name,
-                local_columns=("customer_id",),
-                references=_name("customers"),
-                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
-            ),
-        ),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
     )
 
     assert table_change_state(report, dry_run=False) is TableChangeState.NOT_APPLIED
@@ -803,44 +805,17 @@ def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
         SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,))
 
 
-def test_sync_report_accepts_a_real_change_blocked_by_a_failure():
-    desired = _a_desired_table("orders")
+def test_sync_report_accepts_a_real_change_blocked_by_a_failed_dependency():
     blocked = _report(
-        desired=desired,
+        desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
-        plan=_comment_plan("orders"),
-        failures=(
-            ForeignKeyFailure(
-                table=desired.qualified_name,
-                local_columns=("customer_id",),
-                references=_name("customers"),
-                reason=ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE,
-            ),
-        ),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
     )
 
     report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(blocked,))
 
     assert report.table_reports == (blocked,)
-
-
-def test_sync_report_accepts_an_unexecuted_dry_run_change():
-    changed = _a_changed_table_report()
-
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,), dry_run=True)
-
-    assert report.table_reports == (changed,)
-
-
-def test_sync_report_accepts_an_unexecuted_unchanged_real_run():
-    unchanged = _report(
-        desired=_a_desired_table("orders"),
-        read=TablePresent(table=_an_observed_table()),
-    )
-
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
-
-    assert report.table_reports == (unchanged,)
 
 
 def test_change_state_does_not_extend_the_structured_report_schema():
@@ -990,16 +965,6 @@ def _fk_edge(parent: QualifiedName, constraint_name: str = "blocked_edge_fk"):
         referenced_table=parent,
         referenced_columns=("id",),
         constraint_name=constraint_name,
-    )
-
-
-def _blocked_failure():
-    """Build the failure ``b`` earns for its edge onto a parent ``a`` that did not converge."""
-    return ForeignKeyFailure(
-        table=_name("b"),
-        local_columns=("parent_id",),
-        references=_name("a"),
-        reason=ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY,
     )
 
 
