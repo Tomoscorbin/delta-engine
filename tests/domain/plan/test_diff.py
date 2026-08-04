@@ -189,17 +189,32 @@ def test_observed_only_column_produces_column_removed_change():
     assert diff.actions == (DropColumn(ObservedColumn("stale", String())),)
 
 
-def test_type_drift_produces_column_data_type_changed():
-    # Given a column whose data type differs between desired and observed
+@pytest.mark.parametrize(
+    ("desired_type", "observed_type"),
+    [
+        (Integer(), Long()),
+        (
+            Struct((StructField("value", Integer(), nullable=False),)),
+            Struct((StructField("value", Integer(), nullable=True),)),
+        ),
+    ],
+    ids=["scalar-type", "struct-field-nullability"],
+)
+def test_type_drift_produces_column_data_type_changed(desired_type, observed_type):
+    # Given a column whose modeled data type differs between desired and observed
     diff = diff_table(
-        _desired(columns=(DesiredColumn("id", Integer()),)),
-        _observed(columns=(DesiredColumn("id", Long()),)),
+        _desired(columns=(DesiredColumn("id", desired_type),)),
+        _observed(columns=(DesiredColumn("id", observed_type),)),
     )
 
-    # Then a AlterColumnType change carries both sides
+    # Then an AlterColumnType change carries both complete modeled types
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        AlterColumnType(column_name="id", desired_type=Integer(), observed_type=Long()),
+        AlterColumnType(
+            column_name="id",
+            desired_type=desired_type,
+            observed_type=observed_type,
+        ),
     )
 
 

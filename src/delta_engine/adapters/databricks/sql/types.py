@@ -80,10 +80,13 @@ def render_data_type(data_type: DataType) -> str:
         case Variant():
             return "VARIANT"
         case Struct(fields):
-            rendered = ", ".join(
-                f"{backtick(field.name)}: {render_data_type(field.data_type)}" for field in fields
-            )
-            return f"STRUCT<{rendered}>"
+            rendered_fields = []
+            for field in fields:
+                nullability = "" if field.nullable else " NOT NULL"
+                rendered_fields.append(
+                    f"{backtick(field.name)}: {render_data_type(field.data_type)}{nullability}"
+                )
+            return f"STRUCT<{', '.join(rendered_fields)}>"
         case _:
             cls = data_type.__class__.__name__
             raise TypeError(f"Unsupported DataType variant: {cls}")
@@ -187,9 +190,10 @@ def _struct_from_json(type_obj: dict) -> DataType | None:
             return None
         field_name = field.get("name")
         field_type = data_type_from_json(field.get("type"))
-        if not isinstance(field_name, str) or field_type is None:
+        nullable = field.get("nullable")
+        if not isinstance(field_name, str) or field_type is None or not isinstance(nullable, bool):
             return None
-        fields.append(StructField(name=field_name, data_type=field_type))
+        fields.append(StructField(name=field_name, data_type=field_type, nullable=nullable))
     try:
         return Struct(fields)
     except ValueError:

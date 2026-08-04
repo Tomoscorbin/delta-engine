@@ -76,20 +76,38 @@ def test_unmappable_returns_none():
             {
                 "name": "struct",
                 "fields": [
-                    {"name": "a", "type": {"name": "int"}},
-                    {"name": "A", "type": {"name": "int"}},
+                    {"name": "a", "type": {"name": "int"}, "nullable": True},
+                    {"name": "A", "type": {"name": "int"}, "nullable": True},
                 ],
             }
         )
         is None
     )  # duplicate field identifier
+    assert (
+        data_type_from_json(
+            {
+                "name": "struct",
+                "fields": [{"name": "id", "type": {"name": "int"}, "nullable": 1}],
+            }
+        )
+        is None
+    )
+    assert (
+        data_type_from_json({"name": "struct", "fields": [{"name": "id", "type": {"name": "int"}}]})
+        is None
+    )
     assert data_type_from_json({"not": "a type"}) is None
     assert data_type_from_json("string") is None
 
 
 def test_blank_struct_field_name_returns_none():
     assert (
-        data_type_from_json({"name": "struct", "fields": [{"name": "  ", "type": {"name": "int"}}]})
+        data_type_from_json(
+            {
+                "name": "struct",
+                "fields": [{"name": "  ", "type": {"name": "int"}, "nullable": True}],
+            }
+        )
         is None
     )
 

@@ -30,6 +30,8 @@ from delta_engine.domain.model import (
     QualifiedName,
     Short,
     String,
+    Struct,
+    StructField,
     TableAspect,
     TableKind,
     TimestampNtz,
@@ -357,7 +359,7 @@ def test_allows_adding_nullable_column_to_existing_table():
 
 
 def test_rejects_tightening_existing_columns_to_not_null():
-    # Given existing nullable columns and a declaration tightening them to NOT NULL
+    # Given existing nullable columns tightened to NOT NULL
     desired = _desired_table(
         columns=(
             DesiredColumn("id", Integer(), nullable=False),
@@ -427,19 +429,34 @@ def test_widening_type_change_passes_with_type_widening_declared():
     assert not failures
 
 
-def test_rejects_non_widening_type_change_even_with_type_widening_declared():
-    # Given Integer → String, which no widening supports
+@pytest.mark.parametrize(
+    ("column_name", "desired_type", "observed_type"),
+    [
+        ("id", String(), Integer()),
+        (
+            "payload",
+            Struct((StructField("code", String(), nullable=False),)),
+            Struct((StructField("code", String(), nullable=True),)),
+        ),
+    ],
+    ids=["scalar-type", "struct-field-nullability"],
+)
+def test_rejects_non_widening_type_change_even_with_type_widening_declared(
+    column_name, desired_type, observed_type
+):
+    # Given a modeled type change that Delta cannot widen in place
     desired = _desired_table(
-        columns=(DesiredColumn("id", String()),),
+        columns=(DesiredColumn(column_name, desired_type),),
         properties={"delta.enableTypeWidening": "true"},
     )
-    observed = _observed_table(columns=(DesiredColumn("id", Integer()),))
+    observed = _observed_table(columns=(DesiredColumn(column_name, observed_type),))
 
     failures = _validate(desired, observed)
 
-    assert failures[0].rule_name == "NonWideningColumnTypeChange"
-    assert "recreate the table" in failures[0].message
-    assert failures[0].subject == "id"
+    [failure] = failures
+    assert failure.rule_name == "NonWideningColumnTypeChange"
+    assert "recreate the table" in failure.message
+    assert failure.subject == column_name
 
 
 def test_rejects_narrowing_type_change():

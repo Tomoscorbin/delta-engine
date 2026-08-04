@@ -1072,6 +1072,73 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
     assert column.data_type == Struct((StructField("order id", Integer()),))
 
 
+@pytest.mark.parametrize(
+    ("data_type", "column_nullable", "error_match"),
+    [
+        (
+            Struct(
+                (
+                    StructField(
+                        "nested",
+                        Struct((StructField("value", Integer(), nullable=False),)),
+                        nullable=False,
+                    ),
+                )
+            ),
+            False,
+            None,
+        ),
+        (Struct((StructField("value", Integer(), nullable=False),)), True, "not deployable"),
+        (
+            Struct(
+                (
+                    StructField(
+                        "nested",
+                        Struct((StructField("value", Integer(), nullable=False),)),
+                    ),
+                )
+            ),
+            False,
+            "not deployable",
+        ),
+        (
+            Array(Struct((StructField("value", Integer(), nullable=False),))),
+            False,
+            "not deployable",
+        ),
+        (
+            Map(Struct((StructField("value", Integer(), nullable=False),)), String()),
+            False,
+            "not deployable",
+        ),
+        (
+            Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
+            False,
+            "not deployable",
+        ),
+    ],
+    ids=[
+        "valid",
+        "nullable-column",
+        "nullable-parent-field",
+        "array",
+        "map-key",
+        "map-value",
+    ],
+)
+def test_delta_table_validates_non_nullable_struct_field_placement(
+    data_type, column_nullable: bool, error_match: str | None
+) -> None:
+    column = Column("payload", data_type, nullable=column_nullable)
+    if error_match is not None:
+        with pytest.raises(ValueError, match=error_match):
+            DeltaTable("dev", "silver", "orders", columns=[column])
+        return
+
+    table = DeltaTable("dev", "silver", "orders", columns=[column])
+    assert table.to_desired_table().columns[0].data_type == data_type
+
+
 def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_array() -> None:
     # Proves the gate recurses through container types, not just direct struct columns.
     with pytest.raises(ValueError, match="columnMapping"):
@@ -1089,18 +1156,23 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
 
 
 @pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
-def test_a_restricted_scope_mirrors_special_character_column_names(scope) -> None:
-    # The same exemption, for the same reason: the catalog already accepted
-    # this name, so the declaration must be able to name it back without
-    # declaring the column mapping its creation would have needed.
+def test_a_restricted_scope_mirrors_column_state_full_management_would_reject(scope) -> None:
+    # Structure is mirrored state in these scopes, so creation-time structure
+    # gates must not judge either the column name or nested nullability.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
-        columns=[Column("order id", Integer())],
+        columns=[
+            Column("order id", Integer()),
+            Column(
+                "items",
+                Array(Struct((StructField("value", Integer(), nullable=False),))),
+            ),
+        ],
         scope=scope,
     )
-    assert table.to_desired_table().columns[0].name == "order id"
+    assert [column.name for column in table.to_desired_table().columns] == ["order id", "items"]
 
 
 def test_delta_table_rejects_cdf_reserved_column_names_when_cdf_enabled() -> None:

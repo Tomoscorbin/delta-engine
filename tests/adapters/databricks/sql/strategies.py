@@ -212,13 +212,15 @@ def _struct_cases(
     document_fields: list[dict[str, object]] = []
     for name, field_case in fields.items():
         raw_name = draw(st.sampled_from((name, name.upper())))
-        expected_fields.append(StructField(raw_name, field_case.data_type))
-        sql_fields.append(f"`{raw_name}`: {field_case.sql}")
+        nullable = draw(st.booleans())
+        expected_fields.append(StructField(raw_name, field_case.data_type, nullable=nullable))
+        nullability = "" if nullable else " NOT NULL"
+        sql_fields.append(f"`{raw_name}`: {field_case.sql}{nullability}")
         document_fields.append(
             {
                 "name": raw_name,
                 "type": field_case.document,
-                "nullable": True,
+                "nullable": nullable,
             }
         )
     data_type = Struct(tuple(expected_fields))
@@ -246,4 +248,27 @@ TYPE_CASES = st.recursive(
     st.one_of(st.sampled_from(_SIMPLE_TYPE_CASES), _decimal_cases()),
     _nested_type_cases,
     max_leaves=10,
+)
+
+
+def _parquet_preserves_nested_nullability(data_type: DataType) -> bool:
+    """Whether open-source Spark's Parquet catalog preserves this modeled type."""
+    match data_type:
+        case Struct(fields):
+            return all(
+                field.nullable and _parquet_preserves_nested_nullability(field.data_type)
+                for field in fields
+            )
+        case Array(element):
+            return _parquet_preserves_nested_nullability(element)
+        case Map(key, value):
+            return all(_parquet_preserves_nested_nullability(item) for item in (key, value))
+        case _:
+            return True
+
+
+# The Parquet catalog normalizes nested NOT NULL away even though Spark's SQL
+# parser accepts it. Keep that backend limitation out of the round-trip test.
+PARQUET_ROUND_TRIPPABLE_TYPE_CASES = TYPE_CASES.filter(
+    lambda case: _parquet_preserves_nested_nullability(case.data_type)
 )

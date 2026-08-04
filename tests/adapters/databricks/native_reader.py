@@ -92,7 +92,7 @@ def _struct_type(struct_type: T.StructType) -> DataType:
     for field in struct_type.fields:
         data_type = _data_type(field.dataType)
         if data_type is not None:
-            fields.append(StructField(field.name, data_type))
+            fields.append(StructField(field.name, data_type, nullable=field.nullable))
     return Struct(tuple(fields))
 
 
