@@ -4,12 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from delta_engine.domain.model.data_type import DataType
+from delta_engine.domain.model.data_type import DataType, _require_data_type
 from delta_engine.domain.model.identifier import Identifier
 
 
-def _validate_column_fields(name: str, tags: Mapping[str, str]) -> None:
+def _validate_column_fields(name: str, data_type: DataType, tags: Mapping[str, str]) -> None:
     """Invariants shared by declared and observed columns."""
+    _require_data_type(data_type, subject="Column data type")
     if not name.strip():
         raise ValueError(f"Column name must not be blank: {name!r}")
     for tag_key in tags:
@@ -51,7 +52,7 @@ class DesiredColumn:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        _validate_column_fields(self.name, self.tags)
+        _validate_column_fields(self.name, self.data_type, self.tags)
         object.__setattr__(self, "name", Identifier(self.name))
         if self.renamed_from is not None:
             if not self.renamed_from.strip():
@@ -79,5 +80,5 @@ class ObservedColumn:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
-        _validate_column_fields(self.name, self.tags)
+        _validate_column_fields(self.name, self.data_type, self.tags)
         object.__setattr__(self, "name", Identifier(self.name))

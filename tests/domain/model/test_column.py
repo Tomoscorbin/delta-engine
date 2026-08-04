@@ -1,8 +1,24 @@
-from hypothesis import given, strategies as st
+from typing import Any
+
+from hypothesis import example, given, strategies as st
 import pytest
 
 from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
 from delta_engine.domain.model.data_type import Integer, String
+from tests.domain.model.strategies import NON_DATA_TYPES
+
+
+@example(column_type=DesiredColumn, invalid=None)
+@example(column_type=ObservedColumn, invalid=None)
+@given(
+    column_type=st.sampled_from((DesiredColumn, ObservedColumn)),
+    invalid=NON_DATA_TYPES,
+)
+def test_columns_reject_non_data_types(
+    column_type: type[DesiredColumn] | type[ObservedColumn], invalid: Any
+) -> None:
+    with pytest.raises(ValueError, match="Column data type"):
+        column_type("value", invalid)
 
 
 def test_defaults_to_nullable_true() -> None:

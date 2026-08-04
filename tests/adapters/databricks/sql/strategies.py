@@ -1,5 +1,7 @@
 """Hypothesis strategies shared by the Databricks SQL and Spark adapter tests."""
 
+from dataclasses import dataclass
+
 from hypothesis import strategies as st
 
 from delta_engine.application.properties import Property
@@ -25,7 +27,14 @@ from delta_engine.domain.model import (
     Variant,
 )
 
-type TypeDocument = tuple[DataType, dict[str, object]]
+
+@dataclass(frozen=True, slots=True)
+class TypeCase:
+    """One domain type and its canonical Databricks read/write representations."""
+
+    data_type: DataType
+    sql: str
+    document: dict[str, object]
 
 
 CANONICAL_IDENTIFIERS = st.from_regex(r"[a-z_][a-z0-9_]{0,11}", fullmatch=True)
@@ -136,88 +145,105 @@ def _managed_property_maps(draw: st.DrawFn) -> dict[str, str | None]:
 MANAGED_PROPERTY_MAPS = _managed_property_maps()
 
 
-_SIMPLE_TYPE_DOCUMENTS: tuple[TypeDocument, ...] = (
-    (Integer(), {"name": "int"}),
-    (Long(), {"name": "bigint"}),
-    (Byte(), {"name": "tinyint"}),
-    (Short(), {"name": "smallint"}),
-    (Float(), {"name": "float"}),
-    (Double(), {"name": "double"}),
-    (Boolean(), {"name": "boolean"}),
-    (String(), {"name": "string"}),
-    (String(), {"name": "string", "collation": "UTF8_BINARY"}),
-    (String(), {"name": "varchar", "length": 20}),
-    (Binary(), {"name": "binary"}),
-    (Date(), {"name": "date"}),
-    (Timestamp(), {"name": "timestamp"}),
-    (TimestampNtz(), {"name": "timestamp_ntz"}),
-    (Variant(), {"name": "variant"}),
+_SIMPLE_TYPE_CASES: tuple[TypeCase, ...] = (
+    TypeCase(Integer(), "INT", {"name": "int"}),
+    TypeCase(Long(), "BIGINT", {"name": "bigint"}),
+    TypeCase(Byte(), "TINYINT", {"name": "tinyint"}),
+    TypeCase(Short(), "SMALLINT", {"name": "smallint"}),
+    TypeCase(Float(), "FLOAT", {"name": "float"}),
+    TypeCase(Double(), "DOUBLE", {"name": "double"}),
+    TypeCase(Boolean(), "BOOLEAN", {"name": "boolean"}),
+    TypeCase(String(), "STRING", {"name": "string"}),
+    TypeCase(String(), "STRING", {"name": "string", "collation": "UTF8_BINARY"}),
+    TypeCase(String(), "STRING", {"name": "varchar", "length": 20}),
+    TypeCase(Binary(), "BINARY", {"name": "binary"}),
+    TypeCase(Date(), "DATE", {"name": "date"}),
+    TypeCase(Timestamp(), "TIMESTAMP", {"name": "timestamp"}),
+    TypeCase(TimestampNtz(), "TIMESTAMP_NTZ", {"name": "timestamp_ntz"}),
+    TypeCase(Variant(), "VARIANT", {"name": "variant"}),
 )
 
 
 @st.composite
-def _decimal_documents(draw: st.DrawFn) -> TypeDocument:
+def _decimal_cases(draw: st.DrawFn) -> TypeCase:
     precision = draw(st.integers(min_value=1, max_value=38))
     scale = draw(st.integers(min_value=0, max_value=precision))
-    return Decimal(precision, scale), {
-        "name": "decimal",
-        "precision": precision,
-        "scale": scale,
-    }
+    return TypeCase(
+        Decimal(precision, scale),
+        f"DECIMAL({precision},{scale})",
+        {
+            "name": "decimal",
+            "precision": precision,
+            "scale": scale,
+        },
+    )
 
 
-def _array_document(item: TypeDocument) -> TypeDocument:
-    data_type, document = item
-    return Array(data_type), {"name": "array", "element_type": document, "element_nullable": True}
+def _array_case(item: TypeCase) -> TypeCase:
+    return TypeCase(
+        Array(item.data_type),
+        f"ARRAY<{item.sql}>",
+        {"name": "array", "element_type": item.document, "element_nullable": True},
+    )
 
 
-def _map_document(items: tuple[TypeDocument, TypeDocument]) -> TypeDocument:
-    (key_type, key_document), (value_type, value_document) = items
-    return Map(key_type, value_type), {
-        "name": "map",
-        "key_type": key_document,
-        "value_type": value_document,
-        "value_nullable": True,
-    }
+def _map_case(items: tuple[TypeCase, TypeCase]) -> TypeCase:
+    key, value = items
+    return TypeCase(
+        Map(key.data_type, value.data_type),
+        f"MAP<{key.sql},{value.sql}>",
+        {
+            "name": "map",
+            "key_type": key.document,
+            "value_type": value.document,
+            "value_nullable": True,
+        },
+    )
 
 
 @st.composite
-def _struct_documents(
+def _struct_cases(
     draw: st.DrawFn,
-    children: st.SearchStrategy[TypeDocument],
-) -> TypeDocument:
+    children: st.SearchStrategy[TypeCase],
+) -> TypeCase:
     fields = draw(st.dictionaries(CANONICAL_IDENTIFIERS, children, min_size=1, max_size=3))
     expected_fields: list[StructField] = []
+    sql_fields: list[str] = []
     document_fields: list[dict[str, object]] = []
-    for name, (field_type, field_document) in fields.items():
+    for name, field_case in fields.items():
         raw_name = draw(st.sampled_from((name, name.upper())))
-        expected_fields.append(StructField(raw_name, field_type))
+        expected_fields.append(StructField(raw_name, field_case.data_type))
+        sql_fields.append(f"`{raw_name}`: {field_case.sql}")
         document_fields.append(
             {
                 "name": raw_name,
-                "type": field_document,
+                "type": field_case.document,
                 "nullable": True,
             }
         )
     data_type = Struct(tuple(expected_fields))
-    return data_type, {"name": "struct", "fields": document_fields}
-
-
-def _nested_type_documents(
-    children: st.SearchStrategy[TypeDocument],
-) -> st.SearchStrategy[TypeDocument]:
-    # A MAP key may be any type except MAP itself, so keys exclude map documents
-    # (the value stays unrestricted).
-    map_keys = children.filter(lambda item: item[1]["name"] != "map")
-    return st.one_of(
-        children.map(_array_document),
-        st.tuples(map_keys, children).map(_map_document),
-        _struct_documents(children),
+    return TypeCase(
+        data_type,
+        f"STRUCT<{', '.join(sql_fields)}>",
+        {"name": "struct", "fields": document_fields},
     )
 
 
-TYPE_DOCUMENTS = st.recursive(
-    st.one_of(st.sampled_from(_SIMPLE_TYPE_DOCUMENTS), _decimal_documents()),
-    _nested_type_documents,
+def _nested_type_cases(
+    children: st.SearchStrategy[TypeCase],
+) -> st.SearchStrategy[TypeCase]:
+    # A MAP key may be any type except MAP itself, so keys exclude map documents
+    # (the value stays unrestricted).
+    map_keys = children.filter(lambda item: item.document["name"] != "map")
+    return st.one_of(
+        children.map(_array_case),
+        st.tuples(map_keys, children).map(_map_case),
+        _struct_cases(children),
+    )
+
+
+TYPE_CASES = st.recursive(
+    st.one_of(st.sampled_from(_SIMPLE_TYPE_CASES), _decimal_cases()),
+    _nested_type_cases,
     max_leaves=10,
 )

@@ -11,8 +11,19 @@ _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 class DataType:
     """Base class for all data types."""
 
+    def __new__(cls, *args: object, **kwargs: object) -> "DataType":
+        """Require callers to choose a concrete type while allowing subclasses."""
+        if cls is DataType:
+            raise TypeError("DataType cannot be instantiated; use a concrete data type")
+        return super().__new__(cls)
+
     def __str__(self) -> str:
         return type(self).__name__
+
+
+def _require_data_type(value: object, *, subject: str) -> None:
+    if not isinstance(value, DataType):
+        raise ValueError(f"{subject} must be a DataType instance; got {value!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +139,7 @@ class StructField:
     data_type: DataType
 
     def __post_init__(self) -> None:
+        _require_data_type(self.data_type, subject="Struct field data type")
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
         object.__setattr__(self, "name", Identifier(self.name))
@@ -150,6 +162,8 @@ class Struct(DataType):
             raise ValueError("Struct requires at least one field")
         seen: set[str] = set()
         for field in self.fields:
+            if not isinstance(field, StructField):
+                raise ValueError(f"Struct field must be a StructField instance; got {field!r}")
             if field.name in seen:
                 raise ValueError(f"Duplicate struct field name: {field.name}")
             seen.add(field.name)
@@ -164,6 +178,9 @@ class Array(DataType):
 
     element: DataType
 
+    def __post_init__(self) -> None:
+        _require_data_type(self.element, subject="Array element")
+
     def __str__(self) -> str:
         return f"Array<{self.element}>"
 
@@ -176,6 +193,8 @@ class Map(DataType):
     value: DataType
 
     def __post_init__(self) -> None:
+        _require_data_type(self.key, subject="Map key")
+        _require_data_type(self.value, subject="Map value")
         # Databricks accepts any MAP key type except MAP itself.
         if isinstance(self.key, Map):
             raise ValueError("Map key type must not be a Map")

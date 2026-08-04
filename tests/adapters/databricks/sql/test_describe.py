@@ -14,7 +14,7 @@ from tests.adapters.databricks.sql.strategies import (
     CANONICAL_IDENTIFIERS,
     OBSERVED_TABLE_PROPERTIES,
     SQL_LITERAL_VALUES,
-    TYPE_DOCUMENTS,
+    TYPE_CASES,
 )
 
 QN = QualifiedName("dev", "silver", "demo_table")
@@ -71,14 +71,14 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
     raw_names = []
     for name in names:
         raw_name = draw(st.sampled_from((name, name.upper())))
-        data_type, type_document = draw(TYPE_DOCUMENTS)
+        type_case = draw(TYPE_CASES)
         nullable = draw(st.booleans())
         comment_kind = draw(st.sampled_from(("missing", "null", "value")))
         comment = draw(SQL_LITERAL_VALUES) if comment_kind == "value" else ""
         raw_names.append(raw_name)
         column_document = {
             "name": raw_name,
-            "type": type_document,
+            "type": type_case.document,
             "nullable": nullable,
         }
         if comment_kind == "null":
@@ -89,7 +89,7 @@ def _valid_describe_documents(draw: st.DrawFn) -> DescribeCase:
         expected_columns.append(
             ObservedColumn(
                 name=raw_name,
-                data_type=data_type,
+                data_type=type_case.data_type,
                 nullable=nullable,
                 comment=comment,
             )
