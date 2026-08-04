@@ -66,6 +66,12 @@ table can therefore be `EXECUTION_FAILED` with either `NOT_APPLIED` or
 `PARTIALLY_APPLIED`, and an unchanged table can still carry a foreign-key
 failure. Import the enum with `from delta_engine import TableChangeState`.
 
+The human-readable renderers use these states on real runs. `render_diff`
+marks non-empty plans that were not applied or only partially applied, while
+the `render_report` footer counts catalog outcomes. A compiled plan blocked
+before execution shows statement progress as `0/n`. Dry-run diff blocks and
+their changed/unchanged/failed footer keep describing planned work instead.
+
 This Python-level derived view does not add fields to `SyncReport.to_dict()` or
 `TableRunReport.to_dict()`; the structured schema below remains version 2.
 
