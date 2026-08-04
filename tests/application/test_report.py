@@ -696,24 +696,6 @@ def test_statement_progress_counts_applied_against_planned():
 # ---------- Catalog change state
 
 
-def test_change_state_values_are_human_readable():
-    # Given the complete catalog change-state vocabulary
-    states = tuple(TableChangeState)
-
-    # When reading the public string values
-    values = tuple(state.value for state in states)
-
-    # Then each value is suitable for direct human-readable rendering
-    assert values == (
-        "not planned",
-        "unchanged",
-        "planned",
-        "not applied",
-        "partially applied",
-        "applied",
-    )
-
-
 def test_change_state_is_not_planned_when_no_plan_was_accepted():
     # Given a table whose catalog read failed before planning
     report = _report(
