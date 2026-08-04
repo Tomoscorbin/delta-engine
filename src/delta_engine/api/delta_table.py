@@ -574,7 +574,7 @@ def _normalize_declaration(
 
 
 def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """Reject frozen declarations that the public API cannot deploy."""
+    """Reject invalid frozen declarations before lowering."""
     DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
     _validate_layout(
         declaration.columns,
@@ -591,8 +591,7 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
     for column in declaration.columns:
         _validate_tags(f"column '{column.name}'", column.tags)
-        if TableAspect.COLUMN_STRUCTURE in declaration.managed_aspects:
-            _validate_nested_not_null(column)
+        _validate_nested_not_null(column)
 
     _validate_object_name_parts(declaration.qualified_name)
 

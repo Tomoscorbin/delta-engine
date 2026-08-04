@@ -196,7 +196,7 @@ type, and nullability: `DESCRIBE TABLE ... AS JSON` reports all three, and
 Nested comments remain unmanaged. A nullability-only difference within a struct
 is visible as a change to the owning column's complete `Struct`
 type. Like other struct changes, it is blocked rather than translated into a
-special nested migration. Full declarations also reject non-null fields below a
+special nested migration. Declarations also reject non-null fields below a
 nullable parent or an array/map, because Databricks cannot deploy those states.
 
 The model is also a pinned vocabulary while the catalog's keeps growing:

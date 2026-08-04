@@ -1156,23 +1156,31 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
 
 
 @pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
-def test_a_restricted_scope_mirrors_column_state_full_management_would_reject(scope) -> None:
-    # Structure is mirrored state in these scopes, so creation-time structure
-    # gates must not judge either the column name or nested nullability.
+def test_a_restricted_scope_only_relaxes_catalog_dependent_column_validation(scope) -> None:
+    # Restricted scopes can omit the property that made an observed column
+    # name valid, but they still reject nullability no Delta schema can retain.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
-        columns=[
-            Column("order id", Integer()),
-            Column(
-                "items",
-                Array(Struct((StructField("value", Integer(), nullable=False),))),
-            ),
-        ],
+        columns=[Column("order id", Integer())],
         scope=scope,
     )
-    assert [column.name for column in table.to_desired_table().columns] == ["order id", "items"]
+    assert [column.name for column in table.to_desired_table().columns] == ["order id"]
+
+    with pytest.raises(ValueError, match="not deployable"):
+        DeltaTable(
+            catalog="dev",
+            schema="silver",
+            name="orders",
+            columns=[
+                Column(
+                    "items",
+                    Array(Struct((StructField("value", Integer(), nullable=False),))),
+                )
+            ],
+            scope=scope,
+        )
 
 
 def test_delta_table_rejects_cdf_reserved_column_names_when_cdf_enabled() -> None:
