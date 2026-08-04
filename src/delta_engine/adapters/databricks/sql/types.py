@@ -191,7 +191,7 @@ def _struct_from_json(type_obj: dict) -> DataType | None:
         field_name = field.get("name")
         field_type = data_type_from_json(field.get("type"))
         nullable = field.get("nullable")
-        if not isinstance(field_name, str) or field_type is None or type(nullable) is not bool:
+        if not isinstance(field_name, str) or field_type is None or not isinstance(nullable, bool):
             return None
         fields.append(StructField(name=field_name, data_type=field_type, nullable=nullable))
     try:

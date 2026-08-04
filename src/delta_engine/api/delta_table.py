@@ -152,7 +152,12 @@ def _column_declared_names(column: Column) -> tuple[str, ...]:
     column named ``"payload"``.
     """
     nested_names = (
-        path for path, *_ in _nested_struct_fields(column.name, column.data_type, column.nullable)
+        path
+        for path, *_ in _nested_struct_fields(
+            column.name,
+            column.data_type,
+            not_null_allowed=not column.nullable,
+        )
     )
     return (column.name, *nested_names)
 
@@ -160,26 +165,24 @@ def _column_declared_names(column: Column) -> tuple[str, ...]:
 def _nested_struct_fields(
     path: str,
     data_type: DataType,
-    parent_nullable: bool,
-    below_collection: bool = False,
-) -> Iterator[tuple[str, bool, bool, bool]]:
+    not_null_allowed: bool,
+) -> Iterator[tuple[str, bool, bool]]:
     """Yield struct fields with the container context needed at the API boundary."""
     match data_type:
         case Struct(fields):
             for field in fields:
                 field_path = f"{path}.{field.name}"
-                yield field_path, field.nullable, parent_nullable, below_collection
+                yield field_path, field.nullable, not_null_allowed
                 yield from _nested_struct_fields(
                     field_path,
                     field.data_type,
-                    field.nullable,
-                    below_collection,
+                    not_null_allowed=not_null_allowed and not field.nullable,
                 )
         case Array(element):
-            yield from _nested_struct_fields(path, element, True, True)
+            yield from _nested_struct_fields(path, element, not_null_allowed=False)
         case Map(key, value):
-            yield from _nested_struct_fields(path, key, True, True)
-            yield from _nested_struct_fields(path, value, True, True)
+            yield from _nested_struct_fields(path, key, not_null_allowed=False)
+            yield from _nested_struct_fields(path, value, not_null_allowed=False)
         case _:
             return
 
@@ -188,21 +191,16 @@ def _validate_nested_not_null(
     column: Column,
 ) -> None:
     """Reject nested NOT NULL declarations Databricks cannot deploy."""
-    for field_path, nullable, parent_nullable, below_collection in _nested_struct_fields(
+    for field_path, nullable, not_null_allowed in _nested_struct_fields(
         column.name,
         column.data_type,
-        column.nullable,
+        not_null_allowed=not column.nullable,
     ):
-        if nullable:
-            continue
-        if below_collection:
+        if not nullable and not not_null_allowed:
             raise ValueError(
-                f"NOT NULL struct field '{field_path}' cannot be declared below an ARRAY or MAP"
-            )
-        if parent_nullable:
-            raise ValueError(
-                f"NOT NULL struct field '{field_path}' requires its containing"
-                " column or struct field to be NOT NULL"
+                f"NOT NULL struct field '{field_path}' is not deployable: every containing"
+                " column and struct field must be NOT NULL, and ARRAY or MAP paths do not"
+                " support nested NOT NULL"
             )
 
 

@@ -1088,7 +1088,7 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
             False,
             None,
         ),
-        (Struct((StructField("value", Integer(), nullable=False),)), True, "requires"),
+        (Struct((StructField("value", Integer(), nullable=False),)), True, "not deployable"),
         (
             Struct(
                 (
@@ -1099,13 +1099,17 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
                 )
             ),
             False,
-            "requires",
+            "not deployable",
         ),
-        (Array(Struct((StructField("value", Integer(), nullable=False),))), False, "below"),
+        (
+            Array(Struct((StructField("value", Integer(), nullable=False),))),
+            False,
+            "not deployable",
+        ),
         (
             Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
             False,
-            "below",
+            "not deployable",
         ),
     ],
     ids=["valid", "nullable-column", "nullable-parent-field", "array", "map"],
