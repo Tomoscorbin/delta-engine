@@ -190,13 +190,15 @@ enforcing the length. The trade-off is deliberate: a declaration cannot create
 a varchar column, and an out-of-band length change is invisible to drift
 detection.
 
-`Struct` shows the same rule inside a modeled type. Struct fields carry name
-and type only: the domain `StructField` models neither nested field nullability
-nor comments, so the reader normalizes both sides to name + type — declared
-fields are created nullable, nested comments are unmanaged. The AS JSON
-description does report a `nullable` flag per struct field, so modeling nested
-nullability is now gated on the domain type model, not on the observation
-source.
+`Struct` applies the same rule inside a modeled type. Struct fields carry name,
+type, and nullability: `DESCRIBE TABLE ... AS JSON` reports all three, and
+`StructField(..., nullable=False)` renders the corresponding nested `NOT NULL`.
+Nested comments remain unmanaged. A nullability-only difference on a direct
+struct path is a `SetColumnNullability` action, not a false type change:
+loosening is applied and tightening is blocked by the same safety rule as a
+top-level column. Databricks cannot address `NOT NULL` fields below an array or
+map, so a full declaration rejects those states rather than promising an
+unexecutable migration.
 
 The model is also a pinned vocabulary while the catalog's keeps growing:
 `TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column
@@ -582,7 +584,9 @@ The phase ordering exists because backend DDL has dependencies:
 - Primary keys are dropped before column mutations, so no key references a
   column being dropped or altered.
 - Column nullability changes run before primary keys are set, because primary
-  key columns must be non-nullable.
+  key columns must be non-nullable. Nested constraints are loosened from child
+  to parent (and tightened parent to child) so every intermediate schema is
+  valid.
 - Foreign keys are set last, after the referenced primary key exists.
 - Clustering keys are altered after columns are added (a new clustering key may
   name a column this same sync is still adding) but before columns are dropped,

@@ -416,22 +416,107 @@ def _actions_for_removed_column(observed: ObservedColumn) -> tuple[Action, ...]:
     )
 
 
+def _equal_except_addressable_struct_nullability(
+    desired: DataType,
+    observed: DataType,
+) -> bool:
+    """
+    Compare types while ignoring nullability on fields reachable through structs.
+
+    A struct field path can be targeted by ``ALTER COLUMN``. Fields below an
+    array or map cannot, so collection children use ordinary equality and any
+    difference remains a type change that safety validation blocks.
+    """
+    if not isinstance(desired, Struct) or not isinstance(observed, Struct):
+        return desired == observed
+    if len(desired.fields) != len(observed.fields):
+        return False
+    return all(
+        desired_field.name == observed_field.name
+        and _equal_except_addressable_struct_nullability(
+            desired_field.data_type,
+            observed_field.data_type,
+        )
+        for desired_field, observed_field in zip(
+            desired.fields,
+            observed.fields,
+            strict=True,
+        )
+    )
+
+
+def _struct_nullability_actions(
+    column_path: tuple[str, ...],
+    desired: DataType,
+    observed: DataType,
+) -> tuple[SetColumnNullability, ...]:
+    """Return nullability changes on matching struct paths, stopping at collections."""
+    if not isinstance(desired, Struct) or not isinstance(observed, Struct):
+        return ()
+    if len(desired.fields) != len(observed.fields):
+        return ()
+    if any(
+        desired_field.name != observed_field.name
+        for desired_field, observed_field in zip(
+            desired.fields,
+            observed.fields,
+            strict=True,
+        )
+    ):
+        return ()
+
+    actions: list[SetColumnNullability] = []
+    for desired_field, observed_field in zip(
+        desired.fields,
+        observed.fields,
+        strict=True,
+    ):
+        field_path = (*column_path, observed_field.name)
+        if desired_field.nullable != observed_field.nullable:
+            actions.append(
+                SetColumnNullability(
+                    column_path=field_path,
+                    desired_nullable=desired_field.nullable,
+                    observed_nullable=observed_field.nullable,
+                )
+            )
+        actions.extend(
+            _struct_nullability_actions(
+                field_path,
+                desired_field.data_type,
+                observed_field.data_type,
+            )
+        )
+    return tuple(actions)
+
+
 def _diff_existing_column(desired: DesiredColumn, observed: ObservedColumn) -> tuple[Action, ...]:
     """Return every field and tag action for a matched column."""
     actions: list[Action] = []
 
     if desired.data_type != observed.data_type:
-        actions.append(
-            AlterColumnType(
-                column_name=observed.name,
-                desired_type=desired.data_type,
-                observed_type=observed.data_type,
+        if not _equal_except_addressable_struct_nullability(
+            desired.data_type,
+            observed.data_type,
+        ):
+            actions.append(
+                AlterColumnType(
+                    column_name=observed.name,
+                    desired_type=desired.data_type,
+                    observed_type=observed.data_type,
+                )
+            )
+        actions.extend(
+            _struct_nullability_actions(
+                (observed.name,),
+                desired.data_type,
+                observed.data_type,
             )
         )
     if desired.nullable != observed.nullable:
         actions.append(
             SetColumnNullability(
-                column_name=observed.name,
+                column_path=(observed.name,),
                 desired_nullable=desired.nullable,
                 observed_nullable=observed.nullable,
             )

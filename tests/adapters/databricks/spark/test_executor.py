@@ -8,6 +8,8 @@ from delta_engine.domain.model import (
     DesiredTable,
     ObservedColumn,
     QualifiedName,
+    Struct,
+    StructField,
 )
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
@@ -116,7 +118,14 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
     # Given a desired table to be created in an empty schema
     desired = DesiredTable(
         qualified_name=QualifiedName(TEST_CATALOG, temp_schema, "customers"),
-        columns=(DesiredColumn(name="id", data_type=Integer()),),
+        columns=(
+            DesiredColumn(name="id", data_type=Integer()),
+            DesiredColumn(
+                name="payload",
+                data_type=Struct((StructField("value", Integer(), nullable=False),)),
+                nullable=False,
+            ),
+        ),
     )
     plan = ActionPlan(target=desired.qualified_name, actions=(CreateTable(table=desired),))
 
@@ -133,7 +142,20 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
                 "id",
                 T.IntegerType(),
                 nullable=True,
-            )
+            ),
+            T.StructField(
+                "payload",
+                T.StructType(
+                    [
+                        T.StructField(
+                            "value",
+                            T.IntegerType(),
+                            nullable=False,
+                        )
+                    ]
+                ),
+                nullable=False,
+            ),
         ]
     )
     assert actual_schema == expected_schema
@@ -245,15 +267,28 @@ def test_set_table_comment_sets_comment_on_table(spark, make_temp_table):
     assert _get_table_comment(spark, full_table_name) == "staging table"
 
 
-def test_set_column_nullability_sets_nullable(spark, make_temp_table):
-    # Given an existing table with a NOT NULL id column
-    full_table_name = make_temp_table("nullability", "id INT NOT NULL, name STRING")
+def test_set_column_nullability_sets_top_level_and_nested_fields_nullable(spark, make_temp_table):
+    # Given existing NOT NULL top-level and nested fields
+    full_table_name = make_temp_table(
+        "nullability",
+        "id INT NOT NULL, payload STRUCT<name: STRING NOT NULL> NOT NULL",
+    )
     qualified_name = QualifiedName(*full_table_name.split("."))
     plan = ActionPlan(
         target=qualified_name,
         actions=(
             SetColumnNullability(
-                column_name="id",
+                column_path=("id",),
+                desired_nullable=True,
+                observed_nullable=False,
+            ),
+            SetColumnNullability(
+                column_path=("payload", "name"),
+                desired_nullable=True,
+                observed_nullable=False,
+            ),
+            SetColumnNullability(
+                column_path=("payload",),
                 desired_nullable=True,
                 observed_nullable=False,
             ),
@@ -263,8 +298,11 @@ def test_set_column_nullability_sets_nullable(spark, make_temp_table):
     # When applying the plan
     _apply(spark, plan)
 
-    # Then the column becomes nullable
+    # Then both targets become nullable
     assert _get_field(spark, full_table_name, "id").nullable is True
+    payload = _get_field(spark, full_table_name, "payload")
+    assert payload.nullable is True
+    assert payload.dataType["name"].nullable is True
 
 
 def test_compile_returns_the_statements_execute_would_run():

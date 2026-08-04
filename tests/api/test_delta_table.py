@@ -1072,6 +1072,62 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
     assert column.data_type == Struct((StructField("order id", Integer()),))
 
 
+@pytest.mark.parametrize(
+    ("data_type", "column_nullable"),
+    [
+        (Struct((StructField("value", Integer(), nullable=False),)), True),
+        (
+            Struct(
+                (
+                    StructField(
+                        "nested",
+                        Struct((StructField("value", Integer(), nullable=False),)),
+                    ),
+                )
+            ),
+            False,
+        ),
+        (Array(Struct((StructField("value", Integer(), nullable=False),))), False),
+        (
+            Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
+            False,
+        ),
+    ],
+    ids=["nullable-column", "nullable-parent-field", "array", "map"],
+)
+def test_delta_table_rejects_non_nullable_struct_fields_without_deployable_parents(
+    data_type, column_nullable: bool
+) -> None:
+    with pytest.raises(ValueError, match="NOT NULL struct field"):
+        DeltaTable(
+            "dev",
+            "silver",
+            "orders",
+            columns=[Column("payload", data_type, nullable=column_nullable)],
+        )
+
+
+def test_delta_table_accepts_non_nullable_struct_fields_with_non_nullable_struct_parents():
+    data_type = Struct(
+        (
+            StructField(
+                "nested",
+                Struct((StructField("value", Integer(), nullable=False),)),
+                nullable=False,
+            ),
+        )
+    )
+
+    table = DeltaTable(
+        "dev",
+        "silver",
+        "orders",
+        columns=[Column("payload", data_type, nullable=False)],
+    )
+
+    assert table.to_desired_table().columns[0].data_type == data_type
+
+
 def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_array() -> None:
     # Proves the gate recurses through container types, not just direct struct columns.
     with pytest.raises(ValueError, match="columnMapping"):
@@ -1089,18 +1145,24 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
 
 
 @pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
-def test_a_restricted_scope_mirrors_special_character_column_names(scope) -> None:
-    # The same exemption, for the same reason: the catalog already accepted
-    # this name, so the declaration must be able to name it back without
-    # declaring the column mapping its creation would have needed.
+def test_a_restricted_scope_mirrors_column_state_full_management_would_reject(scope) -> None:
+    # The catalog already accepted this name and nested nullability, so a scope
+    # that does not manage structure must be able to mirror both without
+    # satisfying their creation-time requirements.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
         name="orders",
-        columns=[Column("order id", Integer())],
+        columns=[
+            Column("order id", Integer()),
+            Column(
+                "items",
+                Array(Struct((StructField("value", Integer(), nullable=False),))),
+            ),
+        ],
         scope=scope,
     )
-    assert table.to_desired_table().columns[0].name == "order id"
+    assert [column.name for column in table.to_desired_table().columns] == ["order id", "items"]
 
 
 def test_delta_table_rejects_cdf_reserved_column_names_when_cdf_enabled() -> None:

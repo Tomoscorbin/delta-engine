@@ -326,7 +326,7 @@ def _(action: SetColumnNullability) -> tuple[DiffEntry, ...]:
         DiffEntry(
             DiffCategory.COLUMNS,
             DiffOperation.CHANGE,
-            subject=action.column_name,
+            subject=action.subject,
             detail=(change,),
         ),
     )

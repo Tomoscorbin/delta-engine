@@ -218,17 +218,49 @@ def test_type_nullability_and_comment_drift_on_one_column_each_produce_a_change(
     assert any(isinstance(change, SetColumnComment) for change in diff.actions)
 
 
-def test_nullability_drift_produces_column_nullability_changed():
-    # Given a column whose nullability differs
+@pytest.mark.parametrize(
+    ("desired_column", "observed_column", "column_path"),
+    [
+        (
+            DesiredColumn("id", Integer(), nullable=False),
+            ObservedColumn("id", Integer(), nullable=True),
+            ("id",),
+        ),
+        (
+            DesiredColumn(
+                "payload",
+                Struct((StructField("id", Integer(), nullable=False),)),
+                nullable=False,
+            ),
+            ObservedColumn(
+                "payload",
+                Struct((StructField("id", Integer(), nullable=True),)),
+                nullable=False,
+            ),
+            ("payload", "id"),
+        ),
+    ],
+    ids=["column", "struct-field"],
+)
+def test_nullability_drift_produces_column_nullability_changed(
+    desired_column: DesiredColumn,
+    observed_column: ObservedColumn,
+    column_path: tuple[str, ...],
+) -> None:
+    # Given a top-level or nested column whose nullability differs
     diff = diff_table(
-        _desired(columns=(DesiredColumn("id", Integer(), nullable=False),)),
-        _observed(columns=(DesiredColumn("id", Integer(), nullable=True),)),
+        _desired(columns=(desired_column,)),
+        _observed(columns=(observed_column,)),
     )
 
-    # Then a SetColumnNullability change carries the direction
+    # Then one SetColumnNullability change carries its full path and direction
     assert isinstance(diff, TableDrift)
     assert diff.actions == (
-        SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
+        SetColumnNullability(
+            column_path=column_path,
+            desired_nullable=False,
+            observed_nullable=True,
+        ),
     )
 
 

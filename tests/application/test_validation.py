@@ -30,6 +30,8 @@ from delta_engine.domain.model import (
     QualifiedName,
     Short,
     String,
+    Struct,
+    StructField,
     TableAspect,
     TableKind,
     TimestampNtz,
@@ -357,17 +359,27 @@ def test_allows_adding_nullable_column_to_existing_table():
 
 
 def test_rejects_tightening_existing_columns_to_not_null():
-    # Given existing nullable columns and a declaration tightening them to NOT NULL
+    # Given existing nullable columns and fields tightened to NOT NULL
     desired = _desired_table(
         columns=(
             DesiredColumn("id", Integer(), nullable=False),
             DesiredColumn("email", String(), nullable=False),
+            DesiredColumn(
+                "payload",
+                Struct((StructField("code", String(), nullable=False),)),
+                nullable=False,
+            ),
         )
     )
     observed = _observed_table(
         columns=(
             DesiredColumn("id", Integer(), nullable=True),
             DesiredColumn("email", String(), nullable=True),
+            DesiredColumn(
+                "payload",
+                Struct((StructField("code", String(), nullable=True),)),
+                nullable=False,
+            ),
         )
     )
 
@@ -378,16 +390,36 @@ def test_rejects_tightening_existing_columns_to_not_null():
     assert [failure.rule_name for failure in failures] == [
         "NullabilityTighteningOnExistingColumn",
         "NullabilityTighteningOnExistingColumn",
+        "NullabilityTighteningOnExistingColumn",
     ]
     assert "id" in failures[0].message
     assert "email" in failures[1].message
-    assert [failure.subject for failure in failures] == ["id", "email"]
+    assert "payload.code" in failures[2].message
+    assert [failure.subject for failure in failures] == ["id", "email", "payload.code"]
 
 
 def test_allows_loosening_existing_column_to_nullable():
-    # Given an existing NOT NULL column and a declaration loosening it
-    desired = _desired_table(columns=(DesiredColumn("id", Integer(), nullable=True),))
-    observed = _observed_table(columns=(DesiredColumn("id", Integer(), nullable=False),))
+    # Given existing NOT NULL top-level and nested columns loosened to nullable
+    desired = _desired_table(
+        columns=(
+            DesiredColumn("id", Integer(), nullable=True),
+            DesiredColumn(
+                "payload",
+                Struct((StructField("code", String(), nullable=True),)),
+                nullable=False,
+            ),
+        )
+    )
+    observed = _observed_table(
+        columns=(
+            DesiredColumn("id", Integer(), nullable=False),
+            DesiredColumn(
+                "payload",
+                Struct((StructField("code", String(), nullable=False),)),
+                nullable=False,
+            ),
+        )
+    )
 
     # Then validation passes
     assert not _validate(desired, observed)

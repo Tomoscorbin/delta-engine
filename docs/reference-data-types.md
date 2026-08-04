@@ -27,18 +27,23 @@ under [Unsupported types](#unsupported-types).
 | `Binary()`                               | `BINARY`               |                                                                      |
 | `TimestampNtz()`                         | `TIMESTAMP_NTZ`        | Creation enables the feature; existing tables need it enabled first  |
 | `Variant()`                              | `VARIANT`              | Creation enables the feature; existing tables need it enabled first  |
-| `Struct([StructField(name, type), ...])` | `STRUCT<name: T, ...>` | Field nullability/comments not modeled; fields are created nullable  |
+| `Struct([StructField(name, type, nullable=True), ...])` | `STRUCT<name: T, ...>` | `nullable=False` emits nested `NOT NULL`; field comments are unmanaged |
 
 `Map` declarations should use a non-`Map` key type. Databricks accepts any
 supported map key type except another `Map`; `Map(Map(...), value_type)` is
 rejected with `ValueError` when the type is constructed. A map remains valid as
 the value type.
 
-Any change to a struct's fields (adding, removing, renaming, or retyping a
-field) surfaces as a column type change on the owning column and is blocked
-by `NonWideningColumnTypeChange`, the same as any other non-widening type
-change — structs are never widened as a whole; recreate the table to change
-a struct.
+Struct-field nullability is read and compared. `NOT NULL` → nullable is applied
+for fields reachable directly through structs; nullable → `NOT NULL` is blocked
+until the data is backfilled, like a top-level column. A non-null field requires
+its containing column and struct fields to be non-null, and Databricks does not
+accept nested `NOT NULL` below an array or map.
+
+Any other change to a struct's fields (adding, removing, renaming, or retyping a
+field) surfaces as a column type change on the owning column and is blocked by
+`NonWideningColumnTypeChange`. Structs are never widened as a whole; recreate
+the table to make those changes.
 
 ## Unsupported types
 

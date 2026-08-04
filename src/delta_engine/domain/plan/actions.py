@@ -313,9 +313,9 @@ class SetTableComment(Action):
 
 @dataclass(frozen=True, slots=True)
 class SetColumnNullability(Action):
-    """Set a column's nullability, preserving both sides of the transition."""
+    """Set a top-level or nested column's nullability, preserving the transition."""
 
-    column_name: str
+    column_path: ListOrTuple[str]
     desired_nullable: bool
     observed_nullable: bool
 
@@ -323,7 +323,13 @@ class SetColumnNullability(Action):
     phase: ClassVar[ActionPhase] = ActionPhase.SET_COLUMN_NULLABILITY
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "column_name", Identifier(self.column_name))
+        if not self.column_path:
+            raise ValueError("SetColumnNullability requires a non-empty column path")
+        object.__setattr__(
+            self,
+            "column_path",
+            tuple(Identifier(part) for part in self.column_path),
+        )
         if self.desired_nullable == self.observed_nullable:
             raise ValueError(
                 f"SetColumnNullability carries no difference: {self.desired_nullable!r}"
@@ -331,7 +337,7 @@ class SetColumnNullability(Action):
 
     @property
     def subject(self) -> str:
-        return self.column_name
+        return ".".join(self.column_path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,9 +444,16 @@ class AlterColumnType(Action):
         return self.column_name
 
 
-def _execution_order(action: Action) -> tuple[int, str, str]:
-    """Deterministic ordering key: phase, lowercased subject, then exact subject."""
-    return (action.phase, action.subject.lower(), action.subject)
+def _execution_order(action: Action) -> tuple[int, int, str, str]:
+    """Deterministic ordering key, including parent/child nullability dependencies."""
+    path_order = 0
+    if isinstance(action, SetColumnNullability):
+        depth = len(action.column_path)
+        # Loosening a parent before its child would temporarily leave a NOT
+        # NULL child below a nullable parent. Tightening has the reverse
+        # dependency, even though default safety policy blocks it.
+        path_order = -depth if action.desired_nullable else depth
+    return (action.phase, path_order, action.subject.lower(), action.subject)
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,7 +462,7 @@ class ActionPlan:
     Validated executable actions held in deterministic execution order.
 
     A plan carries the qualified table target its actions apply to and keeps
-    those actions sorted by execution phase and then by subject name,
+    those actions sorted by execution phase and dependency-aware subject order,
     regardless of the order they are supplied in. Target identity and ordering
     are invariants of the plan, not context a caller has to supply later.
 

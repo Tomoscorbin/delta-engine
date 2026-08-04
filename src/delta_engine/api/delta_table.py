@@ -172,6 +172,59 @@ def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
             return ()
 
 
+def _validate_nested_not_null(
+    path: str,
+    data_type: DataType,
+    *,
+    parent_nullable: bool,
+    below_collection: bool = False,
+) -> None:
+    """Reject nested NOT NULL declarations Databricks cannot deploy."""
+    match data_type:
+        case Struct(fields):
+            for field in fields:
+                field_path = f"{path}.{field.name}"
+                if not field.nullable:
+                    if below_collection:
+                        raise ValueError(
+                            f"NOT NULL struct field '{field_path}' cannot be declared"
+                            " below an ARRAY or MAP"
+                        )
+                    if parent_nullable:
+                        raise ValueError(
+                            f"NOT NULL struct field '{field_path}' requires its containing"
+                            " column or struct field to be NOT NULL"
+                        )
+                _validate_nested_not_null(
+                    field_path,
+                    field.data_type,
+                    parent_nullable=field.nullable,
+                    below_collection=below_collection,
+                )
+        case Array(element):
+            _validate_nested_not_null(
+                path,
+                element,
+                parent_nullable=True,
+                below_collection=True,
+            )
+        case Map(key, value):
+            _validate_nested_not_null(
+                path,
+                key,
+                parent_nullable=True,
+                below_collection=True,
+            )
+            _validate_nested_not_null(
+                path,
+                value,
+                parent_nullable=True,
+                below_collection=True,
+            )
+        case _:
+            return
+
+
 def _validate_layout(
     columns: tuple[Column, ...],
     partitioned_by: tuple[str, ...],
@@ -549,6 +602,12 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
     for column in declaration.columns:
         _validate_tags(f"column '{column.name}'", column.tags)
+        if TableAspect.COLUMN_STRUCTURE in declaration.managed_aspects:
+            _validate_nested_not_null(
+                column.name,
+                column.data_type,
+                parent_nullable=column.nullable,
+            )
 
     _validate_object_name_parts(declaration.qualified_name)
 

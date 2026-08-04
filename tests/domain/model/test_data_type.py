@@ -78,10 +78,15 @@ def test_decimal_rejects_non_integer_precision_and_scale(field: str, malformed: 
         Decimal(**values)
 
 
-def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
+def test_struct_field_validates_name_and_nullability_and_preserves_them() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    assert str(StructField("Amount", Integer()).name) == "Amount"
+    with pytest.raises(ValueError, match="nullable"):
+        StructField("amount", Integer(), nullable=1)
+
+    assert StructField("Amount", Integer()).nullable is True
+    assert StructField("Amount", Integer(), nullable=False) != StructField("Amount", Integer())
+    assert str(StructField("Amount", Integer(), nullable=False)) == "Amount: Integer NOT NULL"
     assert StructField("straße", Integer()).name == "straße"
 
 

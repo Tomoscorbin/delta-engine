@@ -124,27 +124,30 @@ class StructField:
     """
     One named field inside a :class:`Struct`.
 
-    Field nullability and comments are deliberately not modeled: catalog DDL
-    strings do not round-trip them reliably, so both desired and observed
-    structs normalize to name + type. Declared fields are created nullable.
+    Nullability is part of the field's identity and defaults to nullable,
+    matching Databricks SQL. Nested field comments remain unmanaged.
     """
 
     name: str
     data_type: DataType
+    nullable: bool = True
 
     def __post_init__(self) -> None:
         _require_data_type(self.data_type, subject="Struct field data type")
+        if type(self.nullable) is not bool:
+            raise ValueError(f"Struct field nullable must be a bool; got {self.nullable!r}")
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
         object.__setattr__(self, "name", Identifier(self.name))
 
     def __str__(self) -> str:
-        return f"{self.name}: {self.data_type}"
+        nullability = "" if self.nullable else " NOT NULL"
+        return f"{self.name}: {self.data_type}{nullability}"
 
 
 @dataclass(frozen=True, slots=True)
 class Struct(DataType):
-    """Struct of named fields; identity is the ordered (name, type) tuple."""
+    """Struct of named fields; identity is their ordered name, type, and nullability."""
 
     fields: ListOrTuple[StructField]
 

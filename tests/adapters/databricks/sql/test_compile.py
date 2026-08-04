@@ -376,11 +376,23 @@ def test_create_table_backticks_struct_field_names_and_renders_variant():
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` COMMENT ''",
         ),
         (
-            SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=False),
+            SetColumnNullability(
+                column_path=("id",), desired_nullable=True, observed_nullable=False
+            ),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` DROP NOT NULL",
         ),
         (
-            SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
+            SetColumnNullability(
+                column_path=("payload", "order id"),
+                desired_nullable=False,
+                observed_nullable=True,
+            ),
+            "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `payload`.`order id` SET NOT NULL",
+        ),
+        (
+            SetColumnNullability(
+                column_path=("id",), desired_nullable=False, observed_nullable=True
+            ),
             "ALTER TABLE `cat`.`sch`.`tbl` ALTER COLUMN `id` SET NOT NULL",
         ),
         (
@@ -550,7 +562,7 @@ _SAMPLE_ACTIONS: dict[type[Action], Action] = {
     EnableTableFeature: EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ),
     RenameColumn: RenameColumn("old", "new"),
     SetColumnComment: SetColumnComment("id", "new", "old"),
-    SetColumnNullability: SetColumnNullability("id", False, True),
+    SetColumnNullability: SetColumnNullability(("id",), False, True),
     SetColumnTag: SetColumnTag("id", "pii", "low", None),
     SetForeignKey: SetForeignKey(constraint=_foreign_key()),
     SetPrimaryKey: SetPrimaryKey(primary_key=_primary_key()),

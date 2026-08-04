@@ -212,13 +212,15 @@ def _struct_cases(
     document_fields: list[dict[str, object]] = []
     for name, field_case in fields.items():
         raw_name = draw(st.sampled_from((name, name.upper())))
-        expected_fields.append(StructField(raw_name, field_case.data_type))
-        sql_fields.append(f"`{raw_name}`: {field_case.sql}")
+        nullable = draw(st.booleans())
+        expected_fields.append(StructField(raw_name, field_case.data_type, nullable=nullable))
+        nullability = "" if nullable else " NOT NULL"
+        sql_fields.append(f"`{raw_name}`: {field_case.sql}{nullability}")
         document_fields.append(
             {
                 "name": raw_name,
                 "type": field_case.document,
-                "nullable": True,
+                "nullable": nullable,
             }
         )
     data_type = Struct(tuple(expected_fields))

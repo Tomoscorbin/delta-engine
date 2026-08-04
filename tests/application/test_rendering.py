@@ -124,7 +124,9 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             (DiffEntry(DiffCategory.COLUMNS, DiffOperation.REMOVE, "legacy"),),
         ),
         (
-            SetColumnNullability(column_name="id", desired_nullable=False, observed_nullable=True),
+            SetColumnNullability(
+                column_path=("id",), desired_nullable=False, observed_nullable=True
+            ),
             (
                 DiffEntry(
                     DiffCategory.COLUMNS,
@@ -135,12 +137,16 @@ def _plan(name: str, *actions: Action) -> ActionPlan:
             ),
         ),
         (
-            SetColumnNullability(column_name="id", desired_nullable=True, observed_nullable=False),
+            SetColumnNullability(
+                column_path=("payload", "id"),
+                desired_nullable=True,
+                observed_nullable=False,
+            ),
             (
                 DiffEntry(
                     DiffCategory.COLUMNS,
                     DiffOperation.CHANGE,
-                    "id",
+                    "payload.id",
                     ("drop NOT NULL (was NOT NULL)",),
                 ),
             ),
