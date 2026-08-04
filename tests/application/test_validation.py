@@ -453,9 +453,10 @@ def test_rejects_non_widening_type_change_even_with_type_widening_declared(
 
     failures = _validate(desired, observed)
 
-    assert failures[0].rule_name == "NonWideningColumnTypeChange"
-    assert "recreate the table" in failures[0].message
-    assert failures[0].subject == column_name
+    [failure] = failures
+    assert failure.rule_name == "NonWideningColumnTypeChange"
+    assert "recreate the table" in failure.message
+    assert failure.subject == column_name
 
 
 def test_rejects_narrowing_type_change():

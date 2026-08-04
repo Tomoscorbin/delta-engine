@@ -1107,12 +1107,24 @@ def test_delta_table_accepts_special_character_struct_field_names_with_column_ma
             "not deployable",
         ),
         (
+            Map(Struct((StructField("value", Integer(), nullable=False),)), String()),
+            False,
+            "not deployable",
+        ),
+        (
             Map(String(), Struct((StructField("value", Integer(), nullable=False),))),
             False,
             "not deployable",
         ),
     ],
-    ids=["valid", "nullable-column", "nullable-parent-field", "array", "map"],
+    ids=[
+        "valid",
+        "nullable-column",
+        "nullable-parent-field",
+        "array",
+        "map-key",
+        "map-value",
+    ],
 )
 def test_delta_table_validates_non_nullable_struct_field_placement(
     data_type, column_nullable: bool, error_match: str | None
@@ -1145,9 +1157,8 @@ def test_delta_table_rejects_special_character_field_names_in_struct_nested_in_a
 
 @pytest.mark.parametrize("scope", _SCOPES_WITHOUT_COLUMN_STRUCTURE)
 def test_a_restricted_scope_mirrors_column_state_full_management_would_reject(scope) -> None:
-    # The catalog already accepted this name and nested nullability, so a scope
-    # that does not manage structure must be able to mirror both without
-    # satisfying their creation-time requirements.
+    # Structure is mirrored state in these scopes, so creation-time structure
+    # gates must not judge either the column name or nested nullability.
     table = DeltaTable(
         catalog="dev",
         schema="silver",
