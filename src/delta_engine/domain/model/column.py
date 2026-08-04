@@ -4,13 +4,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from delta_engine.domain.model.data_type import DataType, _require_data_type
+from delta_engine.domain.model.data_type import DataType
 from delta_engine.domain.model.identifier import Identifier
 
 
 def _validate_column_fields(name: str, data_type: DataType, tags: Mapping[str, str]) -> None:
     """Invariants shared by declared and observed columns."""
-    _require_data_type(data_type, subject="Column data type")
+    if not isinstance(data_type, DataType):
+        raise ValueError(f"Column data type must be a DataType instance; got {data_type!r}")
     if not name.strip():
         raise ValueError(f"Column name must not be blank: {name!r}")
     for tag_key in tags:
