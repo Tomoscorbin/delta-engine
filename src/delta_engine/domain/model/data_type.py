@@ -11,12 +11,6 @@ _MAX_DECIMAL_PRECISION = 38  # hard limit of Delta/Spark DecimalType
 class DataType:
     """Base class for all data types."""
 
-    def __new__(cls, *args: object, **kwargs: object) -> "DataType":
-        """Require callers to choose a concrete type while allowing subclasses."""
-        if cls is DataType:
-            raise TypeError("DataType cannot be instantiated; use a concrete data type")
-        return super().__new__(cls)
-
     def __str__(self) -> str:
         return type(self).__name__
 

@@ -5,7 +5,6 @@ import pytest
 
 from delta_engine.domain.model.data_type import (
     Array,
-    DataType,
     Decimal,
     Integer,
     Map,
@@ -14,11 +13,6 @@ from delta_engine.domain.model.data_type import (
     StructField,
 )
 from tests.domain.model.strategies import NON_DATA_TYPES
-
-
-def test_data_type_base_class_cannot_be_instantiated() -> None:
-    with pytest.raises(TypeError, match="concrete data type"):
-        DataType()
 
 
 @example(position="array element", invalid=None)
