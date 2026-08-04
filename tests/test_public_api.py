@@ -22,6 +22,7 @@ _EAGER = {
     "ValidationFailure",
     "ExecutionFailure",
     "ForeignKeyFailure",
+    "TableChangeState",
     "TableRunStatus",
     "render_diff",
     "render_report",
@@ -41,6 +42,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         ReadFailure,
         SyncFailedError,
         SyncReport,
+        TableChangeState,
         TableRunReport,
         TableRunStatus,
         ValidationFailure,
@@ -57,6 +59,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         ReadFailure as ReadFailureImpl,
         SyncFailedError as SyncFailedErrorImpl,
         SyncReport as SyncReportImpl,
+        TableChangeState as TableChangeStateImpl,
         TableRunReport as TableRunReportImpl,
         TableRunStatus as TableRunStatusImpl,
         ValidationFailure as ValidationFailureImpl,
@@ -74,6 +77,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     assert ForeignKeyFailure is ForeignKeyFailureImpl
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
+    assert TableChangeState is TableChangeStateImpl
     assert TableRunReport is TableRunReportImpl
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl

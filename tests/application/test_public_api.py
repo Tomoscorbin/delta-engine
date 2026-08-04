@@ -16,6 +16,7 @@ def test_public_api_exposes_the_intended_names():
         ReadFailure,
         SyncFailedError,
         SyncReport,
+        TableChangeState,
         TableRunReport,
         TableRunStatus,
         ValidationFailure,
@@ -41,6 +42,7 @@ def test_public_api_exposes_the_intended_names():
     )
     from delta_engine.application.report import (
         SyncReport as SyncReportImpl,
+        TableChangeState as TableChangeStateImpl,
         TableRunReport as TableRunReportImpl,
         TableRunStatus as TableRunStatusImpl,
     )
@@ -55,6 +57,7 @@ def test_public_api_exposes_the_intended_names():
         "ReadFailure",
         "SyncFailedError",
         "SyncReport",
+        "TableChangeState",
         "TableRunReport",
         "TableRunStatus",
         "ValidationFailure",
@@ -66,6 +69,7 @@ def test_public_api_exposes_the_intended_names():
     assert Engine is EngineImpl
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
+    assert TableChangeState is TableChangeStateImpl
     assert TableRunReport is TableRunReportImpl
     assert Failure is FailureImpl
     assert FailurePhase is FailurePhaseImpl

@@ -45,7 +45,7 @@ class TableRunStatus(StrEnum):
 
 
 class TableChangeState(StrEnum):
-    """What happened to the catalog change intended for one table."""
+    """What happened to one table's intended catalog change within a run."""
 
     NOT_PLANNED = "NOT_PLANNED"
     UNCHANGED = "UNCHANGED"
@@ -308,7 +308,7 @@ class TableRunReport:
         }
 
 
-def table_change_state(report: TableRunReport, *, dry_run: bool) -> TableChangeState:
+def _table_change_state(report: TableRunReport, *, dry_run: bool) -> TableChangeState:
     """Derive what happened to a table's intended catalog change."""
     plan = report.plan
     if plan is None:
@@ -402,6 +402,14 @@ class SyncReport:
         ``report.has_failures or report.has_changes``.
         """
         return any(table_report.has_changes for table_report in self.table_reports)
+
+    @property
+    def table_change_states(self) -> tuple[TableChangeState, ...]:
+        """Catalog change state for each table report, in report order."""
+        return tuple(
+            _table_change_state(table_report, dry_run=self.dry_run)
+            for table_report in self.table_reports
+        )
 
     @property
     def duration_seconds(self) -> float:

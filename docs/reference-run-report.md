@@ -43,6 +43,32 @@ These checks apply when constructing a report directly as well as when the
 engine assembles one. `ExecutionSummary` separately validates the statement
 history inside an execution result.
 
+## Table change states
+
+For Python callers, `SyncReport.table_change_states` returns one
+`TableChangeState` per table report, in the same order as
+`SyncReport.table_reports`. The aggregate owns this view because the distinction
+between a planned dry-run change and an unapplied real-run change depends on
+the run's `dry_run` mode, not on the table report alone.
+
+| Value               | Meaning                                                        |
+| ------------------- | -------------------------------------------------------------- |
+| `NOT_PLANNED`       | Reading or planning failed before a plan was accepted          |
+| `UNCHANGED`         | The accepted plan contained no catalog changes                 |
+| `PLANNED`           | A dry run compiled a non-empty plan without executing it       |
+| `NOT_APPLIED`       | A real-run change was blocked, or its first statement failed   |
+| `PARTIALLY_APPLIED` | Some statements succeeded before a later statement failed      |
+| `APPLIED`           | Every statement in a non-empty real-run plan succeeded         |
+
+Change state is deliberately separate from `TableRunStatus`: status explains
+which phase failed, while change state describes the effect on the catalog. A
+table can therefore be `EXECUTION_FAILED` with either `NOT_APPLIED` or
+`PARTIALLY_APPLIED`, and an unchanged table can still carry a foreign-key
+failure. Import the enum with `from delta_engine import TableChangeState`.
+
+This Python-level derived view does not add fields to `SyncReport.to_dict()` or
+`TableRunReport.to_dict()`; the structured schema below remains version 2.
+
 ## Run-level fields
 
 `SyncReport.to_dict()` returns:
