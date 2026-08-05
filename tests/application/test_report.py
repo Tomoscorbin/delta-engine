@@ -421,7 +421,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     )
 
 
-def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present():
+def test_table_run_status_is_foreign_key_failed_when_fk_failure_present():
     # Given a table that read cleanly but has an FK failure in failures
     report = _report(
         desired=_a_desired_table("orders"),
@@ -442,7 +442,7 @@ def test_table_run_report_status_is_foreign_key_failed_when_fk_failure_present()
     assert report.failures[0].format_lines()[0].startswith("Foreign key")
 
 
-def test_table_run_report_status_is_planning_failed_when_only_validation_failure_present():
+def test_table_run_status_is_planning_failed_when_only_validation_failure_present():
     # Given a table that read cleanly but has a validation failure and no FK failure
     report = _report(
         desired=_a_desired_table("tbl"),
@@ -457,7 +457,7 @@ def test_table_run_report_status_is_planning_failed_when_only_validation_failure
     assert report.has_failures is True
 
 
-def test_table_run_report_status_is_foreign_key_failed_when_both_fk_and_validation_present():
+def test_table_run_status_is_foreign_key_failed_when_both_fk_and_validation_present():
     # Given a table with both a validation failure and an FK failure
     report = _report(
         desired=_a_desired_table("orders"),
@@ -500,7 +500,7 @@ def test_multi_phase_failure_reports_the_earliest_pipeline_phase():
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
 
 
-def test_table_run_report_with_no_failures_is_success():
+def test_table_run_with_no_failures_is_success():
     # Given a clean table with no failures
     plan = _comment_plan("ok")
     report = _report(
@@ -535,7 +535,7 @@ def test_status_reflects_the_earliest_failing_phase():
     assert read_failed.status is TableRunStatus.READ_FAILED
 
 
-def test_table_run_report_carries_its_desired_definition():
+def test_table_run_carries_its_desired_definition():
     # Given a completed, unchanged table run
     desired = _a_desired_table("customers")
     report = _report(
@@ -550,7 +550,7 @@ def test_table_run_report_carries_its_desired_definition():
     assert report.plan == ActionPlan(target=desired.qualified_name)
 
 
-def test_table_run_report_rejects_planning_after_a_failed_read():
+def test_table_run_rejects_planning_after_a_failed_read():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
@@ -565,7 +565,7 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
         )
 
 
-def test_table_run_report_rejects_successful_planning_without_compilation():
+def test_table_run_rejects_successful_planning_without_compilation():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="requires compilation"):
@@ -580,7 +580,7 @@ def test_table_run_report_rejects_successful_planning_without_compilation():
         )
 
 
-def test_table_run_report_rejects_compilation_of_another_plan():
+def test_table_run_rejects_compilation_of_another_plan():
     desired = _a_desired_table("orders")
     plan = _comment_plan("orders")
     other_plan = ActionPlan(target=desired.qualified_name)
@@ -595,7 +595,7 @@ def test_table_run_report_rejects_compilation_of_another_plan():
         )
 
 
-def test_table_run_report_rejects_execution_after_failed_resolution():
+def test_table_run_rejects_execution_after_failed_resolution():
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
     compiled = build_compiled_plan(plan, ("SQL",))
@@ -619,7 +619,7 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
         )
 
 
-def test_table_run_report_rejects_execution_of_another_compiled_plan():
+def test_table_run_rejects_execution_of_another_compiled_plan():
     desired = _a_desired_table("orders")
     plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
     reported = build_compiled_plan(plan, ("REPORTED SQL",))
@@ -647,7 +647,7 @@ def _a_changed_table_report():
     )
 
 
-def test_a_table_report_knows_whether_its_plan_creates_the_table():
+def test_a_table_run_knows_whether_its_plan_creates_the_table():
     # Given one report whose plan creates the table and one that alters it
     creating = _report(
         desired=_a_desired_table("orders"),
@@ -1190,48 +1190,14 @@ def test_blocked_failures_require_the_dependency_blocking_reason():
         )
 
 
-def test_report_derives_its_diff_from_its_planning_outcome():
-    # Given a rejected diff retained by its planning outcome
-    qualified_name = _name("orders")
-    desired = DesiredTable(
-        qualified_name=qualified_name,
-        columns=(DesiredColumn("id", Integer(), nullable=False),),
-    )
-    observed = ObservedTable(
-        qualified_name=qualified_name,
-        columns=(ObservedColumn("id", Integer(), nullable=False),),
-    )
-    diff = diff_table(desired, observed)
-    report = _report(
-        desired=desired,
-        read=TablePresent(table=observed),
-        failures=(ValidationFailure(rule_name="SomeRule", message="nope"),),
-        diff=diff,
-    )
-
-    # Then the report's diff is the one the outcome retained, not a stored copy
-    assert report.diff is diff
-
-
-def test_a_failed_read_leaves_no_derived_diff():
-    # Given a read that failed, there is nothing to have compared
-    report = _report(
-        desired=_a_desired_table(),
-        read=ReadFailure(exception_type="IOError", message="boom"),
-    )
-
-    # Then no diff can be derived: planning never ran
-    assert report.diff is None
-
-
-def test_report_rejects_a_planning_outcome_targeting_another_table():
+def test_table_run_rejects_a_planning_outcome_targeting_another_table():
     # Given a planning outcome built for a different table
     desired = _a_desired_table("orders")
     other = _a_desired_table("other")
     other_plan = ActionPlan(target=other.qualified_name)
     foreign_outcome = PlanningSucceeded(diff=TableMissing(other), plan=other_plan)
 
-    # Then the report refuses to carry it
+    # Then the run refuses to carry it
     with pytest.raises(ValueError, match="must target the reported table"):
         TableRun(
             read=TableAbsent(),

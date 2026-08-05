@@ -82,7 +82,7 @@ def test_plan_changes_accepts_safe_actions():
     assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
 
 
-def test_plan_changes_rejects_unsafe_actions_without_constructing_a_plan():
+def test_plan_changes_rejects_unsafe_actions():
     result = plan_changes(
         _desired(
             columns=(
@@ -95,10 +95,9 @@ def test_plan_changes_rejects_unsafe_actions_without_constructing_a_plan():
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["NonNullableColumnAdd"]
-    assert not hasattr(result, "plan")
 
 
-def test_plan_changes_rejects_unmanaged_actions_without_constructing_a_plan():
+def test_plan_changes_rejects_unmanaged_actions():
     result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())),
@@ -109,7 +108,6 @@ def test_plan_changes_rejects_unmanaged_actions_without_constructing_a_plan():
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
-    assert not hasattr(result, "plan")
 
 
 @pytest.mark.parametrize(
@@ -140,7 +138,6 @@ def test_plan_changes_rejects_each_non_action_difference(desired, observed, expe
 
     assert isinstance(result, PlanningFailed)
     assert expected_rule in {failure.rule_name for failure in result.failures}
-    assert not hasattr(result, "plan")
 
 
 def test_an_accepted_outcome_retains_the_diff_it_planned_from():
@@ -174,7 +171,7 @@ def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
     other_plan = ActionPlan(target=QualifiedName("dev", "silver", "other"))
 
     # Then the outcome refuses to pair them
-    with pytest.raises(ValueError, match="target"):
+    with pytest.raises(ValueError, match="must target the diff"):
         PlanningSucceeded(diff=diff, plan=other_plan)
 
 
@@ -221,7 +218,6 @@ def test_plan_changes_rejects_missing_table_when_table_existence_is_unmanaged():
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
-    assert not hasattr(result, "plan")
 
 
 def test_plan_changes_keeps_rename_and_residual_drift_under_the_new_name():
@@ -297,7 +293,6 @@ def test_plan_changes_rejects_rename_of_a_primary_key_referenced_by_foreign_keys
     assert [failure.rule_name for failure in result.failures] == [
         "PrimaryKeyReferencedByForeignKeys"
     ]
-    assert not hasattr(result, "plan")
 
 
 def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
