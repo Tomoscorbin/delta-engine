@@ -224,8 +224,7 @@ class Engine:
                 read=ReadFailure(exception_type=error.exception_type, message=str(error)),
             )
 
-        # Confirmed absence is a plannable state, not a failure: planning
-        # against None produces the creation plan.
+        # None means a missing table
         observed = read.table if isinstance(read, TablePresent) else None
         planning = plan_changes(resolution.desired, observed)
 
@@ -283,10 +282,7 @@ class Engine:
                 continue
 
             compiled = run.compiled
-            # Entailed by the run's invariants: no failures means planning
-            # succeeded, and successful planning requires compilation.
-            assert compiled is not None  # TODO: remove?
-            if not compiled.compiled_actions:
+            if compiled is None or not compiled.compiled_actions:
                 executed.append(run)
                 continue
 
