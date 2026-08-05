@@ -2,16 +2,16 @@
 High-level orchestration of planning and execution.
 
 `Engine.sync` splits the work by one rule: everything table-local and
-read-only happens in one straight-line pass per table (`_prepare`), and
-everything cross-table or world-mutating happens in its own walk over the
-prepared results. On a real run, if any table fails, `SyncFailedError` is
+read-only happens in one straight-line plan pass per table (`_plan_table`),
+and everything cross-table or world-mutating happens in its own walk over
+the planned runs. On a real run, if any table fails, `SyncFailedError` is
 raised with a formatted summary.
 
 The steps are:
   1. Lower    — lower the declaration set into domain tables, deduplicated
   2. Resolve  — judge the declarations against each other: dependency-first
                 order, dependency edges, structural verdicts
-  3. Prepare  — per table, in dependency order: read the catalog state, diff
+  3. Plan     — per table, in dependency order: read the catalog state, diff
                 it against the declaration, judge the complete diff at the
                 planning boundary, and compile the accepted plan — freezing
                 the outcomes into one complete `TableRun`
@@ -21,14 +21,14 @@ The steps are:
   5. Account  — assemble the aggregate report, deriving dependency blocking
                 from the same edges
 
-Because prepare is read-only, every table is diffed and planned against the
-catalog as it stood before any statement ran, and a dry run is a real run
-that stops after prepare: the prepared runs are the preview. A run is born
-frozen and complete for everything its table can know alone; `None` on it
-means "not applicable" (no planning after a failed read), never "not yet".
-Execution and blocking — the two facts that depend on other tables — are
-attached afterwards as functional updates (`dataclasses.replace`), each
-re-validated by the run's own invariants.
+Because the plan pass is read-only, every table is diffed and planned
+against the catalog as it stood before any statement ran, and a dry run is
+a real run that stops after the plan pass: the planned runs are the
+preview. A run is born frozen and complete for everything its table can
+know alone; `None` on it means "not applicable" (no planning after a failed
+read), never "not yet". Execution and blocking — the two facts that depend
+on other tables — are attached afterwards as functional updates
+(`dataclasses.replace`), each re-validated by the run's own invariants.
 
 Resolution is a pure structural judgment of the declarations against each
 other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked* by
@@ -40,9 +40,9 @@ over the dependency-ordered runs: execution to decide what not to attempt,
 accounting to say why. Because it is derived rather than recorded, blocking
 is equally visible in a dry run, which attempts nothing.
 
-A table that fails an early phase returns early from prepare with that
-failure on its run and is skipped by execution, so all tables are attempted
-and the report is always complete.
+A table that fails an early phase returns early from its plan pass with
+that failure on its run and is skipped by execution, so all tables are
+attempted and the report is always complete.
 """
 
 from dataclasses import replace
@@ -139,12 +139,12 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs lower → resolve → prepare → execute → account. Resolution
-        orders the tables dependency-first with their static facts, prepare
-        takes each table through its read-only phases (read, diff, plan,
-        compile) and freezes one complete ``TableRun``, execution
-        attaches attempted statement results to the tables it reaches, and
-        assembly derives dependency blocking from the edges.
+        Runs lower → resolve → plan → execute → account. Resolution orders
+        the tables dependency-first with their static facts, the plan pass
+        takes each table through its read-only steps (read, diff, judge,
+        compile) and freezes one complete ``TableRun``, execution attaches
+        attempted statement results to the tables it reaches, and assembly
+        derives dependency blocking from the edges.
 
         A table that fails an early phase carries that failure on its run
         and is skipped by execution; it is still included in the report.
@@ -153,7 +153,8 @@ class Engine:
             *tables: The table specifications to synchronize. Duplicate
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
-            dry_run: When True, stop after prepare and attempt no statements
+            dry_run: When True, stop after the plan pass and attempt no
+                statements
                 (zero catalog mutations). No table retains attempted statement
                 results, while its ``plan`` still records the actions compiled
                 from the observed snapshot. Blocking is derived rather than
@@ -178,7 +179,7 @@ class Engine:
         desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
-        runs = tuple(self._prepare(resolution) for resolution in resolve(desired))
+        runs = tuple(self._plan_table(resolution) for resolution in resolve(desired))
         if not dry_run:
             runs = self._execute(runs)
 
@@ -200,9 +201,9 @@ class Engine:
 
         return report
 
-    def _prepare(self, resolution: TableResolution) -> TableRun:
+    def _plan_table(self, resolution: TableResolution) -> TableRun:
         """
-        Take one table through its read-only phases: read, diff, plan, compile.
+        Plan one table: read its catalog state, diff, judge, and compile.
 
         Straight-line, table-local, and free of catalog mutations. Each early
         return is a lifecycle rule — a failed read leaves nothing to diff, a
@@ -238,7 +239,7 @@ class Engine:
             case PlanningSucceeded(plan=plan):
                 compiled = self.executor.compile(plan)
                 logger.info(
-                    "Prepared %s: %d action(s), %d statement(s)",
+                    "Planned %s: %d action(s), %d statement(s)",
                     resolution.qualified_name,
                     len(plan),
                     len(compiled.statements),

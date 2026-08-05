@@ -2,7 +2,7 @@
 Run accounts: per-table and run-level outcome aggregates.
 
 `TableRun` is the immutable account of one table's sync run, born complete
-at the engine's prepare pass and enriched afterwards with the cross-table
+at the engine's plan pass and enriched afterwards with the cross-table
 facts (execution, dependency blocking); `SyncReport` aggregates those
 accounts for the whole run.
 """
@@ -154,7 +154,7 @@ class TableRun:
     """
     Frozen public account of one table's sync run.
 
-    Born complete at the engine's prepare pass: everything the table can know
+    Born complete at the engine's plan pass: everything the table can know
     alone — its resolution, read, planning outcome, and compiled SQL — is
     fixed at construction, in lifecycle field order, and the trailing fields
     default to their not-applicable state. The two facts that depend on other

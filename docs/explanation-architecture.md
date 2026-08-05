@@ -260,14 +260,14 @@ Delta/Databricks engine with a clean adapter seam, not a format-neutral one.
 ## Sync lifecycle
 
 `Engine.sync(...)` splits the work by one rule: everything table-local and
-read-only happens in one straight-line prepare pass per table, and everything
-cross-table or world-mutating happens in its own walk over the prepared
-results. Before any table is prepared, user-facing table sources are lowered
-with `to_desired_table()`, duplicate qualified names are rejected, and the
-desired tables are sorted by qualified name so reports and sync behavior do
-not depend on the order arguments were passed.
+read-only happens in one straight-line plan pass per table, and everything
+cross-table or world-mutating happens in its own walk over the planned runs.
+Before any table is planned, user-facing table sources are lowered with
+`to_desired_table()`, duplicate qualified names are rejected, and the desired
+tables are sorted by qualified name so reports and sync behavior do not
+depend on the order arguments were passed.
 
-Each prepare pass returns a frozen, immutable `TableRun` — the public account
+Each plan pass returns a frozen, immutable `TableRun` — the public account
 of that table's run, complete for everything the table can know alone, with
 failures and status derived from the retained outcomes. The two facts that
 depend on other tables are attached afterwards as functional updates
@@ -288,7 +288,7 @@ sequenceDiagram
     Engine->>Engine: lower desired tables
     Engine->>Resolver: resolve(desired tables)
     Resolver-->>Engine: dependency order + dependency edges + structural verdicts
-    loop dependency-ordered tables (prepare)
+    loop dependency-ordered tables (plan)
         Engine->>Reader: fetch_state(qualified_name)
         Reader-->>Engine: TablePresent / TableAbsent / ReadError
         Engine->>Engine: ReadError → ReadFailure
@@ -317,7 +317,7 @@ The full run, with reporting last:
    included) and retaining each table's dependency edges. This is pure
    declaration analysis, so it precedes every read: a run is born knowing its
    position, its edges, and its verdicts, before any catalog state exists.
-3. **Prepare** (per table, in dependency order — read-only): ask the reader
+3. **Plan** (per table, in dependency order — read-only): ask the reader
    port for the current catalog state; compute the typed `TableDiff` with
    `diff_table`, foreign-key existence included; judge the complete diff at
    the total `plan_diff` boundary, where validation always applies the default
@@ -326,13 +326,13 @@ The full run, with reporting last:
    exact statements used for both dry-run preview and real execution. Each
    early exit is a lifecycle rule — a failed read leaves nothing to diff, a
    rejected diff leaves nothing to compile — and the `TableRun` is frozen and
-   complete when prepare returns it.
+   complete when the plan pass returns it.
 4. **Execute** (real runs only): one walk in dependency order over the frozen
    runs. A run with failures of its own, or with a dependency that will not
    converge, is skipped; the compiled statements of the rest are executed
    until the first failure, and each attempted run is replaced by a copy
-   carrying its execution summary. Because prepare is read-only, every table
-   was planned against the catalog as it stood before any statement ran.
+   carrying its execution summary. Because the plan pass is read-only, every
+   table was planned against the catalog as it stood before any statement ran.
 5. **Account**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
    which derives dependency blocking from the retained edges; or raise
    `SyncFailedError` with that report on real runs that failed.
@@ -346,7 +346,7 @@ phase each one failed in.
 
 | Shape              | Produced by            | Consumed by                      | Purpose                                     |
 | ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
-| `DeltaTable`       | User code              | Application preparation          | Public declaration object                   |
+| `DeltaTable`       | User code              | Application lowering             | Public declaration object                   |
 | `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                      |
 | `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
 | `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
@@ -711,7 +711,7 @@ in Python scope. Within one module that usually means defining the parent
 before the child; across modules it means importing the referenced table.
 
 This source-code order does not determine execution order. The engine sorts
-prepared desired tables by qualified name for deterministic setup, then the
+lowered desired tables by qualified name for deterministic setup, then the
 resolver topologically orders them by FK dependency before execution.
 
 References by dotted name are intentionally not supported in this iteration. If
