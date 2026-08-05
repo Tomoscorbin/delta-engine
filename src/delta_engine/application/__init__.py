@@ -22,7 +22,7 @@ from delta_engine.application.rendering import render_diff, render_report
 from delta_engine.application.report import (
     SyncReport,
     TableChangeState,
-    TableRunReport,
+    TableRun,
     TableRunStatus,
 )
 
@@ -37,7 +37,7 @@ __all__ = [
     "SyncFailedError",
     "SyncReport",
     "TableChangeState",
-    "TableRunReport",
+    "TableRun",
     "TableRunStatus",
     "ValidationFailure",
     "render_diff",

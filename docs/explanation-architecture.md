@@ -72,7 +72,7 @@ through a sync.
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
-| `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
+| `TableRun`   | The immutable public account of one table's run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
@@ -259,17 +259,20 @@ Delta/Databricks engine with a clean adapter seam, not a format-neutral one.
 
 ## Sync lifecycle
 
-`Engine.sync(...)` is a phase chain. Before the chain begins, user-facing table
-sources are prepared: each source is lowered with `to_desired_table()`, duplicate
-qualified names are rejected, and the desired tables are sorted by qualified
-name so reports and sync behavior do not depend on the order arguments were
-passed.
+`Engine.sync(...)` splits the work by one rule: everything table-local and
+read-only happens in one straight-line prepare pass per table, and everything
+cross-table or world-mutating happens in its own walk over the prepared
+results. Before any table is prepared, user-facing table sources are lowered
+with `to_desired_table()`, duplicate qualified names are rejected, and the
+desired tables are sorted by qualified name so reports and sync behavior do
+not depend on the order arguments were passed.
 
-After preparation, the engine runs six internal phases over private `_TableRun`
-objects. A `_TableRun` is a mutable scratch pad for one table. It retains the
-read, planning, resolution, and execution outcomes plus the intermediate diff
-and compiled SQL before it is frozen into an immutable `TableRunReport`.
-Failures and status are derived from those outcomes.
+Each prepare pass returns a frozen, immutable `TableRun` — the public account
+of that table's run, complete for everything the table can know alone, with
+failures and status derived from the retained outcomes. The two facts that
+depend on other tables are attached afterwards as functional updates
+(`dataclasses.replace`, re-validated by the value's own invariants): execution
+results by the execute walk, and derived dependency blocking at assembly.
 
 ```mermaid
 sequenceDiagram
@@ -285,18 +288,21 @@ sequenceDiagram
     Engine->>Engine: lower desired tables
     Engine->>Resolver: resolve(desired tables)
     Resolver-->>Engine: dependency order + dependency edges + structural verdicts
-    Engine->>Reader: fetch_state(qualified_name)
-    Reader-->>Engine: TablePresent / TableAbsent / ReadError
-    Engine->>Engine: ReadError → ReadFailure
-    Engine->>Differ: diff_table(desired, observed_or_none)
-    Differ-->>Engine: TableMissing / TableDrift
-    Engine->>Planner: plan_diff(diff)
-    Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
-    Engine->>Executor: compile(plan)
-    Executor-->>Engine: SQL statements
-    loop dependency-ordered runs
-        Engine->>Engine: block the run if a dependency will not converge
-        Engine->>Executor: execute(statement) until the first failure (real runs)
+    loop dependency-ordered tables (prepare)
+        Engine->>Reader: fetch_state(qualified_name)
+        Reader-->>Engine: TablePresent / TableAbsent / ReadError
+        Engine->>Engine: ReadError → ReadFailure
+        Engine->>Differ: diff_table(desired, observed_or_none)
+        Differ-->>Engine: TableMissing / TableDrift
+        Engine->>Planner: plan_diff(diff)
+        Planner-->>Engine: PlanningSucceeded(diff, plan) / PlanningFailed(diff, failures)
+        Engine->>Executor: compile(plan)
+        Executor-->>Engine: SQL statements
+        Engine->>Engine: freeze the TableRun
+    end
+    loop dependency-ordered runs (execute, real runs only)
+        Engine->>Engine: skip the run if it failed or a dependency will not converge
+        Engine->>Executor: execute(statement) until the first failure
         Executor-->>Engine: success or ExecutionError
     end
     Engine-->>User: SyncReport or SyncFailedError(report)
@@ -309,21 +315,25 @@ The full run, with reporting last:
 2. **Resolve**: order tables dependency-first with `relationships.resolve`,
    judging each declared foreign key structurally (referenced spelling
    included) and retaining each table's dependency edges. This is pure
-   declaration analysis, so it precedes the read: a run is born knowing its
+   declaration analysis, so it precedes every read: a run is born knowing its
    position, its edges, and its verdicts, before any catalog state exists.
-3. **Read**: ask the reader port for the current catalog state of each table.
-4. **Diff**: compute the typed `TableDiff` with `diff_table`, foreign-key
-   existence included.
-5. **Plan**: call the total `plan_diff` boundary with the complete diff;
-   validation always applies the default policy to that one stream. A rejected
-   result contributes validation failures and has no plan; an accepted result
-   carries the privately constructed `ActionPlan` into the next phase.
-6. **Compile**: lower every accepted plan through the executor port and record
-   the exact statements used for both dry-run preview and real execution.
-7. **Execute**: run the compiled statements of tables with a non-empty plan,
-   no failures of their own, and no dependency that will not converge (real
-   runs only).
-8. **Account**: freeze the runs into `SyncReport` through `SyncReport.assemble`,
+3. **Prepare** (per table, in dependency order — read-only): ask the reader
+   port for the current catalog state; compute the typed `TableDiff` with
+   `diff_table`, foreign-key existence included; judge the complete diff at
+   the total `plan_diff` boundary, where validation always applies the default
+   policy to that one stream and both outcomes retain the diff they judged;
+   and lower every accepted plan through the executor port, recording the
+   exact statements used for both dry-run preview and real execution. Each
+   early exit is a lifecycle rule — a failed read leaves nothing to diff, a
+   rejected diff leaves nothing to compile — and the `TableRun` is frozen and
+   complete when prepare returns it.
+4. **Execute** (real runs only): one walk in dependency order over the frozen
+   runs. A run with failures of its own, or with a dependency that will not
+   converge, is skipped; the compiled statements of the rest are executed
+   until the first failure, and each attempted run is replaced by a copy
+   carrying its execution summary. Because prepare is read-only, every table
+   was planned against the catalog as it stood before any statement ran.
+5. **Account**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
    which derives dependency blocking from the retained edges; or raise
    `SyncFailedError` with that report on real runs that failed.
 
@@ -761,7 +771,7 @@ keeps downstream planning focused on schema facts.
 
 ## Reporting and failure semantics
 
-Failures are phase-tagged application values. A `TableRunReport` derives its
+Failures are phase-tagged application values. A `TableRun` derives its
 status from the earliest failing phase, in pipeline order:
 
 - `FOREIGN_KEY_FAILED`
@@ -791,7 +801,7 @@ as a result.
 `dry_run` mode. It distinguishes a dry-run plan from an unapplied real-run plan
 and distinguishes a first-statement execution failure from a later failure
 after partial application. The aggregate owns that derivation because a
-`TableRunReport` alone cannot tell whether absent execution means preview or
+`TableRun` alone cannot tell whether absent execution means preview or
 blocking. `TableRunStatus` remains the independent answer to which phase
 failed.
 

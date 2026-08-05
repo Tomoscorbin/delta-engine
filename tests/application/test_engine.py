@@ -25,7 +25,7 @@ from delta_engine.application.ports import (
 )
 from delta_engine.application.report import (
     SyncReport,
-    TableRunReport,
+    TableRun,
     TableRunStatus,
 )
 from delta_engine.domain.model import ObservedColumn, ObservedTable, QualifiedName, TableKind
@@ -362,11 +362,11 @@ class _FailingMultiStatementExecutor:
         return names
 
 
-def _reports_by_name(report: SyncReport) -> dict[str, TableRunReport]:
+def _reports_by_name(report: SyncReport) -> dict[str, TableRun]:
     return {str(table_report.qualified_name): table_report for table_report in report}
 
 
-def _foreign_key_failures(table_report: TableRunReport) -> list[ForeignKeyFailure]:
+def _foreign_key_failures(table_report: TableRun) -> list[ForeignKeyFailure]:
     return [failure for failure in table_report.failures if isinstance(failure, ForeignKeyFailure)]
 
 
@@ -374,14 +374,14 @@ def _assert_status(
     report: SyncReport,
     fqn: str,
     status: TableRunStatus,
-) -> TableRunReport:
+) -> TableRun:
     table_report = _reports_by_name(report)[fqn]
     assert table_report.status is status
     return table_report
 
 
 def _assert_has_fk_failure(
-    table_report: TableRunReport,
+    table_report: TableRun,
     *,
     reason: ForeignKeyFailureReason,
     references: str | None = None,
@@ -1583,7 +1583,7 @@ def test_sync_fails_at_validation_when_dropping_column_without_column_mapping():
         engine.sync(spec)
 
     # Then it fails at validation, naming the property to declare
-    table_report = excinfo.value.report.table_reports[0]
+    table_report = excinfo.value.report.table_runs[0]
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any(f.rule_name == "ColumnMappingRequiredForDrop" for f in table_report.failures)
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
@@ -1612,7 +1612,7 @@ def test_sync_fails_loud_on_undeclared_managed_property():
         engine.sync(spec)
 
     # Then the sync stops at validation, naming the key to declare
-    table_report = excinfo.value.report.table_reports[0]
+    table_report = excinfo.value.report.table_runs[0]
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any(f.rule_name == "PropertyMustBeDeclared" for f in table_report.failures)
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
@@ -1641,7 +1641,7 @@ def test_metadata_scoped_column_removal_fails_without_drop_precondition():
 
     # Then the single failure is the scope violation — the drop-column
     # precondition is guarded out for unmanaged column structure
-    table_report = excinfo.value.report.table_reports[0]
+    table_report = excinfo.value.report.table_runs[0]
     assert len(table_report.failures) == 1
     assert not any("ColumnMappingRequiredForDrop" in f.rule_name for f in table_report.failures)
     assert any("column structure" in f.message.lower() for f in table_report.failures)
@@ -1826,7 +1826,7 @@ def test_a_rejected_table_still_reports_the_drift_that_was_found():
     report = engine.sync(_spec_adding_not_null("cat.sch.orders"), dry_run=True)
 
     # Then the table has no plan, but the diff that caused the rejection survives
-    (table_report,) = report.table_reports
+    (table_report,) = report.table_runs
     assert table_report.plan is None
     assert table_report.diff is not None
     assert any(
@@ -1844,5 +1844,5 @@ def test_a_failed_read_leaves_no_diff_on_the_report():
     report = engine.sync(_spec("cat.sch.orders"), dry_run=True)
 
     # Then there is nothing to have diffed
-    (table_report,) = report.table_reports
+    (table_report,) = report.table_runs
     assert table_report.diff is None

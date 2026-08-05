@@ -314,7 +314,7 @@ def test_primary_key_declared_in_the_wrong_case_is_rejected(live_connection, liv
 
     # Then the rejection names the rule and both spellings, nothing was
     # planned, and the live table is untouched
-    [table_report] = error.value.report.table_reports
+    [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = table_report.failures
     assert isinstance(failure, ValidationFailure)
@@ -407,7 +407,7 @@ def test_foreign_key_declared_in_the_wrong_case_is_rejected(live_connection, liv
         build_sql_engine(live_connection).sync(child, parent)
 
     # Then each table names its own spelling defect and no DDL ran
-    reports = {str(report.qualified_name): report for report in error.value.report.table_reports}
+    reports = {str(report.qualified_name): report for report in error.value.report.table_runs}
     for name, declared, observed in (
         (parent_name, "orderid", "orderId"),
         (child_name, "orderref", "orderRef"),

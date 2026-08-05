@@ -25,7 +25,7 @@ from delta_engine.application.ports import (
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
-    TableRunReport,
+    TableRun,
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
@@ -70,7 +70,7 @@ def _table_report(
     read: ReadResult,
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
-) -> TableRunReport:
+) -> TableRun:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
     planning_failures = tuple(
         failure for failure in failures if isinstance(failure, ValidationFailure)
@@ -93,7 +93,7 @@ def _table_report(
         structural_failures=resolution_failures,
     )
 
-    return TableRunReport(
+    return TableRun(
         read=read,
         planning=planning,
         compiled=compiled,
@@ -102,9 +102,9 @@ def _table_report(
     )
 
 
-def _message_for(table_report: TableRunReport) -> str:
+def _message_for(table_report: TableRun) -> str:
     """Return the SyncFailedError message produced for a run with this one failed table."""
-    report = SyncReport(started_at=_AT, ended_at=_AT, table_reports=(table_report,))
+    report = SyncReport(started_at=_AT, ended_at=_AT, table_runs=(table_report,))
     return str(SyncFailedError(report))
 
 

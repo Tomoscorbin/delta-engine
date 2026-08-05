@@ -24,7 +24,7 @@ from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
     TableChangeState,
-    TableRunReport,
+    TableRun,
     TableRunStatus,
 )
 from delta_engine.domain.model import (
@@ -149,7 +149,7 @@ def _report(
     execution: ExecutionSummary | None = None,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
     diff: TableDiff | None = None,
-) -> TableRunReport:
+) -> TableRun:
     """Construct a frozen report snapshot from concise test inputs."""
     planning_failures = tuple(
         failure for failure in failures if isinstance(failure, ValidationFailure)
@@ -193,7 +193,7 @@ def _report(
         structural_failures=resolution_failures,
     )
 
-    return TableRunReport(
+    return TableRun(
         read=read,
         planning=planning,
         compiled=compiled,
@@ -241,7 +241,7 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
     )
 
     # When aggregating the sync
-    sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
+    sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(t_ok, t_bad))
 
     # Then has_failures is True
     assert sr.has_failures is True
@@ -293,7 +293,7 @@ def test_sync_report_has_changes_when_any_table_plans_actions():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(changed, unchanged),
+        table_runs=(changed, unchanged),
         dry_run=True,
     )
 
@@ -306,7 +306,7 @@ def test_sync_report_has_no_changes_when_no_table_plans_actions():
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(unchanged,))
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(unchanged,))
     assert report.has_changes is False
 
 
@@ -330,14 +330,14 @@ def test_sync_report_counts_put_every_table_in_exactly_one_bucket():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(changed, unchanged, failed),
+        table_runs=(changed, unchanged, failed),
         dry_run=True,
     )
 
     # Then each is counted once, and the total is their sum
     counts = report.counts
     assert (counts.changed, counts.unchanged, counts.failed) == (1, 1, 1)
-    assert counts.total == len(report.table_reports)
+    assert counts.total == len(report.table_runs)
 
 
 def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
@@ -358,14 +358,14 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
             ),
         ),
     )
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(failed,))
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(failed,))
 
     # Then it counts as failed, not changed: the change was planned, not applied
     assert report.counts == (0, 0, 1)
 
 
 def test_sync_report_reports_its_own_duration():
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=())
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=())
     assert report.duration_seconds == 300.0
 
 
@@ -386,7 +386,7 @@ def test_sync_report_planned_sql_maps_dotted_names_and_omits_empty():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(with_sql, without_sql),
+        table_runs=(with_sql, without_sql),
         dry_run=True,
     )
 
@@ -410,7 +410,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     )
 
     # When aggregating the sync report
-    sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(t_ok, t_bad))
+    sr = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(t_ok, t_bad))
 
     # Then only the failed table appears, keyed by its QualifiedName, with its failures
     mapping = sr.failures_by_table
@@ -554,7 +554,7 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
-        TableRunReport(
+        TableRun(
             read=ReadFailure("IOError", "boom"),
             planning=PlanningSucceeded(
                 diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
@@ -569,7 +569,7 @@ def test_table_run_report_rejects_successful_planning_without_compilation():
     desired = _a_desired_table("orders")
 
     with pytest.raises(ValueError, match="requires compilation"):
-        TableRunReport(
+        TableRun(
             read=TableAbsent(),
             planning=PlanningSucceeded(
                 diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
@@ -586,7 +586,7 @@ def test_table_run_report_rejects_compilation_of_another_plan():
     other_plan = ActionPlan(target=desired.qualified_name)
 
     with pytest.raises(ValueError, match="must match the successful planning outcome"):
-        TableRunReport(
+        TableRun(
             read=TableAbsent(),
             planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=build_compiled_plan(other_plan, ()),
@@ -607,7 +607,7 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
     )
 
     with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
-        TableRunReport(
+        TableRun(
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=compiled,
@@ -626,7 +626,7 @@ def test_table_run_report_rejects_execution_of_another_compiled_plan():
     executed = build_compiled_plan(plan, ("EXECUTED SQL",))
 
     with pytest.raises(ValueError, match="reported compiled plan"):
-        TableRunReport(
+        TableRun(
             read=TablePresent(table=_an_observed_table()),
             planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=reported,
@@ -708,7 +708,7 @@ def test_change_state_is_not_planned_when_no_plan_was_accepted():
     )
 
     # When deriving change states through the completed real-run report
-    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(report,))
 
     # Then the table has no accepted plan to apply
     assert sync.table_change_states == (TableChangeState.NOT_PLANNED,)
@@ -723,7 +723,7 @@ def test_change_state_is_not_planned_when_planning_rejected_the_diff():
     )
 
     # When deriving change states through the completed real-run report
-    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(report,))
 
     # Then status explains the planning failure and no change was planned
     assert report.status is TableRunStatus.PLANNING_FAILED
@@ -747,7 +747,7 @@ def test_change_state_is_unchanged_for_an_empty_plan_even_when_the_run_failed():
     )
 
     # When deriving change states through the completed real-run report
-    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(report,))
 
     # Then failure status and catalog change state remain independent
     assert report.status is TableRunStatus.FOREIGN_KEY_FAILED
@@ -762,7 +762,7 @@ def test_change_state_is_planned_for_a_dry_run_with_changes():
     sync = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(report,),
+        table_runs=(report,),
         dry_run=True,
     )
 
@@ -780,7 +780,7 @@ def test_change_state_is_not_applied_when_a_real_change_is_dependency_blocked():
     )
 
     # When deriving change states through the validated aggregate
-    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(report,))
 
     # Then none of the intended catalog change was applied
     assert sync.table_change_states == (TableChangeState.NOT_APPLIED,)
@@ -813,7 +813,7 @@ def test_first_and_later_execution_failures_have_distinct_change_states():
     sync = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(first_failed, later_failed),
+        table_runs=(first_failed, later_failed),
     )
 
     # Then their failure status matches but their catalog effects differ
@@ -834,7 +834,7 @@ def test_change_state_is_applied_after_complete_successful_execution():
     )
 
     # When deriving change states through the validated aggregate
-    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(report,))
+    sync = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(report,))
 
     # Then the intended catalog change is fully applied
     assert sync.table_change_states == (TableChangeState.APPLIED,)
@@ -858,7 +858,7 @@ def test_sync_report_rejects_execution_results_on_a_dry_run():
         SyncReport(
             started_at=_t0(),
             ended_at=_t1(),
-            table_reports=(executed,),
+            table_runs=(executed,),
             dry_run=True,
         )
 
@@ -870,7 +870,7 @@ def test_sync_report_rejects_an_unexplained_unexecuted_real_change():
     # When constructing a real-run aggregate
     # Then the unexplained missing execution is rejected
     with pytest.raises(ValueError):
-        SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(changed,))
+        SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(changed,))
 
 
 def test_sync_report_accepts_a_real_change_blocked_by_a_failed_dependency():
@@ -883,10 +883,10 @@ def test_sync_report_accepts_a_real_change_blocked_by_a_failed_dependency():
     )
 
     # When constructing the aggregate
-    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_reports=(blocked,))
+    report = SyncReport(started_at=_t0(), ended_at=_t1(), table_runs=(blocked,))
 
     # Then the explained lack of execution is accepted
-    assert report.table_reports == (blocked,)
+    assert report.table_runs == (blocked,)
 
 
 def test_change_states_do_not_extend_the_structured_report_schema():
@@ -894,7 +894,7 @@ def test_change_states_do_not_extend_the_structured_report_schema():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(_a_changed_table_report(),),
+        table_runs=(_a_changed_table_report(),),
         dry_run=True,
     )
 
@@ -1007,7 +1007,7 @@ def test_sync_report_to_dict_is_json_serialisable_and_complete():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(_a_changed_table_report(),),
+        table_runs=(_a_changed_table_report(),),
         dry_run=True,
     )
     payload = report.to_dict()
@@ -1027,7 +1027,7 @@ def test_to_dict_is_deterministic():
     report = SyncReport(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=(_a_changed_table_report(),),
+        table_runs=(_a_changed_table_report(),),
         dry_run=True,
     )
 
@@ -1061,11 +1061,11 @@ def _sound_report(name: str, dependencies: tuple[ForeignKeyConstraint, ...] = ()
     )
 
 
-def _assemble(*table_reports: TableRunReport) -> SyncReport:
+def _assemble(*table_runs: TableRun) -> SyncReport:
     return SyncReport.assemble(
         started_at=_t0(),
         ended_at=_t1(),
-        table_reports=table_reports,
+        table_runs=table_runs,
         dry_run=True,
     )
 
@@ -1079,7 +1079,7 @@ def test_assemble_bakes_blocked_failures_onto_a_sound_dependent_of_a_failed_pare
     report = _assemble(parent, child)
 
     # Then the child's blocking is derived into its frozen projection
-    _, derived_child = report.table_reports
+    _, derived_child = report.table_runs
     (failure,) = derived_child.blocked_failures
     assert failure.table == _name("b")
     assert failure.references == _name("a")
@@ -1100,7 +1100,7 @@ def test_assemble_propagates_blocking_along_chains():
     report = _assemble(*reports)
 
     # Then each blocked table names the parent that blocked it
-    _, derived_b, derived_c = report.table_reports
+    _, derived_b, derived_c = report.table_runs
     assert [failure.references for failure in derived_b.blocked_failures] == [_name("a")]
     assert [failure.references for failure in derived_c.blocked_failures] == [_name("b")]
 
@@ -1121,7 +1121,7 @@ def test_assemble_does_not_bake_onto_a_table_with_its_own_failures():
     # Then the child keeps exactly its own failures — blocking is not stacked on
     # top of a table that already failed (it still counts as not converged for
     # its own dependents, which the chain test covers)
-    _, derived_child = report.table_reports
+    _, derived_child = report.table_runs
     assert derived_child.blocked_failures == ()
     assert derived_child.status is TableRunStatus.PLANNING_FAILED
 
@@ -1132,7 +1132,7 @@ def test_assemble_with_no_failures_returns_the_reports_unchanged():
 
     report = _assemble(*reports)
 
-    assert report.table_reports == reports
+    assert report.table_runs == reports
     assert report.has_failures is False
 
 
@@ -1158,6 +1158,18 @@ def test_blocked_failures_reject_a_recorded_execution_outcome():
             desired=_a_desired_table("b"),
             read=TablePresent(table=_an_observed_table()),
             execution=_execution(plan),
+            blocked_failures=(_blocked_failure(),),
+        )
+
+
+def test_blocked_failures_reject_a_table_with_its_own_failures():
+    # Given a table that failed planning on its own account: assembly never
+    # attaches blocking to such a table, so a value claiming both is false
+    with pytest.raises(ValueError, match="cannot also carry its own failures"):
+        _report(
+            desired=_a_desired_table("b"),
+            read=TablePresent(table=_an_observed_table()),
+            failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
             blocked_failures=(_blocked_failure(),),
         )
 
@@ -1221,7 +1233,7 @@ def test_report_rejects_a_planning_outcome_targeting_another_table():
 
     # Then the report refuses to carry it
     with pytest.raises(ValueError, match="must target the reported table"):
-        TableRunReport(
+        TableRun(
             read=TableAbsent(),
             planning=foreign_outcome,
             compiled=build_compiled_plan(other_plan, ()),

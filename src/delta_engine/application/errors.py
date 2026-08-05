@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from delta_engine.domain.model import QualifiedName
 
 if TYPE_CHECKING:
-    from delta_engine.application.report import SyncReport, TableRunReport
+    from delta_engine.application.report import SyncReport, TableRun
 
 
 class ReadError(Exception):
@@ -51,22 +51,20 @@ class SyncFailedError(Exception):
         """Build a rich error message from the supplied sync `report`."""
         self.report = report
 
-        failed_tables = [
-            table_report for table_report in report.table_reports if table_report.has_failures
-        ]
-        header = f"Sync failed: {len(failed_tables)}/{len(report.table_reports)} tables failed"
+        failed_runs = [run for run in report.table_runs if run.has_failures]
+        header = f"Sync failed: {len(failed_runs)}/{len(report.table_runs)} tables failed"
 
         details: list[str] = []
-        for table_report in failed_tables:
-            details.extend(_format_failure_detail(table_report))
+        for run in failed_runs:
+            details.extend(_format_failure_detail(run))
 
         super().__init__("\n".join([header, *details]))
 
 
-def _format_failure_detail(table_report: TableRunReport) -> list[str]:
+def _format_failure_detail(run: TableRun) -> list[str]:
     """Return the detail lines describing why a single table failed."""
-    lines = [f"\n{table_report.qualified_name} [{table_report.status.value}]"]
-    for failure in table_report.failures:
+    lines = [f"\n{run.qualified_name} [{run.status.value}]"]
+    for failure in run.failures:
         for line in failure.format_lines():
             lines.append(f"    {line}")
     return lines

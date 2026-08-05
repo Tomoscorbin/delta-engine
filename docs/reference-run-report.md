@@ -11,7 +11,7 @@ tags:
 of a run, for CI gates, run-history persistence, and structured logging. The
 human-readable views are `render_report` and `render_diff`.
 
-`TableRunReport.to_dict()` projects a single table's record, the same object
+`TableRun.to_dict()` projects a single table's record, the same object
 that appears in the run-level `tables` list.
 
 ## Stability
@@ -46,8 +46,8 @@ history inside an execution result.
 ## Table change states
 
 For Python callers, `SyncReport.table_change_states` returns one
-`TableChangeState` per table report, in the same order as
-`SyncReport.table_reports`. The aggregate owns this view because the distinction
+`TableChangeState` per table run, in the same order as
+`SyncReport.table_runs`. The aggregate owns this view because the distinction
 between a planned dry-run change and an unapplied real-run change depends on
 the run's `dry_run` mode, not on the table report alone.
 
@@ -73,7 +73,7 @@ before execution shows statement progress as `0/n`. Dry-run diff blocks and
 their changed/unchanged/failed footer keep describing planned work instead.
 
 This Python-level derived view does not add fields to `SyncReport.to_dict()` or
-`TableRunReport.to_dict()`; the structured schema below remains version 2.
+`TableRun.to_dict()`; the structured schema below remains version 2.
 
 ## Run-level fields
 
@@ -91,7 +91,7 @@ This Python-level derived view does not add fields to `SyncReport.to_dict()` or
 
 ## Table-level fields
 
-Each entry in `tables`, and the whole of `TableRunReport.to_dict()`:
+Each entry in `tables`, and the whole of `TableRun.to_dict()`:
 
 | Field                    | Type             | Meaning                                                      |
 | ------------------------ | ---------------- | ------------------------------------------------------------ |

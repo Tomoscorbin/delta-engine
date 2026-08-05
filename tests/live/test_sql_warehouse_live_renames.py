@@ -125,7 +125,7 @@ def test_sync_replaces_a_primary_key_across_a_rename_in_one_plan(live_connection
     # The plan is a complete transcript: the key is dropped and re-added
     # explicitly around the rename rather than relying on the implicit drop
     # Databricks performs during RENAME COLUMN.
-    [table_report] = report.table_reports
+    [table_report] = report.table_runs
     assert table_report.compiled is not None
     statements = table_report.compiled.statements
     assert len(statements) == 3
@@ -179,7 +179,7 @@ def test_sync_replaces_a_composite_primary_key_when_one_member_is_renamed(
 
     # Renaming one member still replaces the whole key: the drop and re-add
     # bracket the rename, and the untouched member keeps its position.
-    [table_report] = report.table_reports
+    [table_report] = report.table_runs
     assert table_report.compiled is not None
     statements = table_report.compiled.statements
     assert len(statements) == 3
@@ -342,7 +342,7 @@ def test_sync_rejects_a_primary_key_rename_referenced_by_a_foreign_key(
     # Renaming the key column would let RENAME COLUMN silently drop the
     # child's foreign key, so the engine refuses client-side: nothing was
     # planned and neither table changed.
-    [parent_report] = error.value.report.table_reports
+    [parent_report] = error.value.report.table_runs
     assert parent_report.status is TableRunStatus.PLANNING_FAILED
     [failure] = parent_report.failures
     assert isinstance(failure, ValidationFailure)
@@ -378,7 +378,7 @@ def test_sync_rejects_an_ambiguous_rename_without_catalog_change(live_connection
             )
         )
 
-    [table_report] = error.value.report.table_reports
+    [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert "AmbiguousColumnRename" in {
         failure.rule_name
@@ -419,7 +419,7 @@ def test_sync_renames_a_partition_column_without_layout_drift(live_connection, l
 
     # Partition metadata follows the mapped column's identity, so the whole
     # plan is the rename itself — no layout action, no partitioning drift.
-    [table_report] = report.table_reports
+    [table_report] = report.table_runs
     assert table_report.compiled is not None
     [statement] = table_report.compiled.statements
     assert "RENAME COLUMN" in statement
@@ -464,7 +464,7 @@ def test_sync_renames_a_clustering_key_without_layout_drift(live_connection, liv
 
     # Clustering keys follow the mapped column's identity, so the whole plan
     # is the rename itself — no re-clustering action, no layout drift.
-    [table_report] = report.table_reports
+    [table_report] = report.table_runs
     assert table_report.compiled is not None
     [statement] = table_report.compiled.statements
     assert "RENAME COLUMN" in statement

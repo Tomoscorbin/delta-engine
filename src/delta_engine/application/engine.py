@@ -14,21 +14,21 @@ The steps are:
   3. Prepare  — per table, in dependency order: read the catalog state, diff
                 it against the declaration, judge the complete diff at the
                 planning boundary, and compile the accepted plan — freezing
-                the outcomes into one complete `TableRunReport`
+                the outcomes into one complete `TableRun`
   4. Execute  — the one cross-table walk (real runs only): fold the blocking
-                rule over the reports and attach attempted statement results
+                rule over the runs and attach attempted statement results
                 to each executed table
   5. Account  — assemble the aggregate report, deriving dependency blocking
                 from the same edges
 
 Because prepare is read-only, every table is diffed and planned against the
 catalog as it stood before any statement ran, and a dry run is a real run
-that stops after prepare: the prepared reports are the preview. A report is
-born frozen and complete for everything its table can know alone; `None` on
-it means "not applicable" (no planning after a failed read), never "not
-yet". Execution and blocking — the two facts that depend on other tables —
-are attached afterwards as functional updates (`dataclasses.replace`), each
-re-validated by the report's own invariants.
+that stops after prepare: the prepared runs are the preview. A run is born
+frozen and complete for everything its table can know alone; `None` on it
+means "not applicable" (no planning after a failed read), never "not yet".
+Execution and blocking — the two facts that depend on other tables — are
+attached afterwards as functional updates (`dataclasses.replace`), each
+re-validated by the run's own invariants.
 
 Resolution is a pure structural judgment of the declarations against each
 other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked* by
@@ -36,13 +36,13 @@ another table's failure is nobody's outcome to record: it is the derived
 consequence of the dependency edges and the other tables' fates. One rule
 states it — a table did not converge if it has failures of its own or a
 dependency did not — and execution and accounting each fold that same rule
-over the dependency-ordered reports: execution to decide what not to
-attempt, accounting to say why. Because it is derived rather than recorded,
-blocking is equally visible in a dry run, which attempts nothing.
+over the dependency-ordered runs: execution to decide what not to attempt,
+accounting to say why. Because it is derived rather than recorded, blocking
+is equally visible in a dry run, which attempts nothing.
 
 A table that fails an early phase returns early from prepare with that
-failure on its report and is skipped by execution, so all tables are
-attempted and the report is always complete.
+failure on its run and is skipped by execution, so all tables are attempted
+and the report is always complete.
 """
 
 from dataclasses import replace
@@ -78,7 +78,7 @@ from delta_engine.application.ports import (
 from delta_engine.application.relationships import TableResolution, resolve
 from delta_engine.application.report import (
     SyncReport,
-    TableRunReport,
+    TableRun,
 )
 from delta_engine.domain.model import (
     DesiredTable,
@@ -142,11 +142,11 @@ class Engine:
         Runs lower → resolve → prepare → execute → account. Resolution
         orders the tables dependency-first with their static facts, prepare
         takes each table through its read-only phases (read, diff, plan,
-        compile) and freezes one complete ``TableRunReport``, execution
+        compile) and freezes one complete ``TableRun``, execution
         attaches attempted statement results to the tables it reaches, and
         assembly derives dependency blocking from the edges.
 
-        A table that fails an early phase carries that failure on its report
+        A table that fails an early phase carries that failure on its run
         and is skipped by execution; it is still included in the report.
 
         Args:
@@ -178,14 +178,14 @@ class Engine:
         desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
-        reports = tuple(self._prepare(resolution) for resolution in resolve(desired))
+        runs = tuple(self._prepare(resolution) for resolution in resolve(desired))
         if not dry_run:
-            reports = self._execute(reports)
+            runs = self._execute(runs)
 
         report = SyncReport.assemble(
             started_at=run_started,
             ended_at=datetime.now(UTC),
-            table_reports=reports,
+            table_runs=runs,
             dry_run=dry_run,
         )
 
@@ -195,19 +195,19 @@ class Engine:
         logger.info(
             "%s completed successfully for %d table(s)",
             "Dry run" if dry_run else "Sync",
-            len(report.table_reports),
+            len(report.table_runs),
         )
 
         return report
 
-    def _prepare(self, resolution: TableResolution) -> TableRunReport:
+    def _prepare(self, resolution: TableResolution) -> TableRun:
         """
         Take one table through its read-only phases: read, diff, plan, compile.
 
         Straight-line, table-local, and free of catalog mutations. Each early
         return is a lifecycle rule — a failed read leaves nothing to diff, a
         rejected diff leaves nothing to compile — so every ``None`` on the
-        returned report means "not applicable", never "not yet". Execution is
+        returned run means "not applicable", never "not yet". Execution is
         deliberately absent: whether this table may execute depends on other
         tables' fates, which is the execute walk's concern.
         """
@@ -223,12 +223,9 @@ class Engine:
                 error.exception_type,
                 error,
             )
-            return TableRunReport(
-                read=ReadFailure(exception_type=error.exception_type, message=str(error)),
-                planning=None,
-                compiled=None,
+            return TableRun(
                 resolution=resolution,
-                execution=None,
+                read=ReadFailure(exception_type=error.exception_type, message=str(error)),
             )
 
         observed = read.table if isinstance(read, TablePresent) else None
@@ -237,13 +234,7 @@ class Engine:
         match planning:
             case PlanningFailed():
                 logger.error("Planning failed for %s", resolution.qualified_name)
-                return TableRunReport(
-                    read=read,
-                    planning=planning,
-                    compiled=None,
-                    resolution=resolution,
-                    execution=None,
-                )
+                return TableRun(resolution=resolution, read=read, planning=planning)
             case PlanningSucceeded(plan=plan):
                 compiled = self.executor.compile(plan)
                 logger.info(
@@ -252,17 +243,13 @@ class Engine:
                     len(plan),
                     len(compiled.statements),
                 )
-                return TableRunReport(
-                    read=read,
-                    planning=planning,
-                    compiled=compiled,
-                    resolution=resolution,
-                    execution=None,
+                return TableRun(
+                    resolution=resolution, read=read, planning=planning, compiled=compiled
                 )
             case _ as unreachable:
                 assert_never(unreachable)
 
-    def _execute(self, reports: tuple[TableRunReport, ...]) -> tuple[TableRunReport, ...]:
+    def _execute(self, runs: tuple[TableRun, ...]) -> tuple[TableRun, ...]:
         """
         Execute every convergent table's compiled plan, skipping dependents of failure.
 
@@ -275,47 +262,47 @@ class Engine:
         joins the set through the same rule when its dependency failed, so
         blocking propagates through tables with no work of their own. Each
         attempted table is replaced by a copy carrying its execution summary,
-        re-validated by the report's own invariants.
+        re-validated by the run's own invariants.
         """
         not_converged: set[QualifiedName] = set()
-        executed: list[TableRunReport] = []
+        executed: list[TableRun] = []
 
-        for report in reports:
-            if report.has_failures:
-                not_converged.add(report.qualified_name)
-                executed.append(report)
+        for run in runs:
+            if run.has_failures:
+                not_converged.add(run.qualified_name)
+                executed.append(run)
                 continue
 
-            blocking_failures = report.resolution.blocked_by(not_converged)
+            blocking_failures = run.resolution.blocked_by(not_converged)
             if blocking_failures:
-                not_converged.add(report.qualified_name)
+                not_converged.add(run.qualified_name)
                 logger.error(
                     "Execution blocked for %s (%d foreign key failure(s))",
-                    report.qualified_name,
+                    run.qualified_name,
                     len(blocking_failures),
                 )
-                executed.append(report)
+                executed.append(run)
                 continue
 
-            compiled = report.compiled
-            # Entailed by the report's invariants: no failures means planning
+            compiled = run.compiled
+            # Entailed by the run's invariants: no failures means planning
             # succeeded, and successful planning requires compilation.
             assert compiled is not None
             if not compiled.compiled_actions:
-                executed.append(report)
+                executed.append(run)
                 continue
 
             summary = self._execute_compiled(compiled)
             if summary.failures:
-                not_converged.add(report.qualified_name)
+                not_converged.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
                 len(summary.results),
-                report.qualified_name,
+                run.qualified_name,
                 len(summary.failures),
             )
-            executed.append(replace(report, execution=summary))
+            executed.append(replace(run, execution=summary))
 
         return tuple(executed)
 

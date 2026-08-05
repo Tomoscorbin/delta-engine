@@ -1,8 +1,10 @@
 """
-Run reports: per-table and run-level outcome aggregates.
+Run accounts: per-table and run-level outcome aggregates.
 
-`TableRunReport` is the immutable public snapshot created from one completed
-engine run; `SyncReport` aggregates those table snapshots.
+`TableRun` is the immutable account of one table's sync run, born complete
+at the engine's prepare pass and enriched afterwards with the cross-table
+facts (execution, dependency blocking); `SyncReport` aggregates those
+accounts for the whole run.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -148,12 +150,19 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
 
 
 @dataclass(frozen=True, slots=True)
-class TableRunReport:
+class TableRun:
     """
-    Frozen public projection of one completed table run.
+    Frozen public account of one table's sync run.
 
-    The engine creates a report after all phases finish, projecting its
-    canonical phase outcomes into this immutable snapshot.
+    Born complete at the engine's prepare pass: everything the table can know
+    alone — its resolution, read, planning outcome, and compiled SQL — is
+    fixed at construction, in lifecycle field order, and the trailing fields
+    default to their not-applicable state. The two facts that depend on other
+    tables are attached afterwards as functional updates: ``execution`` by
+    the execute walk, ``blocked_failures`` at assembly. A run without
+    execution is a legitimate terminal state (a dry run, a blocked table, a
+    no-op plan), not an unfinished one.
+
     ``plan`` is ``None`` when reading or planning failed; a successfully
     planned no-op retains an empty, target-bearing plan.
     ``compiled`` is populated on dry and real runs so the accepted plan and its
@@ -167,11 +176,11 @@ class TableRunReport:
     ``None`` when the read failed, because planning never ran.
     """
 
-    read: ReadResult
-    planning: PlanningResult | None
-    compiled: CompiledPlan | None
     resolution: TableResolution
-    execution: ExecutionSummary | None
+    read: ReadResult
+    planning: PlanningResult | None = None
+    compiled: CompiledPlan | None = None
+    execution: ExecutionSummary | None = None
     blocked_failures: ListOrTuple[ForeignKeyFailure] = ()
 
     def __post_init__(self) -> None:
@@ -201,6 +210,8 @@ class TableRunReport:
         if self.blocked_failures:
             if self.execution is not None:
                 raise ValueError("A blocked table records no execution outcome")
+            if read_failed or planning_failed or resolution_failed:
+                raise ValueError("A blocked table cannot also carry its own failures")
             if any(
                 failure.reason is not ForeignKeyFailureReason.BLOCKED_BY_FAILED_DEPENDENCY
                 for failure in self.blocked_failures
@@ -308,9 +319,9 @@ class TableRunReport:
         }
 
 
-def _table_change_state(report: TableRunReport, *, dry_run: bool) -> TableChangeState:
+def _table_change_state(run: TableRun, *, dry_run: bool) -> TableChangeState:
     """Derive what happened to a table's intended catalog change."""
-    plan = report.plan
+    plan = run.plan
     if plan is None:
         return TableChangeState.NOT_PLANNED
     if not plan:
@@ -318,7 +329,7 @@ def _table_change_state(report: TableRunReport, *, dry_run: bool) -> TableChange
     if dry_run:
         return TableChangeState.PLANNED
 
-    execution = report.execution
+    execution = run.execution
     if execution is None:
         return TableChangeState.NOT_APPLIED
     if not execution.failures:
@@ -334,16 +345,16 @@ class SyncReport:
 
     started_at: datetime
     ended_at: datetime
-    table_reports: ListOrTuple[TableRunReport]
+    table_runs: ListOrTuple[TableRun]
     dry_run: bool = False
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "table_reports", tuple(self.table_reports))
-        if self.dry_run and any(report.execution is not None for report in self.table_reports):
+        object.__setattr__(self, "table_runs", tuple(self.table_runs))
+        if self.dry_run and any(run.execution is not None for run in self.table_runs):
             raise ValueError("A dry run cannot contain execution results")
         if not self.dry_run and any(
-            report.has_changes and report.execution is None and not report.has_failures
-            for report in self.table_reports
+            run.has_changes and run.execution is None and not run.has_failures
+            for run in self.table_runs
         ):
             raise ValueError(
                 "A real run with a non-empty plan requires execution or a failure explaining"
@@ -356,13 +367,13 @@ class SyncReport:
         *,
         started_at: datetime,
         ended_at: datetime,
-        table_reports: ListOrTuple[TableRunReport],
+        table_runs: ListOrTuple[TableRun],
         dry_run: bool,
     ) -> "SyncReport":
         """
         Assemble the run report, deriving dependency blocking from the graph.
 
-        Folds the blocking rule over the reports in dependency order: a table
+        Folds the blocking rule over the runs in dependency order: a table
         that did not converge — own failures, or a dependency that did not —
         marks its name, and a sound table its resolution reports as blocked is
         replaced by a copy carrying those failures. The run recorded nothing
@@ -370,27 +381,27 @@ class SyncReport:
         visible, dry and real runs alike.
         """
         not_converged: set[QualifiedName] = set()
-        derived: list[TableRunReport] = []
-        for report in table_reports:
-            if report.has_failures:
-                not_converged.add(report.qualified_name)
-                derived.append(report)
+        derived: list[TableRun] = []
+        for run in table_runs:
+            if run.has_failures:
+                not_converged.add(run.qualified_name)
+                derived.append(run)
                 continue
-            blocking = report.resolution.blocked_by(not_converged)
+            blocking = run.resolution.blocked_by(not_converged)
             if blocking:
-                not_converged.add(report.qualified_name)
-            derived.append(replace(report, blocked_failures=blocking) if blocking else report)
+                not_converged.add(run.qualified_name)
+            derived.append(replace(run, blocked_failures=blocking) if blocking else run)
         return cls(
             started_at=started_at,
             ended_at=ended_at,
-            table_reports=derived,
+            table_runs=derived,
             dry_run=dry_run,
         )
 
     @property
     def has_failures(self) -> bool:
         """Return True if any table failed in the run."""
-        return any(table_report.has_failures for table_report in self.table_reports)
+        return any(run.has_failures for run in self.table_runs)
 
     @property
     def has_changes(self) -> bool:
@@ -401,15 +412,12 @@ class SyncReport:
         validation contributes failures, not changes. The CI gate idiom is
         ``report.has_failures or report.has_changes``.
         """
-        return any(table_report.has_changes for table_report in self.table_reports)
+        return any(run.has_changes for run in self.table_runs)
 
     @property
     def table_change_states(self) -> tuple[TableChangeState, ...]:
-        """Catalog change state for each table report, in report order."""
-        return tuple(
-            _table_change_state(table_report, dry_run=self.dry_run)
-            for table_report in self.table_reports
-        )
+        """Catalog change state for each table run, in run order."""
+        return tuple(_table_change_state(run, dry_run=self.dry_run) for run in self.table_runs)
 
     @property
     def duration_seconds(self) -> float:
@@ -426,10 +434,10 @@ class SyncReport:
         overstate what the run achieved.
         """
         changed = unchanged = failed = 0
-        for table_report in self.table_reports:
-            if table_report.has_failures:
+        for run in self.table_runs:
+            if run.has_failures:
                 failed += 1
-            elif table_report.has_changes:
+            elif run.has_changes:
                 changed += 1
             else:
                 unchanged += 1
@@ -439,19 +447,15 @@ class SyncReport:
     def planned_sql_statements(self) -> dict[str, tuple[str, ...]]:
         """Dotted table name → the SQL its plan compiles to; no-op tables omitted."""
         return {
-            str(table_report.qualified_name): table_report.compiled.statements
-            for table_report in self.table_reports
-            if table_report.compiled is not None and table_report.compiled.statements
+            str(run.qualified_name): run.compiled.statements
+            for run in self.table_runs
+            if run.compiled is not None and run.compiled.statements
         }
 
     @property
     def failures_by_table(self) -> dict[QualifiedName, tuple[Failure, ...]]:
         """Mapping of qualified table name to its failures (if any)."""
-        return {
-            table_report.qualified_name: table_report.failures
-            for table_report in self.table_reports
-            if table_report.has_failures
-        }
+        return {run.qualified_name: run.failures for run in self.table_runs if run.has_failures}
 
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
@@ -462,8 +466,8 @@ class SyncReport:
             "dry_run": self.dry_run,
             "has_changes": self.has_changes,
             "has_failures": self.has_failures,
-            "tables": [table_report.to_dict() for table_report in self.table_reports],
+            "tables": [run.to_dict() for run in self.table_runs],
         }
 
-    def __iter__(self) -> Iterator[TableRunReport]:
-        return iter(self.table_reports)
+    def __iter__(self) -> Iterator[TableRun]:
+        return iter(self.table_runs)

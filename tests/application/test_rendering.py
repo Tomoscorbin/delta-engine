@@ -30,7 +30,7 @@ from delta_engine.application.rendering import (
     render_report,
     run_summary_footer,
 )
-from delta_engine.application.report import SyncReport, TableRunReport
+from delta_engine.application.report import SyncReport, TableRun
 from delta_engine.domain.model import (
     Array,
     Decimal,
@@ -488,13 +488,13 @@ def test_every_unresolvable_type_has_registered_diff_entries():
 # ---------- diff block with failures hint ----------
 
 
-def _report_with_empty_plan_and_failure() -> TableRunReport:
+def _report_with_empty_plan_and_failure() -> TableRun:
     qualified_name = QualifiedName("dev", "silver", "orders")
     desired = DesiredTable(qualified_name=qualified_name, columns=(DesiredColumn("id", Integer()),))
     observed = ObservedTable(
         qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
     )
-    return TableRunReport(
+    return TableRun(
         read=TablePresent(table=observed),
         planning=PlanningFailed(
             diff=diff_table(desired, observed),
@@ -518,7 +518,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     # Given a fully in-sync table
     report = _report_with_empty_plan_and_failure()
     plan = ActionPlan(target=report.desired.qualified_name)
-    healthy = TableRunReport(
+    healthy = TableRun(
         read=report.read,
         planning=PlanningSucceeded(diff=TableMissing(report.desired), plan=plan),
         compiled=build_compiled_plan(plan, ()),
@@ -574,7 +574,7 @@ def test_diff_block_reports_a_read_failure_instead_of_a_diff():
     # Given a table whose catalog read failed
     qualified_name = QualifiedName("cat", "sch", "orders")
     failure = ReadFailure("IOError", "boom")
-    report = TableRunReport(
+    report = TableRun(
         read=failure,
         planning=None,
         compiled=None,
@@ -618,7 +618,7 @@ def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failur
     else:
         assert plan is not None
         compiled = build_compiled_plan(plan, statements)
-    return TableRunReport(
+    return TableRun(
         read=TablePresent(
             table=ObservedTable(
                 qualified_name=qualified_name, columns=(ObservedColumn("id", Integer()),)
@@ -731,12 +731,12 @@ def test_grid_statement_counts_distinguish_blocking_from_pre_compilation_failure
     real_run = SyncReport(
         started_at=started_at,
         ended_at=ended_at,
-        table_reports=(blocked, rejected),
+        table_runs=(blocked, rejected),
     )
     dry_run = SyncReport(
         started_at=started_at,
         ended_at=ended_at,
-        table_reports=(blocked,),
+        table_runs=(blocked,),
         dry_run=True,
     )
 
@@ -835,7 +835,7 @@ def test_run_summary_footer_counts_changed_unchanged_and_failed():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(changed, unchanged, failed),
+        table_runs=(changed, unchanged, failed),
         dry_run=True,
     )
 
@@ -877,7 +877,7 @@ def test_real_run_footer_counts_each_catalog_change_outcome():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(applied, partial, blocked, unchanged, not_planned),
+        table_runs=(applied, partial, blocked, unchanged, not_planned),
     )
 
     # When rendering the real-run footer
@@ -893,7 +893,7 @@ def test_a_single_table_run_uses_the_singular_noun():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(_grid_report("orders"),),
+        table_runs=(_grid_report("orders"),),
     )
 
     assert run_summary_footer(sync).startswith("1 table:")
@@ -911,7 +911,7 @@ def test_render_report_is_the_status_grid_followed_by_the_summary_footer():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(changed, failed),
+        table_runs=(changed, failed),
         dry_run=True,
     )
 
@@ -931,7 +931,7 @@ def test_render_report_of_an_empty_run_is_a_header_and_zero_footer():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(),
+        table_runs=(),
     )
 
     # When rendering the whole report
@@ -957,7 +957,7 @@ def test_render_report_shows_a_full_failures_section_for_failed_tables():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(failed,),
+        table_runs=(failed,),
     )
 
     rendered = render_report(sync)
@@ -979,7 +979,7 @@ def test_failures_section_nests_supporting_detail_under_its_error_line():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(failed,),
+        table_runs=(failed,),
     )
 
     lines = render_report(sync).splitlines()
@@ -996,7 +996,7 @@ def test_render_report_failures_section_has_an_underlined_header():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(failed,),
+        table_runs=(failed,),
     )
 
     lines = render_report(sync).splitlines()
@@ -1014,7 +1014,7 @@ def test_render_report_has_no_failures_section_when_all_succeed():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(changed,),
+        table_runs=(changed,),
         dry_run=True,
     )
 
@@ -1036,8 +1036,8 @@ def test_render_report_shows_dry_run_banner_only_for_dry_runs():
     )
 
     # When rendering both valid aggregates
-    dry_rendered = render_report(SyncReport(**base, table_reports=(planned,), dry_run=True))
-    applied_rendered = render_report(SyncReport(**base, table_reports=(applied,)))
+    dry_rendered = render_report(SyncReport(**base, table_runs=(planned,), dry_run=True))
+    applied_rendered = render_report(SyncReport(**base, table_runs=(applied,)))
 
     # Then the banner appears (below the title) for a dry run and is absent otherwise
     assert "PLAN — no planned SQL executed" in dry_rendered.splitlines()
@@ -1052,7 +1052,7 @@ def test_render_report_is_titled():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(changed,),
+        table_runs=(changed,),
         dry_run=True,
     )
 
@@ -1072,7 +1072,7 @@ def test_render_diff_is_titled():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(first,),
+        table_runs=(first,),
         dry_run=True,
     )
 
@@ -1093,7 +1093,7 @@ def test_render_diff_joins_each_tables_change_block_in_report_order():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(first, second),
+        table_runs=(first, second),
         dry_run=True,
     )
 
@@ -1134,7 +1134,7 @@ def test_render_diff_marks_unapplied_real_run_changes_in_their_headers():
     sync = SyncReport(
         started_at=datetime(2025, 1, 1, 0, 0, 0),
         ended_at=datetime(2025, 1, 1, 0, 0, 3),
-        table_reports=(applied, blocked, partial),
+        table_runs=(applied, blocked, partial),
     )
 
     # When rendering the real run's diff
@@ -1233,7 +1233,7 @@ def test_a_rejected_table_shows_the_drift_that_was_refused():
             ObservedColumn("obsolete", String()),
         ),
     )
-    report = TableRunReport(
+    report = TableRun(
         read=TablePresent(table=observed),
         planning=PlanningFailed(
             diff=diff_table(desired, observed),
@@ -1249,7 +1249,7 @@ def test_a_rejected_table_shows_the_drift_that_was_refused():
         SyncReport(
             started_at=datetime(2025, 1, 1, 0, 0, 0),
             ended_at=datetime(2025, 1, 1, 0, 0, 3),
-            table_reports=(report,),
+            table_runs=(report,),
         )
     )
 
@@ -1274,7 +1274,7 @@ def test_a_rejected_table_shows_the_differences_no_action_could_close():
         columns=tuple(ObservedColumn(name, data_type) for name, data_type in columns),
         partitioned_by=("country",),
     )
-    report = TableRunReport(
+    report = TableRun(
         read=TablePresent(table=observed),
         planning=PlanningFailed(
             diff=diff_table(desired, observed),

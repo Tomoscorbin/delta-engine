@@ -20,7 +20,7 @@ from delta_engine.application.diff_entries import (
     plan_entries,
 )
 from delta_engine.application.failures import ReadFailure
-from delta_engine.application.report import SyncReport, TableChangeState, TableRunReport
+from delta_engine.application.report import SyncReport, TableChangeState, TableRun
 from delta_engine.domain.plan import ActionPlan, TableDrift
 
 # Shown wherever a report has a readable state but no planned actions. One
@@ -73,9 +73,7 @@ def _render_entry_groups(entries: Sequence[DiffEntry]) -> list[str]:
     return lines
 
 
-def _change_outcome_marker(
-    report: TableRunReport, change_state: TableChangeState | None
-) -> str | None:
+def _change_outcome_marker(report: TableRun, change_state: TableChangeState | None) -> str | None:
     """Describe an incomplete real-run outcome; omit previews and complete outcomes."""
     if change_state is TableChangeState.NOT_APPLIED:
         return change_state.value
@@ -87,7 +85,7 @@ def _change_outcome_marker(
     return None
 
 
-def _render_diff_block(report: TableRunReport, *, change_state: TableChangeState | None) -> str:
+def _render_diff_block(report: TableRun, *, change_state: TableChangeState | None) -> str:
     """Render one table's change block, optionally marking its aggregate outcome."""
     header = str(report.qualified_name)
     if isinstance(report.read, ReadFailure):
@@ -118,14 +116,12 @@ def _render_diff_block(report: TableRunReport, *, change_state: TableChangeState
     return "\n".join([header, *_render_entry_groups(plan_entries(plan))])
 
 
-def render_diff_block(report: TableRunReport) -> str:
+def render_diff_block(report: TableRun) -> str:
     """Render one table's planned change block without claiming a run outcome."""
     return _render_diff_block(report, change_state=None)
 
 
-def _grid_statements_cell(
-    report: TableRunReport, change_state: TableChangeState | None = None
-) -> str:
+def _grid_statements_cell(report: TableRun, change_state: TableChangeState | None = None) -> str:
     """STATEMENTS cell: execution progress, compiled count, or — when none compiled."""
     progress = report.statement_progress
     if progress is not None:
@@ -145,7 +141,7 @@ def _humanized_action_summary(plan: ActionPlan | None) -> str:
     return ", ".join(parts) or _NO_CHANGES
 
 
-def _grid_detail(report: TableRunReport) -> str:
+def _grid_detail(report: TableRun) -> str:
     """Return the DETAIL cell: first failure headline, or a per-category change count."""
     if report.has_failures:
         failures = report.failures
@@ -161,7 +157,7 @@ def _truncate(text: str, limit: int = _DETAIL_MAX_CHARS) -> str:
 
 
 def _grid_row_cells(
-    report: TableRunReport, change_state: TableChangeState | None = None
+    report: TableRun, change_state: TableChangeState | None = None
 ) -> tuple[str, str, str, str]:
     """Return the four grid cells for one report (DETAIL already truncated)."""
     return (
@@ -172,7 +168,7 @@ def _grid_row_cells(
     )
 
 
-def render_grid(reports: Sequence[TableRunReport]) -> str:
+def render_grid(reports: Sequence[TableRun]) -> str:
     """Render an aligned TABLE | STATUS | STATEMENTS | DETAIL grid for ``reports``."""
     rows = [_GRID_HEADERS, *(_grid_row_cells(report) for report in reports)]
     return "\n".join(_aligned_rows(rows))
@@ -185,7 +181,7 @@ def _render_run_grid(report: SyncReport) -> str:
         *(
             _grid_row_cells(table_report, change_state)
             for table_report, change_state in zip(
-                report.table_reports, report.table_change_states, strict=True
+                report.table_runs, report.table_change_states, strict=True
             )
         ),
     ]
@@ -199,7 +195,7 @@ def _count_phrase(count: int, singular: str, plural: str) -> str:
 
 def run_summary_footer(report: SyncReport) -> str:
     """Summarise planned work for a preview or catalog outcomes for a real run."""
-    total = _count_phrase(len(report.table_reports), "table", "tables")
+    total = _count_phrase(len(report.table_runs), "table", "tables")
     summary = _planned_summary(report) if report.dry_run else _real_run_summary(report)
     prefix = f"{total}: {summary}" if summary else total
     return f"{prefix} ({report.duration_seconds:.1f}s)"
@@ -229,7 +225,7 @@ def _dry_run_banner(report: SyncReport) -> str:
     return "PLAN — no planned SQL executed" if report.dry_run else ""
 
 
-def render_failures_section(reports: Sequence[TableRunReport]) -> str:
+def render_failures_section(reports: Sequence[TableRun]) -> str:
     """Render full per-table failure detail for every failed table; empty when none failed."""
     failed = [report for report in reports if report.has_failures]
     if not failed:
@@ -253,7 +249,7 @@ def render_report(report: SyncReport) -> str:
         _heading("SYNC REPORT"),
         _dry_run_banner(report),
         _render_run_grid(report),
-        render_failures_section(report.table_reports),
+        render_failures_section(report.table_runs),
         run_summary_footer(report),
     )
     return "\n\n".join(part for part in parts if part)
@@ -264,7 +260,7 @@ def render_diff(report: SyncReport) -> str:
     blocks = [
         _render_diff_block(table_report, change_state=change_state)
         for table_report, change_state in zip(
-            report.table_reports, report.table_change_states, strict=True
+            report.table_runs, report.table_change_states, strict=True
         )
     ]
     return "\n\n".join([_heading("DIFF"), *blocks])
