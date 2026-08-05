@@ -127,8 +127,7 @@ def test_reader_rejects_non_default_string_collation(live_connection, live_table
     table_name = live_tables("collation")
     execute_sql(
         live_connection,
-        f"CREATE TABLE {qualified_table(table_name)} "
-        "(value STRING COLLATE UTF8_LCASE) USING DELTA",
+        f"CREATE TABLE {qualified_table(table_name)} (value STRING COLLATE UTF8_LCASE) USING DELTA",
     )
     reader = WarehouseReader(WarehouseSqlRunner(live_connection))
 
@@ -509,8 +508,7 @@ def test_variant_feature_enablement_round_trips(live_connection, live_tables):
     [table_report] = report.table_runs
     assert table_report.compiled is not None
     assert any(
-        "delta.feature.variantType" in statement
-        for statement in table_report.compiled.statements
+        "delta.feature.variantType" in statement for statement in table_report.compiled.statements
     )
     resync = engine.sync(extended).table_runs[0]
     assert resync.compiled is not None
