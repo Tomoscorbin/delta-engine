@@ -89,7 +89,7 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 6 | Medium | Rename name frames are documented but not enforced | A valid `ActionPlan` can compile actions against stale column names |
 | 7 ✅ | High | Compiled execution does not prove plan coverage | A changed table can report success without executing work |
 | 8 ✅ | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
-| 9 | High | The machine report reuses lossy display rendering | Structured diagnostics are truncated and wire names follow Python symbols |
+| 9 ✅ | High | The machine report reuses lossy display rendering | Structured diagnostics are truncated and wire names follow Python symbols |
 | 10 | High | The closed data-type vocabulary is operationally open | Invalid types fail late or bypass feature policy |
 | 11 | Medium | Unresolvable differences are not classified exhaustively | A new blocker can be silently omitted from a successful plan |
 | 12 | Medium | Other error translators also catch beyond their boundary | Adapter and import defects become expected operational failures |
@@ -518,6 +518,37 @@ messages actionable but did not move the machine boundary: `_failure_records`
 still serializes `" ".join(failure.format_lines())`, so the versioned payload
 still receives head-truncated display text, and the wire identifiers still
 derive from Python symbol names. The finding stands.
+
+### Resolved at MVP scope (2026-08-05)
+
+[PR #329](https://github.com/Tomoscorbin/delta-engine/pull/329) plugged the
+data loss and guarded the renames, deliberately stopping short of the full
+recommended direction.
+
+Each failure record now carries its variant's lossless facts beside the
+unchanged `phase` / `type` / `message` keys: `exception_type` and the full
+untruncated `diagnostic` for read and execution failures, the 0-based
+`statement_index` and `sql` for execution failures, `rule` / `subject` /
+`details` (physical lines, not one embedded-newline string) for validation
+failures, and `reason` / `columns` / `references` for foreign-key failures.
+The projection lives in one `_failure_facts` match at the schema boundary in
+`report.py`; `failures.py` and the renderers are untouched and display output
+is byte-identical. The schema stays at version 2 — additive keys only — and
+the bare literal became `_SCHEMA_VERSION`.
+
+Rename fragility is guarded by freeze pins rather than wire codes: exact-set
+tests make the current symbol-derived names the contract (phases, failure
+type names, FK reason codes, entry kinds), and a `Failure.__subclasses__()`
+coverage pin makes an unhandled variant fail two named tests instead of
+silently emitting a lossy record. A rename now breaks a test naming the wire
+contract instead of silently changing the documented format.
+
+Deliberately deferred, not oversight: explicit wire codes owned by the
+boundary (the pins give equivalent protection until a rename is actually
+wanted), typed schema definitions, and the shared failure-block renderer
+(`_message_head` stays inside `format_lines()`). The read-failure double-log
+dedup this finding blocked is now unblocked, since the payload retains the
+full traceback.
 
 ## 10. Close or explicitly extend the data-type vocabulary
 
