@@ -212,13 +212,9 @@ class Engine:
         deliberately absent: whether this table may execute depends on other
         tables' fates, which is the execute walk's concern.
         """
-        # A structural failure does not end the pass: the plan and its SQL are
-        # still legitimate facts to report — the execute walk is what skips.
         if resolution.structural_failures:
             logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
 
-        # The pass's only catalog I/O. An unreadable table ends here: nothing
-        # downstream applies without an observed state.
         try:
             read = self.reader.fetch_state(resolution.qualified_name)
         except ReadError as error:
@@ -240,13 +236,9 @@ class Engine:
 
         match planning:
             case PlanningFailed():
-                # Rejected — nothing to compile; the outcome retains the
-                # judged diff so the run can still show what drifted.
                 logger.error("Planning failed for %s", resolution.qualified_name)
                 return TableRun(resolution=resolution, read=read, planning=planning)
             case PlanningSucceeded(plan=plan):
-                # Compiled on dry and real runs alike: the previewed and the
-                # executed statements are the same artifact.
                 compiled = self.executor.compile(plan)
                 logger.info(
                     "Planned %s: %d action(s), %d statement(s)",
