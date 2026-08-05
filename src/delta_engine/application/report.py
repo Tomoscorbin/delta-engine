@@ -16,6 +16,7 @@ from typing import Any, Final, NamedTuple
 
 from delta_engine.application.diff_entries import DiffEntry, drift_entries, plan_entries
 from delta_engine.application.failures import (
+    ExecutionFailure,
     Failure,
     FailurePhase,
     ForeignKeyFailure,
@@ -137,13 +138,38 @@ def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, 
     return _entry_records(drift_entries(planning.diff))
 
 
-def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
+def _failure_facts(failure: Failure) -> dict[str, Any]:
+    """
+    The variant's own lossless facts, added beside the rendered ``message``.
+
+    ``message`` may truncate a long backend message for display;
+    ``diagnostic`` carries the complete text for the variants that have one.
+    """
+    match failure:
+        case ReadFailure():
+            return {
+                "exception_type": failure.exception_type,
+                "diagnostic": failure.message,
+            }
+        case ExecutionFailure():
+            return {
+                "exception_type": failure.exception_type,
+                "diagnostic": failure.message,
+                "statement_index": failure.statement_index,
+                "sql": failure.statement,
+            }
+        case _:
+            return {}
+
+
+def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:
     """Project failures as flat records, in phase order as carried."""
     return [
         {
             "phase": failure.phase.name,
             "type": type(failure).__name__,
             "message": " ".join(failure.format_lines()),
+            **_failure_facts(failure),
         }
         for failure in failures
     ]

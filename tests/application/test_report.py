@@ -990,6 +990,45 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
     ]
 
 
+def test_a_read_failure_record_retains_the_full_backend_message():
+    # The display message keeps only the first five lines; the machine
+    # record must carry the whole backend message.
+    long_message = "\n".join(f"line {n}" for n in range(1, 10))
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure(exception_type="AnalysisException", message=long_message),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["exception_type"] == "AnalysisException"
+    assert record["diagnostic"] == long_message
+
+
+def test_an_execution_failure_record_carries_its_statement_facts():
+    statement = "ALTER TABLE `cat`.`schema`.`orders` ALTER COLUMN id COMMENT 'x'"
+    long_message = "\n".join(f"line {n}" for n in range(1, 10))
+    plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=plan,
+        execution=_execution(
+            plan,
+            _failed_exec(0, preview=statement, exc="DeltaAnalysisException", msg=long_message),
+        ),
+    )
+
+    payload = report.to_dict()
+    (record,) = payload["failures"]
+
+    assert record["exception_type"] == "DeltaAnalysisException"
+    assert record["diagnostic"] == long_message
+    assert record["sql"] == statement
+    # 0-based on purpose: the index addresses the sibling statement list.
+    assert payload["planned_sql_statements"][record["statement_index"]] == statement
+
+
 def test_table_to_dict_reports_execution_counts_when_executed():
     # The counts are statement-denominated: statements applied of statements planned.
     statement = "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
