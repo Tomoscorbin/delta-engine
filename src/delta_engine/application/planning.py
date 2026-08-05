@@ -16,15 +16,32 @@ from delta_engine.domain.plan import (
 
 @dataclass(frozen=True, slots=True)
 class PlanningSucceeded:
-    """Accepted diff and the validated executable plan constructed from it."""
+    """
+    The accepted diff and the validated executable plan constructed from it.
 
+    The two facts are born together in :func:`plan_diff` and stay together
+    here: construction proves the plan targets the diff it was judged from, so
+    consumers never have to re-associate them.
+    """
+
+    diff: TableDiff
     plan: ActionPlan
+
+    def __post_init__(self) -> None:
+        if self.plan.target != self.diff.target:
+            raise ValueError("Accepted plan must target the diff it was judged from")
 
 
 @dataclass(frozen=True, slots=True)
 class PlanningFailed:
-    """Rejected diff; no action plan exists for this result variant."""
+    """
+    The rejected diff and the failures that rejected it.
 
+    No action plan exists for this result variant; the diff is retained so a
+    report can still show what drifted.
+    """
+
+    diff: TableDiff
     failures: ListOrTuple[ValidationFailure]
 
     def __post_init__(self) -> None:
@@ -61,13 +78,13 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
     exactly one stream with no side channels. This remains the only boundary
     that constructs an :class:`ActionPlan`; a rejected result carries
     validation failures and deliberately has no plan, making execution of
-    unvalidated drift unrepresentable. The plan carries the relation kind its
-    actions lower against: the observed kind for drift, and the default
-    ordinary kind for a creation.
+    unvalidated drift unrepresentable. Both outcomes retain the diff they
+    judged. The plan carries the relation kind its actions lower against: the
+    observed kind for drift, and the default ordinary kind for a creation.
     """
     failures = validate_diff(diff)
     if failures:
-        return PlanningFailed(failures=failures)
+        return PlanningFailed(diff=diff, failures=failures)
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
@@ -75,4 +92,4 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
             plan = ActionPlan(target=missing.target, actions=missing.actions)
         case _ as unreachable:
             assert_never(unreachable)
-    return PlanningSucceeded(plan=plan)
+    return PlanningSucceeded(diff=diff, plan=plan)

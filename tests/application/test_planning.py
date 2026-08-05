@@ -23,6 +23,7 @@ from delta_engine.domain.model import (
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
+    ActionPlan,
     AddColumn,
     AlterColumnType,
     CreateTable,
@@ -146,6 +147,45 @@ def test_plan_diff_rejects_each_non_action_difference(desired, observed, expecte
     assert isinstance(result, PlanningFailed)
     assert expected_rule in {failure.rule_name for failure in result.failures}
     assert not hasattr(result, "plan")
+
+
+def test_an_accepted_outcome_retains_the_diff_it_judged():
+    diff = diff_table(
+        _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
+        _observed(),
+    )
+
+    result = plan_diff(diff)
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.diff is diff
+
+
+def test_a_rejected_outcome_retains_the_diff_it_judged():
+    diff = diff_table(
+        _desired(
+            columns=(
+                DesiredColumn("id", Integer()),
+                DesiredColumn("required", Integer(), nullable=False),
+            )
+        ),
+        _observed(),
+    )
+
+    result = plan_diff(diff)
+
+    assert isinstance(result, PlanningFailed)
+    assert result.diff is diff
+
+
+def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
+    # Given a diff judged for one table and a plan built for another
+    diff = diff_table(_desired(), None)
+    other_plan = ActionPlan(target=QualifiedName("dev", "silver", "other"))
+
+    # Then the outcome refuses to pair them
+    with pytest.raises(ValueError, match="target"):
+        PlanningSucceeded(diff=diff, plan=other_plan)
 
 
 def test_plan_diff_accepts_no_op_as_an_empty_plan():

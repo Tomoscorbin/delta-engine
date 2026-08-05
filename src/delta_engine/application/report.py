@@ -123,18 +123,16 @@ def _change_records(plan: ActionPlan | None) -> list[dict[str, str]]:
     return _entry_records(plan_entries(plan))
 
 
-def _rejected_change_records(
-    diff: TableDiff | None, plan: ActionPlan | None
-) -> list[dict[str, str]]:
+def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, str]]:
     """
     Summarise the differences a rejected diff found, in diff order.
 
-    Empty whenever a plan exists: an accepted diff's differences are its
+    Empty for an accepted outcome: an accepted diff's differences are its
     changes, already projected by ``_change_records``.
     """
-    if plan is not None or not isinstance(diff, TableDrift):
+    if not isinstance(planning, PlanningFailed) or not isinstance(planning.diff, TableDrift):
         return []
-    return _entry_records(drift_entries(diff))
+    return _entry_records(drift_entries(planning.diff))
 
 
 def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
@@ -163,10 +161,10 @@ class TableRunReport:
     ``blocked_failures`` is the derived consequence of other tables' fates,
     baked in at assembly — a blocked table records no execution outcome of its
     own.
-    ``diff`` is the complete set of differences the engine found — actions and
-    unresolvable differences alike — retained so a table whose plan was
-    rejected can still show what drifted. It is ``None`` when the read failed,
-    and may be ``None`` on a hand-constructed report.
+    ``diff`` is derived from the planning outcome, which retains the complete
+    set of differences it judged — actions and unresolvable differences alike
+    — so a table whose plan was rejected can still show what drifted. It is
+    ``None`` when the read failed, because planning never ran.
     """
 
     read: ReadResult
@@ -175,7 +173,6 @@ class TableRunReport:
     resolution: TableResolution
     execution: ExecutionSummary | None
     blocked_failures: ListOrTuple[ForeignKeyFailure] = ()
-    diff: TableDiff | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "blocked_failures", tuple(self.blocked_failures))
@@ -187,12 +184,10 @@ class TableRunReport:
             raise ValueError("Planning cannot follow a failed read")
         if not read_failed and self.planning is None:
             raise ValueError("A successful read requires a planning outcome")
-        if read_failed and self.diff is not None:
-            raise ValueError("A failed read produces no diff")
+        if self.planning is not None and self.planning.diff.target != self.qualified_name:
+            raise ValueError("Planning outcome must target the reported table")
 
         plan = self.plan
-        if plan is not None and plan.target != self.qualified_name:
-            raise ValueError("Planned action target must match the reported table")
         if plan is None and self.compiled is not None:
             raise ValueError("Compilation requires a successful planning outcome")
         if plan is not None and self.compiled is None:
@@ -216,6 +211,11 @@ class TableRunReport:
     def plan(self) -> ActionPlan | None:
         """The accepted plan, or ``None`` when reading or planning failed."""
         return accepted_plan(self.planning)
+
+    @property
+    def diff(self) -> TableDiff | None:
+        """The differences planning judged, or ``None`` when the read failed."""
+        return None if self.planning is None else self.planning.diff
 
     @property
     def failures(self) -> tuple[Failure, ...]:
@@ -299,7 +299,7 @@ class TableRunReport:
             "has_changes": self.has_changes,
             "has_failures": self.has_failures,
             "changes": _change_records(self.plan),
-            "rejected_changes": _rejected_change_records(self.diff, self.plan),
+            "rejected_changes": _rejected_change_records(self.planning),
             "planned_sql_statements": list(
                 self.compiled.statements if self.compiled is not None else ()
             ),

@@ -135,7 +135,7 @@ class _TableRun:
     resolution: TableResolution
     read: ReadResult | None = None
     diff: TableDiff | None = None
-    planning: PlanningResult | None = None  # TODO: diff should be on PlanningResult
+    planning: PlanningResult | None = None
     compiled: CompiledPlan | None = None
     execution: ExecutionSummary | None = None
 
@@ -177,7 +177,6 @@ class _TableRun:
             compiled=self.compiled,
             resolution=self.resolution,
             execution=self.execution,
-            diff=self.diff,
         )
 
 

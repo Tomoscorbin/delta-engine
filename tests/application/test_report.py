@@ -38,7 +38,7 @@ from delta_engine.domain.model import (
     String,
     TableFeature,
 )
-from delta_engine.domain.plan import TableDiff, diff_table
+from delta_engine.domain.plan import TableDiff, TableMissing, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     CreateTable,
@@ -169,13 +169,14 @@ def _report(
         assert plan is None or isinstance(plan, ActionPlan)
         report_plan = plan
 
+    judged_diff = diff if diff is not None else TableMissing(desired)
     if isinstance(read, ReadFailure):
         planning = None
     elif planning_failures:
-        planning = PlanningFailed(planning_failures)
+        planning = PlanningFailed(diff=judged_diff, failures=planning_failures)
     else:
         assert isinstance(report_plan, ActionPlan)
-        planning = PlanningSucceeded(report_plan)
+        planning = PlanningSucceeded(diff=judged_diff, plan=report_plan)
 
     if report_plan is None:
         compiled = None
@@ -199,7 +200,6 @@ def _report(
         resolution=resolution,
         execution=execution,
         blocked_failures=blocked_failures,
-        diff=diff,
     )
 
 
@@ -556,7 +556,9 @@ def test_table_run_report_rejects_planning_after_a_failed_read():
     with pytest.raises(ValueError, match="Planning cannot follow a failed read"):
         TableRunReport(
             read=ReadFailure("IOError", "boom"),
-            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            planning=PlanningSucceeded(
+                diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
+            ),
             compiled=None,
             resolution=TableResolution(desired, (), ()),
             execution=None,
@@ -569,7 +571,9 @@ def test_table_run_report_rejects_successful_planning_without_compilation():
     with pytest.raises(ValueError, match="requires compilation"):
         TableRunReport(
             read=TableAbsent(),
-            planning=PlanningSucceeded(ActionPlan(target=desired.qualified_name)),
+            planning=PlanningSucceeded(
+                diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
+            ),
             compiled=None,
             resolution=TableResolution(desired, (), ()),
             execution=None,
@@ -584,7 +588,7 @@ def test_table_run_report_rejects_compilation_of_another_plan():
     with pytest.raises(ValueError, match="must match the successful planning outcome"):
         TableRunReport(
             read=TableAbsent(),
-            planning=PlanningSucceeded(plan),
+            planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=build_compiled_plan(other_plan, ()),
             resolution=TableResolution(desired, (), ()),
             execution=None,
@@ -605,7 +609,7 @@ def test_table_run_report_rejects_execution_after_failed_resolution():
     with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
         TableRunReport(
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningSucceeded(plan),
+            planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=compiled,
             resolution=TableResolution(desired, (), (failure,)),
             execution=ExecutionSummary(
@@ -624,7 +628,7 @@ def test_table_run_report_rejects_execution_of_another_compiled_plan():
     with pytest.raises(ValueError, match="reported compiled plan"):
         TableRunReport(
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningSucceeded(plan),
+            planning=PlanningSucceeded(diff=TableMissing(desired), plan=plan),
             compiled=reported,
             resolution=TableResolution(desired, (), ()),
             execution=ExecutionSummary(
@@ -1174,17 +1178,55 @@ def test_blocked_failures_require_the_dependency_blocking_reason():
         )
 
 
-def test_a_report_cannot_claim_a_diff_after_a_failed_read():
-    # Given a read that failed, there is nothing to have compared
-    desired = _a_desired_table()
-    observed = _an_observed_table()
+def test_report_derives_its_diff_from_its_planning_outcome():
+    # Given a rejected diff retained by its planning outcome
+    qualified_name = _name("orders")
+    desired = DesiredTable(
+        qualified_name=qualified_name,
+        columns=(DesiredColumn("id", Integer(), nullable=False),),
+    )
+    observed = ObservedTable(
+        qualified_name=qualified_name,
+        columns=(ObservedColumn("id", Integer(), nullable=False),),
+    )
+    diff = diff_table(desired, observed)
+    report = _report(
+        desired=desired,
+        read=TablePresent(table=observed),
+        failures=(ValidationFailure(rule_name="SomeRule", message="nope"),),
+        diff=diff,
+    )
 
-    # Then constructing a report that claims both is rejected
-    with pytest.raises(ValueError, match="failed read produces no diff"):
-        _report(
-            desired=desired,
-            read=ReadFailure(exception_type="IOError", message="boom"),
-            diff=diff_table(desired, observed),
+    # Then the report's diff is the one the outcome judged, not a stored copy
+    assert report.diff is diff
+
+
+def test_a_failed_read_leaves_no_derived_diff():
+    # Given a read that failed, there is nothing to have compared
+    report = _report(
+        desired=_a_desired_table(),
+        read=ReadFailure(exception_type="IOError", message="boom"),
+    )
+
+    # Then no diff can be derived: planning never ran
+    assert report.diff is None
+
+
+def test_report_rejects_a_planning_outcome_targeting_another_table():
+    # Given a planning outcome judged for a different table
+    desired = _a_desired_table("orders")
+    other = _a_desired_table("other")
+    other_plan = ActionPlan(target=other.qualified_name)
+    foreign_outcome = PlanningSucceeded(diff=TableMissing(other), plan=other_plan)
+
+    # Then the report refuses to carry it
+    with pytest.raises(ValueError, match="must target the reported table"):
+        TableRunReport(
+            read=TableAbsent(),
+            planning=foreign_outcome,
+            compiled=build_compiled_plan(other_plan, ()),
+            resolution=TableResolution(desired, (), ()),
+            execution=None,
         )
 
 
