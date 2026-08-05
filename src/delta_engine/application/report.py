@@ -100,6 +100,10 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 )
 
 
+# The versioned wire format `to_dict` emits; additive keys do not bump it.
+_SCHEMA_VERSION: Final = 2
+
+
 def _entry_records(entries: Iterable[DiffEntry]) -> list[dict[str, str]]:
     """Project interpreted diff entries as flat records, in the order given."""
     return [
@@ -499,7 +503,7 @@ class SyncReport:
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
-            "schema_version": 2,
+            "schema_version": _SCHEMA_VERSION,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "dry_run": self.dry_run,

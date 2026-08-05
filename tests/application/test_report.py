@@ -3,9 +3,11 @@ import json
 
 import pytest
 
+from delta_engine.application.diff_entries import DiffCategory
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
+    FailurePhase,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
@@ -1067,6 +1069,43 @@ def test_a_foreign_key_failure_record_names_its_edge_and_reason_code():
     assert record["references"] == "cat.schema.a"
     # No "table" key: it would duplicate the enclosing record's "name".
     assert "table" not in record
+
+
+def test_the_wire_vocabulary_is_frozen():
+    # These strings are the schema_version 2 contract (reference-run-report.md).
+    # A rename that reaches this test is a wire-format change: extend the
+    # contract and the reference doc deliberately, or revert the rename.
+    # Exact equality on purpose — an addition must arrive here too.
+    assert {phase.name for phase in FailurePhase} == {
+        "READ",
+        "PLANNING",
+        "FOREIGN_KEY",
+        "EXECUTION",
+    }
+    assert {cls.__name__ for cls in Failure.__subclasses__()} == {
+        "ReadFailure",
+        "ValidationFailure",
+        "ExecutionFailure",
+        "ForeignKeyFailure",
+    }
+    assert {reason.value for reason in ForeignKeyFailureReason} == {
+        "CYCLE",
+        "UNRESOLVABLE_REFERENCE",
+        "BLOCKED_BY_FAILED_DEPENDENCY",
+        "REFERENCED_COLUMNS_NOT_A_KEY",
+        "REFERENCED_COLUMN_TYPE_MISMATCH",
+        "REFERENCED_COLUMN_CASE_MISMATCH",
+    }
+    assert {category.name.lower() for category in DiffCategory} == {
+        "columns",
+        "keys",
+        "clustering",
+        "partitioning",
+        "features",
+        "properties",
+        "tags",
+        "comments",
+    }
 
 
 def test_table_to_dict_reports_execution_counts_when_executed():
