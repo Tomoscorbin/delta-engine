@@ -1,4 +1,5 @@
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -296,6 +297,22 @@ def test_other_describe_error_reads_as_failed():
 
     assert "warehouse gone" in str(error)
     assert isinstance(error.__cause__, RuntimeError)
+
+
+def test_a_failed_read_raises_without_logging(caplog):
+    # The raised error is the adapter's whole account of a failed read: the
+    # engine logs the failure once, and the exception chain keeps the
+    # traceback. A second, adapter-level log line would narrate the same
+    # event twice.
+    responses = {describe_json_query(QN): RuntimeError("warehouse gone")}
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="delta_engine.adapters.databricks.read"),
+        pytest.raises(ReadError),
+    ):
+        read_catalog_state(_router(responses), QN)
+
+    assert [r for r in caplog.records if r.name == "delta_engine.adapters.databricks.read"] == []
 
 
 def test_empty_describe_result_reads_as_failed():
