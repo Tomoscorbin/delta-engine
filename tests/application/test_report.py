@@ -1108,6 +1108,58 @@ def test_the_wire_vocabulary_is_frozen():
     }
 
 
+def _one_run_per_failure_variant() -> tuple[TableRun, ...]:
+    """One run per failure variant, for contract checks that sweep the family."""
+    read_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure(exception_type="AnalysisException", message="line 1\nline 2"),
+    )
+    validation_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    plan = _comment_plan("orders")
+    execution_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=plan,
+        execution=_execution(plan, _failed_exec(0, exc="DeltaAnalysisException", msg="boom")),
+    )
+    blocked = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+    return (read_failed, validation_failed, execution_failed, blocked)
+
+
+def test_failure_records_expose_exactly_the_documented_keys():
+    # An accidental extra key would silently grow the public contract; the
+    # reference doc's per-type tables are the source of these sets.
+    base = {"phase", "type", "message"}
+    expected_by_type = {
+        "ReadFailure": base | {"exception_type", "diagnostic"},
+        "ValidationFailure": base | {"rule", "subject", "details"},
+        "ExecutionFailure": base | {"exception_type", "diagnostic", "statement_index", "sql"},
+        "ForeignKeyFailure": base | {"reason", "columns", "references"},
+    }
+
+    records = [run.to_dict()["failures"][0] for run in _one_run_per_failure_variant()]
+
+    assert {record["type"] for record in records} == set(expected_by_type)
+    for record in records:
+        assert set(record) == expected_by_type[record["type"]]
+
+
+def test_a_payload_with_failures_is_json_serialisable():
+    # The per-type fields include a list and an int; every variant's record
+    # must stay within JSON-plain types, like the failure-free payload does.
+    for run in _one_run_per_failure_variant():
+        json.dumps(run.to_dict())  # must not raise
+
+
 def test_table_to_dict_reports_execution_counts_when_executed():
     # The counts are statement-denominated: statements applied of statements planned.
     statement = "COMMENT ON TABLE `cat`.`schema`.`orders` IS 'hello'"
