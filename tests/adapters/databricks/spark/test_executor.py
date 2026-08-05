@@ -8,6 +8,8 @@ from delta_engine.domain.model import (
     DesiredTable,
     ObservedColumn,
     QualifiedName,
+    Struct,
+    StructField,
 )
 from delta_engine.domain.model.data_type import Integer
 from delta_engine.domain.plan import (
@@ -116,7 +118,14 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
     # Given a desired table to be created in an empty schema
     desired = DesiredTable(
         qualified_name=QualifiedName(TEST_CATALOG, temp_schema, "customers"),
-        columns=(DesiredColumn(name="id", data_type=Integer()),),
+        columns=(
+            DesiredColumn(name="id", data_type=Integer()),
+            DesiredColumn(
+                name="payload",
+                data_type=Struct((StructField("value", Integer(), nullable=False),)),
+                nullable=False,
+            ),
+        ),
     )
     plan = ActionPlan(target=desired.qualified_name, actions=(CreateTable(table=desired),))
 
@@ -133,7 +142,20 @@ def test_create_table_action_creates_table_with_correct_schema(spark, temp_schem
                 "id",
                 T.IntegerType(),
                 nullable=True,
-            )
+            ),
+            T.StructField(
+                "payload",
+                T.StructType(
+                    [
+                        T.StructField(
+                            "value",
+                            T.IntegerType(),
+                            nullable=False,
+                        )
+                    ]
+                ),
+                nullable=False,
+            ),
         ]
     )
     assert actual_schema == expected_schema

@@ -1,4 +1,6 @@
-from hypothesis import given, strategies as st
+from typing import Any
+
+from hypothesis import example, given, strategies as st
 import pytest
 
 from delta_engine.domain.model.data_type import (
@@ -10,8 +12,36 @@ from delta_engine.domain.model.data_type import (
     Struct,
     StructField,
 )
+from tests.domain.model.strategies import NON_DATA_TYPES
 
 
+@example(position="array element", invalid=None)
+@example(position="map key", invalid=None)
+@example(position="map value", invalid=None)
+@example(position="struct field data type", invalid=None)
+@example(position="struct field", invalid=None)
+@given(
+    position=st.sampled_from(
+        ("array element", "map key", "map value", "struct field data type", "struct field")
+    ),
+    invalid=NON_DATA_TYPES,
+)
+def test_composite_types_reject_non_data_type_members(position: str, invalid: Any) -> None:
+    with pytest.raises(ValueError, match=f"(?i){position}"):
+        match position:
+            case "array element":
+                Array(invalid)
+            case "map key":
+                Map(invalid, String())
+            case "map value":
+                Map(String(), invalid)
+            case "struct field data type":
+                StructField("value", invalid)
+            case "struct field":
+                Struct((invalid,))
+
+
+@example(38, 38)
 @given(st.integers(min_value=-10, max_value=50), st.integers(min_value=-10, max_value=60))
 def test_decimal_accepts_valid_pairs_and_rejects_invalid_ones(precision: int, scale: int) -> None:
     # Given: an arbitrary (precision, scale) pair
@@ -37,23 +67,26 @@ def test_decimal_rejects_precision_above_delta_maximum() -> None:
         Decimal(40, 45)
 
 
-def test_decimal_accepts_maximum_precision_and_scale() -> None:
-    assert Decimal(38, 38).precision == 38
-
-
 @given(
-    precision=st.sampled_from(["1", 1.0, True, False]),
-    scale=st.sampled_from(["1", 1.0, True, False]),
+    field=st.sampled_from(("precision", "scale")),
+    malformed=st.sampled_from(["1", 1.0, True, False]),
 )
-def test_decimal_rejects_non_integer_precision_and_scale(precision, scale) -> None:
+def test_decimal_rejects_non_integer_precision_and_scale(field: str, malformed: object) -> None:
+    values = {"precision": 10, "scale": 1}
+    values[field] = malformed
     with pytest.raises(ValueError):
-        Decimal(precision, scale)
+        Decimal(**values)
 
 
-def test_struct_field_requires_non_blank_name_and_preserves_case() -> None:
+def test_struct_field_validates_name_and_nullability_and_preserves_them() -> None:
     with pytest.raises(ValueError):
         StructField("", Integer())
-    assert str(StructField("Amount", Integer()).name) == "Amount"
+    with pytest.raises(ValueError, match="nullable"):
+        StructField("amount", Integer(), nullable=1)
+
+    assert StructField("Amount", Integer()).nullable is True
+    assert StructField("Amount", Integer(), nullable=False) != StructField("Amount", Integer())
+    assert str(StructField("Amount", Integer(), nullable=False)) == "Amount: Integer NOT NULL"
     assert StructField("straße", Integer()).name == "straße"
 
 
@@ -107,9 +140,3 @@ def test_genuinely_different_field_names_stay_semantically_different() -> None:
 def test_struct_rejects_fields_differing_only_by_case() -> None:
     with pytest.raises(ValueError, match=r"[Dd]uplicate struct field"):
         Struct((StructField("id", Integer()), StructField("ID", Integer())))
-
-
-def test_struct_types_differing_only_in_field_case_are_equal() -> None:
-    left = Struct((StructField("Payload", String()),))
-    right = Struct((StructField("payload", String()),))
-    assert left == right

@@ -190,13 +190,14 @@ enforcing the length. The trade-off is deliberate: a declaration cannot create
 a varchar column, and an out-of-band length change is invisible to drift
 detection.
 
-`Struct` shows the same rule inside a modeled type. Struct fields carry name
-and type only: the domain `StructField` models neither nested field nullability
-nor comments, so the reader normalizes both sides to name + type — declared
-fields are created nullable, nested comments are unmanaged. The AS JSON
-description does report a `nullable` flag per struct field, so modeling nested
-nullability is now gated on the domain type model, not on the observation
-source.
+`Struct` applies the same rule inside a modeled type. Struct fields carry name,
+type, and nullability: `DESCRIBE TABLE ... AS JSON` reports all three, and
+`StructField(..., nullable=False)` renders the corresponding nested `NOT NULL`.
+Nested comments remain unmanaged. A nullability-only difference within a struct
+is visible as a change to the owning column's complete `Struct`
+type. Like other struct changes, it is blocked rather than translated into a
+special nested migration. Declarations also reject non-null fields below a
+nullable parent or an array/map, because Databricks cannot deploy those states.
 
 The model is also a pinned vocabulary while the catalog's keeps growing:
 `TIMESTAMP_NTZ` and `VARIANT` both went from nonexistent to real column

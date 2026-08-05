@@ -225,8 +225,11 @@ ignored without coupling the parser to every platform release.
 Known semantic gaps still need explicit decisions:
 
 - string collation is ignored;
-- `CHAR(n)` and `VARCHAR(n)` are normalized to unbounded `String`;
-- nested struct-field nullability is available in metadata but absent from the domain.
+- `CHAR(n)` and `VARCHAR(n)` are normalized to unbounded `String`.
+
+Nested struct-field nullability is now modeled from AS JSON, rendered on
+creation, and included when existing struct types are compared. Changes remain
+blocked as whole-column type changes.
 
 For new metadata, use a simple rule:
 
@@ -373,8 +376,8 @@ triggered canary is enough for the expected release rate and risk.
 
 ### P1 — strengthen the real compatibility boundaries
 
-- [ ] Decide whether to model, preserve, or reject collation, bounded strings, and
-      nested struct nullability instead of silently erasing their semantics.
+- [ ] Decide whether to model, preserve, or reject collation and bounded strings
+      instead of silently erasing their semantics. Nested struct nullability is modeled.
 - [ ] Capture sanitized production JSON metadata fixtures when a live runtime exposes a
       meaningful new shape or reproduces a parser defect.
 - [ ] Add a non-blocking newest-DBR canary if its operating cost proves worthwhile.

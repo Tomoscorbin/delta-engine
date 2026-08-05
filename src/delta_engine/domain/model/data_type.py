@@ -15,6 +15,11 @@ class DataType:
         return type(self).__name__
 
 
+def _require_data_type(value: object, *, subject: str) -> None:
+    if not isinstance(value, DataType):
+        raise ValueError(f"{subject} must be a DataType instance; got {value!r}")
+
+
 @dataclass(frozen=True, slots=True)
 class Integer(DataType):
     """32-bit signed integer type."""
@@ -119,26 +124,30 @@ class StructField:
     """
     One named field inside a :class:`Struct`.
 
-    Field nullability and comments are deliberately not modeled: catalog DDL
-    strings do not round-trip them reliably, so both desired and observed
-    structs normalize to name + type. Declared fields are created nullable.
+    Nullability is part of the field's identity and defaults to nullable,
+    matching Databricks SQL. Nested field comments remain unmanaged.
     """
 
     name: str
     data_type: DataType
+    nullable: bool = True
 
     def __post_init__(self) -> None:
+        _require_data_type(self.data_type, subject="Struct field data type")
+        if type(self.nullable) is not bool:
+            raise ValueError(f"Struct field nullable must be a bool; got {self.nullable!r}")
         if not self.name.strip():
             raise ValueError(f"Struct field name must not be blank: {self.name!r}")
         object.__setattr__(self, "name", Identifier(self.name))
 
     def __str__(self) -> str:
-        return f"{self.name}: {self.data_type}"
+        nullability = "" if self.nullable else " NOT NULL"
+        return f"{self.name}: {self.data_type}{nullability}"
 
 
 @dataclass(frozen=True, slots=True)
 class Struct(DataType):
-    """Struct of named fields; identity is the ordered (name, type) tuple."""
+    """Struct of named fields; identity is their ordered name, type, and nullability."""
 
     fields: ListOrTuple[StructField]
 
@@ -150,6 +159,8 @@ class Struct(DataType):
             raise ValueError("Struct requires at least one field")
         seen: set[str] = set()
         for field in self.fields:
+            if not isinstance(field, StructField):
+                raise ValueError(f"Struct field must be a StructField instance; got {field!r}")
             if field.name in seen:
                 raise ValueError(f"Duplicate struct field name: {field.name}")
             seen.add(field.name)
@@ -164,6 +175,9 @@ class Array(DataType):
 
     element: DataType
 
+    def __post_init__(self) -> None:
+        _require_data_type(self.element, subject="Array element")
+
     def __str__(self) -> str:
         return f"Array<{self.element}>"
 
@@ -176,6 +190,8 @@ class Map(DataType):
     value: DataType
 
     def __post_init__(self) -> None:
+        _require_data_type(self.key, subject="Map key")
+        _require_data_type(self.value, subject="Map value")
         # Databricks accepts any MAP key type except MAP itself.
         if isinstance(self.key, Map):
             raise ValueError("Map key type must not be a Map")

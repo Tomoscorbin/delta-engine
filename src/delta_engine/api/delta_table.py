@@ -11,7 +11,7 @@ it cannot resolve rather than re-checking existence.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, NamedTuple
@@ -140,6 +140,12 @@ def _validate_tags(subject: str, tags: Mapping[str, str]) -> None:
             )
 
 
+class _NestedStructFieldContext(NamedTuple):
+    path: str
+    nullable: bool
+    not_null_allowed: bool
+
+
 def _column_declared_names(column: Column) -> tuple[str, ...]:
     """
     Return every name a column declares under Delta's naming rules.
@@ -151,25 +157,61 @@ def _column_declared_names(column: Column) -> tuple[str, ...]:
     ``"payload.order id"`` for a field named ``"order id"`` inside a struct
     column named ``"payload"``.
     """
-    return (column.name, *_nested_field_paths(column.name, column.data_type))
+    nested_names = (
+        field.path
+        for field in _nested_struct_fields(
+            column.name,
+            column.data_type,
+            not_null_allowed=not column.nullable,
+        )
+    )
+    return (column.name, *nested_names)
 
 
-def _nested_field_paths(path: str, data_type: DataType) -> tuple[str, ...]:
-    """Recursively collect dotted struct-field paths reachable from `data_type`."""
+def _nested_struct_fields(
+    path: str,
+    data_type: DataType,
+    not_null_allowed: bool,
+) -> Iterator[_NestedStructFieldContext]:
+    """Yield struct fields with the container context needed at the API boundary."""
     match data_type:
         case Struct(fields):
-            paths: list[str] = []
             for field in fields:
                 field_path = f"{path}.{field.name}"
-                paths.append(field_path)
-                paths.extend(_nested_field_paths(field_path, field.data_type))
-            return tuple(paths)
+                yield _NestedStructFieldContext(
+                    path=field_path,
+                    nullable=field.nullable,
+                    not_null_allowed=not_null_allowed,
+                )
+                yield from _nested_struct_fields(
+                    field_path,
+                    field.data_type,
+                    not_null_allowed=not_null_allowed and not field.nullable,
+                )
         case Array(element):
-            return _nested_field_paths(path, element)
+            yield from _nested_struct_fields(path, element, not_null_allowed=False)
         case Map(key, value):
-            return _nested_field_paths(path, key) + _nested_field_paths(path, value)
+            yield from _nested_struct_fields(path, key, not_null_allowed=False)
+            yield from _nested_struct_fields(path, value, not_null_allowed=False)
         case _:
-            return ()
+            return
+
+
+def _validate_nested_not_null(
+    column: Column,
+) -> None:
+    """Reject nested NOT NULL declarations Databricks cannot deploy."""
+    for field in _nested_struct_fields(
+        column.name,
+        column.data_type,
+        not_null_allowed=not column.nullable,
+    ):
+        if not field.nullable and not field.not_null_allowed:
+            raise ValueError(
+                f"NOT NULL struct field '{field.path}' is not deployable: every containing"
+                " column and struct field must be NOT NULL, and ARRAY or MAP paths do not"
+                " support nested NOT NULL"
+            )
 
 
 def _validate_layout(
@@ -532,7 +574,7 @@ def _normalize_declaration(
 
 
 def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
-    """Reject frozen declarations that the public API cannot deploy."""
+    """Reject invalid frozen declarations before lowering."""
     DELTA_PROPERTY_POLICY.validate_declaration(declaration.properties)
     _validate_layout(
         declaration.columns,
@@ -549,6 +591,7 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     _validate_tags(f"table '{declaration.qualified_name.name}'", declaration.tags)
     for column in declaration.columns:
         _validate_tags(f"column '{column.name}'", column.tags)
+        _validate_nested_not_null(column)
 
     _validate_object_name_parts(declaration.qualified_name)
 

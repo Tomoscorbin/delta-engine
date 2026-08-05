@@ -313,8 +313,9 @@ Tracked in `todo.md`, deliberately unchanged by this roadmap:
 - UNIQUE constraints — wait for the feature to leave Public Preview.
 - `Char(n)`/`Varchar(n)` fidelity — needs a migration story for the read-side
   normalisation flip; wait for demand.
-- Struct-field nullability — gated on a richer observation source than DDL
-  string parsing.
+- Struct-field nullability is implemented from the structured AS JSON source;
+  creation and observation preserve it, while changes to existing structs stay
+  blocked as whole-column type changes until nested migrations are warranted.
 - Backend-agnostic application layer (rules and property policy injected
   from the composition root) — architectural refactor, own PR, not blocking
   any item above.
