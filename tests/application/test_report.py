@@ -3,9 +3,11 @@ import json
 
 import pytest
 
+from delta_engine.application.diff_entries import DiffCategory
 from delta_engine.application.failures import (
     ExecutionFailure,
     Failure,
+    FailurePhase,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
@@ -986,8 +988,176 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
             "phase": "PLANNING",
             "type": "ValidationFailure",
             "message": "Validation failed: SomeRule - unsafe",
+            "rule": "SomeRule",
+            "subject": "",
+            "details": [],
         }
     ]
+
+
+def test_a_read_failure_record_retains_the_full_backend_message():
+    # The display message keeps only the first five lines; the machine
+    # record must carry the whole backend message.
+    long_message = "\n".join(f"line {n}" for n in range(1, 10))
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure(exception_type="AnalysisException", message=long_message),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["exception_type"] == "AnalysisException"
+    assert record["diagnostic"] == long_message
+
+
+def test_an_execution_failure_record_carries_its_statement_facts():
+    statement = "ALTER TABLE `cat`.`schema`.`orders` ALTER COLUMN id COMMENT 'x'"
+    long_message = "\n".join(f"line {n}" for n in range(1, 10))
+    plan = _plan("orders", SetTableComment(desired_comment="hello", observed_comment=""))
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=plan,
+        execution=_execution(
+            plan,
+            _failed_exec(0, preview=statement, exc="DeltaAnalysisException", msg=long_message),
+        ),
+    )
+
+    payload = report.to_dict()
+    (record,) = payload["failures"]
+
+    assert record["exception_type"] == "DeltaAnalysisException"
+    assert record["diagnostic"] == long_message
+    assert record["sql"] == statement
+    # 0-based on purpose: the index addresses the sibling statement list.
+    assert payload["planned_sql_statements"][record["statement_index"]] == statement
+
+
+def test_a_validation_failure_record_carries_rule_subject_and_detail_lines():
+    failure = ValidationFailure(
+        rule_name="UnmanagedAspectDrift",
+        message="observed partitioning is not declared",
+        subject="partitioning",
+        details=("partitioning: observed (a) desired ()",),
+    )
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(failure,),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["rule"] == "UnmanagedAspectDrift"
+    assert record["subject"] == "partitioning"
+    assert record["details"] == ["partitioning: observed (a) desired ()"]
+
+
+def test_a_foreign_key_failure_record_names_its_edge_and_reason_code():
+    report = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["reason"] == "BLOCKED_BY_FAILED_DEPENDENCY"
+    assert record["columns"] == ["parent_id"]
+    assert record["references"] == "cat.schema.a"
+    # No "table" key: it would duplicate the enclosing record's "name".
+    assert "table" not in record
+
+
+def test_the_wire_vocabulary_is_frozen():
+    # These strings are the schema_version 2 contract (reference-run-report.md).
+    # A rename that reaches this test is a wire-format change: extend the
+    # contract and the reference doc deliberately, or revert the rename.
+    # Exact equality on purpose — an addition must arrive here too.
+    assert {phase.name for phase in FailurePhase} == {
+        "READ",
+        "PLANNING",
+        "FOREIGN_KEY",
+        "EXECUTION",
+    }
+    assert {cls.__name__ for cls in Failure.__subclasses__()} == {
+        "ReadFailure",
+        "ValidationFailure",
+        "ExecutionFailure",
+        "ForeignKeyFailure",
+    }
+    assert {reason.value for reason in ForeignKeyFailureReason} == {
+        "CYCLE",
+        "UNRESOLVABLE_REFERENCE",
+        "BLOCKED_BY_FAILED_DEPENDENCY",
+        "REFERENCED_COLUMNS_NOT_A_KEY",
+        "REFERENCED_COLUMN_TYPE_MISMATCH",
+        "REFERENCED_COLUMN_CASE_MISMATCH",
+    }
+    assert {category.name.lower() for category in DiffCategory} == {
+        "columns",
+        "keys",
+        "clustering",
+        "partitioning",
+        "features",
+        "properties",
+        "tags",
+        "comments",
+    }
+
+
+def _one_run_per_failure_variant() -> tuple[TableRun, ...]:
+    """One run per failure variant, for contract checks that sweep the family."""
+    read_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=ReadFailure(exception_type="AnalysisException", message="line 1\nline 2"),
+    )
+    validation_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(ValidationFailure(rule_name="SomeRule", message="unsafe"),),
+    )
+    plan = _comment_plan("orders")
+    execution_failed = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=plan,
+        execution=_execution(plan, _failed_exec(0, exc="DeltaAnalysisException", msg="boom")),
+    )
+    blocked = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+    return (read_failed, validation_failed, execution_failed, blocked)
+
+
+def test_failure_records_expose_exactly_the_documented_keys():
+    # An accidental extra key would silently grow the public contract; the
+    # reference doc's per-type tables are the source of these sets.
+    base = {"phase", "type", "message"}
+    expected_by_type = {
+        "ReadFailure": base | {"exception_type", "diagnostic"},
+        "ValidationFailure": base | {"rule", "subject", "details"},
+        "ExecutionFailure": base | {"exception_type", "diagnostic", "statement_index", "sql"},
+        "ForeignKeyFailure": base | {"reason", "columns", "references"},
+    }
+
+    records = [run.to_dict()["failures"][0] for run in _one_run_per_failure_variant()]
+
+    assert {record["type"] for record in records} == set(expected_by_type)
+    for record in records:
+        assert set(record) == expected_by_type[record["type"]]
+
+
+def test_a_payload_with_failures_is_json_serialisable():
+    # The per-type fields include a list and an int; every variant's record
+    # must stay within JSON-plain types, like the failure-free payload does.
+    for run in _one_run_per_failure_variant():
+        json.dumps(run.to_dict())  # must not raise
 
 
 def test_table_to_dict_reports_execution_counts_when_executed():

@@ -661,9 +661,7 @@ def test_dry_run_report_is_ci_consumable(spark, temp_schema):
     payload = report.to_dict()
     json.dumps(payload)  # plain types only — must not raise
     assert payload["dry_run"] is True
-    assert payload["tables"][0]["planned_sql_statements"] == list(
-        table_report.compiled.statements
-    )
+    assert payload["tables"][0]["planned_sql_statements"] == list(table_report.compiled.statements)
 
     # And nothing was created
     assert spark.catalog.tableExists(fq) is False

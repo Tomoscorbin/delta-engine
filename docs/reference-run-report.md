@@ -31,6 +31,10 @@ Version 2 renamed the planning-phase status from `VALIDATION_FAILED` to
 backwards-compatible, and a reader that does not know the key sees exactly the
 payload it saw before.
 
+The per-type failure fields (2026-08-05) were likewise added without a bump:
+every failure record still carries `phase`, `type`, and `message` with
+unchanged meaning, and the additional keys sit beside them.
+
 ## Consistency
 
 `SyncReport` rejects combinations that a completed engine run cannot produce.
@@ -139,6 +143,43 @@ Each entry in `failures`:
 | `phase`   | `str` | The phase that produced it: `READ`, `PLANNING`, `FOREIGN_KEY`, `EXECUTION` |
 | `type`    | `str` | The concrete failure class name, e.g. `ValidationFailure`                    |
 | `message` | `str` | The rendered failure message                                                 |
+
+Records are not all-string: the per-type fields below include an integer
+(`statement_index`) and lists (`details`, `columns`).
+
+#### Additional keys by type
+
+`ReadFailure`:
+
+| Field            | Type  | Meaning                                                        |
+| ---------------- | ----- | -------------------------------------------------------------- |
+| `exception_type` | `str` | The backend exception class name                               |
+| `diagnostic`     | `str` | The complete backend message; `message` may truncate long text |
+
+`ValidationFailure`:
+
+| Field     | Type        | Meaning                                                             |
+| --------- | ----------- | ------------------------------------------------------------------- |
+| `rule`    | `str`       | The rule that rejected the diff, e.g. `NonWideningColumnTypeChange` |
+| `subject` | `str`       | The column, property, or aspect judged; empty for whole-table rules |
+| `details` | `list[str]` | One line per difference behind a summary judgment                   |
+
+`ExecutionFailure`:
+
+| Field             | Type  | Meaning                                                        |
+| ----------------- | ----- | -------------------------------------------------------------- |
+| `exception_type`  | `str` | The backend exception class name                               |
+| `diagnostic`      | `str` | The complete backend message; `message` may truncate long text |
+| `statement_index` | `int` | 0-based index into the table's `planned_sql_statements`        |
+| `sql`             | `str` | The statement that failed                                      |
+
+`ForeignKeyFailure`:
+
+| Field        | Type        | Meaning                                                   |
+| ------------ | ----------- | --------------------------------------------------------- |
+| `reason`     | `str`       | Machine code for why, e.g. `BLOCKED_BY_FAILED_DEPENDENCY` |
+| `columns`    | `list[str]` | The declaring table's foreign-key columns                 |
+| `references` | `str`       | Dotted name of the referenced table                       |
 
 ### Execution record
 

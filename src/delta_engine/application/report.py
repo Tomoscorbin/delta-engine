@@ -16,11 +16,13 @@ from typing import Any, Final, NamedTuple
 
 from delta_engine.application.diff_entries import DiffEntry, drift_entries, plan_entries
 from delta_engine.application.failures import (
+    ExecutionFailure,
     Failure,
     FailurePhase,
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
+    ValidationFailure,
 )
 from delta_engine.application.planning import (
     PlanningFailed,
@@ -98,6 +100,10 @@ _STATUS_FOR_PHASE: Final[Mapping[FailurePhase, TableRunStatus]] = MappingProxyTy
 )
 
 
+# The versioned wire format `to_dict` emits; additive keys do not bump it.
+_SCHEMA_VERSION: Final = 2
+
+
 def _entry_records(entries: Iterable[DiffEntry]) -> list[dict[str, str]]:
     """Project interpreted diff entries as flat records, in the order given."""
     return [
@@ -137,13 +143,50 @@ def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, 
     return _entry_records(drift_entries(planning.diff))
 
 
-def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, str]]:
+def _failure_facts(failure: Failure) -> dict[str, Any]:
+    """
+    Return the variant's own lossless facts, added beside the rendered ``message``.
+
+    ``message`` may truncate a long backend message for display;
+    ``diagnostic`` carries the complete text for the variants that have one.
+    """
+    match failure:
+        case ReadFailure():
+            return {
+                "exception_type": failure.exception_type,
+                "diagnostic": failure.message,
+            }
+        case ExecutionFailure():
+            return {
+                "exception_type": failure.exception_type,
+                "diagnostic": failure.message,
+                "statement_index": failure.statement_index,
+                "sql": failure.statement,
+            }
+        case ValidationFailure():
+            return {
+                "rule": failure.rule_name,
+                "subject": failure.subject,
+                "details": list(failure.details),
+            }
+        case ForeignKeyFailure():
+            return {
+                "reason": failure.reason.value,
+                "columns": list(failure.local_columns),
+                "references": str(failure.references),
+            }
+        case _:
+            raise NotImplementedError(f"No wire facts for failure {type(failure).__name__}")
+
+
+def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:
     """Project failures as flat records, in phase order as carried."""
     return [
         {
             "phase": failure.phase.name,
             "type": type(failure).__name__,
             "message": " ".join(failure.format_lines()),
+            **_failure_facts(failure),
         }
         for failure in failures
     ]
@@ -460,7 +503,7 @@ class SyncReport:
     def to_dict(self) -> dict[str, Any]:
         """Project the whole run as plain, JSON-serialisable data; tables in run order."""
         return {
-            "schema_version": 2,
+            "schema_version": _SCHEMA_VERSION,
             "started_at": self.started_at.isoformat(),
             "ended_at": self.ended_at.isoformat(),
             "dry_run": self.dry_run,
