@@ -55,11 +55,10 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
     """
     Narrow a planning result to the plan it accepted, if any.
 
-    The one place the union narrows to a plan. Every phase downstream of
-    planning asks this question — the engine's run while the phases are still
-    mutating, its frozen report afterwards — and both ask it of a result that
-    may not exist yet, so the not-yet-planned case answers alongside the
-    rejected one rather than at each caller.
+    The one place the union narrows to a plan. The report asks this of a
+    result that may not exist — a failed read leaves no planning outcome — so
+    the not-applicable case answers alongside the rejected one rather than at
+    each caller.
     """
     match planning:
         case PlanningSucceeded(plan=plan):
