@@ -7,7 +7,8 @@ tags:
 
 # Ousterhoutian complexity review
 
-**Status:** Review complete; findings await agreement and implementation
+**Status:** Review complete; resolved findings are marked below, the rest
+await agreement and implementation
 
 **Review date:** 2026-07-31
 
@@ -18,6 +19,8 @@ tags:
 **Follow-up revision:** `db4f41ae` (current reporting branch)
 
 **Rendering follow-up revision:** `a3ddbc4e` (`report-carries-the-diff` branch)
+
+**Implementation recheck:** `50193acc` (`main`, 2026-08-05)
 
 ## Scope
 
@@ -78,7 +81,7 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 5 | Medium | The shared reader catches beyond the backend boundary | Programming defects become ordinary per-table read failures |
 | 6 | Medium | Rename name frames are documented but not enforced | A valid `ActionPlan` can compile actions against stale column names |
 | 7 ✅ | High | Compiled execution does not prove plan coverage | A changed table can report success without executing work |
-| 8 | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
+| 8 ✅ | High | Frozen snapshots retain mutable caller aliases | Mutation after validation can invalidate trusted state |
 | 9 | High | The machine report reuses lossy display rendering | Structured diagnostics are truncated and wire names follow Python symbols |
 | 10 | High | The closed data-type vocabulary is operationally open | Invalid types fail late or bypass feature policy |
 | 11 | Medium | Unresolvable differences are not classified exhaustively | A new blocker can be silently omitted from a successful plan |
@@ -440,6 +443,15 @@ exactly the values that were validated. The linear construction cost is the
 appropriate price at these trust boundaries; valid public declarations and
 adapter-produced values retain their current behavior.
 
+### Resolved (2026-08-01)
+
+[PR #320](https://github.com/Tomoscorbin/delta-engine/pull/320) and
+[PR #321](https://github.com/Tomoscorbin/delta-engine/pull/321): frozen domain
+and report values now copy their collection inputs at construction —
+sequences to tuples behind the explicit `ListOrTuple` input type, aspect sets
+to `frozenset` — so the stored collections are exactly the ones that were
+validated and the alias-mutation probe no longer bypasses validation.
+
 ## 9. Give the machine report a lossless schema boundary
 
 ### Cause
@@ -492,6 +504,14 @@ serializer should continue to consume the underlying facts instead.
 Existing version 2 fields can remain while additive structured fields are
 introduced. Changing the current `message` semantics would justify version 3.
 
+### Update (2026-08-05)
+
+[PR #322](https://github.com/Tomoscorbin/delta-engine/pull/322) made failure
+messages actionable but did not move the machine boundary: `_failure_records`
+still serializes `" ".join(failure.format_lines())`, so the versioned payload
+still receives head-truncated display text, and the wire identifiers still
+derive from Python symbol names. The finding stands.
+
 ## 10. Close or explicitly extend the data-type vocabulary
 
 ### Cause
@@ -533,6 +553,16 @@ policy and application feature policy can consume that mechanism without
 being merged. If custom types are intended instead, introduce an explicit
 registration boundary that supplies rendering and feature requirements
 together.
+
+### Update (2026-08-05)
+
+[PR #325](https://github.com/Tomoscorbin/delta-engine/pull/325) closed the
+malformed-child probe: columns and the nested type constructors now require
+`DataType` instances, so `Column("items", Array(Integer))` fails at
+declaration. The base class deliberately remains constructible. The second
+probe stands — a `TimestampNtz` subclass still renders while evading the
+exact-type feature lookup — and the duplicated tree traversals remain, so
+the extension-policy decision is still open.
 
 ## 11. Classify every unresolvable difference exhaustively
 
@@ -806,7 +836,7 @@ but they appear after roughly 650 lines of rule implementations in
 discoverable near the module's front or expose it through one small
 front-facing policy module. Do not split every rule into its own thin module.
 
-### Normalize column-name collections consistently
+### Normalize column-name collections consistently ✅
 
 The public declaration boundary rejects a bare-string `primary_key` before it
 can be consumed character by character. `partitioned_by` and `clustered_by`
@@ -816,6 +846,12 @@ name-sequence normalizer for these three inputs that rejects bare strings,
 validates entries, wraps `Identifier`, and freezes the result. Keep
 `ForeignKey.columns` separate because its string form deliberately means one
 column.
+
+Resolved by [PR #321](https://github.com/Tomoscorbin/delta-engine/pull/321):
+the three inputs now share one bare-string guard during normalization, so
+`partitioned_by="id"` fails with a corrective message instead of becoming
+`("i", "d")`. `ForeignKey.columns` keeps its deliberate single-column string
+form.
 
 ### Make the CLI target own its validity
 
@@ -841,6 +877,9 @@ These are documentation defects, not separate architectural findings:
 - At the follow-up revision, that guide and the architecture explanation say
   there are three unresolvable differences; the union contains four after
   `ColumnCaseDrift` was added.
+
+All five were corrected on `main` by
+[PR #327](https://github.com/Tomoscorbin/delta-engine/pull/327) (2026-08-05).
 
 ## Boundaries to retain
 
