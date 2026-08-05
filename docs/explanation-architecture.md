@@ -65,7 +65,7 @@ through a sync.
 | `CatalogState`     | A known catalog answer: `TablePresent` or `TableAbsent`. An unreadable state crosses the port as `ReadError`.                                               |
 | `ReadResult`       | The persistent read outcome retained by a table run: a `CatalogState` or the engine-created `ReadFailure`.                                                  |
 | `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
-| `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
+| `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnCaseDrift`, `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                  |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
 | `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
@@ -464,9 +464,10 @@ would drop those constraints implicitly as part of `RENAME COLUMN`; the
 engine states the drops instead of relying on that, so the plan is a
 complete transcript of what executes.
 
-Only three unresolvable differences exist: `ColumnRenameConflict`,
-`PropertyUndeclared`, and `PartitioningChanged`. Each states an ambiguity or
-unsupported transition without deciding its policy outcome. The
+Only four unresolvable differences exist: `ColumnCaseDrift`,
+`ColumnRenameConflict`, `PropertyUndeclared`, and `PartitioningChanged`. Each
+states an ambiguity or unsupported transition without deciding its policy
+outcome. The
 `Unresolvable` union names them, they live structurally apart from the
 actions, and the application default rules decide to reject each one.
 

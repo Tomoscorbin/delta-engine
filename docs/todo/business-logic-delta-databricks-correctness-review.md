@@ -1,16 +1,17 @@
 # Business logic, Delta, and Databricks correctness review
 
-**Status:** Fresh sweep complete; original item 3 and fresh findings 9–15
-await agreement and implementation
+**Status:** 12 of 15 findings resolved (rechecked against `main`, 2026-08-05);
+items 11, 13, and 14 remain open
 
 **Original review:** 2026-07-14
 
 **Fresh sweep:** 2026-07-20
 
-**Fresh-sweep implementation PR:** Not opened
+**Fresh-sweep implementation:** landed piecemeal — see each finding's
+resolution note; items 11, 13, and 14 have no implementation PR yet
 
-This began as the second phase of the codebase review. Seven of the original
-eight findings have since been implemented, as recorded in their resolution
+This began as the second phase of the codebase review. All eight original
+findings have since been implemented, as recorded in their resolution
 notes below. On 2026-07-20 the current `main` branch was swept again from the
 public API through domain validation, dependency resolution, diffing,
 observation, SQL compilation, and execution reporting. The fresh findings were
@@ -47,10 +48,10 @@ path currently produces an incorrect result.
 | 9 ✅ | High | Non-default `STRING` collations are erased on observation | Collation drift can be reported as synchronized |
 | 10 ✅ | Medium | Column tags are not removed before dropping a column | Governed-tagged column drops fail during execution |
 | 11 | Medium | Tag declarations omit Databricks tag constraints | Invalid tag declarations reach execution |
-| 12 | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
+| 12 ✅ | Medium | Some validation runs before identifier normalization | Invalid layouts pass and valid foreign keys can be rejected |
 | 13 | Medium | Generated constraint names can be invalid or collide | Constraint creation fails on Unity Catalog |
 | 14 | Medium | Dependency traversal is recursive | A valid deep graph can abort synchronization with `RecursionError` |
-| 15 | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
+| 15 ✅ | Low | `Decimal` accepts non-integer precision and scale | The model can compile invalid `DECIMAL` SQL |
 
 ## 1. Reject views and non-Delta tables at the read boundary
 
@@ -216,6 +217,18 @@ or [VARIANT](https://docs.databricks.com/aws/en/tables/features/variant).
 Feature activation is a permanent protocol change, so it must be visible in
 the plan. Rejecting the declaration and requiring an out-of-band command would
 also be safe, but would not provide declarative convergence.
+
+### Resolved (2026-07-24)
+
+Shipped in [PR #280](https://github.com/Tomoscorbin/delta-engine/pull/280)
+with follow-up refinements, in the shape settled by the
+[table-feature enablement design review](2026-07-24-table-feature-enablement-ousterhout-review.md):
+the domain differ derives required features from the desired column type tree,
+observed enablement is projected from the AS JSON `delta.feature.*` entries,
+feature identities are typed, and an explicit `EnableTableFeature` action —
+its own `ActionPhase`, ordered before the dependent column work — compiles to
+the documented `delta.feature.*` property assignment and appears in dry-run
+output and the report contract.
 
 ## 4. Validate foreign keys against the registered parent definition
 
@@ -709,6 +722,16 @@ Databricks requires integer precision and scale in the
    and other non-integer values.
 3. Add a type/value matrix while retaining the current precision and scale
    boundary tests.
+
+### Resolved (2026-08-01)
+
+Fixed in [PR #314](https://github.com/Tomoscorbin/delta-engine/pull/314) and
+corrected in [PR #317](https://github.com/Tomoscorbin/delta-engine/pull/317):
+`Decimal.__post_init__` requires `type(precision) is int` and
+`type(scale) is int` (rejecting `bool` with the rest) before the range
+checks. The initial guard joined the two conditions with `and`, so it only
+fired when both parameters were non-integers; #317 changed it to `or` and
+extended the test matrix accordingly.
 
 ## Residual concurrency limitation
 
