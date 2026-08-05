@@ -2,7 +2,8 @@
 High-level orchestration of planning and execution.
 
 `Engine.sync` splits the work by one rule: everything table-local and
-read-only happens in one straight-line plan pass per table (`_plan_table`),
+read-only happens in one straight-line plan pass per table
+(`_plan_execution`),
 and everything cross-table or world-mutating happens in its own walk over
 the planned runs. On a real run, if any table fails, `SyncFailedError` is
 raised with a formatted summary.
@@ -11,10 +12,10 @@ The steps are:
   1. Lower    — lower the declaration set into domain tables, deduplicated
   2. Resolve  — judge the declarations against each other: dependency-first
                 order, dependency edges, structural verdicts
-  3. Plan     — per table, in dependency order: read the catalog state, diff
-                it against the declaration, judge the complete diff at the
-                planning boundary, and compile the accepted plan — freezing
-                the outcomes into one complete `TableRun`
+  3. Plan     — per table, in dependency order: read the catalog state, plan
+                the changes against it at the planning boundary, and compile
+                the accepted plan — freezing the outcomes into one complete
+                `TableRun`
   4. Execute  — the one cross-table walk (real runs only): fold the blocking
                 rule over the runs and attach attempted statement results
                 to each executed table
@@ -63,7 +64,7 @@ from delta_engine.application.failures import (
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningSucceeded,
-    plan_diff,
+    plan_changes,
 )
 from delta_engine.application.ports import (
     CatalogStateReader,
@@ -84,7 +85,6 @@ from delta_engine.domain.model import (
     DesiredTable,
     QualifiedName,
 )
-from delta_engine.domain.plan import diff_table
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,8 @@ class Engine:
 
         Runs lower → resolve → plan → execute → account. Resolution orders
         the tables dependency-first with their static facts, the plan pass
-        takes each table through its read-only steps (read, diff, judge,
-        compile) and freezes one complete ``TableRun``, execution attaches
+        takes each table through its read-only steps (read, plan, compile)
+        and freezes one complete ``TableRun``, execution attaches
         attempted statement results to the tables it reaches, and assembly
         derives dependency blocking from the edges.
 
@@ -179,7 +179,7 @@ class Engine:
         desired = lower_desired_tables(*tables)
         logger.info("Starting sync for %d table(s)", len(desired))
 
-        runs = tuple(self._plan_table(resolution) for resolution in resolve(desired))
+        runs = tuple(self._plan_execution(resolution) for resolution in resolve(desired))
         if not dry_run:
             runs = self._execute(runs)
 
@@ -201,16 +201,16 @@ class Engine:
 
         return report
 
-    def _plan_table(self, resolution: TableResolution) -> TableRun:
+    def _plan_execution(self, resolution: TableResolution) -> TableRun:
         """
-        Plan one table: read its catalog state, diff, judge, and compile.
+        Plan one table's execution: read the catalog, plan the changes, compile.
 
         Straight-line, table-local, and free of catalog mutations. Each early
-        return is a lifecycle rule — a failed read leaves nothing to diff, a
-        rejected diff leaves nothing to compile — so every ``None`` on the
-        returned run means "not applicable", never "not yet". Execution is
-        deliberately absent: whether this table may execute depends on other
-        tables' fates, which is the execute walk's concern.
+        return is a lifecycle rule — a failed read leaves nothing to plan, a
+        refused plan leaves nothing to compile — so every ``None`` on the
+        returned run means "not applicable", never "not yet". Execution itself
+        is deliberately absent: whether this table may execute depends on
+        other tables' fates, which is the execute walk's concern.
         """
         if resolution.structural_failures:
             logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
@@ -229,10 +229,10 @@ class Engine:
                 read=ReadFailure(exception_type=error.exception_type, message=str(error)),
             )
 
-        # Confirmed absence is a plannable state, not a failure: diffing
+        # Confirmed absence is a plannable state, not a failure: planning
         # against None produces the creation plan.
         observed = read.table if isinstance(read, TablePresent) else None
-        planning = plan_diff(diff_table(resolution.desired, observed))
+        planning = plan_changes(resolution.desired, observed)
 
         match planning:
             case PlanningFailed():
@@ -290,7 +290,7 @@ class Engine:
             compiled = run.compiled
             # Entailed by the run's invariants: no failures means planning
             # succeeded, and successful planning requires compilation.
-            assert compiled is not None
+            assert compiled is not None  # TODO: remove?
             if not compiled.compiled_actions:
                 executed.append(run)
                 continue

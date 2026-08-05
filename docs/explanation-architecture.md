@@ -68,7 +68,7 @@ through a sync.
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
-| `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
+| `PlanningResult`   | The total planning outcome: either `PlanningSucceeded(diff, plan)` or `PlanningFailed(diff, failures)`; both retain the diff they were planned from.        |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
@@ -281,7 +281,7 @@ sequenceDiagram
     participant Resolver as relationships.resolve
     participant Reader as CatalogStateReader
     participant Differ as diff_table
-    participant Planner as plan_diff
+    participant Planner as plan_changes
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
@@ -292,9 +292,9 @@ sequenceDiagram
         Engine->>Reader: fetch_state(qualified_name)
         Reader-->>Engine: TablePresent / TableAbsent / ReadError
         Engine->>Engine: ReadError → ReadFailure
-        Engine->>Differ: diff_table(desired, observed_or_none)
-        Differ-->>Engine: TableMissing / TableDrift
-        Engine->>Planner: plan_diff(diff)
+        Engine->>Planner: plan_changes(desired, observed_or_none)
+        Planner->>Differ: diff_table(desired, observed_or_none)
+        Differ-->>Planner: TableMissing / TableDrift
         Planner-->>Engine: PlanningSucceeded(diff, plan) / PlanningFailed(diff, failures)
         Engine->>Executor: compile(plan)
         Executor-->>Engine: SQL statements
@@ -318,14 +318,15 @@ The full run, with reporting last:
    declaration analysis, so it precedes every read: a run is born knowing its
    position, its edges, and its verdicts, before any catalog state exists.
 3. **Plan** (per table, in dependency order — read-only): ask the reader
-   port for the current catalog state; compute the typed `TableDiff` with
-   `diff_table`, foreign-key existence included; judge the complete diff at
-   the total `plan_diff` boundary, where validation always applies the default
-   policy to that one stream and both outcomes retain the diff they judged;
-   and lower every accepted plan through the executor port, recording the
+   port for the current catalog state, then plan the changes at the total
+   `plan_changes` boundary — it computes the typed `TableDiff` with
+   `diff_table` (foreign-key existence included), validates the complete
+   diff under the default policy, and constructs the executable plan or
+   refuses with the failures, both outcomes retaining the diff. Every
+   accepted plan is then lowered through the executor port, recording the
    exact statements used for both dry-run preview and real execution. Each
-   early exit is a lifecycle rule — a failed read leaves nothing to diff, a
-   rejected diff leaves nothing to compile — and the `TableRun` is frozen and
+   early exit is a lifecycle rule — a failed read leaves nothing to plan, a
+   refused plan leaves nothing to compile — and the `TableRun` is frozen and
    complete when the plan pass returns it.
 4. **Execute** (real runs only): one walk in dependency order over the frozen
    runs. A run with failures of its own, or with a dependency that will not
@@ -349,8 +350,8 @@ phase each one failed in.
 | `DeltaTable`       | User code              | Application lowering             | Public declaration object                   |
 | `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                      |
 | `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
-| `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
-| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Targeted, ordered, validated actions         |
+| `TableDiff`        | `diff_table`           | `plan_changes`                   | Direct actions and unresolvable differences |
+| `ActionPlan`       | successful `plan_changes` | Executor (`compile`), report     | Targeted, ordered, validated actions         |
 | `CatalogState`     | Reader port            | Engine                           | Known present or absent state               |
 | `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
@@ -364,7 +365,7 @@ phase each one failed in.
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
 | `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
 | `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`, `Property`                                               |
-| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
+| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_changes`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |
 | `delta_engine.adapters`    | Backend integration and translation                                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler |
 
@@ -480,12 +481,14 @@ unsupported transition without deciding its policy outcome. The
 `Unresolvable` union names them, they live structurally apart from the
 actions, and the application default rules decide to reject each one.
 
-Whether a difference is permitted is application policy. `plan_diff` always runs
-the default policy and returns either `PlanningSucceeded(plan)` or
-`PlanningFailed(failures)`. Only the success arm has an `ActionPlan`, and plan
-construction is private to that boundary, so callers cannot plan raw diffs
-without validation. `validate_diff(..., rules=...)` remains the lower-level
-interface for testing alternative rule sets; it does not construct plans.
+Whether a difference is permitted is application policy. `plan_changes` diffs
+the declaration against the observed state itself, always runs the default
+policy, and returns either `PlanningSucceeded(diff, plan)` or
+`PlanningFailed(diff, failures)`. Only the success arm has an `ActionPlan`,
+and both diff production and plan construction are private to that boundary,
+so callers cannot plan unvalidated drift at all. `validate_diff(..., rules=...)`
+remains the lower-level interface for testing alternative rule sets; it does
+not construct plans.
 
 Two aspects deliberately diff under different semantics. Properties are
 exact-declaration: the declaration is the complete list of managed keys — a
@@ -563,7 +566,7 @@ The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
 
-The engine calls `plan_diff` once. A `PlanningFailed` leaves the run without a
+The engine calls `plan_changes` once per table. A `PlanningFailed` leaves the run without a
 plan and records its validation failures; a `PlanningSucceeded` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
 an empty plan with a real target and relation kind.
@@ -655,7 +658,7 @@ the same run.
 
 Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`

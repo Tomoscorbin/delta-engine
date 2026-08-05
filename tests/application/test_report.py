@@ -169,14 +169,14 @@ def _report(
         assert plan is None or isinstance(plan, ActionPlan)
         report_plan = plan
 
-    judged_diff = diff if diff is not None else TableMissing(desired)
+    planning_diff = diff if diff is not None else TableMissing(desired)
     if isinstance(read, ReadFailure):
         planning = None
     elif planning_failures:
-        planning = PlanningFailed(diff=judged_diff, failures=planning_failures)
+        planning = PlanningFailed(diff=planning_diff, failures=planning_failures)
     else:
         assert isinstance(report_plan, ActionPlan)
-        planning = PlanningSucceeded(diff=judged_diff, plan=report_plan)
+        planning = PlanningSucceeded(diff=planning_diff, plan=report_plan)
 
     if report_plan is None:
         compiled = None
@@ -1209,7 +1209,7 @@ def test_report_derives_its_diff_from_its_planning_outcome():
         diff=diff,
     )
 
-    # Then the report's diff is the one the outcome judged, not a stored copy
+    # Then the report's diff is the one the outcome retained, not a stored copy
     assert report.diff is diff
 
 
@@ -1225,7 +1225,7 @@ def test_a_failed_read_leaves_no_derived_diff():
 
 
 def test_report_rejects_a_planning_outcome_targeting_another_table():
-    # Given a planning outcome judged for a different table
+    # Given a planning outcome built for a different table
     desired = _a_desired_table("orders")
     other = _a_desired_table("other")
     other_plan = ActionPlan(target=other.qualified_name)

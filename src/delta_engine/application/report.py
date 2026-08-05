@@ -171,9 +171,9 @@ class TableRun:
     baked in at assembly — a blocked table records no execution outcome of its
     own.
     ``diff`` is derived from the planning outcome, which retains the complete
-    set of differences it judged — actions and unresolvable differences alike
-    — so a table whose plan was rejected can still show what drifted. It is
-    ``None`` when the read failed, because planning never ran.
+    set of differences it planned from — actions and unresolvable differences
+    alike — so a table whose plan was refused can still show what drifted. It
+    is ``None`` when the read failed, because planning never ran.
     """
 
     resolution: TableResolution
@@ -225,7 +225,7 @@ class TableRun:
 
     @property
     def diff(self) -> TableDiff | None:
-        """The differences planning judged, or ``None`` when the read failed."""
+        """The diff the planning outcome retains, or ``None`` when the read failed."""
         return None if self.planning is None else self.planning.diff
 
     @property
