@@ -22,6 +22,10 @@ await agreement and implementation
 
 **Implementation recheck:** `50193acc` (`main`, 2026-08-05)
 
+**Second review pass:** `50193acc` (`main`, 2026-08-05) — an independent
+whole-codebase design pass, recorded in its own section at the end of this
+document
+
 ## Scope
 
 This review asks where the code makes callers understand or coordinate more
@@ -922,3 +926,142 @@ alias mutation, report-message loss, malformed and subclassed data types,
 execution exception translation, optional-import classification, and repeated
 declaration imports. No production code changed; this review changes
 documentation only.
+
+## Second review: whole-codebase design pass (2026-08-05)
+
+An independent design review of the complete source tree at `50193acc`
+(`main`), read module by module — domain, application, api, adapters, cli,
+and a sample of the tests — without reference to the findings above.
+Overlaps discovered afterwards are cross-referenced. Where the findings
+above largely track correctness obligations at boundaries, this pass asks
+only the complexity question: where does the design make a maintainer
+understand or coordinate more than the problem requires?
+
+### Verdict
+
+Mostly good, minor complexity. This is an unusually deep-module codebase:
+interfaces are small, invariants live in constructors, platform knowledge
+is buried at the edges, and comments record why. The remaining structural
+complexity is concentrated in one seam — the engine's private run against
+the public report — and the code itself already knows it: the open `TODO`s
+in `application/engine.py` cluster at that seam.
+
+### The run/report mirror
+
+`_TableRun` (`application/engine.py`) and `TableRunReport`
+(`application/report.py`) are near-mirror types. They carry the same six
+outcomes (`resolution`, `read`, `diff`, `planning`, `compiled`,
+`execution`), the same derived properties (`desired`, `qualified_name`,
+`plan`), and — the load-bearing part — two independent definitions of
+failure: `_TableRun.has_failures` and `TableRunReport.failures`. The
+engine's skip logic folds one; the report's status derivation folds the
+other. They agree today because both enumerate the same failure sources by
+hand; nothing structural keeps them agreeing. Every new phase outcome pays
+a triple tax: a run field, a report field, and another coherence guard in
+`TableRunReport.__post_init__`'s stack — guards that exist precisely
+because the report cannot trust a scratch pad whose fields are all optional
+and mutable.
+
+The root cause is the phase-major loop shape: `_read`, `_diff`, `_plan`,
+and `_compile` each iterate every run and re-narrow the previous phase's
+optional field (`case ReadFailure() | None`, `if run.diff is None`,
+`case PlanningFailed() | None`). That conflates two meanings of `None` —
+"not yet" and "not applicable" — which is the confusion behind the engine's
+own `TODO: why can this be None?`.
+
+Improvements, in increasing size; the first stands alone:
+
+- **Adopt finding 14.** This pass independently reached the same first
+  step: planning outcomes should own the diff they judged. That deletes the
+  `diff` field from both records, the "A failed read produces no diff"
+  guard, and the `run.diff is None` narrowing.
+- **Flip phase-major to table-major.** One `_prepare(resolution) →
+  TableRunReport` per table builds the frozen report directly, each
+  intermediate a plain non-optional local. Execution attaches its summary
+  via `replace(report, execution=...)` — the pattern `SyncReport.assemble`
+  already uses for `blocked_failures`. `_TableRun` and `to_report()`
+  disappear; "None because not yet" leaves the types, and only "None
+  because not applicable" remains. Semantics are unchanged — all reads
+  still precede all execution, because execution is already a separate
+  dependency-ordered walk. The observable cost is per-table rather than
+  per-phase log grouping.
+
+This is not the phase-typed proposal the boundaries-to-retain section
+rejects: it introduces no phase-specific public types and no pass-through
+union handling. It removes the private scratchpad rather than typing it.
+
+Sketch:
+
+```python
+def sync(self, *tables, dry_run=False):
+    reports = [self._prepare(res) for res in resolve(lower_desired_tables(*tables))]
+    if not dry_run:
+        reports = self._execute(reports)  # replace(report, execution=...) per attempted table
+    return SyncReport.assemble(..., table_reports=reports, dry_run=dry_run)
+```
+
+### Minor findings
+
+- `PropertyPolicy.permits_transition` silently permits unknown keys
+  (`application/properties.py`, an acknowledged `TODO`). Unknown keys are
+  unreachable by construction — the API validates declared keys and the
+  reader projects observed keys through the policy — so the lenient
+  `return True` can only mask a programming error. Raise instead, matching
+  the fail-loud convention the compiler's `AddColumn` guard already sets.
+- `validate_diff(rules=...)` is configurability nothing reaches
+  (`application/validation.py`). No production path passes it; only tests
+  do. Either rule customization is a feature — then it should reach the
+  surface — or the parameter and the docstring space spent on its semantics
+  are interface complexity no user can touch. The eligibility
+  short-circuit that tests pin with `rules=()` can be pinned through public
+  behaviour instead.
+- Housekeeping `TODO`s in `Engine._compile` (log ownership, `__len__` on
+  `CompiledPlan`): trivial, and the why-can-this-be-`None` one dissolves
+  with the moves above.
+
+### Examined and deliberately not flagged
+
+- The convergence rule "folded twice" (`Engine._execute` and
+  `SyncReport.assemble`) is acceptable as is: the kernel lives once in
+  `TableResolution.blocked_by`, and the two folds answer different
+  questions — what to skip now versus what to say afterwards. If
+  consolidation is ever wanted, finding 3's `ResolutionBatch` is the right
+  shape.
+- The open action vocabulary (define → diff → validate → compile → render)
+  is the expression problem, but both singledispatch registries carry
+  exhaustiveness pins, so a missing arm fails tests rather than production.
+- The `scope` docstring's weight reflects the problem, not the design:
+  mirror-the-pipeline semantics are what make unmanaged drift detectable,
+  and the eligibility checks carry that complexity below the API.
+
+### What carries the design
+
+Named so the review does not read as a list of debts:
+
+- `RunQuery = Callable[[str], Rows]` is the entire read-side backend
+  contract; `read_catalog_state` hides the describe, five
+  information_schema queries, relation-kind admission, property projection,
+  and the typed error boundary behind one function. Both backends collapse
+  to ~20-line wirings.
+- Invalid states are designed out consistently: actions refuse
+  no-difference construction, `ActionPlan` sorts itself and validates its
+  target, `ExecutionSummary` rejects impossible statement histories, and
+  `CompiledPlan` requires exact action-to-statement pairing.
+- `diff_entries.py` as the one meaning layer keeps the human and machine
+  views of a change from drifting, and validation reuses it so rejection
+  messages quote drift in the diff's own words.
+- The eligibility/safety split means no rule does scope filtering of its
+  own — the special cases are handled once, behind the boundary.
+- `relationships.resolve` hides Tarjan entirely; `blocked_by` is the single
+  rule kernel both execution and accounting fold.
+- Tests are classical: recording fakes at the ports, real domain values,
+  behaviour-named tests, mocks only at true boundaries.
+- Comments record platform reasoning no code could express — the plain
+  `CREATE` versus `DROP ... IF EXISTS` convergence asymmetry pair being the
+  standout.
+
+### Scope note
+
+This pass read every module in `src/` and sampled the test suite; it ran no
+probes and changed no production code. This section changes documentation
+only.
