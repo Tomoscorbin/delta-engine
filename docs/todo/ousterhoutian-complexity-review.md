@@ -26,6 +26,9 @@ await agreement and implementation
 whole-codebase design pass, recorded in its own section at the end of this
 document
 
+**Finding 14 / run-report mirror resolved:** `86ba54ac` (`main`, 2026-08-05,
+[PR #328](https://github.com/Tomoscorbin/delta-engine/pull/328))
+
 ## Scope
 
 This review asks where the code makes callers understand or coordinate more
@@ -91,7 +94,7 @@ and backend SQL spelling should remain at their presentation boundaries.
 | 11 | Medium | Unresolvable differences are not classified exhaustively | A new blocker can be silently omitted from a successful plan |
 | 12 | Medium | Other error translators also catch beyond their boundary | Adapter and import defects become expected operational failures |
 | 13 | Medium | Declaration loading leaks process-wide import state | One invocation can affect backend imports and later invocations |
-| 14 | High | Planning outcomes do not retain the diff they judged | Reports carry planning and diff as unrelated values that can disagree |
+| 14 ✅ | High | Planning outcomes do not retain the diff they judged | Reports carry planning and diff as unrelated values that can disagree |
 | 15 | High | Change interpretation is partial and repeated | Rejected creates and added-column comments disappear from reports |
 | 16 | Medium | Consumers reconstruct one-answer semantic facts | Renderers and serializers know action polarity, plan kind, and wire identity |
 
@@ -706,6 +709,18 @@ This keeps the domain diff as the retained fact; it does not put report text or
 moving a canonical string to its data type: the value that makes the claim
 also carries everything required to substantiate it.
 
+### Resolved (2026-08-05)
+
+[PR #328](https://github.com/Tomoscorbin/delta-engine/pull/328) implemented
+this and went one step further: `plan_changes(desired, observed)` absorbed
+`diff_table` into the planning boundary, so the association is constructed
+where the facts are born and no caller can pair a diff with the wrong
+outcome. `PlanningSucceeded` and `PlanningFailed` both retain `diff`;
+`PlanningSucceeded` validates that its plan targets that diff; `TableRun`
+(`TableRunReport` renamed in the same PR) validates that the planning
+outcome targets the reported table and derives its `diff` from `planning`
+rather than accepting it as a constructor argument.
+
 ## 15. Give every table diff one total change interpretation
 
 ### Cause
@@ -902,9 +917,12 @@ reduce file or type count:
   casing, quoting, and dialect rules should remain in the backend compiler.
 - Desired and observed table types prevent catalog facts from carrying
   declaration-only syntax.
-- `_TableRun` is a useful private mutable phase scratchpad; phase-specific
-  public types would add pass-through union handling without removing the need
-  to retain terminal runs.
+- Phase-specific public run types stay rejected: they would add pass-through
+  union handling without removing the need to retain terminal runs. (This
+  bullet originally also defended `_TableRun` as a useful private scratchpad;
+  PR #328's table-major flip removed the scratchpad itself — each `TableRun`
+  is born frozen and complete — while leaving the rejection of phase types
+  intact.)
 - Property policy, action phase ordering, and the shared read assembly are the
   right kinds of named policy homes. The recommendations above deepen those
   boundaries rather than moving their logic back into the engine.
@@ -947,6 +965,15 @@ the public report — and the code itself already knows it: the open `TODO`s
 in `application/engine.py` cluster at that seam.
 
 ### The run/report mirror
+
+**Resolved (2026-08-05).**
+[PR #328](https://github.com/Tomoscorbin/delta-engine/pull/328) adopted both
+improvements below, in order: finding 14 first, then the table-major flip.
+`_TableRun` and `to_report()` are gone; `Engine._plan_execution(resolution)`
+builds one frozen `TableRun` per table (`TableRunReport` renamed, with
+`table_reports` becoming `table_runs`), execution attaches its summary via
+`replace`, and the engine's `TODO` cluster at this seam went with it. The
+analysis below is retained as the reasoning of record.
 
 `_TableRun` (`application/engine.py`) and `TableRunReport`
 (`application/report.py`) are near-mirror types. They carry the same six
@@ -1017,7 +1044,9 @@ def sync(self, *tables, dry_run=False):
   behaviour instead.
 - Housekeeping `TODO`s in `Engine._compile` (log ownership, `__len__` on
   `CompiledPlan`): trivial, and the why-can-this-be-`None` one dissolves
-  with the moves above.
+  with the moves above. (Confirmed after PR #328: `_compile` and its `TODO`s
+  are gone, and the structural-verdict log moved into
+  `relationships.resolve`.)
 
 ### Examined and deliberately not flagged
 
