@@ -36,6 +36,7 @@ strongly-connected-components algorithm) are hidden behind that interface.
 
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
+import logging
 
 from delta_engine.application.failures import (
     ForeignKeyFailure,
@@ -54,6 +55,8 @@ from delta_engine.domain.model import (
 # Its call depth follows dependency depth, so a chain near Python's recursion
 # limit raises RecursionError even though the public API declares no table-count
 # or dependency-depth limit. Preserve deterministic dependency-first ordering.
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,9 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
     cycle_partners = _cycle_partners_by_table(components)
     ordered = _order_tables(tables, components)
     failures_by_table = _classify_structural_failures(tables, registered_names, cycle_partners)
+
+    for qualified_name in failures_by_table:
+        logger.error("Foreign key resolution failed for %s", qualified_name)
 
     return tuple(
         TableResolution(

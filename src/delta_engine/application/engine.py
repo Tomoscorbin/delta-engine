@@ -3,10 +3,9 @@ High-level orchestration of planning and execution.
 
 `Engine.sync` splits the work by one rule: everything table-local and
 read-only happens in one straight-line plan pass per table
-(`_plan_execution`),
-and everything cross-table or world-mutating happens in its own walk over
-the planned runs. On a real run, if any table fails, `SyncFailedError` is
-raised with a formatted summary.
+(`_plan_execution`), and everything cross-table or world-mutating happens
+in its own walk over the planned runs. On a real run, if any table fails,
+`SyncFailedError` is raised with a formatted summary.
 
 The steps are:
   1. Lower    — lower the declaration set into domain tables, deduplicated
@@ -154,8 +153,7 @@ class Engine:
                 qualified names raise ``DuplicateTableDefinitionError`` before
                 any phase runs.
             dry_run: When True, stop after the plan pass and attempt no
-                statements
-                (zero catalog mutations). No table retains attempted statement
+                statements (zero catalog mutations). No table retains attempted statement
                 results, while its ``plan`` still records the actions compiled
                 from the observed snapshot. Blocking is derived rather than
                 executed, so a dependent of a failed table still reports
@@ -190,7 +188,7 @@ class Engine:
             dry_run=dry_run,
         )
 
-        if not dry_run and report.has_failures:
+        if not dry_run and report.has_failures:  # TODO: should a dry run raise as well?
             raise SyncFailedError(report)
 
         logger.info(
@@ -212,9 +210,6 @@ class Engine:
         is deliberately absent: whether this table may execute depends on
         other tables' fates, which is the execute walk's concern.
         """
-        if resolution.structural_failures:
-            logger.error("Foreign key resolution failed for %s", resolution.qualified_name)
-
         try:
             read = self.reader.fetch_state(resolution.qualified_name)
         except ReadError as error:
