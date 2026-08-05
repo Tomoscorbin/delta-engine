@@ -14,7 +14,7 @@ _EAGER = {
     "DuplicateTableDefinitionError",
     "Engine",
     "SyncReport",
-    "TableRunReport",
+    "TableRun",
     "SyncFailedError",
     "Failure",
     "FailurePhase",
@@ -43,7 +43,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         SyncFailedError,
         SyncReport,
         TableChangeState,
-        TableRunReport,
+        TableRun,
         TableRunStatus,
         ValidationFailure,
         render_diff,
@@ -60,7 +60,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
         SyncFailedError as SyncFailedErrorImpl,
         SyncReport as SyncReportImpl,
         TableChangeState as TableChangeStateImpl,
-        TableRunReport as TableRunReportImpl,
+        TableRun as TableRunImpl,
         TableRunStatus as TableRunStatusImpl,
         ValidationFailure as ValidationFailureImpl,
         render_diff as render_diff_impl,
@@ -79,7 +79,7 @@ def test_eager_names_are_importable_and_identical_to_their_source():
     assert SyncFailedError is SyncFailedErrorImpl
     assert SyncReport is SyncReportImpl
     assert TableChangeState is TableChangeStateImpl
-    assert TableRunReport is TableRunReportImpl
+    assert TableRun is TableRunImpl
     assert TableRunStatus is TableRunStatusImpl
     assert render_diff is render_diff_impl
     assert render_report is render_report_impl

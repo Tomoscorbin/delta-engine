@@ -251,7 +251,7 @@ def test_referenced_primary_key_change_is_rejected_without_catalog_change(
     # names the referencing constraint and no DDL was even planned.
     [parent_report] = [
         table_report
-        for table_report in error.value.report.table_reports
+        for table_report in error.value.report.table_runs
         if table_report.qualified_name.name == parent_name
     ]
     assert parent_report.status is TableRunStatus.PLANNING_FAILED
@@ -377,7 +377,7 @@ def test_server_rejected_statement_surfaces_as_typed_execution_failure(
         )
 
     # Then the failure is typed, carries its SQL, and leaves catalog state unchanged
-    [table_report] = error.value.report.table_reports
+    [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.EXECUTION_FAILED
     [failure] = table_report.failures
     assert isinstance(failure, ExecutionFailure)
@@ -480,7 +480,7 @@ def test_child_with_foreign_key_is_blocked_when_its_parent_is_rejected(
     # block it rather than create it against an unreconciled parent.
     [child_report] = [
         table_report
-        for table_report in error.value.report.table_reports
+        for table_report in error.value.report.table_runs
         if table_report.qualified_name.name == child_name
     ]
     assert child_report.status is TableRunStatus.FOREIGN_KEY_FAILED
@@ -538,7 +538,7 @@ def test_fk_type_mismatch_against_registered_parent_is_blocked_before_execution(
     report = error.value.report
     [child_report] = [
         table_report
-        for table_report in report.table_reports
+        for table_report in report.table_runs
         if table_report.qualified_name.name == child_name
     ]
     # On failure the rendered report is the diagnosis: it shows what the
@@ -568,7 +568,7 @@ def test_unreadable_catalog_surfaces_as_typed_read_failure(live_connection):
 
     # The reader port is total: a backend error reading state must come back
     # as a typed read failure in the report, not a raw connector exception.
-    [table_report] = error.value.report.table_reports
+    [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.READ_FAILED
     [failure] = table_report.failures
     assert isinstance(failure, ReadFailure)

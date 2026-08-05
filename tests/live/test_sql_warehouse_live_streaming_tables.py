@@ -175,7 +175,7 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     with pytest.raises(SyncFailedError) as error:
         engine.sync(full_scope)
 
-    [table_report] = error.value.report.table_reports
+    [table_report] = error.value.report.table_runs
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert "StreamingTableAnnotationsOnly" in {
         failure.rule_name

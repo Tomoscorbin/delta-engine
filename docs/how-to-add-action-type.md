@@ -97,7 +97,7 @@ comparison cannot be represented as an action, add a frozen difference type in
 `unresolvable.py`, name it in `Unresolvable`, and emit it into the diff's
 `unresolvable` tuple from `diff.py`. Decide whether it is accepted or
 rejected in application validation; the current three unresolvable
-differences are rejected by the default policy. Successful `plan_diff`
+differences are rejected by the default policy. Successful `plan_changes`
 results must contain actions only.
 
 ## 4. Register a SQL compiler
@@ -164,7 +164,7 @@ class NoUnsafeCommentChange:
         )
 ```
 
-Add it to `DEFAULT_SAFETY_RULES` in the same file. `plan_diff` deliberately exposes
+Add it to `DEFAULT_SAFETY_RULES` in the same file. `plan_changes` deliberately exposes
 no rules parameter: accepted plans always use this default policy.
 
 ## 7. Write tests

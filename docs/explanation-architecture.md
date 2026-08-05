@@ -68,11 +68,11 @@ through a sync.
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
-| `PlanningResult`   | The total application boundary: either `PlanningSucceeded(ActionPlan)` or `PlanningFailed(validation failures)`.                                            |
+| `PlanningResult`   | The total planning outcome: either `PlanningSucceeded(diff, plan)` or `PlanningFailed(diff, failures)`; both retain the diff they were planned from.        |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
 | `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
-| `TableRunReport`   | The immutable public snapshot of a completed table run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
+| `TableRun`   | The immutable public account of one table's run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
@@ -259,17 +259,20 @@ Delta/Databricks engine with a clean adapter seam, not a format-neutral one.
 
 ## Sync lifecycle
 
-`Engine.sync(...)` is a phase chain. Before the chain begins, user-facing table
-sources are prepared: each source is lowered with `to_desired_table()`, duplicate
-qualified names are rejected, and the desired tables are sorted by qualified
-name so reports and sync behavior do not depend on the order arguments were
-passed.
+`Engine.sync(...)` splits the work by one rule: everything table-local and
+read-only happens in one straight-line plan pass per table, and everything
+cross-table or world-mutating happens in its own walk over the planned runs.
+Before any table is planned, user-facing table sources are lowered with
+`to_desired_table()`, duplicate qualified names are rejected, and the desired
+tables are sorted by qualified name so reports and sync behavior do not
+depend on the order arguments were passed.
 
-After preparation, the engine runs six internal phases over private `_TableRun`
-objects. A `_TableRun` is a mutable scratch pad for one table. It retains the
-read, planning, resolution, and execution outcomes plus the intermediate diff
-and compiled SQL before it is frozen into an immutable `TableRunReport`.
-Failures and status are derived from those outcomes.
+Each plan pass returns a frozen, immutable `TableRun` — the public account
+of that table's run, complete for everything the table can know alone, with
+failures and status derived from the retained outcomes. The two facts that
+depend on other tables are attached afterwards as functional updates
+(`dataclasses.replace`, re-validated by the value's own invariants): execution
+results by the execute walk, and derived dependency blocking at assembly.
 
 ```mermaid
 sequenceDiagram
@@ -278,25 +281,28 @@ sequenceDiagram
     participant Resolver as relationships.resolve
     participant Reader as CatalogStateReader
     participant Differ as diff_table
-    participant Planner as plan_diff
+    participant Planner as plan_changes
     participant Executor as PlanExecutor
 
     User->>Engine: sync(customers, orders)
     Engine->>Engine: lower desired tables
     Engine->>Resolver: resolve(desired tables)
     Resolver-->>Engine: dependency order + dependency edges + structural verdicts
-    Engine->>Reader: fetch_state(qualified_name)
-    Reader-->>Engine: TablePresent / TableAbsent / ReadError
-    Engine->>Engine: ReadError → ReadFailure
-    Engine->>Differ: diff_table(desired, observed_or_none)
-    Differ-->>Engine: TableMissing / TableDrift
-    Engine->>Planner: plan_diff(diff)
-    Planner-->>Engine: PlanningSucceeded(plan) / PlanningFailed(failures)
-    Engine->>Executor: compile(plan)
-    Executor-->>Engine: SQL statements
-    loop dependency-ordered runs
-        Engine->>Engine: block the run if a dependency will not converge
-        Engine->>Executor: execute(statement) until the first failure (real runs)
+    loop dependency-ordered tables (plan)
+        Engine->>Reader: fetch_state(qualified_name)
+        Reader-->>Engine: TablePresent / TableAbsent / ReadError
+        Engine->>Engine: ReadError → ReadFailure
+        Engine->>Planner: plan_changes(desired, observed_or_none)
+        Planner->>Differ: diff_table(desired, observed_or_none)
+        Differ-->>Planner: TableMissing / TableDrift
+        Planner-->>Engine: PlanningSucceeded(diff, plan) / PlanningFailed(diff, failures)
+        Engine->>Executor: compile(plan)
+        Executor-->>Engine: SQL statements
+        Engine->>Engine: freeze the TableRun
+    end
+    loop dependency-ordered runs (execute, real runs only)
+        Engine->>Engine: skip the run if it failed or a dependency will not converge
+        Engine->>Executor: execute(statement) until the first failure
         Executor-->>Engine: success or ExecutionError
     end
     Engine-->>User: SyncReport or SyncFailedError(report)
@@ -309,21 +315,26 @@ The full run, with reporting last:
 2. **Resolve**: order tables dependency-first with `relationships.resolve`,
    judging each declared foreign key structurally (referenced spelling
    included) and retaining each table's dependency edges. This is pure
-   declaration analysis, so it precedes the read: a run is born knowing its
+   declaration analysis, so it precedes every read: a run is born knowing its
    position, its edges, and its verdicts, before any catalog state exists.
-3. **Read**: ask the reader port for the current catalog state of each table.
-4. **Diff**: compute the typed `TableDiff` with `diff_table`, foreign-key
-   existence included.
-5. **Plan**: call the total `plan_diff` boundary with the complete diff;
-   validation always applies the default policy to that one stream. A rejected
-   result contributes validation failures and has no plan; an accepted result
-   carries the privately constructed `ActionPlan` into the next phase.
-6. **Compile**: lower every accepted plan through the executor port and record
-   the exact statements used for both dry-run preview and real execution.
-7. **Execute**: run the compiled statements of tables with a non-empty plan,
-   no failures of their own, and no dependency that will not converge (real
-   runs only).
-8. **Account**: freeze the runs into `SyncReport` through `SyncReport.assemble`,
+3. **Plan** (per table, in dependency order — read-only): ask the reader
+   port for the current catalog state, then plan the changes at the total
+   `plan_changes` boundary — it computes the typed `TableDiff` with
+   `diff_table` (foreign-key existence included), validates the complete
+   diff under the default policy, and constructs the executable plan or
+   refuses with the failures, both outcomes retaining the diff. Every
+   accepted plan is then lowered through the executor port, recording the
+   exact statements used for both dry-run preview and real execution. Each
+   early exit is a lifecycle rule — a failed read leaves nothing to plan, a
+   refused plan leaves nothing to compile — and the `TableRun` is frozen and
+   complete when the plan pass returns it.
+4. **Execute** (real runs only): one walk in dependency order over the frozen
+   runs. A run with failures of its own, or with a dependency that will not
+   converge, is skipped; the compiled statements of the rest are executed
+   until the first failure, and each attempted run is replaced by a copy
+   carrying its execution summary. Because the plan pass is read-only, every
+   table was planned against the catalog as it stood before any statement ran.
+5. **Account**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
    which derives dependency blocking from the retained edges; or raise
    `SyncFailedError` with that report on real runs that failed.
 
@@ -336,11 +347,11 @@ phase each one failed in.
 
 | Shape              | Produced by            | Consumed by                      | Purpose                                     |
 | ------------------ | ---------------------- | -------------------------------- | ------------------------------------------- |
-| `DeltaTable`       | User code              | Application preparation          | Public declaration object                   |
+| `DeltaTable`       | User code              | Application lowering             | Public declaration object                   |
 | `DesiredTable`     | API lowering           | Domain planner, resolver, report | Target schema snapshot                      |
 | `ObservedTable`    | Reader adapter         | Domain planner, report           | Catalog schema snapshot                     |
-| `TableDiff`        | `diff_table`           | `plan_diff`                      | Direct actions and unresolvable differences |
-| `ActionPlan`       | successful `plan_diff` | Executor (`compile`), report     | Targeted, ordered, validated actions         |
+| `TableDiff`        | `diff_table`           | `plan_changes`                   | Direct actions and unresolvable differences |
+| `ActionPlan`       | successful `plan_changes` | Executor (`compile`), report     | Targeted, ordered, validated actions         |
 | `CatalogState`     | Reader port            | Engine                           | Known present or absent state               |
 | `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
@@ -354,7 +365,7 @@ phase each one failed in.
 | `delta_engine.cli`         | Read-only command composition and rendering                                                         | `plan`, declaration loading, unified-auth SQL connection                             |
 | `delta_engine.schema`      | User-facing declaration import surface                                                              | `DeltaTable`, `ForeignKey`, `Property`                                               |
 | `delta_engine.api`         | Declaration implementation package                                                                  | `DeltaTable`, `ForeignKey`, `Property`                                               |
-| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_diff`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
+| `delta_engine.application` | Use-case orchestration, accepted/rejected planning, ports, failures, relationship resolution, reports | `Engine`, `plan_changes`, `CatalogStateReader`, `PlanExecutor`, `resolve`, `SyncReport` |
 | `delta_engine.domain`      | Backend-free snapshots, diffs, actions, and deterministic planning                                  | `DesiredTable`, `ObservedTable`, `TableDiff`, `ActionPlan`                           |
 | `delta_engine.adapters`    | Backend integration and translation                                                                 | `SparkReader`, `SparkExecutor`, `WarehouseReader`, `WarehouseExecutor`, SQL compiler |
 
@@ -470,12 +481,14 @@ unsupported transition without deciding its policy outcome. The
 `Unresolvable` union names them, they live structurally apart from the
 actions, and the application default rules decide to reject each one.
 
-Whether a difference is permitted is application policy. `plan_diff` always runs
-the default policy and returns either `PlanningSucceeded(plan)` or
-`PlanningFailed(failures)`. Only the success arm has an `ActionPlan`, and plan
-construction is private to that boundary, so callers cannot plan raw diffs
-without validation. `validate_diff(..., rules=...)` remains the lower-level
-interface for testing alternative rule sets; it does not construct plans.
+Whether a difference is permitted is application policy. `plan_changes` diffs
+the declaration against the observed state itself, always runs the default
+policy, and returns either `PlanningSucceeded(diff, plan)` or
+`PlanningFailed(diff, failures)`. Only the success arm has an `ActionPlan`,
+and both diff production and plan construction are private to that boundary,
+so callers cannot plan unvalidated drift at all. `validate_diff(..., rules=...)`
+remains the lower-level interface for testing alternative rule sets; it does
+not construct plans.
 
 Two aspects deliberately diff under different semantics. Properties are
 exact-declaration: the declaration is the complete list of managed keys — a
@@ -553,7 +566,7 @@ The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
 
-The engine calls `plan_diff` once. A `PlanningFailed` leaves the run without a
+The engine calls `plan_changes` once per table. A `PlanningFailed` leaves the run without a
 plan and records its validation failures; a `PlanningSucceeded` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
 an empty plan with a real target and relation kind.
@@ -645,7 +658,7 @@ the same run.
 
 Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_diff` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`
@@ -701,7 +714,7 @@ in Python scope. Within one module that usually means defining the parent
 before the child; across modules it means importing the referenced table.
 
 This source-code order does not determine execution order. The engine sorts
-prepared desired tables by qualified name for deterministic setup, then the
+lowered desired tables by qualified name for deterministic setup, then the
 resolver topologically orders them by FK dependency before execution.
 
 References by dotted name are intentionally not supported in this iteration. If
@@ -761,7 +774,7 @@ keeps downstream planning focused on schema facts.
 
 ## Reporting and failure semantics
 
-Failures are phase-tagged application values. A `TableRunReport` derives its
+Failures are phase-tagged application values. A `TableRun` derives its
 status from the earliest failing phase, in pipeline order:
 
 - `FOREIGN_KEY_FAILED`
@@ -791,7 +804,7 @@ as a result.
 `dry_run` mode. It distinguishes a dry-run plan from an unapplied real-run plan
 and distinguishes a first-statement execution failure from a later failure
 after partial application. The aggregate owns that derivation because a
-`TableRunReport` alone cannot tell whether absent execution means preview or
+`TableRun` alone cannot tell whether absent execution means preview or
 blocking. `TableRunStatus` remains the independent answer to which phase
 failed.
 

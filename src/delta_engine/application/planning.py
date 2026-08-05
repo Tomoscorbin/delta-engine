@@ -1,4 +1,4 @@
-"""Validated boundary from complete table diffs to executable action plans."""
+"""Validated boundary from declared and observed state to executable action plans."""
 
 from dataclasses import dataclass
 from typing import assert_never
@@ -6,25 +6,44 @@ from typing import assert_never
 from delta_engine.application.failures import ValidationFailure
 from delta_engine.application.validation import validate_diff
 from delta_engine.domain.collection_types import ListOrTuple
+from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import (
     ActionPlan,
     TableDiff,
     TableDrift,
     TableMissing,
+    diff_table,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class PlanningSucceeded:
-    """Accepted diff and the validated executable plan constructed from it."""
+    """
+    The accepted diff and the validated executable plan constructed from it.
 
+    The two facts are born together in :func:`plan_changes` and stay together
+    here: construction proves the plan targets the diff it was planned from,
+    so consumers never have to re-associate them.
+    """
+
+    diff: TableDiff
     plan: ActionPlan
+
+    def __post_init__(self) -> None:
+        if self.plan.target != self.diff.target:
+            raise ValueError("Accepted plan must target the diff it was planned from")
 
 
 @dataclass(frozen=True, slots=True)
 class PlanningFailed:
-    """Rejected diff; no action plan exists for this result variant."""
+    """
+    The rejected diff and the failures that rejected it.
 
+    No action plan exists for this result variant; the diff is retained so a
+    report can still show what drifted.
+    """
+
+    diff: TableDiff
     failures: ListOrTuple[ValidationFailure]
 
     def __post_init__(self) -> None:
@@ -38,11 +57,10 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
     """
     Narrow a planning result to the plan it accepted, if any.
 
-    The one place the union narrows to a plan. Every phase downstream of
-    planning asks this question — the engine's run while the phases are still
-    mutating, its frozen report afterwards — and both ask it of a result that
-    may not exist yet, so the not-yet-planned case answers alongside the
-    rejected one rather than at each caller.
+    The one place the union narrows to a plan. The report asks this of a
+    result that may not exist — a failed read leaves no planning outcome — so
+    the not-applicable case answers alongside the rejected one rather than at
+    each caller.
     """
     match planning:
         case PlanningSucceeded(plan=plan):
@@ -53,21 +71,27 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
             assert_never(unreachable)
 
 
-def plan_diff(diff: TableDiff) -> PlanningResult:
+def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> PlanningResult:
     """
-    Validate ``diff``; accept or reject.
+    Plan the changes that reconcile ``observed`` with ``desired``; accept or refuse.
 
-    The diff is complete — foreign-key existence included — so policy judges
-    exactly one stream with no side channels. This remains the only boundary
-    that constructs an :class:`ActionPlan`; a rejected result carries
-    validation failures and deliberately has no plan, making execution of
-    unvalidated drift unrepresentable. The plan carries the relation kind its
+    The one boundary from state to executable plan. It diffs the declaration
+    against the observed table — ``None`` means confirmed absence, so the diff
+    proposes creation — and validates the complete diff, foreign-key existence
+    included, so policy sees exactly one stream with no side channels. An
+    accepted result carries the validated :class:`ActionPlan`; a refused
+    result carries the validation failures and deliberately has no plan,
+    making execution of unvalidated drift unrepresentable. This remains the
+    only boundary that constructs an ``ActionPlan``, and both outcomes retain
+    the diff they were planned from. The plan carries the relation kind its
     actions lower against: the observed kind for drift, and the default
     ordinary kind for a creation.
     """
+    diff = diff_table(desired, observed)
     failures = validate_diff(diff)
     if failures:
-        return PlanningFailed(failures=failures)
+        return PlanningFailed(diff=diff, failures=failures)
+
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
@@ -75,4 +99,4 @@ def plan_diff(diff: TableDiff) -> PlanningResult:
             plan = ActionPlan(target=missing.target, actions=missing.actions)
         case _ as unreachable:
             assert_never(unreachable)
-    return PlanningSucceeded(plan=plan)
+    return PlanningSucceeded(diff=diff, plan=plan)

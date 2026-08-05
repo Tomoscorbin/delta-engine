@@ -3,7 +3,7 @@ import pytest
 from delta_engine.application.planning import (
     PlanningFailed,
     PlanningSucceeded,
-    plan_diff,
+    plan_changes,
 )
 from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.domain.model import (
@@ -23,6 +23,7 @@ from delta_engine.domain.model import (
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
+    ActionPlan,
     AddColumn,
     AlterColumnType,
     CreateTable,
@@ -70,21 +71,19 @@ def _foreign_key(
     )
 
 
-def test_plan_diff_accepts_safe_actions():
-    diff = diff_table(
+def test_plan_changes_accepts_safe_actions():
+    result = plan_changes(
         _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer()))),
         _observed(),
     )
-
-    result = plan_diff(diff)
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
     assert result.plan.actions == (AddColumn(DesiredColumn("age", Integer())),)
 
 
-def test_plan_diff_rejects_unsafe_actions_without_constructing_a_plan():
-    diff = diff_table(
+def test_plan_changes_rejects_unsafe_actions():
+    result = plan_changes(
         _desired(
             columns=(
                 DesiredColumn("id", Integer()),
@@ -94,15 +93,12 @@ def test_plan_diff_rejects_unsafe_actions_without_constructing_a_plan():
         _observed(),
     )
 
-    result = plan_diff(diff)
-
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["NonNullableColumnAdd"]
-    assert not hasattr(result, "plan")
 
 
-def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
-    diff = diff_table(
+def test_plan_changes_rejects_unmanaged_actions():
+    result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())),
             managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
@@ -110,11 +106,8 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
         _observed(),
     )
 
-    result = plan_diff(diff)
-
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["UnmanagedAspectDrift"]
-    assert not hasattr(result, "plan")
 
 
 @pytest.mark.parametrize(
@@ -140,23 +133,57 @@ def test_plan_diff_rejects_unmanaged_actions_without_constructing_a_plan():
         ),
     ],
 )
-def test_plan_diff_rejects_each_non_action_difference(desired, observed, expected_rule):
-    result = plan_diff(diff_table(desired, observed))
+def test_plan_changes_rejects_each_non_action_difference(desired, observed, expected_rule):
+    result = plan_changes(desired, observed)
 
     assert isinstance(result, PlanningFailed)
     assert expected_rule in {failure.rule_name for failure in result.failures}
-    assert not hasattr(result, "plan")
 
 
-def test_plan_diff_accepts_no_op_as_an_empty_plan():
-    result = plan_diff(diff_table(_desired(), _observed()))
+def test_an_accepted_outcome_retains_the_diff_it_planned_from():
+    desired = _desired(columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())))
+    observed = _observed()
+
+    result = plan_changes(desired, observed)
+
+    assert isinstance(result, PlanningSucceeded)
+    assert result.diff == diff_table(desired, observed)
+
+
+def test_a_refused_outcome_retains_the_diff_it_refused():
+    desired = _desired(
+        columns=(
+            DesiredColumn("id", Integer()),
+            DesiredColumn("required", Integer(), nullable=False),
+        )
+    )
+    observed = _observed()
+
+    result = plan_changes(desired, observed)
+
+    assert isinstance(result, PlanningFailed)
+    assert result.diff == diff_table(desired, observed)
+
+
+def test_an_accepted_outcome_rejects_a_plan_for_another_tables_diff():
+    # Given a diff built for one table and a plan built for another
+    diff = diff_table(_desired(), None)
+    other_plan = ActionPlan(target=QualifiedName("dev", "silver", "other"))
+
+    # Then the outcome refuses to pair them
+    with pytest.raises(ValueError, match="must target the diff"):
+        PlanningSucceeded(diff=diff, plan=other_plan)
+
+
+def test_plan_changes_accepts_no_op_as_an_empty_plan():
+    result = plan_changes(_desired(), _observed())
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
     assert result.plan.actions == ()
 
 
-def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
+def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
     # Given a missing table declared with tags and a foreign key
     foreign_key = _foreign_key(
         local_columns=("id",),
@@ -171,7 +198,7 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, None))
+    result = plan_changes(desired, None)
 
     # Then the create is followed by tag and constraint actions
     assert isinstance(result, PlanningSucceeded)
@@ -184,17 +211,16 @@ def test_plan_diff_accepts_missing_table_and_builds_follow_up_actions():
     )
 
 
-def test_plan_diff_rejects_missing_table_when_table_existence_is_unmanaged():
+def test_plan_changes_rejects_missing_table_when_table_existence_is_unmanaged():
     desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
 
-    result = plan_diff(diff_table(desired, None))
+    result = plan_changes(desired, None)
 
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == ["MissingTableUnmanaged"]
-    assert not hasattr(result, "plan")
 
 
-def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
+def test_plan_changes_keeps_rename_and_residual_drift_under_the_new_name():
     # Given a rename hint plus a type change on the renamed column
     desired = _desired(
         columns=(DesiredColumn("amount", Long(), renamed_from="amt"),),
@@ -206,7 +232,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the residual drift lands under the new name
     assert isinstance(result, PlanningSucceeded)
@@ -216,7 +242,7 @@ def test_plan_diff_keeps_rename_and_residual_drift_under_the_new_name():
     )
 
 
-def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
+def test_plan_changes_replaces_a_primary_key_explicitly_across_a_rename():
     # Given a primary key moving to a renamed column
     desired_key = PrimaryKeyConstraint(("customer_name",), "test_pk")
     observed_key = PrimaryKeyConstraint(("customer_nm",), "legacy_pk")
@@ -230,7 +256,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -241,7 +267,7 @@ def test_plan_diff_replaces_a_primary_key_explicitly_across_a_rename():
     )
 
 
-def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
+def test_plan_changes_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
     # Given an inbound reference to the primary key being renamed
     reference = ForeignKeyReference(
         constraint_name="orders_customer_id_fk",
@@ -260,17 +286,16 @@ def test_plan_diff_rejects_rename_of_a_primary_key_referenced_by_foreign_keys():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then planning fails with the referenced-key rule
     assert isinstance(result, PlanningFailed)
     assert [failure.rule_name for failure in result.failures] == [
         "PrimaryKeyReferencedByForeignKeys"
     ]
-    assert not hasattr(result, "plan")
 
 
-def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
+def test_plan_changes_replaces_a_foreign_key_explicitly_across_a_rename():
     # Given a foreign key whose local column is being renamed
     parent = QualifiedName("dev", "silver", "parent")
     desired_key = _foreign_key(
@@ -294,7 +319,7 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -305,7 +330,7 @@ def test_plan_diff_replaces_a_foreign_key_explicitly_across_a_rename():
     )
 
 
-def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_rename():
+def test_plan_changes_replaces_a_self_referencing_foreign_key_explicitly_across_a_rename():
     # Given a self-referencing key whose referenced column is being renamed
     desired_key = _foreign_key(
         local_columns=("manager_id",),
@@ -332,7 +357,7 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the plan drops the old key, renames, then sets the new key
     assert isinstance(result, PlanningSucceeded)
@@ -343,7 +368,7 @@ def test_plan_diff_replaces_a_self_referencing_foreign_key_explicitly_across_a_r
     )
 
 
-def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
+def test_plan_changes_drops_an_observed_only_foreign_key_alongside_a_rename():
     # Given an observed-only foreign key unrelated to the rename
     unrelated_key = _foreign_key(
         local_columns=("id",),
@@ -363,7 +388,7 @@ def test_plan_diff_drops_an_observed_only_foreign_key_alongside_a_rename():
     )
 
     # When planning
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the drop still lands alongside the rename
     assert isinstance(result, PlanningSucceeded)
@@ -382,7 +407,7 @@ def test_plan_carries_the_observed_relation_kind():
     observed = _observed(kind=TableKind.STREAMING_TABLE)
 
     # When planning the diff
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the plan knows what its actions lower against
     assert isinstance(result, PlanningSucceeded)
@@ -393,7 +418,7 @@ def test_plan_carries_the_observed_relation_kind():
 def test_creation_plan_carries_the_ordinary_table_kind():
     # Given a missing table — absence has no observed kind, and the engine
     # only creates ordinary tables
-    result = plan_diff(diff_table(_desired(), None))
+    result = plan_changes(_desired(), None)
 
     assert isinstance(result, PlanningSucceeded)
     assert result.plan.target == _NAME
@@ -411,7 +436,7 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
     observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
 
     # When planning the resulting feature drift
-    result = plan_diff(diff_table(desired, observed))
+    result = plan_changes(desired, observed)
 
     # Then the column-structure action is rejected as out of scope
     assert isinstance(result, PlanningFailed)
@@ -431,10 +456,8 @@ def test_foreign_key_to_an_unregistered_parent_keeps_its_declared_referenced_spe
         columns=(DesiredColumn("id", Integer()),),
         foreign_keys=(constraint,),
     )
-    diff = diff_table(desired, _observed())
-
     # When planning
-    result = plan_diff(diff)
+    result = plan_changes(desired, _observed())
 
     # Then the referenced spelling passes through planning untouched
     assert isinstance(result, PlanningSucceeded)
@@ -451,7 +474,7 @@ def test_created_table_uses_its_columns_spelling_for_internal_references():
     )
 
     # When planning the creation
-    result = plan_diff(diff_table(desired, None))
+    result = plan_changes(desired, None)
 
     # Then the creation plan carries the declared spelling untouched
     assert isinstance(result, PlanningSucceeded)
@@ -472,7 +495,8 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
         referenced_columns=("id",),
         constraint_name="orders_customers_fk",
     )
-    diff = diff_table(
+    # When planning
+    result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
             foreign_keys=(fk,),
@@ -481,9 +505,6 @@ def test_foreign_key_actions_join_the_validated_plan_in_phase_order():
             columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
         ),
     )
-
-    # When planning
-    result = plan_diff(diff)
 
     # Then the accepted plan carries the foreign-key action
     assert isinstance(result, PlanningSucceeded)
@@ -503,7 +524,8 @@ def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
         referenced_columns=("id",),
         constraint_name="test_parent_id_fk",
     )
-    diff = diff_table(
+    # When planning
+    result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("parent_id", Integer())),
         ),
@@ -514,9 +536,6 @@ def test_pk_drop_exemption_sees_same_sync_foreign_key_drops():
             referencing_foreign_keys=(reference,),
         ),
     )
-
-    # When planning
-    result = plan_diff(diff)
 
     # Then the exemption found the drop in the same stream, and the plan
     # phases the FK drop before the PK drop
@@ -532,7 +551,8 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
         referenced_columns=("id",),
         constraint_name="orders_customers_fk",
     )
-    diff = diff_table(
+    # When planning
+    result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
             foreign_keys=(fk,),
@@ -542,9 +562,6 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
             columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),
         ),
     )
-
-    # When planning
-    result = plan_diff(diff)
 
     # Then the eligibility check rejects the unmanaged work
     assert isinstance(result, PlanningFailed)
@@ -563,10 +580,9 @@ def test_missing_table_plan_contains_the_declared_foreign_keys():
         columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
         foreign_keys=(fk,),
     )
-    diff = diff_table(desired, None)
 
     # When planning
-    result = plan_diff(diff)
+    result = plan_changes(desired, None)
 
     # Then the accepted plan creates the table and then adds the constraint
     assert isinstance(result, PlanningSucceeded)

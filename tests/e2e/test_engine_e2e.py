@@ -89,7 +89,7 @@ def test_engine_preserves_spark_variable_expressions_in_comments(spark, temp_sch
 
         second_report = engine.sync(declaration)
 
-        assert len(second_report.table_reports[0].plan) == 0
+        assert len(second_report.table_runs[0].plan) == 0
         assert spark.conf.get(variable_substitution) == "true"
     finally:
         spark.conf.set(variable_substitution, original_setting)
@@ -184,7 +184,7 @@ def test_engine_sync_fails_when_adding_non_nullable_column(spark, temp_schema):
 
     # Then the table is reported PLANNING_FAILED with a validation failure,
     # and the error message names the offending column so an operator can act
-    [table_report] = excinfo.value.report.table_reports
+    [table_report] = excinfo.value.report.table_runs
     assert table_report.status is TableRunStatus.PLANNING_FAILED
     assert any(isinstance(f, ValidationFailure) for f in table_report.failures)
     assert "age" in str(excinfo.value)
@@ -215,7 +215,7 @@ def test_engine_idempotent_when_already_in_desired_state(spark, temp_schema):
     second_report = engine.sync(*tables)
 
     # Then no actions were executed (true no-op, not just a schema-equal re-apply)
-    assert all(t.execution is None for t in second_report.table_reports)
+    assert all(t.execution is None for t in second_report.table_runs)
     assert spark.catalog.getTable(fq).description == "idempotency test"
 
 
@@ -256,7 +256,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
     )
     second_report = engine.sync(evolved)
     assert second_report.has_failures is False
-    assert second_report.table_reports[0].execution is not None
+    assert second_report.table_runs[0].execution is not None
 
     fields = {f.name: f for f in spark.table(fq).schema.fields}
     assert set(fields) == {"id", "name", "age"}
@@ -275,7 +275,7 @@ def test_engine_sync_applies_evolving_declaration_over_multiple_runs(spark, temp
     assert detail["properties"].get("delta.logRetentionDuration") == "interval 30 days"
 
     third_report = engine.sync(evolved)
-    assert len(third_report.table_reports[0].plan) == 0
+    assert len(third_report.table_runs[0].plan) == 0
 
 
 def test_engine_loosen_nullability_sets_column_nullable(spark, make_temp_table, temp_schema):
@@ -429,7 +429,7 @@ def test_engine_metadata_scope_fails_when_column_type_has_drifted(spark, temp_sc
         )
 
     # Then validation failed before execution and the table is unchanged
-    report = exc_info.value.report.table_reports[0]
+    report = exc_info.value.report.table_runs[0]
     assert report.status is TableRunStatus.PLANNING_FAILED
     assert {f.name for f in spark.table(fq).schema.fields} == {"id"}
 
@@ -482,7 +482,7 @@ def test_engine_fails_loud_on_undeclared_column_mapping(spark, temp_schema):
                 columns=(Column("id", Integer(), nullable=False),),
             )
         )
-    table_report = excinfo.value.report.table_reports[0]
+    table_report = excinfo.value.report.table_runs[0]
     assert any("delta.columnMapping.mode" in f.message for f in table_report.failures)
 
 
@@ -510,7 +510,7 @@ def test_engine_ignores_platform_written_properties(spark, temp_schema):
 
     # Then the unmanaged key is invisible — no failure, no action
     assert report.has_failures is False
-    assert len(report.table_reports[0].plan) == 0
+    assert len(report.table_runs[0].plan) == 0
 
 
 def test_engine_property_sync_is_idempotent(spark, temp_schema):
@@ -539,7 +539,7 @@ def test_engine_property_sync_is_idempotent(spark, temp_schema):
     report = engine.sync(declaration)
 
     # Then nothing is planned
-    assert len(report.table_reports[0].plan) == 0
+    assert len(report.table_runs[0].plan) == 0
 
 
 def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
@@ -587,12 +587,12 @@ def test_engine_creates_and_reclusters_a_table(spark, temp_schema):
 
     # Then it is reconciled in place (an action ran) and the catalog reflects it
     assert second.has_failures is False
-    assert second.table_reports[0].execution is not None
+    assert second.table_runs[0].execution is not None
     assert _clustering_columns() == ["id"]
 
     # And an identical re-sync is a true no-op (idempotent; order-insensitive set diff)
     third = engine.sync(reclustered)
-    assert len(third.table_reports[0].plan) == 0
+    assert len(third.table_runs[0].plan) == 0
 
 
 def test_engine_sync_widens_column_types_with_type_widening_declared(spark, temp_schema):

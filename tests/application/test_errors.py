@@ -25,11 +25,11 @@ from delta_engine.application.ports import (
 from delta_engine.application.relationships import TableResolution
 from delta_engine.application.report import (
     SyncReport,
-    TableRunReport,
+    TableRun,
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import ActionPlan, SetTableComment
+from delta_engine.domain.plan import ActionPlan, SetTableComment, TableMissing
 from tests.builders import build_compiled_plan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -70,7 +70,7 @@ def _table_report(
     read: ReadResult,
     failures: tuple[Failure, ...] = (),
     execution: ExecutionSummary | None = None,
-) -> TableRunReport:
+) -> TableRun:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
     planning_failures = tuple(
         failure for failure in failures if isinstance(failure, ValidationFailure)
@@ -82,18 +82,18 @@ def _table_report(
         planning = None
         compiled = None
     elif planning_failures:
-        planning = PlanningFailed(planning_failures)
+        planning = PlanningFailed(diff=TableMissing(desired), failures=planning_failures)
         compiled = None
     else:
         compiled = execution.compiled_plan if execution is not None else _compiled()
-        planning = PlanningSucceeded(compiled.plan)
+        planning = PlanningSucceeded(diff=TableMissing(desired), plan=compiled.plan)
     resolution = TableResolution(
         desired=desired,
         dependencies=(),
         structural_failures=resolution_failures,
     )
 
-    return TableRunReport(
+    return TableRun(
         read=read,
         planning=planning,
         compiled=compiled,
@@ -102,9 +102,9 @@ def _table_report(
     )
 
 
-def _message_for(table_report: TableRunReport) -> str:
+def _message_for(table_report: TableRun) -> str:
     """Return the SyncFailedError message produced for a run with this one failed table."""
-    report = SyncReport(started_at=_AT, ended_at=_AT, table_reports=(table_report,))
+    report = SyncReport(started_at=_AT, ended_at=_AT, table_runs=(table_report,))
     return str(SyncFailedError(report))
 
 
