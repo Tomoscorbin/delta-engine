@@ -145,7 +145,7 @@ def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, 
 
 def _failure_facts(failure: Failure) -> dict[str, Any]:
     """
-    The variant's own lossless facts, added beside the rendered ``message``.
+    Return the variant's own lossless facts, added beside the rendered ``message``.
 
     ``message`` may truncate a long backend message for display;
     ``diagnostic`` carries the complete text for the variants that have one.
