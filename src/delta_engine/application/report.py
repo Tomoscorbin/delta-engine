@@ -22,6 +22,7 @@ from delta_engine.application.failures import (
     ForeignKeyFailure,
     ForeignKeyFailureReason,
     ReadFailure,
+    ValidationFailure,
 )
 from delta_engine.application.planning import (
     PlanningFailed,
@@ -158,8 +159,20 @@ def _failure_facts(failure: Failure) -> dict[str, Any]:
                 "statement_index": failure.statement_index,
                 "sql": failure.statement,
             }
+        case ValidationFailure():
+            return {
+                "rule": failure.rule_name,
+                "subject": failure.subject,
+                "details": list(failure.details),
+            }
+        case ForeignKeyFailure():
+            return {
+                "reason": failure.reason.value,
+                "columns": list(failure.local_columns),
+                "references": str(failure.references),
+            }
         case _:
-            return {}
+            raise NotImplementedError(f"No wire facts for failure {type(failure).__name__}")
 
 
 def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:

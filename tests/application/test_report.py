@@ -986,6 +986,9 @@ def test_table_to_dict_reports_failures_with_phase_and_type():
             "phase": "PLANNING",
             "type": "ValidationFailure",
             "message": "Validation failed: SomeRule - unsafe",
+            "rule": "SomeRule",
+            "subject": "",
+            "details": [],
         }
     ]
 
@@ -1027,6 +1030,43 @@ def test_an_execution_failure_record_carries_its_statement_facts():
     assert record["sql"] == statement
     # 0-based on purpose: the index addresses the sibling statement list.
     assert payload["planned_sql_statements"][record["statement_index"]] == statement
+
+
+def test_a_validation_failure_record_carries_rule_subject_and_detail_lines():
+    failure = ValidationFailure(
+        rule_name="UnmanagedAspectDrift",
+        message="observed partitioning is not declared",
+        subject="partitioning",
+        details=("partitioning: observed (a) desired ()",),
+    )
+    report = _report(
+        desired=_a_desired_table("orders"),
+        read=TablePresent(table=_an_observed_table()),
+        failures=(failure,),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["rule"] == "UnmanagedAspectDrift"
+    assert record["subject"] == "partitioning"
+    assert record["details"] == ["partitioning: observed (a) desired ()"]
+
+
+def test_a_foreign_key_failure_record_names_its_edge_and_reason_code():
+    report = _report(
+        desired=_a_desired_table("b"),
+        read=TablePresent(table=_an_observed_table()),
+        plan=_comment_plan("b"),
+        blocked_failures=(_blocked_failure(),),
+    )
+
+    (record,) = report.to_dict()["failures"]
+
+    assert record["reason"] == "BLOCKED_BY_FAILED_DEPENDENCY"
+    assert record["columns"] == ["parent_id"]
+    assert record["references"] == "cat.schema.a"
+    # No "table" key: it would duplicate the enclosing record's "name".
+    assert "table" not in record
 
 
 def test_table_to_dict_reports_execution_counts_when_executed():
