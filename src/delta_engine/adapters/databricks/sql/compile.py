@@ -47,12 +47,7 @@ from delta_engine.domain.plan import (
 
 @dataclass(frozen=True, slots=True)
 class _Target:
-    """
-    A relation rendered as Databricks SQL addresses it.
-
-    Hides identifier quoting and the relation-kind-specific ALTER dialect so
-    action compilers need no knowledge of :class:`TableKind`.
-    """
+    """A relation target rendered for Databricks SQL statements."""
 
     name: str
     alter_clause: str
