@@ -186,7 +186,7 @@ class Engine:
             dry_run=dry_run,
         )
 
-        if not dry_run and report.has_failures:  # TODO: should a dry run raise as well?
+        if not dry_run and report.has_failures:
             raise SyncFailedError(report)
 
         logger.info(
