@@ -66,8 +66,15 @@ _REQUIRED_FEATURE_BY_TYPE: Final[Mapping[type[DataType], TableFeature]] = {
 
 
 @dataclass(frozen=True, slots=True)
-class TableMissing:
-    """The table does not exist in the catalog; carries what should exist."""
+class TableCreation:
+    """
+    The diff for a table with no catalog counterpart: create everything declared.
+
+    The read observed the table as absent (``TableAbsent``); this arm is the
+    differ's conclusion from that fact — the whole declaration is the gap, and
+    ``actions`` realize it. Whether creation is *allowed* is validation's
+    judgment (``MissingTableUnmanaged``), not the diff's.
+    """
 
     desired: DesiredTable
 
@@ -113,7 +120,7 @@ class TableDrift:
         return self.desired.qualified_name
 
 
-type TableDiff = TableMissing | TableDrift
+type TableDiff = TableCreation | TableDrift
 
 
 def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
@@ -128,7 +135,7 @@ def _require_same_table(desired: DesiredTable, observed: ObservedTable) -> None:
 def diff_table(desired: DesiredTable, observed: ObservedTable | None) -> TableDiff:
     """Describe every difference between desired and observed table state."""
     if observed is None:
-        return TableMissing(desired=desired)
+        return TableCreation(desired=desired)
 
     return _diff_existing_table(desired, observed)
 

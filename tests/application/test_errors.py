@@ -29,7 +29,7 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import ActionPlan, SetTableComment, TableMissing
+from delta_engine.domain.plan import ActionPlan, SetTableComment, TableCreation
 from tests.builders import build_compiled_plan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -82,11 +82,11 @@ def _table_report(
         planning = None
         compiled = None
     elif planning_failures:
-        planning = PlanningRejected(diff=TableMissing(desired), failures=planning_failures)
+        planning = PlanningRejected(diff=TableCreation(desired), failures=planning_failures)
         compiled = None
     else:
         compiled = execution.compiled_plan if execution is not None else _compiled()
-        planning = PlanningAccepted(diff=TableMissing(desired), plan=compiled.plan)
+        planning = PlanningAccepted(diff=TableCreation(desired), plan=compiled.plan)
     resolution = TableResolution(
         desired=desired,
         dependencies=(),

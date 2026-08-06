@@ -9,9 +9,9 @@ from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import (
     ActionPlan,
+    TableCreation,
     TableDiff,
     TableDrift,
-    TableMissing,
     diff_table,
 )
 
@@ -95,8 +95,8 @@ def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> Plann
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
-        case TableMissing() as missing:
-            plan = ActionPlan(target=missing.target, actions=missing.actions)
+        case TableCreation() as creation:
+            plan = ActionPlan(target=creation.target, actions=creation.actions)
         case _ as unreachable:
             assert_never(unreachable)
     return PlanningAccepted(diff=diff, plan=plan)

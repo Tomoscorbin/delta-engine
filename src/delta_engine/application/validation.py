@@ -40,9 +40,9 @@ from delta_engine.domain.plan import (
     PropertyUndeclared,
     SetColumnNullability,
     SetProperty,
+    TableCreation,
     TableDiff,
     TableDrift,
-    TableMissing,
     Unresolvable,
     UnsetProperty,
 )
@@ -108,7 +108,7 @@ class SafetyRule(Protocol):
     a rule is only ever evaluated on a diff that is fully in scope and spelled
     as the catalog spells it, so its actions and unresolvable differences are
     exactly the ones the declaration manages — it does no scope filtering of
-    its own. Never called for a ``TableMissing`` diff.
+    its own. Never called for a ``TableCreation`` diff.
     """
 
     name: ClassVar[str]
@@ -508,7 +508,7 @@ class ColumnSpellingMustMatchCatalog:
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag every column reference spelled differently from the catalog."""
         match diff:
-            case TableMissing():
+            case TableCreation():
                 return ()
 
             case TableDrift() as drift:
@@ -576,7 +576,7 @@ class UnmanagedAspectDrift:
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag every drifted aspect the declaration does not manage."""
         match diff:
-            case TableMissing():
+            case TableCreation():
                 return ()
 
             case TableDrift() as drift:
@@ -611,7 +611,7 @@ class MissingTableUnmanaged:
     Fail creation of a table whose declaration does not manage table existence.
 
     One of the ``ELIGIBILITY_CHECKS``, and the only one that judges the
-    ``TableMissing`` arm. It shares the naming shape of a rule (its ``name``
+    ``TableCreation`` arm. It shares the naming shape of a rule (its ``name``
     supplies the failure's ``rule_name``) but not the ``SafetyRule`` protocol —
     a missing table has no changes to evaluate. Like every eligibility check it
     runs unconditionally: ``rules=()`` must not enable metadata-only creates.
@@ -625,7 +625,7 @@ class MissingTableUnmanaged:
             case TableDrift():
                 return ()
 
-            case TableMissing() as missing:
+            case TableCreation() as missing:
                 if TableAspect.TABLE_EXISTENCE in missing.desired.managed_aspects:
                     return ()
                 return (
@@ -671,7 +671,7 @@ class StreamingTableAnnotationsOnly:
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
         """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
         match diff:
-            case TableMissing():
+            case TableCreation():
                 return ()
 
             case TableDrift() as drift:
@@ -697,7 +697,7 @@ class StreamingTableAnnotationsOnly:
 # Position is report order, so a root defect leads what it causes: spelling
 # before the two it can co-fire with, then StreamingTableAnnotationsOnly before
 # UnmanagedAspectDrift. MissingTableUnmanaged sits anywhere — it alone judges
-# TableMissing, so it never co-fires.
+# TableCreation, so it never co-fires.
 ELIGIBILITY_CHECKS: Final[tuple[EligibilityCheck, ...]] = (
     ColumnSpellingMustMatchCatalog(),
     MissingTableUnmanaged(),
@@ -748,7 +748,7 @@ def validate_diff(
         return ineligible
 
     match diff:
-        case TableMissing():
+        case TableCreation():
             return ()
         case TableDrift() as drift:
             return tuple(failure for rule in rules for failure in rule.evaluate(drift))

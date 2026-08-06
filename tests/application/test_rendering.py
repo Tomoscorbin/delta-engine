@@ -54,7 +54,7 @@ from delta_engine.domain.plan import (
     ColumnRenameConflict,
     PartitioningChanged,
     PropertyUndeclared,
-    TableMissing,
+    TableCreation,
     diff_table,
 )
 from delta_engine.domain.plan.actions import (
@@ -520,7 +520,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     plan = ActionPlan(target=report.desired.qualified_name)
     healthy = TableRun(
         read=report.read,
-        planning=PlanningAccepted(diff=TableMissing(report.desired), plan=plan),
+        planning=PlanningAccepted(diff=TableCreation(report.desired), plan=plan),
         compiled=build_compiled_plan(plan, ()),
         resolution=report.resolution,
         execution=None,
@@ -606,9 +606,9 @@ def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failur
         failure for failure in failures if isinstance(failure, ValidationFailure)
     )
     planning = (
-        PlanningRejected(diff=TableMissing(desired), failures=planning_failures)
+        PlanningRejected(diff=TableCreation(desired), failures=planning_failures)
         if planning_failures
-        else PlanningAccepted(diff=TableMissing(desired), plan=plan)
+        else PlanningAccepted(diff=TableCreation(desired), plan=plan)
     )
     statements = tuple(f"SQL {index}" for index in range(len(plan) if plan is not None else 0))
     if planning_failures:

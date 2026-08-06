@@ -45,8 +45,8 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
+    TableCreation,
     TableDrift,
-    TableMissing,
     diff_table,
 )
 from delta_engine.domain.plan.unresolvable import (
@@ -98,7 +98,7 @@ def test_missing_table_diffs_to_table_missing_carrying_desired():
     diff = diff_table(desired, observed=None)
 
     # Then the diff is the self-contained missing-table variant
-    assert diff == TableMissing(desired=desired)
+    assert diff == TableCreation(desired=desired)
 
 
 def test_missing_table_derives_target_from_desired_table():
@@ -106,7 +106,7 @@ def test_missing_table_derives_target_from_desired_table():
 
     diff = diff_table(desired, observed=None)
 
-    assert isinstance(diff, TableMissing)
+    assert isinstance(diff, TableCreation)
     assert diff.target == _QUALIFIED_NAME
 
 
@@ -364,7 +364,7 @@ def test_missing_table_relies_on_create_for_required_features():
     diff = diff_table(desired, None)
 
     # Then creation relies on Delta to enable the required feature
-    assert isinstance(diff, TableMissing)
+    assert isinstance(diff, TableCreation)
     assert diff.actions == (CreateTable(desired),)
 
 
@@ -790,7 +790,7 @@ def test_missing_table_actions_include_every_declared_foreign_key():
     diff = diff_table(desired, observed=None)
 
     # Then creation is stated first and every declared FK follows
-    assert isinstance(diff, TableMissing)
+    assert isinstance(diff, TableCreation)
     assert isinstance(diff.actions[0], CreateTable)
     fk_actions = [a for a in diff.actions if isinstance(a, SetForeignKey)]
     assert {str(a.constraint.constraint_name) for a in fk_actions} == {
@@ -993,7 +993,7 @@ def test_diff_missing_table_ignores_rename_hints():
 
     diff = diff_table(desired, None)
 
-    assert isinstance(diff, TableMissing)
+    assert isinstance(diff, TableCreation)
     assert diff.desired is desired
 
 

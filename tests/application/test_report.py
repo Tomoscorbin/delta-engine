@@ -40,7 +40,7 @@ from delta_engine.domain.model import (
     String,
     TableFeature,
 )
-from delta_engine.domain.plan import TableDiff, TableMissing, diff_table
+from delta_engine.domain.plan import TableCreation, TableDiff, diff_table
 from delta_engine.domain.plan.actions import (
     ActionPlan,
     CreateTable,
@@ -171,7 +171,7 @@ def _report(
         assert plan is None or isinstance(plan, ActionPlan)
         report_plan = plan
 
-    planning_diff = diff if diff is not None else TableMissing(desired)
+    planning_diff = diff if diff is not None else TableCreation(desired)
     if isinstance(read, ReadFailure):
         planning = None
     elif planning_failures:
@@ -559,7 +559,7 @@ def test_table_run_rejects_planning_after_a_failed_read():
         TableRun(
             read=ReadFailure("IOError", "boom"),
             planning=PlanningAccepted(
-                diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
+                diff=TableCreation(desired), plan=ActionPlan(target=desired.qualified_name)
             ),
             compiled=None,
             resolution=TableResolution(desired, (), ()),
@@ -574,7 +574,7 @@ def test_table_run_rejects_successful_planning_without_compilation():
         TableRun(
             read=TableAbsent(),
             planning=PlanningAccepted(
-                diff=TableMissing(desired), plan=ActionPlan(target=desired.qualified_name)
+                diff=TableCreation(desired), plan=ActionPlan(target=desired.qualified_name)
             ),
             compiled=None,
             resolution=TableResolution(desired, (), ()),
@@ -590,7 +590,7 @@ def test_table_run_rejects_compilation_of_another_plan():
     with pytest.raises(ValueError, match="must match the successful planning outcome"):
         TableRun(
             read=TableAbsent(),
-            planning=PlanningAccepted(diff=TableMissing(desired), plan=plan),
+            planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
             compiled=build_compiled_plan(other_plan, ()),
             resolution=TableResolution(desired, (), ()),
             execution=None,
@@ -611,7 +611,7 @@ def test_table_run_rejects_execution_after_failed_resolution():
     with pytest.raises(ValueError, match="Execution cannot follow a failed earlier phase"):
         TableRun(
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningAccepted(diff=TableMissing(desired), plan=plan),
+            planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
             compiled=compiled,
             resolution=TableResolution(desired, (), (failure,)),
             execution=ExecutionSummary(
@@ -630,7 +630,7 @@ def test_table_run_rejects_execution_of_another_compiled_plan():
     with pytest.raises(ValueError, match="reported compiled plan"):
         TableRun(
             read=TablePresent(table=_an_observed_table()),
-            planning=PlanningAccepted(diff=TableMissing(desired), plan=plan),
+            planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
             compiled=reported,
             resolution=TableResolution(desired, (), ()),
             execution=ExecutionSummary(
@@ -1365,7 +1365,7 @@ def test_table_run_rejects_a_planning_outcome_targeting_another_table():
     desired = _a_desired_table("orders")
     other = _a_desired_table("other")
     other_plan = ActionPlan(target=other.qualified_name)
-    foreign_outcome = PlanningAccepted(diff=TableMissing(other), plan=other_plan)
+    foreign_outcome = PlanningAccepted(diff=TableCreation(other), plan=other_plan)
 
     # Then the run refuses to carry it
     with pytest.raises(ValueError, match="must target the reported table"):
