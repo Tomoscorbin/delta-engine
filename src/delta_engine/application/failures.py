@@ -1,10 +1,15 @@
 """
 Failure vocabulary for engine runs.
 
-Every way a sync can fail, as one closed family: each failure knows the phase
-that produced it (`FailurePhase`) and renders itself as display lines. Reports
-derive a table's status from the earliest failing phase, so the family stays
-together rather than being scattered across its producers.
+A failure is a recorded reason a table did not converge — a frozen value in
+the table's run, never raised (it is not an ``Exception``). ``ReadFailure``
+and ``ExecutionFailure`` are born when the engine catches the corresponding
+adapter error; ``ValidationFailure`` and ``ForeignKeyFailure`` are born as
+values from pure judgment — no exception is ever involved. Each failure
+knows the phase that produced it (`FailurePhase`) and renders itself as
+display lines; reports derive a table's status from the earliest failing
+phase, so the family stays together rather than being scattered across its
+producers.
 """
 
 from abc import ABC, abstractmethod

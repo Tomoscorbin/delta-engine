@@ -14,11 +14,10 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
+from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
     CompiledPlan,
-    ExecutionSucceeded,
-    ExecutionSummary,
+    ExecutionResult,
     ReadResult,
     TableAbsent,
 )
@@ -29,7 +28,7 @@ from delta_engine.application.report import (
 )
 from delta_engine.domain.model import DesiredColumn, Integer, QualifiedName
 from delta_engine.domain.model.table import DesiredTable
-from delta_engine.domain.plan import ActionPlan, SetTableComment, TableMissing
+from delta_engine.domain.plan import ActionPlan, SetTableComment, TableCreation
 from tests.builders import build_compiled_plan
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -69,7 +68,7 @@ def _table_report(
     *,
     read: ReadResult,
     failures: tuple[Failure, ...] = (),
-    execution: ExecutionSummary | None = None,
+    execution: ExecutionResult | None = None,
 ) -> TableRun:
     desired = DesiredTable(qualified_name=_QN, columns=(DesiredColumn("id", Integer()),))
     planning_failures = tuple(
@@ -82,11 +81,11 @@ def _table_report(
         planning = None
         compiled = None
     elif planning_failures:
-        planning = PlanningFailed(diff=TableMissing(desired), failures=planning_failures)
+        planning = PlanningRejected(diff=TableCreation(desired), failures=planning_failures)
         compiled = None
     else:
         compiled = execution.compiled_plan if execution is not None else _compiled()
-        planning = PlanningSucceeded(diff=TableMissing(desired), plan=compiled.plan)
+        planning = PlanningAccepted(diff=TableCreation(desired), plan=compiled.plan)
     resolution = TableResolution(
         desired=desired,
         dependencies=(),
@@ -185,13 +184,10 @@ def test_message_renders_execution_failure_detail_with_sql():
     )
     report = _table_report(
         read=TableAbsent(),
-        execution=ExecutionSummary(
+        execution=ExecutionResult(
             compiled_plan=compiled,
-            results=(
-                ExecutionSucceeded(0, statements[0]),
-                ExecutionSucceeded(1, statements[1]),
-                failed_result,
-            ),
+            applied_count=2,
+            failure=failed_result,
         ),
     )
 

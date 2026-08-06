@@ -64,15 +64,15 @@ through a sync.
 | `ObservedTable`    | Immutable domain snapshot of the current catalog state. Reader adapters produce this after normalizing backend details.                                     |
 | `CatalogState`     | A known catalog answer: `TablePresent` or `TableAbsent`. An unreadable state crosses the port as `ReadError`.                                               |
 | `ReadResult`       | The persistent read outcome retained by a table run: a `CatalogState` or the engine-created `ReadFailure`.                                                  |
-| `TableDiff`        | Typed desired/observed drift. It is either `TableMissing` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
+| `TableDiff`        | Typed desired/observed drift. It is either `TableCreation` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
-| `PlanningResult`   | The total planning outcome: either `PlanningSucceeded(diff, plan)` or `PlanningFailed(diff, failures)`; both retain the diff they were planned from.        |
+| `PlanningResult`   | The total planning outcome: either `PlanningAccepted(diff, plan)` or `PlanningRejected(diff, failures)`; both retain the diff they were planned from.        |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
 | `TableResolution`  | One table's static relationship facts, in dependency-first order by tuple position: the declaration it was judged from, that table's dependency edges, and its structural foreign-key verdicts.                   |
-| `ExecutionSummary` | The result of running a plan's compiled statements. It records successful statements and the first failed statement, if execution failed.                   |
-| `TableRun`   | The immutable public account of one table's run: desired state, read result, accepted plan, compiled SQL, failures, and attempted statement results.                  |
+| `ExecutionResult` | The result of running a plan's compiled statements. It records how many statements applied and the first failed statement, if execution failed.                   |
+| `TableRun`   | The immutable public record of one table's run: desired state, read result, accepted plan, compiled SQL, failures, and execution result.                  |
 | `SyncReport`       | The aggregate result for the whole sync. It is returned on success and attached to `SyncFailedError` on real-run failure.                                   |
 
 The table snapshots deliberately use domain vocabulary, not Spark vocabulary.
@@ -267,7 +267,7 @@ Before any table is planned, user-facing table sources are lowered with
 tables are sorted by qualified name so reports and sync behavior do not
 depend on the order arguments were passed.
 
-Each plan pass returns a frozen, immutable `TableRun` — the public account
+Each plan pass returns a frozen, immutable `TableRun` — the public record
 of that table's run, complete for everything the table can know alone, with
 failures and status derived from the retained outcomes. The two facts that
 depend on other tables are attached afterwards as functional updates
@@ -294,8 +294,8 @@ sequenceDiagram
         Engine->>Engine: ReadError → ReadFailure
         Engine->>Planner: plan_changes(desired, observed_or_none)
         Planner->>Differ: diff_table(desired, observed_or_none)
-        Differ-->>Planner: TableMissing / TableDrift
-        Planner-->>Engine: PlanningSucceeded(diff, plan) / PlanningFailed(diff, failures)
+        Differ-->>Planner: TableCreation / TableDrift
+        Planner-->>Engine: PlanningAccepted(diff, plan) / PlanningRejected(diff, failures)
         Engine->>Executor: compile(plan)
         Executor-->>Engine: SQL statements
         Engine->>Engine: freeze the TableRun
@@ -322,26 +322,26 @@ The full run, with reporting last:
    `plan_changes` boundary — it computes the typed `TableDiff` with
    `diff_table` (foreign-key existence included), validates the complete
    diff under the default policy, and constructs the executable plan or
-   refuses with the failures, both outcomes retaining the diff. Every
+   rejects with the failures, both outcomes retaining the diff. Every
    accepted plan is then lowered through the executor port, recording the
    exact statements used for both dry-run preview and real execution. Each
    early exit is a lifecycle rule — a failed read leaves nothing to plan, a
-   refused plan leaves nothing to compile — and the `TableRun` is frozen and
+   rejected plan leaves nothing to compile — and the `TableRun` is frozen and
    complete when the plan pass returns it.
 4. **Execute** (real runs only): one walk in dependency order over the frozen
    runs. A run with failures of its own, or with a dependency that will not
    converge, is skipped; the compiled statements of the rest are executed
    until the first failure, and each attempted run is replaced by a copy
-   carrying its execution summary. Because the plan pass is read-only, every
+   carrying its execution result. Because the plan pass is read-only, every
    table was planned against the catalog as it stood before any statement ran.
-5. **Account**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
+5. **Report**: assemble the runs into `SyncReport` through `SyncReport.assemble`,
    which derives dependency blocking from the retained edges; or raise
    `SyncFailedError` with that report on real runs that failed.
 
 A table that failed read, validation, or structural foreign-key resolution is
 skipped during execution, and so is any table depending on one that will not
 converge. The engine still processes other tables. Nothing records the block:
-it is derived at accounting, so a blocked table carries no execution outcome
+it is derived at report assembly, so a blocked table carries no execution outcome
 and its `blocked_failures` name every dependency that let it down, whichever
 phase each one failed in.
 
@@ -355,7 +355,7 @@ phase each one failed in.
 | `CatalogState`     | Reader port            | Engine                           | Known present or absent state               |
 | `ReadResult`       | Engine                 | Report                           | Catalog state or persistent read failure    |
 | SQL statements     | Executor (`compile`)   | Engine, executor, report         | The DDL a plan lowers to                    |
-| `ExecutionSummary` | Engine                 | Report                           | Attempted statement outcomes                |
+| `ExecutionResult` | Engine                 | Report                           | Applied-statement count and first failure   |
 | `SyncReport`       | Engine                 | User code                        | Immutable run result                        |
 
 ## Package map
@@ -441,7 +441,7 @@ either.
 ## Diff-first planning
 
 Planning is two pure stages connected by a typed diff. `diff_table(desired,
-observed)` produces a `TableDiff` — `TableMissing` when the table does not
+observed)` produces a `TableDiff` — `TableCreation` when the table does not
 exist, else a `TableDrift` holding executable `actions` and non-action
 `unresolvable` differences as two typed tuples. Actions carry their `TableAspect` plus the
 complete desired/observed state needed by validation and reporting;
@@ -461,7 +461,7 @@ or by an add-and-backfill — the difference and its remedy stop being the
 same thing, and the vocabularies must separate again for that aspect.
 
 Both arms state the complete intended transition the same way: a
-`TableMissing` exposes its creation actions — CREATE TABLE plus tag and
+`TableCreation` exposes its creation actions — CREATE TABLE plus tag and
 foreign-key follow-ups — so accepted planning is uniformly "construct an
 `ActionPlan` from the diff's actions" for creation and drift alike.
 
@@ -483,8 +483,8 @@ actions, and the application default rules decide to reject each one.
 
 Whether a difference is permitted is application policy. `plan_changes` diffs
 the declaration against the observed state itself, always runs the default
-policy, and returns either `PlanningSucceeded(diff, plan)` or
-`PlanningFailed(diff, failures)`. Only the success arm has an `ActionPlan`,
+policy, and returns either `PlanningAccepted(diff, plan)` or
+`PlanningRejected(diff, failures)`. Only the success arm has an `ActionPlan`,
 and both diff production and plan construction are private to that boundary,
 so callers cannot plan unvalidated drift at all. `validate_diff(..., rules=...)`
 remains the lower-level interface for testing alternative rule sets; it does
@@ -507,7 +507,7 @@ naming the aspects the engine reconciles for that table. The differ
 (`diff_table`) is scope-blind for every aspect except properties — the
 properties diff runs only when the declaration manages `PROPERTIES` (see
 Diff-first planning). The `TableDrift` it produces carries the `desired`
-table itself (symmetric with `TableMissing`), so the diff is self-contained
+table itself (symmetric with `TableCreation`), so the diff is self-contained
 and `validate_diff` takes only the diff. Scope awareness lives in
 validation, as an eligibility check rather than an optional rule. Before any
 safety rule runs, `validate_diff` fails the sync once per unmanaged aspect that
@@ -535,7 +535,7 @@ never reconciles them, the same as `COLUMN_STRUCTURE` and `PARTITIONING`.
 
 `diff_table(desired, observed)` produces a `TableDiff`:
 
-- `TableMissing` means the catalog has no table at that name.
+- `TableCreation` means the catalog has no table at that name.
 - `TableDrift` means the table exists and carries its actions and unresolvable differences.
 
 The diff produces backend-neutral commands but does not decide whether they are
@@ -566,8 +566,8 @@ The authoritative list and resolution for every current rule lives in
 [safe-change rules](reference-safe-change-rules.md); keeping the inventory in
 one place prevents this architecture overview from drifting when policy grows.
 
-The engine calls `plan_changes` once per table. A `PlanningFailed` leaves the run without a
-plan and records its validation failures; a `PlanningSucceeded` supplies the
+The engine calls `plan_changes` once per table. A `PlanningRejected` leaves the run without a
+plan and records its validation failures; a `PlanningAccepted` supplies the
 only plan the compiler can receive. A successful no-op is distinct: it carries
 an empty plan with a real target and relation kind.
 
@@ -658,7 +658,7 @@ the same run.
 
 Each eligibility check implements the `EligibilityCheck` protocol over `TableDiff`; a check returns no failures when it does not apply to that diff arm. Each safety rule implements the `SafetyRule` protocol: a `name` `ClassVar[str]` and an `evaluate(drift: TableDrift) -> tuple[ValidationFailure, ...]` method. Safety rules usually scan `drift.actions` or `drift.unresolvable` directly — typically matching a specific type with `isinstance` — and return all violations at once, avoiding a fix-and-rerun cycle per failure. The eligibility checks run before any safety rule and short-circuit the safety stage on failure, so a safety rule only ever sees differences the declaration manages and does no scope filtering of its own.
 
-`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableMissing` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
+`validate_diff` evaluates every check in `ELIGIBILITY_CHECKS` and aggregates their failures in declaration order, which is why `ColumnSpellingMustMatchCatalog` is listed first: when a misspelling and an unmanaged difference both fire, the spelling failure leads. A `TableCreation` is eligible when table existence is managed — creating it from its full declaration is always safe, and what a declaration creates it spells freely — and fails with `MissingTableUnmanaged` when it is not, so no safety rule ever sees a missing table; a `TableDrift` is eligible when its claimed scope and observed relation kind are valid, no unmanaged aspect has drifted, and every column reference is spelled as the catalog spells it. Only then does `validate_diff` call every rule in `DEFAULT_SAFETY_RULES` with the drift and aggregate their failures into one tuple, returned empty when the diff is valid. `plan_changes` fixes that default composition in place and turns those failures into the accepted/rejected planning sum.
 
 Two walks fold that one rule over the dependency-first order the resolver
 produced, each accumulating its own not-converged set as it goes: `_execute`
@@ -774,6 +774,31 @@ keeps downstream planning focused on schema facts.
 
 ## Reporting and failure semantics
 
+### Outcome vocabulary
+
+One word, one meaning — every outcome type uses exactly one of these:
+
+| Word        | Meaning                                                                  | Types                                              |
+| ----------- | ------------------------------------------------------------------------ | -------------------------------------------------- |
+| **Error**   | A call could not deliver what its contract promises; unwinds to a caller | `ReadError`, `ExecutionError`, `SyncFailedError`, … |
+| **Failure** | A recorded reason a table did not converge, tagged with its phase        | `ReadFailure`, `ValidationFailure`, `ExecutionFailure`, `ForeignKeyFailure` |
+| **Result**  | The recorded outcome of one lifecycle step for one table                 | `ReadResult`, `PlanningResult`, `ExecutionResult`   |
+| **Run**     | The frozen record of one table's whole sync                              | `TableRun`                                          |
+| **Report**  | The aggregate record of the whole sync                                   | `SyncReport`                                        |
+| **State**   | A condition something is in                                              | `CatalogState`, `TableChangeState`                  |
+| **Status**  | How a table's run ended: earliest failing phase, else success            | `TableRunStatus`                                    |
+
+Errors are never stored in a report; failures are never raised (`Failure`
+is not an `Exception`, so `raise` rejects it). `ReadError` and
+`ExecutionError` are translated into `ReadFailure`/`ExecutionFailure` by
+the engine at the two backend boundaries; `ValidationFailure` and
+`ForeignKeyFailure` are born as values from pure judgment. `ReadResult`
+and `PlanningResult` are unions; `ExecutionResult` is a record, because
+execution can partially succeed — `applied_count` of N statements — which
+a binary union cannot state. The read port's `TableAbsent` and the diff's
+`TableCreation` split one situation by layer: Absent is the catalog fact
+the read observed; Creation is the work the differ concluded from it.
+
 Failures are phase-tagged application values. A `TableRun` derives its
 status from the earliest failing phase, in pipeline order:
 
@@ -789,9 +814,9 @@ That matters when a table has multiple validation failures or multiple FK
 failures: callers receive the complete failure tuple without another mutable
 source of run truth. For execution, the engine stops at the first failed
 statement because it is not transactional and later statements may depend on
-earlier ones. The `ExecutionSummary` records all attempted statements up to
-that point. Dependency blocking is retained as no outcome at all: it is derived
-at accounting into `blocked_failures`, which the report flattens at the
+earlier ones. The `ExecutionResult` records the applied count up to that
+point and the failure itself. Dependency blocking is retained as no outcome
+at all: it is derived at report assembly into `blocked_failures`, which the report flattens at the
 execution position while `execution` stays `None` because no statement was
 attempted.
 

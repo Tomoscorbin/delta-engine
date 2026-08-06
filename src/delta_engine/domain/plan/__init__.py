@@ -24,9 +24,9 @@ from delta_engine.domain.plan.actions import (
     UnsetTableTag,
 )
 from delta_engine.domain.plan.diff import (
+    TableCreation,
     TableDiff,
     TableDrift,
-    TableMissing,
     diff_table,
 )
 from delta_engine.domain.plan.unresolvable import (
@@ -62,9 +62,9 @@ __all__ = [
     "SetProperty",
     "SetTableComment",
     "SetTableTag",
+    "TableCreation",
     "TableDiff",
     "TableDrift",
-    "TableMissing",
     "Unresolvable",
     "UnsetColumnTag",
     "UnsetProperty",

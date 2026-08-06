@@ -2,7 +2,7 @@
 Application ports: the engine's boundary contracts and the message types they exchange.
 
 Each boundary is defined in full here — the vocabulary an adapter returns
-(``CatalogState`` for reads, ``ExecutionSummary`` for execution) sits beside
+(``CatalogState`` for reads, ``ExecutionResult`` for execution) sits beside
 the Protocol that requires it, so an adapter author reads one file to learn
 the whole contract. ``DesiredTableSource`` is the inbound counterpart: the
 contract a user-facing declaration satisfies to enter a sync.
@@ -115,66 +115,41 @@ class CompiledPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionSucceeded:
+class ExecutionResult:
     """
-    A single statement that executed without error.
+    The recorded outcome of executing one table's compiled plan.
 
-    ``statement_index`` is the statement's position in the run and
-    ``statement`` is its SQL exactly as executed; neither is rendered by the
-    engine's own reports — they are carried for callers that inspect
-    ``ExecutionSummary.results`` directly.
-    """
-
-    statement_index: int
-    statement: str
-
-
-# A completed statement is either recorded as successful or as the execution
-# failure itself.
-type ExecutionResult = ExecutionSucceeded | ExecutionFailure
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionSummary:
-    """
-    The outcome of running a plan's compiled statements.
-
-    Results must cover the compiled statements in order. A successful history
-    covers the complete plan; a failed history is the prefix ending at the
-    first failed statement. Therefore ``failures`` holds at most one.
+    Execution applies statements in compiled order and stops at the first
+    failure, so the complete history is an applied prefix plus at most one
+    failure sitting immediately after it: ``applied_count`` says how far the
+    prefix ran, and ``failure`` is the statement that stopped it, ``None``
+    when the whole plan applied. The statements themselves live on
+    ``compiled_plan`` — nothing derivable is restated here.
     """
 
     compiled_plan: CompiledPlan
-    results: ListOrTuple[ExecutionResult] = ()
+    applied_count: int = 0
+    failure: ExecutionFailure | None = None
 
     def __post_init__(self) -> None:
-        """Reject result histories that the engine's execution loop cannot produce."""
-        results = tuple(self.results)
-        object.__setattr__(self, "results", results)
+        """Reject histories the engine's execution loop cannot produce."""
         statements = self.compiled_plan.statements
-        execution_failed = False
-        for expected_index, result in enumerate(results):
-            if result.statement_index != expected_index:
-                raise ValueError("Execution result indexes must be contiguous")
-            if expected_index >= len(statements) or result.statement != statements[expected_index]:
-                raise ValueError("Execution results must match the compiled statement prefix")
-            if isinstance(result, ExecutionFailure):
-                if expected_index != len(results) - 1:
-                    raise ValueError("Execution must stop at its first failure")
-                execution_failed = True
-
-        if not execution_failed and len(results) != len(statements):
-            raise ValueError("Successful execution must cover the complete compiled plan")
+        attempted = self.applied_count + (0 if self.failure is None else 1)
+        if not 0 <= self.applied_count or attempted > len(statements):
+            raise ValueError("Execution history must lie within the compiled plan")
+        if self.failure is None:
+            if self.applied_count != len(statements):
+                raise ValueError("Successful execution must cover the complete compiled plan")
+            return
+        if self.failure.statement_index != self.applied_count:
+            raise ValueError("Execution must stop at its first failure")
+        if self.failure.statement != statements[self.applied_count]:
+            raise ValueError("Execution failure must carry its compiled statement")
 
     @property
     def failures(self) -> tuple[ExecutionFailure, ...]:
-        """The failure detail from each failed statement, in execution order."""
-        return tuple(result for result in self.results if isinstance(result, ExecutionFailure))
-
-    @property
-    def applied_count(self) -> int:
-        """How many statements ran successfully."""
-        return len(self.results) - len(self.failures)
+        """The failure that stopped execution, as the tuple reports flatten."""
+        return () if self.failure is None else (self.failure,)
 
 
 class PlanExecutor(Protocol):
@@ -220,7 +195,7 @@ class PlanExecutor(Protocol):
         Execute one statement produced by :meth:`compile`.
 
         Returning normally means the statement succeeded. The application adds
-        the statement and its sequence index to the execution summary.
+        the statement and its sequence index to the execution result.
 
         Args:
             statement: The backend statement to execute verbatim.

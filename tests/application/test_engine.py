@@ -19,7 +19,6 @@ from delta_engine.application.failures import (
 from delta_engine.application.ports import (
     CatalogState,
     CompiledPlan,
-    ExecutionSucceeded,
     TableAbsent,
     TablePresent,
 )
@@ -744,11 +743,8 @@ def test_execution_stops_after_first_failure_and_retains_attempted_results():
     [table_report] = list(exc_info.value.report)
     assert table_report.status is TableRunStatus.EXECUTION_FAILED
     assert table_report.execution is not None
-    assert [type(result) for result in table_report.execution.results] == [
-        ExecutionSucceeded,
-        ExecutionFailure,
-    ]
-    failure = table_report.execution.results[1]
+    assert table_report.execution.applied_count == 1
+    failure = table_report.execution.failure
     assert isinstance(failure, ExecutionFailure)
     assert failure.statement_index == 1
     assert failure.statement == f"STATEMENT 1 FOR {fqn}"

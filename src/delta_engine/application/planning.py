@@ -9,15 +9,15 @@ from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, ObservedTable
 from delta_engine.domain.plan import (
     ActionPlan,
+    TableCreation,
     TableDiff,
     TableDrift,
-    TableMissing,
     diff_table,
 )
 
 
 @dataclass(frozen=True, slots=True)
-class PlanningSucceeded:
+class PlanningAccepted:
     """
     The accepted diff and the validated executable plan constructed from it.
 
@@ -35,7 +35,7 @@ class PlanningSucceeded:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanningFailed:
+class PlanningRejected:
     """
     The rejected diff and the failures that rejected it.
 
@@ -50,7 +50,7 @@ class PlanningFailed:
         object.__setattr__(self, "failures", tuple(self.failures))
 
 
-type PlanningResult = PlanningSucceeded | PlanningFailed
+type PlanningResult = PlanningAccepted | PlanningRejected
 
 
 def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
@@ -63,9 +63,9 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
     each caller.
     """
     match planning:
-        case PlanningSucceeded(plan=plan):
+        case PlanningAccepted(plan=plan):
             return plan
-        case PlanningFailed() | None:
+        case PlanningRejected() | None:
             return None
         case _ as unreachable:
             assert_never(unreachable)
@@ -73,13 +73,13 @@ def accepted_plan(planning: PlanningResult | None) -> ActionPlan | None:
 
 def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> PlanningResult:
     """
-    Plan the changes that reconcile ``observed`` with ``desired``; accept or refuse.
+    Plan the changes that reconcile ``observed`` with ``desired``; accept or reject.
 
     The one boundary from state to executable plan. It diffs the declaration
     against the observed table — ``None`` means confirmed absence, so the diff
     proposes creation — and validates the complete diff, foreign-key existence
     included, so policy sees exactly one stream with no side channels. An
-    accepted result carries the validated :class:`ActionPlan`; a refused
+    accepted result carries the validated :class:`ActionPlan`; a rejected
     result carries the validation failures and deliberately has no plan,
     making execution of unvalidated drift unrepresentable. This remains the
     only boundary that constructs an ``ActionPlan``, and both outcomes retain
@@ -90,13 +90,13 @@ def plan_changes(desired: DesiredTable, observed: ObservedTable | None) -> Plann
     diff = diff_table(desired, observed)
     failures = validate_diff(diff)
     if failures:
-        return PlanningFailed(diff=diff, failures=failures)
+        return PlanningRejected(diff=diff, failures=failures)
 
     match diff:
         case TableDrift() as drift:
             plan = ActionPlan(target=drift.target, actions=drift.actions, kind=drift.observed.kind)
-        case TableMissing() as missing:
-            plan = ActionPlan(target=missing.target, actions=missing.actions)
+        case TableCreation() as creation:
+            plan = ActionPlan(target=creation.target, actions=creation.actions)
         case _ as unreachable:
             assert_never(unreachable)
-    return PlanningSucceeded(diff=diff, plan=plan)
+    return PlanningAccepted(diff=diff, plan=plan)

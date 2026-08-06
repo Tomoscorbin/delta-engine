@@ -1,9 +1,12 @@
 """
 Application-owned exception types.
 
-``ReadError`` and ``ExecutionError`` are transient signals raised by outbound
-adapters and caught by the engine. The engine turns them into persistent
-``Failure`` values for reports. ``DuplicateTableDefinitionError`` and
+An error is raised when a call cannot deliver what its contract promises,
+and unwinds to whoever can act; a failure (``application.failures``) is
+recorded when the sync carries on and the report must say why a table did
+not converge. ``ReadError`` and ``ExecutionError`` are transient signals
+raised by outbound adapters and translated into persistent failures by the
+engine at the two backend boundaries. ``DuplicateTableDefinitionError`` and
 ``SyncFailedError`` are raised from the inbound sync boundary to callers.
 """
 

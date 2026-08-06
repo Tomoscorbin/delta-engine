@@ -118,6 +118,6 @@ See [how to preview changes](how-to-preview-changes.md).
 
 ## Where to drill down
 
-- What the engine will refuse and why: [the safety model](explanation-safety-model.md)
+- What the engine will reject and why: [the safety model](explanation-safety-model.md)
 - Reading and acting on a failed run: [how to handle sync failures](how-to-handle-sync-failures.md)
 - The internals — layers, ports, adapters, planning: [architecture](explanation-architecture.md)

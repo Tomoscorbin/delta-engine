@@ -1,10 +1,10 @@
 """
-Run accounts: per-table and run-level outcome aggregates.
+Run records: per-table and run-level outcome aggregates.
 
-`TableRun` is the immutable account of one table's sync run, born complete
+`TableRun` is the immutable record of one table's sync run, born complete
 at the engine's plan pass and enriched afterwards with the cross-table
 facts (execution, dependency blocking); `SyncReport` aggregates those
-accounts for the whole run.
+records for the whole run.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -25,11 +25,11 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.planning import (
-    PlanningFailed,
+    PlanningRejected,
     PlanningResult,
     accepted_plan,
 )
-from delta_engine.application.ports import CompiledPlan, ExecutionSummary, ReadResult
+from delta_engine.application.ports import CompiledPlan, ExecutionResult, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, QualifiedName
@@ -138,7 +138,7 @@ def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, 
     Empty for an accepted outcome: an accepted diff's differences are its
     changes, already projected by ``_change_records``.
     """
-    if not isinstance(planning, PlanningFailed) or not isinstance(planning.diff, TableDrift):
+    if not isinstance(planning, PlanningRejected) or not isinstance(planning.diff, TableDrift):
         return []
     return _entry_records(drift_entries(planning.diff))
 
@@ -195,7 +195,7 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:
 @dataclass(frozen=True, slots=True)
 class TableRun:
     """
-    Frozen public account of one table's sync run.
+    Frozen public record of one table's sync run.
 
     Born complete at the engine's plan pass: everything the table can know
     alone — its resolution, read, planning outcome, and compiled SQL — is
@@ -215,7 +215,7 @@ class TableRun:
     own.
     ``diff`` is derived from the planning outcome, which retains the complete
     set of differences it planned from — actions and unresolvable differences
-    alike — so a table whose plan was refused can still show what drifted. It
+    alike — so a table whose plan was rejected can still show what drifted. It
     is ``None`` when the read failed, because planning never ran.
     """
 
@@ -223,13 +223,13 @@ class TableRun:
     read: ReadResult
     planning: PlanningResult | None = None
     compiled: CompiledPlan | None = None
-    execution: ExecutionSummary | None = None
+    execution: ExecutionResult | None = None
     blocked_failures: ListOrTuple[ForeignKeyFailure] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "blocked_failures", tuple(self.blocked_failures))
         read_failed = isinstance(self.read, ReadFailure)
-        planning_failed = isinstance(self.planning, PlanningFailed)
+        planning_failed = isinstance(self.planning, PlanningRejected)
         resolution_failed = bool(self.resolution.structural_failures)
 
         if read_failed and self.planning is not None:
@@ -285,7 +285,7 @@ class TableRun:
         failures.extend(self.resolution.structural_failures)
         if isinstance(self.read, ReadFailure):
             failures.append(self.read)
-        if isinstance(self.planning, PlanningFailed):
+        if isinstance(self.planning, PlanningRejected):
             failures.extend(self.planning.failures)
 
         if self.execution is not None:

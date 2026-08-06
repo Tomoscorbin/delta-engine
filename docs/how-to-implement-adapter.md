@@ -64,7 +64,7 @@ class MyExecutor:
 ```
 
 The engine calls `compile` only with the `ActionPlan` carried by a
-`PlanningSucceeded` result, on every dry or real run, and records the
+`PlanningAccepted` result, on every dry or real run, and records the
 compiled plan on the table's report. Each `CompiledAction` pairs one source
 action with the single statement that applies it; `CompiledPlan` rejects
 missing, additional, or reordered actions. A rejected diff has no plan and
@@ -92,7 +92,7 @@ means the statement succeeded; translate an expected backend failure into
             ) from exc
 ```
 
-The application owns statement indexes, constructs the `ExecutionSummary`, and
+The application owns statement indexes, constructs the `ExecutionResult`, and
 stops after the first `ExecutionError`. It then records the partial result and
 moves on to the next independent table. Exceptions other than
 `ExecutionError` are port-contract or programming errors and propagate.
