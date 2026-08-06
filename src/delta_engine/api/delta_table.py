@@ -17,7 +17,7 @@ from types import MappingProxyType
 from typing import Final, NamedTuple
 
 from delta_engine.application.properties import DELTA_PROPERTY_POLICY, Property
-from delta_engine.application.scopes import ScopeName, managed_aspects_for
+from delta_engine.application.scopes import ScopeName, table_scope_for
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import (
     Array,
@@ -33,6 +33,7 @@ from delta_engine.domain.model import (
     QualifiedName,
     Struct,
     TableAspect,
+    TableScope,
     Variant,
     key_signature,
 )
@@ -284,7 +285,7 @@ def _validate_renames(columns: tuple[Column, ...], properties: Mapping[str, str 
 def _validate_column_names(
     columns: tuple[Column, ...],
     properties: Mapping[str, str | None],
-    managed_aspects: frozenset[TableAspect],
+    scope: TableScope,
 ) -> None:
     """
     Reject column names the declared properties make invalid on Delta.
@@ -296,7 +297,7 @@ def _validate_column_names(
     accepted, so it must be able to declare names this engine would reject
     to create.
     """
-    if TableAspect.COLUMN_STRUCTURE not in managed_aspects:
+    if not scope.manages(TableAspect.COLUMN_STRUCTURE):
         return
 
     if properties.get(Property.COLUMN_MAPPING_MODE) != "name":
@@ -524,7 +525,7 @@ class _NormalizedDeclaration:
     clustered_by: tuple[Identifier, ...]
     primary_key: tuple[Identifier, ...] | None
     foreign_key_declarations: tuple[ForeignKey, ...]
-    managed_aspects: frozenset[TableAspect]
+    scope: TableScope
 
 
 def _normalize_declaration(
@@ -569,7 +570,7 @@ def _normalize_declaration(
             tuple(Identifier(name) for name in primary_key) if primary_key is not None else None
         ),
         foreign_key_declarations=tuple(foreign_keys or ()),
-        managed_aspects=managed_aspects_for(scope),
+        scope=table_scope_for(scope),
     )
 
 
@@ -584,7 +585,7 @@ def _validate_declaration(declaration: _NormalizedDeclaration) -> None:
     _validate_column_names(
         declaration.columns,
         declaration.properties,
-        declaration.managed_aspects,
+        declaration.scope,
     )
     _validate_renames(declaration.columns, declaration.properties)
 
@@ -636,7 +637,7 @@ def _lower_declaration(declaration: _NormalizedDeclaration) -> DesiredTable:
         clustered_by=[column_names.get(name, name) for name in declaration.clustered_by],
         primary_key=primary_key_constraint,
         foreign_keys=foreign_keys,
-        managed_aspects=declaration.managed_aspects,
+        scope=declaration.scope,
     )
 
 

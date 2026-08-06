@@ -89,12 +89,13 @@ class TableDrift:
 
     ``actions`` are remedied differences, each carrying the executable
     operation that closes its gap. ``unresolvable`` are differences no action
-    can close; they exist to be judged by validation. Both state every
-    difference regardless of scope; deciding which the declaration is
-    allowed to make is validation's eligibility check, not the diff's concern.
+    can close; they exist to be judged by validation. Diffing is scope-blind
+    except for properties, which are not compared when the declaration does
+    not manage them. Validation's eligibility checks decide whether every
+    other difference is within the declaration's scope.
     ``desired`` and ``observed`` are the two endpoints the differences
-    separate, carried as judging context: the declaration's side (managed
-    aspects, declared properties) and the catalog's side (observed facts such
+    separate, carried as judging context: the declaration's side (scope and
+    declared properties) and the catalog's side (observed facts such
     as the relation kind).
     """
 
@@ -592,7 +593,7 @@ def _diff_properties(
     tuple[PropertyUndeclared, ...],
 ]:
     """Return all differences implied by exact property declarations."""
-    if TableAspect.PROPERTIES not in desired.managed_aspects:
+    if not desired.scope.manages(TableAspect.PROPERTIES):
         return (), ()
 
     actions: list[SetProperty | UnsetProperty] = []

@@ -1,7 +1,6 @@
 import pytest
 
 from delta_engine.domain.model import (
-    ALL_ASPECTS,
     Array,
     DesiredColumn,
     DesiredTable,
@@ -15,9 +14,9 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
-    TableAspect,
     TableFeature,
     TableKind,
+    TableScope,
     TimestampNtz,
     Variant,
 )
@@ -553,9 +552,8 @@ def test_every_observed_key_without_declaration_produces_a_finding():
 def test_properties_diff_is_skipped_when_properties_unmanaged():
     # Given a declaration that does not manage properties (metadata-only style)
     # over a catalog carrying an undeclared managed key
-    managed = ALL_ASPECTS - frozenset({TableAspect.PROPERTIES})
     diff = diff_table(
-        _desired(properties={}, managed_aspects=managed),
+        _desired(properties={}, scope=TableScope.METADATA),
         _observed(properties={"delta.columnMapping.mode": "name"}),
     )
 
@@ -568,9 +566,8 @@ def test_properties_diff_is_skipped_when_properties_unmanaged():
 def test_declared_properties_are_not_compared_when_properties_unmanaged():
     # Given a declaration that carries a property but does not manage
     # properties, over a catalog where that property is absent
-    managed = ALL_ASPECTS - frozenset({TableAspect.PROPERTIES})
     diff = diff_table(
-        _desired(properties={"delta.enableChangeDataFeed": "true"}, managed_aspects=managed),
+        _desired(properties={"delta.enableChangeDataFeed": "true"}, scope=TableScope.METADATA),
         _observed(properties={}),
     )
 
@@ -805,7 +802,7 @@ def test_foreign_key_drift_is_stated_even_when_unmanaged():
     desired = _desired(
         columns=(DesiredColumn("customer_id", String()),),
         foreign_keys=(declared,),
-        managed_aspects=ALL_ASPECTS - frozenset({TableAspect.FOREIGN_KEYS}),
+        scope=TableScope.ANNOTATIONS,
     )
     observed = _observed(columns=(ObservedColumn("customer_id", String()),))
 

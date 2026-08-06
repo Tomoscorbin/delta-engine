@@ -2,7 +2,7 @@ from delta_engine.domain.model import ALL_ASPECTS, TableAspect
 
 
 def test_all_aspects_contains_every_aspect():
-    # Given the canonical full-management set
+    # Given the canonical aspect vocabulary
     # Then it equals the full enum
     assert ALL_ASPECTS == frozenset(TableAspect)
 
@@ -36,6 +36,6 @@ def test_aspect_declaration_order_is_canonical():
 
 def test_clustering_is_a_managed_aspect():
     # Given the clustering aspect
-    # Then it is part of the full managed-aspect set and has a readable label
+    # Then it is part of the aspect vocabulary and has a readable label
     assert TableAspect.CLUSTERING in ALL_ASPECTS
     assert TableAspect.CLUSTERING.label == "clustering"

@@ -5,7 +5,6 @@ from delta_engine.application.planning import (
     PlanningRejected,
     plan_changes,
 )
-from delta_engine.application.scopes import METADATA_ASPECTS
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -18,8 +17,8 @@ from delta_engine.domain.model import (
     PrimaryKeyConstraint,
     QualifiedName,
     String,
-    TableAspect,
     TableKind,
+    TableScope,
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
@@ -101,7 +100,7 @@ def test_plan_changes_rejects_unmanaged_actions():
     result = plan_changes(
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("age", Integer())),
-            managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+            scope=TableScope.ANNOTATIONS,
         ),
         _observed(),
     )
@@ -212,7 +211,7 @@ def test_plan_changes_accepts_missing_table_and_builds_follow_up_actions():
 
 
 def test_plan_changes_rejects_missing_table_when_table_existence_is_unmanaged():
-    desired = _desired(managed_aspects=frozenset({TableAspect.TABLE_COMMENT}))
+    desired = _desired(scope=TableScope.ANNOTATIONS)
 
     result = plan_changes(desired, None)
 
@@ -402,7 +401,7 @@ def test_plan_carries_the_observed_relation_kind():
     # Given tag drift against a streaming table, under a tags-only declaration
     desired = _desired(
         columns=(DesiredColumn("id", Integer(), tags={"pii": "low"}),),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+        scope=TableScope.TAGS,
     )
     observed = _observed(kind=TableKind.STREAMING_TABLE)
 
@@ -431,7 +430,7 @@ def test_feature_enablement_outside_column_structure_scope_is_rejected():
     # come from its aspect, which a metadata-scoped declaration excludes.
     desired = _desired(
         columns=(DesiredColumn("seen_at", TimestampNtz()),),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
     observed = _observed(columns=(ObservedColumn("seen_at", TimestampNtz()),))
 
@@ -556,7 +555,7 @@ def test_foreign_key_drift_on_an_unmanaged_aspect_fails_eligibility():
         _desired(
             columns=(DesiredColumn("id", Integer()), DesiredColumn("customer_id", Integer())),
             foreign_keys=(fk,),
-            managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+            scope=TableScope.ANNOTATIONS,
         ),
         _observed(
             columns=(ObservedColumn("id", Integer()), ObservedColumn("customer_id", Integer())),

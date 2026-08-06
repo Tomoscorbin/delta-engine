@@ -68,6 +68,11 @@ ever drops authority:
 | `"annotations"`        | Table and column comments, table and column tags                                        | Documenting and tagging a table whose structure and keys belong elsewhere — including streaming tables            |
 | `"tags"`               | Table and column tags only                                                              | Tag governance alone, where even a comment would be too much authority to claim                                   |
 
+Inside the engine these names resolve once to a closed `TableScope` value.
+That value owns scope policy; the rest of the system asks it whether an aspect
+is managed instead of interpreting sets of permissions or constructing new
+scope combinations.
+
 See [how to deploy metadata only](how-to-deploy-metadata-only.md) for the
 metadata scope in practice, and
 [annotations](how-to-configure-table.md#manage-comments-and-tags-only) and

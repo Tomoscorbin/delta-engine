@@ -67,6 +67,7 @@ through a sync.
 | `TableDiff`        | Typed desired/observed drift. It is either `TableCreation` or `TableDrift`; both state their remedies as `actions`, and a drift also carries `unresolvable`. |
 | `Unresolvable`     | A `TableDrift` difference no action can close: `ColumnRenameConflict`, `PropertyUndeclared`, or `PartitioningChanged`.                                      |
 | `TableAspect`      | One managed aspect of a table: existence, columns, comments, properties, tags, partitioning, clustering, primary key, or foreign keys. Internal enum.       |
+| `TableScope`       | The closed ownership policy carried by a desired table. It answers whether an aspect is managed and whether one scope fits within another.                  |
 | `ValidationFailure` | One policy rejection: the rule that raised it and the message the user reads. `validate_diff` returns them in evaluation order, empty when the diff is valid. |
 | `PlanningResult`   | The total planning outcome: either `PlanningAccepted(diff, plan)` or `PlanningRejected(diff, failures)`; both retain the diff they were planned from.        |
 | `ActionPlan`       | The qualified table target, relation kind, and ordered actions that should be executed if the table is allowed to run.                                      |
@@ -502,8 +503,10 @@ unset).
 
 ## Managed aspects
 
-Every `DesiredTable` carries a `managed_aspects` field: a `frozenset[TableAspect]`
-naming the aspects the engine reconciles for that table. The differ
+Every `DesiredTable` carries a closed `TableScope` value. It owns the questions
+of whether an aspect is managed and whether one scope fits within another, so
+callers do not interpret a permission bitmap themselves and arbitrary scope
+combinations cannot enter the domain. The differ
 (`diff_table`) is scope-blind for every aspect except properties — the
 properties diff runs only when the declaration manages `PROPERTIES` (see
 Diff-first planning). The `TableDrift` it produces carries the `desired`
@@ -880,9 +883,9 @@ dependency cost.
 - Keep the domain backend-free, immutable, and deterministic.
 - Make immutability real, not conventional: frozen dataclasses copy their
   collection fields in `__post_init__` — sequences into tuples, mappings into
-  read-only views (`MappingProxyType`), aspect sets into `frozenset` — so an
-  object cannot change after construction through a collection the caller
-  still holds. This applies at the public boundary too: `ForeignKey.columns`
+  read-only views (`MappingProxyType`) — so an object cannot change after
+  construction through a collection the caller still holds. This applies at
+  the public boundary too: `ForeignKey.columns`
   and `Column.tags` copy what the user passed, so mutating the original
   mapping later does not alter the declaration.
 - Put orchestration, safety policy, relationship resolution, and failure

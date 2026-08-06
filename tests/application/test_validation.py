@@ -3,7 +3,6 @@ from typing import ClassVar
 import pytest
 
 from delta_engine.application.failures import ValidationFailure
-from delta_engine.application.scopes import ANNOTATION_ASPECTS, METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.application.validation import (
     DEFAULT_SAFETY_RULES,
     ELIGIBILITY_CHECKS,
@@ -11,7 +10,6 @@ from delta_engine.application.validation import (
     validate_diff,
 )
 from delta_engine.domain.model import (
-    ALL_ASPECTS,
     Byte,
     DataType,
     Date,
@@ -32,8 +30,8 @@ from delta_engine.domain.model import (
     String,
     Struct,
     StructField,
-    TableAspect,
     TableKind,
+    TableScope,
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
@@ -68,7 +66,7 @@ def _desired_table(
     properties: dict[str, str | None] | None = None,
     partitioned_by: tuple[str, ...] = (),
     clustered_by: tuple[str, ...] = (),
-    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    scope: TableScope = TableScope.FULL,
     primary_key: PrimaryKeyConstraint | None = None,
 ) -> DesiredTable:
     return DesiredTable(
@@ -77,7 +75,7 @@ def _desired_table(
         properties={} if properties is None else properties,
         partitioned_by=partitioned_by,
         clustered_by=clustered_by,
-        managed_aspects=managed_aspects,
+        scope=scope,
         primary_key=primary_key,
     )
 
@@ -107,13 +105,13 @@ def _observed_table(
 
 def _drift(
     *differences: Action | Unresolvable,
-    managed_aspects: frozenset[TableAspect] = ALL_ASPECTS,
+    scope: TableScope = TableScope.FULL,
     desired: DesiredTable | None = None,
     observed: ObservedTable | None = None,
     kind: TableKind = TableKind.TABLE,
 ) -> TableDrift:
     if desired is None:
-        desired = _desired_table(managed_aspects=managed_aspects)
+        desired = _desired_table(scope=scope)
     if observed is None:
         observed = _observed_table(kind=kind)
     actions = tuple(item for item in differences if isinstance(item, Action))
@@ -267,7 +265,7 @@ def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_
     # Given a missing table with a NOT NULL column
     desired = _desired_table(
         columns=(DesiredColumn("id", Integer(), nullable=False),),
-        managed_aspects=ALL_ASPECTS,
+        scope=TableScope.FULL,
     )
 
     # Then creating the table is safe
@@ -277,7 +275,7 @@ def test_missing_table_with_non_nullable_columns_passes_when_table_existence_is_
 def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
     # Given a metadata-only definition for a table that does not exist
     desired = _desired_table(
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT, TableAspect.TABLE_TAGS})
+        scope=TableScope.ANNOTATIONS,
     )
 
     # When validating
@@ -290,7 +288,7 @@ def test_validate_diff_fails_table_missing_when_table_existence_unmanaged():
 
 def test_validate_diff_passes_table_missing_when_table_existence_managed():
     # Given a fully managed definition for a missing table
-    desired = _desired_table(managed_aspects=ALL_ASPECTS)
+    desired = _desired_table(scope=TableScope.FULL)
 
     # When validating
     failures = validate_diff(diff_table(desired, None))
@@ -302,7 +300,7 @@ def test_validate_diff_passes_table_missing_when_table_existence_managed():
 def test_missing_table_unmanaged_cannot_be_suppressed_by_empty_rules():
     # Given a missing table whose declaration does not manage table existence
     desired = _desired_table(
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT, TableAspect.TABLE_TAGS})
+        scope=TableScope.ANNOTATIONS,
     )
 
     # When validating with no safety rules
@@ -602,7 +600,7 @@ def test_unmanaged_aspect_drift_fails_when_unmanaged_aspect_has_drifted():
     # Given a declaration that only manages table tags, but column structure has drifted
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     # When validating
@@ -620,7 +618,7 @@ def test_unmanaged_aspect_drift_produces_one_failure_per_drifted_unmanaged_aspec
         AddColumn(DesiredColumn("extra", Integer())),
         AddColumn(DesiredColumn("more", Integer())),
         SetTableComment(desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     # When validating
@@ -636,7 +634,7 @@ def test_unmanaged_aspect_drift_cannot_be_suppressed_by_empty_rules():
     # Given unmanaged drift and an empty rule set
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     # When validating
@@ -650,7 +648,7 @@ def test_unmanaged_drift_does_not_also_trip_safety_rules():
     # Given a metadata-only declaration whose live table has a type mismatch
     diff = _drift(
         _type_drift("id"),
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+        scope=TableScope.ANNOTATIONS,
     )
 
     # When validating
@@ -663,7 +661,7 @@ def test_unmanaged_drift_does_not_also_trip_safety_rules():
 
 def test_managed_drift_still_trips_safety_rules():
     # Given a fully managed drift with a type change
-    diff = _drift(_type_drift("id"), managed_aspects=ALL_ASPECTS)
+    diff = _drift(_type_drift("id"), scope=TableScope.FULL)
 
     # When validating
     failures = validate_diff(diff)
@@ -673,27 +671,11 @@ def test_managed_drift_still_trips_safety_rules():
     assert failures[0].rule_name == "TypeWideningRequiredForTypeChange"
 
 
-def test_out_of_scope_drift_short_circuits_safety_rules():
-    # Given a declaration that manages column structure but not table comment,
-    # with both a managed-and-unsafe column add and out-of-scope comment drift
-    diff = _drift(
-        AddColumn(DesiredColumn("x", Integer(), nullable=False)),
-        SetTableComment(desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.COLUMN_STRUCTURE}),
-    )
-
-    # When validating
-    failures = validate_diff(diff)
-
-    # Then the scope violation is reported alone; the safety rule never runs
-    assert [failure.rule_name for failure in failures] == ["UnmanagedAspectDrift"]
-
-
 def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
     # Given a metadata-only drift where only a managed aspect drifted
     diff = _drift(
         SetTableComment(desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+        scope=TableScope.ANNOTATIONS,
     )
 
     # Then validation passes
@@ -702,7 +684,7 @@ def test_drift_passes_when_no_unmanaged_aspect_has_drifted():
 
 def test_drift_passes_when_all_aspects_managed():
     # Given a fully managed drift with a nullable column addition
-    diff = _drift(AddColumn(DesiredColumn("extra", Integer())), managed_aspects=ALL_ASPECTS)
+    diff = _drift(AddColumn(DesiredColumn("extra", Integer())), scope=TableScope.FULL)
 
     # Then validation passes
     assert not validate_diff(diff)
@@ -712,7 +694,7 @@ def test_unmanaged_column_drop_does_not_require_column_mapping():
     # Given column structure drift on a declaration that does not manage column structure
     diff = _drift(
         DropColumn(ObservedColumn("stale", Integer())),
-        managed_aspects=frozenset({TableAspect.TABLE_COMMENT}),
+        scope=TableScope.ANNOTATIONS,
     )
 
     # When validating
@@ -728,7 +710,7 @@ def test_tag_only_scope_passes_when_only_table_and_column_tags_drift():
         qualified_name=_QUALIFIED_NAME,
         columns=(DesiredColumn("id", Integer(), tags={"pii": "false"}),),
         tags={"domain": "sales"},
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+        scope=TableScope.TAGS,
     )
     observed = ObservedTable(
         qualified_name=_QUALIFIED_NAME,
@@ -747,7 +729,7 @@ def test_tag_only_scope_fails_when_table_comment_drifts():
     # Given a tag-only declaration with comment drift
     diff = _drift(
         SetTableComment(desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     # When validating
@@ -763,7 +745,7 @@ def test_tag_only_scope_fails_when_column_comment_drifts():
     diff = _drift(
         SetColumnTag(column_name="id", name="pii", desired_value="true", observed_value=None),
         SetColumnComment(column_name="id", desired_comment="new", observed_comment="old"),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     # When validating
@@ -777,7 +759,7 @@ def test_tag_only_scope_fails_when_column_structure_drifts():
     # Given a tag-only declaration whose live table has an extra, undeclared column
     desired = _desired_table(
         columns=(DesiredColumn("id", Integer()),),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}),
+        scope=TableScope.TAGS,
     )
     observed = _observed_table(
         columns=(DesiredColumn("id", Integer()), DesiredColumn("extra", String()))
@@ -1063,7 +1045,7 @@ def test_column_case_drift_is_named_at_a_scope_that_does_not_manage_columns():
     # keys or comments to a table someone else created
     drift = _drift(
         ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     # When the diff is validated
@@ -1105,7 +1087,7 @@ def test_column_spelling_check_reports_before_unmanaged_aspect_drift():
     drift = _drift(
         ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     failures = validate_diff(drift)
@@ -1125,7 +1107,7 @@ def test_column_spelling_check_reports_before_the_streaming_table_check():
     # and kind checks against each other
     diff = _drift(
         ColumnCaseDrift(declared_name="requestid", observed_name="requestId"),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
         kind=TableKind.STREAMING_TABLE,
     )
 
@@ -1149,25 +1131,21 @@ _PIPELINE_KEY = PrimaryKeyConstraint(("id",), "test_pk")
 _KEYED_COLUMNS = (DesiredColumn("id", Integer(), nullable=False),)
 
 
-@pytest.mark.parametrize(
-    "managed_aspects", [TAG_ASPECTS, ANNOTATION_ASPECTS], ids=["tags", "annotations"]
-)
-def test_streaming_table_admits_a_declaration_within_annotations(managed_aspects):
+@pytest.mark.parametrize("scope", [TableScope.TAGS, TableScope.ANNOTATIONS])
+def test_streaming_table_admits_a_declaration_within_annotations(scope):
     # Given a declaration claiming no more than comments and tags — the aspects
     # a pipeline does not own
-    diff = _drift(managed_aspects=managed_aspects, kind=TableKind.STREAMING_TABLE)
+    diff = _drift(scope=scope, kind=TableKind.STREAMING_TABLE)
 
     # Then the engine may manage them
     assert not validate_diff(diff)
 
 
-@pytest.mark.parametrize(
-    "managed_aspects", [METADATA_ASPECTS, ALL_ASPECTS], ids=["metadata", "full"]
-)
-def test_streaming_table_refuses_a_declaration_beyond_annotations(managed_aspects):
+@pytest.mark.parametrize("scope", [TableScope.METADATA, TableScope.FULL])
+def test_streaming_table_refuses_a_declaration_beyond_annotations(scope):
     # Given a declaration claiming keys as well, over an in-sync table — zero
     # drift, so there is nothing to do either way
-    diff = _drift(managed_aspects=managed_aspects, kind=TableKind.STREAMING_TABLE)
+    diff = _drift(scope=scope, kind=TableKind.STREAMING_TABLE)
 
     # When validating
     failures = validate_diff(diff)
@@ -1183,7 +1161,7 @@ def test_streaming_table_check_reports_before_unmanaged_aspect_drift():
     # both eligibility checks fire, kind first
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
         kind=TableKind.STREAMING_TABLE,
     )
 
@@ -1198,7 +1176,7 @@ def test_streaming_table_check_reports_before_unmanaged_aspect_drift():
 def test_annotations_scope_refuses_to_drop_a_pipeline_declared_key():
     # Given a streaming table whose key was declared in the pipeline's defining
     # SQL, and an annotations-scope declaration that does not restate it
-    desired = _desired_table(columns=_KEYED_COLUMNS, managed_aspects=ANNOTATION_ASPECTS)
+    desired = _desired_table(columns=_KEYED_COLUMNS, scope=TableScope.ANNOTATIONS)
     observed = _observed_table(
         columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
     )
@@ -1215,7 +1193,7 @@ def test_annotations_scope_refuses_to_drop_a_pipeline_declared_key():
 def test_a_declaration_mirroring_the_pipeline_key_leaves_it_alone():
     # Given the same table, with the declaration restating the pipeline's key
     desired = _desired_table(
-        columns=_KEYED_COLUMNS, managed_aspects=ANNOTATION_ASPECTS, primary_key=_PIPELINE_KEY
+        columns=_KEYED_COLUMNS, scope=TableScope.ANNOTATIONS, primary_key=_PIPELINE_KEY
     )
     observed = _observed_table(
         columns=_KEYED_COLUMNS, kind=TableKind.STREAMING_TABLE, primary_key=_PIPELINE_KEY
@@ -1236,7 +1214,7 @@ def test_scope_failure_prevents_safety_evaluation():
 
     diff = _drift(
         AddColumn(DesiredColumn("extra", Integer())),
-        managed_aspects=frozenset({TableAspect.TABLE_TAGS}),
+        scope=TableScope.TAGS,
     )
 
     failures = validate_diff(diff, rules=(MustNotRun(),))
@@ -1249,7 +1227,7 @@ def test_unmanaged_drift_names_the_differences_that_drifted():
     diff = _drift(
         AddColumn(DesiredColumn("legacy_region", String())),
         AlterColumnType(column_name="amount", desired_type=Long(), observed_type=Integer()),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     # When the eligibility check judges it
@@ -1267,7 +1245,7 @@ def test_unmanaged_drift_names_differences_no_action_could_close():
     # Given drift a plan action cannot express
     diff = _drift(
         PartitioningChanged(desired_partitioning=("region",), observed_partitioning=("country",)),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     # When the check judges it
@@ -1282,7 +1260,7 @@ def test_unmanaged_drift_reports_one_failure_per_aspect():
     diff = _drift(
         AddColumn(DesiredColumn("legacy_region", String())),
         PartitioningChanged(desired_partitioning=("region",), observed_partitioning=("country",)),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     # When the check judges it
@@ -1301,7 +1279,7 @@ def test_unmanaged_drift_still_passes_over_a_column_spelled_differently():
     # Given case drift, which ColumnSpellingMustMatchCatalog owns at every scope
     diff = _drift(
         ColumnCaseDrift(declared_name="SKU", observed_name="sku"),
-        managed_aspects=METADATA_ASPECTS,
+        scope=TableScope.METADATA,
     )
 
     # Then this check says nothing about it

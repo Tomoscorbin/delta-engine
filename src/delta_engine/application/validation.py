@@ -12,7 +12,6 @@ from delta_engine.application.properties import (
     Property,
     PropertyPolicy,
 )
-from delta_engine.application.scopes import ANNOTATION_ASPECTS
 from delta_engine.domain.model import (
     Byte,
     DataType,
@@ -25,6 +24,7 @@ from delta_engine.domain.model import (
     Short,
     TableAspect,
     TableKind,
+    TableScope,
     TimestampNtz,
 )
 from delta_engine.domain.plan import (
@@ -584,7 +584,7 @@ class UnmanagedAspectDrift:
                 for difference in (*drift.actions, *drift.unresolvable):
                     if isinstance(difference, ColumnCaseDrift):
                         continue
-                    if difference.aspect in drift.desired.managed_aspects:
+                    if drift.desired.scope.manages(difference.aspect):
                         continue
                     lines_by_aspect.setdefault(difference.aspect, []).extend(
                         _difference_lines(difference)
@@ -626,7 +626,7 @@ class MissingTableUnmanaged:
                 return ()
 
             case TableCreation() as missing:
-                if TableAspect.TABLE_EXISTENCE in missing.desired.managed_aspects:
+                if missing.desired.scope.manages(TableAspect.TABLE_EXISTENCE):
                     return ()
                 return (
                     ValidationFailure(
@@ -656,8 +656,8 @@ class StreamingTableAnnotationsOnly:
     ``COMMENT ON`` reach. It judges the declaration's claimed aspects against
     the observed kind — not the drift — so it fires even when the table is
     currently in sync, and a dry run surfaces the misdeclaration immediately.
-    ``ANNOTATION_ASPECTS`` is shared with the public ``"annotations"`` scope so
-    the two policies cannot diverge.
+    The comparison uses the same domain scope policy as the public
+    ``"annotations"`` scope, so the two decisions cannot diverge.
 
     Keys are excluded rather than silently ignored: a declaration mirrors the
     pipeline's key to keep the aspect quiet, exactly as it already mirrors the
@@ -677,7 +677,7 @@ class StreamingTableAnnotationsOnly:
             case TableDrift() as drift:
                 if drift.observed.kind is not TableKind.STREAMING_TABLE:
                     return ()
-                if drift.desired.managed_aspects <= ANNOTATION_ASPECTS:
+                if drift.desired.scope.is_within(TableScope.ANNOTATIONS):
                     return ()
                 return (
                     ValidationFailure(
