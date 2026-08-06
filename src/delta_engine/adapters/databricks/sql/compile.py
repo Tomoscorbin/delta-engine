@@ -131,26 +131,8 @@ def _compile_create_table(action: CreateTable, target: _Target) -> str:
 
 @_compile_action.register
 def _compile_add_column(action: AddColumn, target: _Target) -> str:
-    """
-    Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
-
-    The column is always added without a NOT NULL constraint: adding a
-    non-nullable column to an existing table is rejected at validation
-    (see NonNullableColumnAdd), so this path is only reached for nullable adds.
-    The guard makes that contract loud -- it fires only if validation was
-    bypassed or a custom rule set let a NOT NULL add through, rather than
-    silently emitting an add that drops the constraint. It is an unconditional
-    ``raise`` (not ``assert``) so the invariant survives ``python -O``.
-    """
-    if not action.column.nullable:
-        raise AssertionError(
-            f"AddColumn reached the compiler with non-nullable column {action.column.name!r}; "
-            "validation (NonNullableColumnAdd) should have blocked this"
-        )
-    name = backtick(action.column.name)
-    dtype = render_data_type(action.column.data_type)
-    comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
-    return f"{target.alter_clause} ADD COLUMN {name} {dtype}{comment}"
+    """Compile an ALTER TABLE ... ADD COLUMN statement for a single column."""
+    return f"{target.alter_clause} ADD COLUMN {_column_definition(action.column)}"
 
 
 @_compile_action.register

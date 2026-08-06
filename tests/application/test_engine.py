@@ -1824,6 +1824,7 @@ def test_a_rejected_table_still_reports_the_drift_that_was_found():
     # Then the table has no plan, but the diff that caused the rejection survives
     (table_report,) = report.table_runs
     assert table_report.plan is None
+    assert table_report.compiled is None
     assert table_report.diff is not None
     assert any(
         isinstance(action, AddColumn) and action.column.name == "order_id"
