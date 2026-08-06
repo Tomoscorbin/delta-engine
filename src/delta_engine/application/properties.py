@@ -191,10 +191,20 @@ class PropertyPolicy:
         observed: str | None,
         desired: str | None,
     ) -> bool:
-        """Return whether a managed property may move to its desired value."""
+        """
+        Return whether a managed property may move to its desired value.
+
+        Only managed keys can reach a transition check — declarations are
+        validated and observations projected — so an unmanaged key is a
+        programming error, not a permitted transition.
+
+        Raises:
+            ValueError: If the key is not managed by this policy.
+
+        """
         definition = self._definitions_by_name.get(name)
-        if definition is None:  # TODO: raise on unknown properties
-            return True
+        if definition is None:
+            raise ValueError(f"Property not managed by this engine: {name}")
         return definition.permits_transition(observed, desired)
 
     def permits_removal(
