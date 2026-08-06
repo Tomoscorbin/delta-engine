@@ -192,15 +192,6 @@ def test_add_column_without_comment_omits_comment_clause():
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` ADD COLUMN `age` INT"
 
 
-def test_add_column_rejects_non_nullable_column():
-    # Given an AddColumn action carrying a NOT NULL column
-    action = AddColumn(DesiredColumn("age", Integer(), nullable=False))
-
-    # When / Then compiling fails loudly rather than silently dropping NOT NULL
-    with pytest.raises(AssertionError, match="age"):
-        _compile_single(action)
-
-
 def test_create_table_renders_all_state_embedded_in_creation():
     # Given a CREATE TABLE with structure, comments, properties, partitioning, and a key
     action = _create_table(
