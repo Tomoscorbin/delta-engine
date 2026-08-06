@@ -8,7 +8,7 @@ statements in plan order, ready to execute against a Spark session.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import singledispatch
-from typing import assert_never
+from typing import Self, assert_never
 
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
@@ -53,7 +53,7 @@ class _Target:
     alter_clause: str
 
     @classmethod
-    def for_relation(cls, qualified_name: QualifiedName, kind: TableKind) -> "_Target":
+    def for_relation(cls, qualified_name: QualifiedName, kind: TableKind) -> Self:
         """Render the SQL forms needed to compile actions for one relation."""
         name = backtick_qualified_name(qualified_name)
 
@@ -191,10 +191,7 @@ def _compile_set_column_tag(action: SetColumnTag, target: _Target) -> str:
 @_compile_action.register
 def _compile_unset_column_tag(action: UnsetColumnTag, target: _Target) -> str:
     column = backtick(action.column_name)
-    return (
-        f"{target.alter_clause} ALTER COLUMN {column}"
-        f" UNSET TAGS ({quote_literal(action.name)})"
-    )
+    return f"{target.alter_clause} ALTER COLUMN {column} UNSET TAGS ({quote_literal(action.name)})"
 
 
 @_compile_action.register

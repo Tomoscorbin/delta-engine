@@ -1,5 +1,7 @@
 """Open a Databricks SQL connection through Databricks unified auth."""
 
+from __future__ import annotations
+
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -50,7 +52,7 @@ class Target:
 
 
 @contextmanager
-def open_connection() -> Iterator[tuple[Target, "Connection"]]:
+def open_connection() -> Iterator[tuple[Target, Connection]]:
     """
     Resolve unified authentication, connect, and own the connection.
 
@@ -93,7 +95,7 @@ def _warehouse_id_from_environment() -> str:
     return warehouse_id
 
 
-def _target_from_config(config: "Config", warehouse_id: str) -> Target:
+def _target_from_config(config: Config, warehouse_id: str) -> Target:
     """Freeze the non-credential identity resolved by the SDK."""
     host = (config.host or "").strip()
     if not host:
@@ -101,7 +103,7 @@ def _target_from_config(config: "Config", warehouse_id: str) -> Target:
     return Target(host=host, warehouse_id=warehouse_id)
 
 
-def _import_backends() -> tuple[ModuleType, type["Config"]]:
+def _import_backends() -> tuple[ModuleType, type[Config]]:
     """Import the connector and SDK, translating optional-dependency failures."""
     try:
         from databricks import sql as databricks_sql
@@ -154,7 +156,7 @@ def _distribution_for(error: ImportError) -> str:
     return "databricks-sdk and databricks-sql-connector"
 
 
-def _build_config(config_class: type["Config"]) -> "Config":
+def _build_config(config_class: type[Config]) -> Config:
     """Delegate credential and workspace resolution to Databricks unified auth."""
     try:
         return config_class()
@@ -167,9 +169,9 @@ def _build_config(config_class: type["Config"]) -> "Config":
 
 def _connect(
     databricks_sql: ModuleType,
-    config: "Config",
+    config: Config,
     target: Target,
-) -> "Connection":
+) -> Connection:
     """Open the connector transport and translate its broad failure surface."""
     try:
         with _suppress_optional_pyarrow_warning():

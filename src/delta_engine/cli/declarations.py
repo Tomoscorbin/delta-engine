@@ -6,6 +6,7 @@ import importlib
 import os
 import sys
 from types import ModuleType
+from typing import Self
 
 from delta_engine.application.engine import lower_desired_tables
 from delta_engine.cli.errors import ConfigError
@@ -20,7 +21,7 @@ class DeclarationRef:
     attribute: str
 
     @classmethod
-    def parse(cls, text: str) -> "DeclarationRef":
+    def parse(cls, text: str) -> Self:
         """Parse exactly one importable ``MODULE:ATTRIBUTE`` reference."""
         module_name, separator, attribute = text.partition(":")
         module_is_importable = bool(separator) and all(
