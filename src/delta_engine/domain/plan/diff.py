@@ -592,7 +592,7 @@ def _diff_properties(
     tuple[PropertyUndeclared, ...],
 ]:
     """Return all differences implied by exact property declarations."""
-    if TableAspect.PROPERTIES not in desired.managed_aspects:
+    if not desired.scope.manages(TableAspect.PROPERTIES):
         return (), ()
 
     actions: list[SetProperty | UnsetProperty] = []

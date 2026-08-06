@@ -2,12 +2,11 @@ from types import MappingProxyType
 
 import pytest
 
-from delta_engine.application.scopes import ANNOTATION_ASPECTS, METADATA_ASPECTS, TAG_ASPECTS
 from delta_engine.domain.model import (
-    ALL_ASPECTS,
     DesiredColumn as DomainColumn,
     QualifiedName,
     TableAspect,
+    TableScope,
 )
 from delta_engine.domain.model.constraints import PrimaryKeyConstraint
 from delta_engine.schema import (
@@ -799,16 +798,16 @@ def test_delta_table_manages_all_aspects_by_default():
     )
 
     # Then the lowered desired table manages everything
-    assert table.to_desired_table().managed_aspects == ALL_ASPECTS
+    assert table.to_desired_table().scope is TableScope.FULL
 
 
 @pytest.mark.parametrize(
     ("scope", "expected"),
     [
-        ("full", ALL_ASPECTS),
-        ("metadata", METADATA_ASPECTS),
-        ("annotations", ANNOTATION_ASPECTS),
-        ("tags", TAG_ASPECTS),
+        ("full", TableScope.FULL),
+        ("metadata", TableScope.METADATA),
+        ("annotations", TableScope.ANNOTATIONS),
+        ("tags", TableScope.TAGS),
     ],
 )
 def test_a_scope_name_narrows_what_the_declaration_manages(scope, expected):
@@ -821,10 +820,8 @@ def test_a_scope_name_narrows_what_the_declaration_manages(scope, expected):
         scope=scope,
     )
 
-    # Then it lowers to exactly that scope's aspects. What each set contains is
-    # pinned in tests/application/test_scopes.py; this is the wiring from the
-    # public name to it
-    assert table.to_desired_table().managed_aspects == expected
+    # Then the public name becomes the corresponding closed domain scope.
+    assert table.to_desired_table().scope is expected
 
 
 def test_a_restricted_scope_still_lowers_everything_declared():
@@ -885,7 +882,7 @@ def test_metadata_scope_carries_properties_without_deploying_them():
     # Then the declaration carries the property; PROPERTIES stays unmanaged
     desired = table.to_desired_table()
     assert desired.properties == {Property.CHANGE_DATA_FEED.value: "true"}
-    assert TableAspect.PROPERTIES not in desired.managed_aspects
+    assert not desired.scope.manages(TableAspect.PROPERTIES)
 
 
 def test_tag_scope_carries_foreign_keys_without_managing_them():
@@ -913,7 +910,7 @@ def test_tag_scope_carries_foreign_keys_without_managing_them():
     # Then the declaration carries the key; FOREIGN_KEYS stays unmanaged
     desired = table.to_desired_table()
     assert len(desired.foreign_keys) == 1
-    assert TableAspect.FOREIGN_KEYS not in desired.managed_aspects
+    assert not desired.scope.manages(TableAspect.FOREIGN_KEYS)
 
 
 def test_annotations_scope_carries_a_mirrored_primary_key_without_managing_it():
@@ -933,7 +930,7 @@ def test_annotations_scope_carries_a_mirrored_primary_key_without_managing_it():
     # Omitting it would instead read as a drop this scope cannot authorise
     desired = table.to_desired_table()
     assert desired.primary_key is not None
-    assert TableAspect.PRIMARY_KEY not in desired.managed_aspects
+    assert not desired.scope.manages(TableAspect.PRIMARY_KEY)
 
 
 def test_no_properties_are_injected_by_default():

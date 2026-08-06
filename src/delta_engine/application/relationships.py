@@ -140,7 +140,7 @@ def resolve(tables: tuple[DesiredTable, ...]) -> tuple[TableResolution, ...]:
 
 def _managed_foreign_keys(table: DesiredTable) -> Sequence[ForeignKeyConstraint]:
     """Return foreign keys this declaration is responsible for reconciling."""
-    if TableAspect.FOREIGN_KEYS not in table.managed_aspects:
+    if not table.scope.manages(TableAspect.FOREIGN_KEYS):
         return ()
     return table.foreign_keys
 

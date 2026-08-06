@@ -34,6 +34,7 @@ from delta_engine.domain.model.table import (
     ObservedTable,
     TableAspect,
     TableKind,
+    TableScope,
 )
 from delta_engine.domain.model.table_feature import TableFeature
 
@@ -67,6 +68,7 @@ __all__ = [
     "TableAspect",
     "TableFeature",
     "TableKind",
+    "TableScope",
     "Timestamp",
     "TimestampNtz",
     "Variant",

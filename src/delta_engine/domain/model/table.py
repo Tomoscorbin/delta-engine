@@ -106,6 +106,40 @@ class TableAspect(Enum):
 ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 
 
+class TableScope(Enum):
+    """The portion of a desired table managed by the engine."""
+
+    TAGS = auto()
+    ANNOTATIONS = auto()
+    METADATA = auto()
+    FULL = auto()
+
+    def manages(self, aspect: TableAspect) -> bool:
+        """Return whether this scope manages ``aspect``."""
+        return self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value
+
+    def is_within(self, other: "TableScope") -> bool:
+        """Return whether this scope grants no more authority than ``other``."""
+        return self.value <= other.value
+
+
+_MINIMUM_SCOPE_BY_ASPECT: Final[Mapping[TableAspect, TableScope]] = MappingProxyType(
+    {
+        TableAspect.TABLE_TAGS: TableScope.TAGS,
+        TableAspect.COLUMN_TAGS: TableScope.TAGS,
+        TableAspect.TABLE_COMMENT: TableScope.ANNOTATIONS,
+        TableAspect.COLUMN_COMMENTS: TableScope.ANNOTATIONS,
+        TableAspect.PRIMARY_KEY: TableScope.METADATA,
+        TableAspect.FOREIGN_KEYS: TableScope.METADATA,
+        TableAspect.TABLE_EXISTENCE: TableScope.FULL,
+        TableAspect.COLUMN_STRUCTURE: TableScope.FULL,
+        TableAspect.PROPERTIES: TableScope.FULL,
+        TableAspect.PARTITIONING: TableScope.FULL,
+        TableAspect.CLUSTERING: TableScope.FULL,
+    }
+)
+
+
 class TableKind(Enum):
     """
     The catalog relation kind an observed table resolved to.
@@ -137,7 +171,7 @@ class DesiredTable:
         foreign_keys: Foreign key constraints owned by this table.
         properties: Table properties; a ``None`` value asserts the key must be
             absent from the table.
-        managed_aspects: The table aspects this declaration manages.
+        scope: The portion of the table this declaration manages.
 
     A desired table contains only declared state. Table features implied by
     its column types are derived at the application planning boundary when an
@@ -154,7 +188,7 @@ class DesiredTable:
     primary_key: PrimaryKeyConstraint | None = None
     foreign_keys: ListOrTuple[ForeignKeyConstraint] = ()
     properties: Mapping[str, str | None] = field(default_factory=dict)
-    managed_aspects: Set[TableAspect] = field(default_factory=lambda: ALL_ASPECTS)
+    scope: TableScope = TableScope.FULL
 
     @property
     def primary_key_columns(self) -> tuple[str, ...]:
@@ -186,6 +220,9 @@ class DesiredTable:
         representable.
 
         """
+        if not isinstance(self.scope, TableScope):
+            raise TypeError(f"scope must be a TableScope, got {type(self.scope).__name__}")
+
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "tags", MappingProxyType(dict(self.tags)))
         partitioned_by = tuple(self.partitioned_by)
@@ -194,8 +231,6 @@ class DesiredTable:
         object.__setattr__(self, "clustered_by", tuple(Identifier(n) for n in clustered_by))
         object.__setattr__(self, "foreign_keys", tuple(self.foreign_keys))
         object.__setattr__(self, "properties", MappingProxyType(dict(self.properties)))
-        object.__setattr__(self, "managed_aspects", frozenset(self.managed_aspects))
-
         _validate_table_structure(
             columns=self.columns,
             tags=self.tags,
@@ -205,11 +240,6 @@ class DesiredTable:
             foreign_keys=self.foreign_keys,
         )
 
-        if not self.managed_aspects:
-            raise ValueError(
-                "managed_aspects must not be empty: a table that manages no aspect"
-                " declares nothing for the engine to do"
-            )
         seen: set[frozenset[str]] = set()
         local_columns_by_constraint_name: dict[str, Sequence[str]] = {}
         for foreign_key in self.foreign_keys:
@@ -252,7 +282,7 @@ class DesiredTable:
             source = column.renamed_from
             if source is None:
                 continue
-            if TableAspect.COLUMN_STRUCTURE not in self.managed_aspects:
+            if not self.scope.manages(TableAspect.COLUMN_STRUCTURE):
                 raise ValueError(
                     f"Column {column.name!r} declares renamed_from, but this"
                     " declaration does not manage column structure"
