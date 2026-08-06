@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from types import MappingProxyType
-from typing import Final
+from typing import Final, Self
 
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model.column import DesiredColumn, ObservedColumn
@@ -118,7 +118,7 @@ class TableScope(Enum):
         """Return whether this scope manages ``aspect``."""
         return self.value >= _MINIMUM_SCOPE_BY_ASPECT[aspect].value
 
-    def is_within(self, other: "TableScope") -> bool:
+    def is_within(self, other: Self) -> bool:
         """Return whether this scope grants no more authority than ``other``."""
         return self.value <= other.value
 
