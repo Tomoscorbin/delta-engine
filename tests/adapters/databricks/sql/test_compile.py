@@ -4,7 +4,6 @@ from hypothesis import given
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import compile_plan
-from delta_engine.application.scopes import ANNOTATION_ASPECTS
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -637,20 +636,6 @@ def test_ordinary_tables_keep_the_alter_table_dialect():
     statement = _compile_single(SetTableTag(name="owner", desired_value="gov", observed_value=None))
 
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
-
-
-@pytest.mark.parametrize(
-    "action",
-    [
-        action
-        for action in _SAMPLE_ACTIONS.values()
-        if action.aspect not in ANNOTATION_ASPECTS
-    ],
-    ids=lambda action: type(action).__name__,
-)
-def test_non_annotation_actions_cannot_compile_for_streaming_tables(action):
-    with pytest.raises(ValueError):
-        _compile_single(action, kind=TableKind.STREAMING_TABLE)
 
 
 def test_compile_enable_table_feature():

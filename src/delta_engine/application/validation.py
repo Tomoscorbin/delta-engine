@@ -669,7 +669,7 @@ class StreamingTableAnnotationsOnly:
     name: ClassVar[str] = "StreamingTableAnnotationsOnly"
 
     def evaluate(self, diff: TableDiff) -> tuple[ValidationFailure, ...]:
-        """Flag a streaming-table declaration whose managed aspects exceed the tag aspects."""
+        """Flag a streaming-table declaration whose managed aspects exceed annotations."""
         match diff:
             case TableMissing():
                 return ()

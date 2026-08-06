@@ -8,8 +8,7 @@ statements in plan order, ready to execute against a Spark session.
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import singledispatch
-from types import MappingProxyType
-from typing import Final
+from typing import assert_never
 
 from delta_engine.adapters.databricks.sql.dialect import (
     backtick,
@@ -19,7 +18,6 @@ from delta_engine.adapters.databricks.sql.dialect import (
 from delta_engine.adapters.databricks.sql.types import render_data_type
 from delta_engine.adapters.databricks.table_features import enable_property
 from delta_engine.application.ports import CompiledAction, CompiledPlan
-from delta_engine.application.scopes import ANNOTATION_ASPECTS
 from delta_engine.domain.model import DesiredColumn, QualifiedName, TableKind
 from delta_engine.domain.plan import (
     Action,
@@ -46,72 +44,55 @@ from delta_engine.domain.plan import (
     UnsetTableTag,
 )
 
-# ALTER STREAMING TABLE is the documented dialect for annotating a streaming
-# table; its statements are pinned live in
-# tests/live/test_sql_warehouse_live_streaming_tables.py. The platform was
-# observed tolerating plain ALTER TABLE for table-level tags (2026-07-16),
-# but the engine emits the documented form.
-_ANNOTATION_ALTER_CLAUSES: Final[Mapping[TableKind, str]] = MappingProxyType(
-    {
-        TableKind.TABLE: "ALTER TABLE",
-        TableKind.STREAMING_TABLE: "ALTER STREAMING TABLE",
-    }
-)
+
+def _annotation_alter_keyword(kind: TableKind) -> str:
+    """Return the relation-kind-specific ALTER keyword used by annotations."""
+    match kind:
+        case TableKind.TABLE:
+            return "ALTER TABLE"
+        case TableKind.STREAMING_TABLE:
+            # ALTER STREAMING TABLE is the documented annotation dialect. Its
+            # behaviour is pinned by the streaming-table live test.
+            return "ALTER STREAMING TABLE"
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 @dataclass(frozen=True, slots=True)
 class _Target:
     """
-    The table as statements address it.
+    The table as SQL statements address it.
 
-    Owns the rendering of the ways a statement names its table: the bare
-    backticked name, the ordinary-table ALTER clause, and the annotation ALTER
-    clause whose keyword follows the relation kind.
+    Construction hides qualified-name quoting and the one dialect decision
+    relation kind affects. Action compilers receive rendered capabilities, not
+    the kind itself, so ordinary operations cannot accidentally depend on it.
     """
 
-    qualified_name: QualifiedName
-    kind: TableKind
+    name: str
+    annotation_alter_clause: str
+
+    @classmethod
+    def for_relation(cls, qualified_name: QualifiedName, kind: TableKind) -> "_Target":
+        """Render the target forms needed to compile actions for one relation."""
+        name = backtick_qualified_name(qualified_name)
+        annotation_alter_clause = f"{_annotation_alter_keyword(kind)} {name}"
+        return cls(name=name, annotation_alter_clause=annotation_alter_clause)
 
     @property
-    def name(self) -> str:
-        """The backticked fully qualified table name."""
-        return backtick_qualified_name(self.qualified_name)
-
-    @property
-    def table_alter_clause(self) -> str:
-        """The ALTER clause for operations supported only on ordinary tables."""
+    def alter_table_clause(self) -> str:
+        """The kind-independent ALTER TABLE clause for ordinary operations."""
         return f"ALTER TABLE {self.name}"
-
-    @property
-    def annotation_alter_clause(self) -> str:
-        """The kind-correct ALTER clause for comments and Unity Catalog tags."""
-        return f"{_ANNOTATION_ALTER_CLAUSES[self.kind]} {self.name}"
 
 
 def compile_plan(plan: ActionPlan) -> CompiledPlan:
     """
     Compile an :class:`ActionPlan` into SQL statements, in plan order.
 
-    The plan supplies both the qualified table target and the relation kind.
-    Only annotation actions can target a streaming table; all other actions are
-    rejected here as a final boundary behind application validation. Annotation
-    ALTER statements select their dialect from the kind, while COMMENT ON is
-    kind-independent.
+    Planning has already decided whether the declaration may act on the
+    relation. Compilation only lowers each accepted action; relation kind
+    selects the annotation ALTER dialect and does not affect other actions.
     """
-    if plan.kind is TableKind.STREAMING_TABLE:
-        unsupported = tuple(
-            type(action).__name__
-            for action in plan
-            if action.aspect not in ANNOTATION_ASPECTS
-        )
-        if unsupported:
-            action_names = ", ".join(unsupported)
-            raise ValueError(
-                f"Cannot compile {action_names} for streaming table {plan.target}; "
-                "only annotation actions are supported"
-            )
-
-    target = _Target(qualified_name=plan.target, kind=plan.kind)
+    target = _Target.for_relation(plan.target, plan.kind)
     compiled_actions = [
         CompiledAction(action=action, statement=_compile_action(action, target)) for action in plan
     ]
@@ -129,7 +110,7 @@ def _compile_action(action: Action, target: _Target) -> str:
 
 
 @_compile_action.register
-def _(action: CreateTable, target: _Target) -> str:
+def _compile_create_table(action: CreateTable, target: _Target) -> str:
     """Compile a CREATE TABLE statement including columns, comment, properties, and optional PK."""
     table = action.table
     column_defs = [_column_definition(column) for column in table.columns]
@@ -163,7 +144,7 @@ def _(action: CreateTable, target: _Target) -> str:
 
 
 @_compile_action.register
-def _(action: AddColumn, target: _Target) -> str:
+def _compile_add_column(action: AddColumn, target: _Target) -> str:
     """
     Compile an ALTER TABLE ... ADD COLUMN statement for a single column.
 
@@ -183,64 +164,64 @@ def _(action: AddColumn, target: _Target) -> str:
     name = backtick(action.column.name)
     dtype = render_data_type(action.column.data_type)
     comment = f" COMMENT {quote_literal(action.column.comment)}" if action.column.comment else ""
-    return f"{target.table_alter_clause} ADD COLUMN {name} {dtype}{comment}"
+    return f"{target.alter_table_clause} ADD COLUMN {name} {dtype}{comment}"
 
 
 @_compile_action.register
-def _(action: DropColumn, target: _Target) -> str:
+def _compile_drop_column(action: DropColumn, target: _Target) -> str:
     """Compile an ALTER TABLE ... DROP COLUMN statement for a column name."""
     column_name = backtick(action.column.name)
-    return f"{target.table_alter_clause} DROP COLUMN {column_name}"
+    return f"{target.alter_table_clause} DROP COLUMN {column_name}"
 
 
 @_compile_action.register
-def _(action: RenameColumn, target: _Target) -> str:
+def _compile_rename_column(action: RenameColumn, target: _Target) -> str:
     """Compile ALTER TABLE ... RENAME COLUMN."""
     old = backtick(action.old_name)
     new = backtick(action.new_name)
-    return f"{target.table_alter_clause} RENAME COLUMN {old} TO {new}"
+    return f"{target.alter_table_clause} RENAME COLUMN {old} TO {new}"
 
 
 @_compile_action.register
-def _(action: EnableTableFeature, target: _Target) -> str:
+def _compile_enable_table_feature(action: EnableTableFeature, target: _Target) -> str:
     """Compile a table-feature enablement to its documented SET TBLPROPERTIES form."""
     property_ = enable_property(action.feature)
     pair = f"{quote_literal(property_.key)}={quote_literal(property_.value)}"
-    return f"{target.table_alter_clause} SET TBLPROPERTIES ({pair})"
+    return f"{target.alter_table_clause} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register
-def _(action: SetProperty, target: _Target) -> str:
+def _compile_set_property(action: SetProperty, target: _Target) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
-    return f"{target.table_alter_clause} SET TBLPROPERTIES ({pair})"
+    return f"{target.alter_table_clause} SET TBLPROPERTIES ({pair})"
 
 
 @_compile_action.register
-def _(action: UnsetProperty, target: _Target) -> str:
+def _compile_unset_property(action: UnsetProperty, target: _Target) -> str:
     key = quote_literal(action.name)
-    return f"{target.table_alter_clause} UNSET TBLPROPERTIES IF EXISTS ({key})"
+    return f"{target.alter_table_clause} UNSET TBLPROPERTIES IF EXISTS ({key})"
 
 
 @_compile_action.register
-def _(action: SetTableTag, target: _Target) -> str:
+def _compile_set_table_tag(action: SetTableTag, target: _Target) -> str:
     pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
     return f"{target.annotation_alter_clause} SET TAGS ({pair})"
 
 
 @_compile_action.register
-def _(action: UnsetTableTag, target: _Target) -> str:
+def _compile_unset_table_tag(action: UnsetTableTag, target: _Target) -> str:
     return f"{target.annotation_alter_clause} UNSET TAGS ({quote_literal(action.name)})"
 
 
 @_compile_action.register
-def _(action: SetColumnTag, target: _Target) -> str:
+def _compile_set_column_tag(action: SetColumnTag, target: _Target) -> str:
     column = backtick(action.column_name)
     pair = f"{quote_literal(action.name)}={quote_literal(action.desired_value)}"
     return f"{target.annotation_alter_clause} ALTER COLUMN {column} SET TAGS ({pair})"
 
 
 @_compile_action.register
-def _(action: UnsetColumnTag, target: _Target) -> str:
+def _compile_unset_column_tag(action: UnsetColumnTag, target: _Target) -> str:
     column = backtick(action.column_name)
     return (
         f"{target.annotation_alter_clause} ALTER COLUMN {column}"
@@ -249,7 +230,7 @@ def _(action: UnsetColumnTag, target: _Target) -> str:
 
 
 @_compile_action.register
-def _(action: SetColumnComment, target: _Target) -> str:
+def _compile_set_column_comment(action: SetColumnComment, target: _Target) -> str:
     # An empty desired comment compiles to COMMENT '' rather than UNSET
     # COMMENT: SQL warehouses reject the latter, and '' round-trips as the
     # empty comment the reader observes, keeping resyncs idempotent.
@@ -259,71 +240,71 @@ def _(action: SetColumnComment, target: _Target) -> str:
 
 
 @_compile_action.register
-def _(action: SetTableComment, target: _Target) -> str:
+def _compile_set_table_comment(action: SetTableComment, target: _Target) -> str:
     comment = quote_literal(action.desired_comment)
     return f"COMMENT ON TABLE {target.name} IS {comment}"
 
 
 @_compile_action.register
-def _(action: SetColumnNullability, target: _Target) -> str:
+def _compile_set_column_nullability(action: SetColumnNullability, target: _Target) -> str:
     column_name = backtick(action.column_name)
     sign = "DROP" if action.desired_nullable else "SET"
-    return f"{target.table_alter_clause} ALTER COLUMN {column_name} {sign} NOT NULL"
+    return f"{target.alter_table_clause} ALTER COLUMN {column_name} {sign} NOT NULL"
 
 
 @_compile_action.register
-def _(action: AlterClustering, target: _Target) -> str:
+def _compile_alter_clustering(action: AlterClustering, target: _Target) -> str:
     """Compile ALTER TABLE ... CLUSTER BY (...) or CLUSTER BY NONE."""
     if not action.desired_clustering:
-        return f"{target.table_alter_clause} CLUSTER BY NONE"
+        return f"{target.alter_table_clause} CLUSTER BY NONE"
     columns = ", ".join(backtick(column) for column in action.desired_clustering)
-    return f"{target.table_alter_clause} CLUSTER BY ({columns})"
+    return f"{target.alter_table_clause} CLUSTER BY ({columns})"
 
 
 @_compile_action.register
-def _(action: AlterColumnType, target: _Target) -> str:
+def _compile_alter_column_type(action: AlterColumnType, target: _Target) -> str:
     """Compile ALTER TABLE ... ALTER COLUMN ... TYPE for a validated type widening."""
     column_name = backtick(action.column_name)
     sql_type = render_data_type(action.desired_type)
-    return f"{target.table_alter_clause} ALTER COLUMN {column_name} TYPE {sql_type}"
+    return f"{target.alter_table_clause} ALTER COLUMN {column_name} TYPE {sql_type}"
 
 
 @_compile_action.register
-def _(action: DropPrimaryKey, target: _Target) -> str:
+def _compile_drop_primary_key(action: DropPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... DROP PRIMARY KEY IF EXISTS statement."""
     # IF EXISTS is the deliberate mirror of CreateTable's plain CREATE: a
     # constraint already gone is the end state this action wants, so an
     # out-of-band drop in the read-execute window converges instead of failing
     # the sync — whereas a table that appeared in that window has contents the
     # plan knows nothing about, so the create must surface it as a failure.
-    return f"{target.table_alter_clause} DROP PRIMARY KEY IF EXISTS"
+    return f"{target.alter_table_clause} DROP PRIMARY KEY IF EXISTS"
 
 
 @_compile_action.register
-def _(action: SetPrimaryKey, target: _Target) -> str:
+def _compile_set_primary_key(action: SetPrimaryKey, target: _Target) -> str:
     """Compile an ALTER TABLE ... ADD CONSTRAINT ... PRIMARY KEY statement."""
     column_clause = ", ".join(backtick(name) for name in action.primary_key.columns)
     constraint = backtick(action.primary_key.constraint_name)
-    return f"{target.table_alter_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
+    return f"{target.alter_table_clause} ADD CONSTRAINT {constraint} PRIMARY KEY ({column_clause})"
 
 
 @_compile_action.register
-def _(action: DropForeignKey, target: _Target) -> str:
+def _compile_drop_foreign_key(action: DropForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... DROP CONSTRAINT IF EXISTS for a foreign key."""
     # IF EXISTS converges like DropPrimaryKey: already absent is the end state.
     constraint = backtick(action.constraint.constraint_name)
-    return f"{target.table_alter_clause} DROP CONSTRAINT IF EXISTS {constraint}"
+    return f"{target.alter_table_clause} DROP CONSTRAINT IF EXISTS {constraint}"
 
 
 @_compile_action.register
-def _(action: SetForeignKey, target: _Target) -> str:
+def _compile_set_foreign_key(action: SetForeignKey, target: _Target) -> str:
     """Compile ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ... REFERENCES ..."""
     constraint = backtick(action.constraint.constraint_name)
     local_cols = ", ".join(backtick(col) for col in action.constraint.local_columns)
     ref_cols = ", ".join(backtick(col) for col in action.constraint.referenced_columns)
     backticked_ref = backtick_qualified_name(action.constraint.referenced_table)
     return (
-        f"{target.table_alter_clause}"
+        f"{target.alter_table_clause}"
         f" ADD CONSTRAINT {constraint}"
         f" FOREIGN KEY ({local_cols}) REFERENCES {backticked_ref} ({ref_cols})"
     )

@@ -106,21 +106,21 @@ In `src/delta_engine/adapters/databricks/sql/compile.py`, register a `singledisp
 
 ```python
 @_compile_action.register
-def _(action: UpdateComment, target: _Target) -> str:
+def _compile_update_comment(action: UpdateComment, target: _Target) -> str:
     col = backtick(action.column_name)
     comment = quote_literal(action.desired_comment)
     return f"{target.annotation_alter_clause} ALTER COLUMN {col} COMMENT {comment}"
 ```
 
 Each handler receives a `_Target` — the table as statements address it. It
-renders the backticked table name (`target.name`) and exposes two ALTER
-clauses. Use `target.table_alter_clause` for operations supported only on an
-ordinary table. Annotation actions use `target.annotation_alter_clause`, whose
-keyword follows the plan's relation kind (`ALTER TABLE ...` or `ALTER
-STREAMING TABLE ...`). The compiler rejects any non-annotation action paired
-with a streaming-table target before dispatch. A constraint action carries its
-complete constraint (named when the `DesiredTable` was built, or read from the
-catalog for an observed one), so the handler renders
+renders the backticked table name (`target.name`) and exposes the SQL forms the
+handlers need without exposing relation kind. Use `target.alter_table_clause`
+for ordinary operations. Annotation ALTER actions use
+`target.annotation_alter_clause`, which is pre-rendered with `ALTER TABLE ...`
+or `ALTER STREAMING TABLE ...` as appropriate. Planning has already accepted
+the action before compilation. A constraint action carries its complete
+constraint (named when the `DesiredTable` was built, or read from the catalog
+for an observed one), so the handler renders
 `action.constraint.constraint_name` directly rather than computing it.
 
 Use `backtick` for identifiers and `quote_literal` for string literals (both in `delta_engine/adapters/databricks/sql/dialect.py`).

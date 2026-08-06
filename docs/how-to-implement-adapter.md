@@ -75,7 +75,8 @@ both the qualified table target (`plan.target`) and the relation kind its
 actions lower against (`plan.kind`). Backends whose DDL dialect differs by
 kind read both facts from the plan; a backend with one dialect may ignore the
 kind. Databricks, for example, uses `ALTER STREAMING TABLE` for annotation
-actions on a streaming table and rejects non-annotation actions for that kind.
+actions on a streaming table. Eligibility validation ensures that wider
+streaming-table declarations never produce an accepted plan.
 
 The engine passes those same compiled statements to `execute` one at a time.
 The table they target is already baked into each statement. Returning normally
