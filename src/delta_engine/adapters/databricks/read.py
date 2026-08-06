@@ -15,7 +15,6 @@ and the typed error boundary all live here. This module stays PySpark-free.
 
 from collections.abc import Mapping
 from dataclasses import replace
-import logging
 from types import MappingProxyType
 from typing import Final
 
@@ -49,9 +48,6 @@ from delta_engine.domain.model import ObservedTable, QualifiedName, TableKind
 
 class UnsupportedRelationError(Exception):
     """The described relation is not a kind of table the engine manages."""
-
-
-logger = logging.getLogger(__name__)
 
 
 # The engine reads and reconciles the Delta relations it can ALTER: ordinary
@@ -95,7 +91,6 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
         return TablePresent(table=_read_observed_table(run_query, description, kind))
     except Exception as exception:
         message = exception_message(exception)
-        logger.warning("Read failed for %s: %s", qualified_name, message, exc_info=True)
         raise ReadError(
             exception_type=exception_type_name(exception),
             message=message,
