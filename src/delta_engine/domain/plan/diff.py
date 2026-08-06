@@ -67,14 +67,7 @@ _REQUIRED_FEATURE_BY_TYPE: Final[Mapping[type[DataType], TableFeature]] = {
 
 @dataclass(frozen=True, slots=True)
 class TableCreation:
-    """
-    The diff for a table with no catalog counterpart: create everything declared.
-
-    The read observed the table as absent (``TableAbsent``); this arm is the
-    differ's conclusion from that fact — the whole declaration is the gap, and
-    ``actions`` realize it. Whether creation is *allowed* is validation's
-    judgment (``MissingTableUnmanaged``), not the diff's.
-    """
+    """The diff for a table with no catalog counterpart: create everything declared."""
 
     desired: DesiredTable
 
