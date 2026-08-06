@@ -109,10 +109,10 @@ ALL_ASPECTS: Final[frozenset[TableAspect]] = frozenset(TableAspect)
 class TableScope(Enum):
     """The portion of a desired table managed by the engine."""
 
-    TAGS = auto()
-    ANNOTATIONS = auto()
-    METADATA = auto()
-    FULL = auto()
+    TAGS = 1
+    ANNOTATIONS = 2
+    METADATA = 3
+    FULL = 4
 
     def manages(self, aspect: TableAspect) -> bool:
         """Return whether this scope manages ``aspect``."""
