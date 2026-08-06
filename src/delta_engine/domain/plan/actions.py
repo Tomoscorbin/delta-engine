@@ -454,8 +454,8 @@ class ActionPlan:
     are invariants of the plan, not context a caller has to supply later.
 
     ``kind`` is the relation kind of the table the actions lower against —
-    part of what the plan means, since the same actions compile to different
-    statements per kind. Defaults to the ordinary table kind.
+    part of what the plan means, since annotation actions use the streaming
+    table dialect for a streaming target. Defaults to the ordinary table kind.
     """
 
     target: QualifiedName

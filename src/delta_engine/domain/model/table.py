@@ -112,8 +112,9 @@ class TableKind(Enum):
 
     Discovered at read time, never declared. ``TABLE`` is an ordinary managed
     or external Delta table; ``STREAMING_TABLE`` is a pipeline-owned streaming
-    table, which takes a distinct ALTER dialect and admits tag changes only
-    (enforced by validation's eligibility checks, not here).
+    table, which takes a distinct ALTER dialect for column comments and tags
+    and admits annotation changes only (enforced by validation's eligibility
+    checks, not here).
     """
 
     TABLE = auto()

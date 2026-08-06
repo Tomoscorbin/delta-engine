@@ -4,6 +4,7 @@ from hypothesis import given
 import pytest
 
 from delta_engine.adapters.databricks.sql.compile import compile_plan
+from delta_engine.application.scopes import ANNOTATION_ASPECTS
 from delta_engine.domain.model import (
     DesiredColumn,
     DesiredTable,
@@ -638,27 +639,18 @@ def test_ordinary_tables_keep_the_alter_table_dialect():
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
 
 
-def test_alter_statements_adopt_the_dialect_mechanically():
-    # The compiler is policy-free: validation keeps non-tag actions away from
-    # streaming tables, but a statement compiled for one still targets it.
-    statement = _compile_single(
-        AddColumn(DesiredColumn("extra", Integer())), kind=TableKind.STREAMING_TABLE
-    )
-
-    assert statement.startswith("ALTER STREAMING TABLE `cat`.`sch`.`tbl` ADD COLUMN")
-
-
-def test_non_alter_statements_ignore_the_dialect():
-    create = _compile_single(
-        _create_table(DesiredColumn("id", Integer())), kind=TableKind.STREAMING_TABLE
-    )
-    comment = _compile_single(
-        SetTableComment(desired_comment="c", observed_comment=""),
-        kind=TableKind.STREAMING_TABLE,
-    )
-
-    assert create.startswith("CREATE TABLE `cat`.`sch`.`tbl`")
-    assert comment == "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'c'"
+@pytest.mark.parametrize(
+    "action",
+    [
+        action
+        for action in _SAMPLE_ACTIONS.values()
+        if action.aspect not in ANNOTATION_ASPECTS
+    ],
+    ids=lambda action: type(action).__name__,
+)
+def test_non_annotation_actions_cannot_compile_for_streaming_tables(action):
+    with pytest.raises(ValueError):
+        _compile_single(action, kind=TableKind.STREAMING_TABLE)
 
 
 def test_compile_enable_table_feature():

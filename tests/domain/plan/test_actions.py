@@ -347,11 +347,9 @@ def test_partitioning_changed_rejects_no_difference():
 
 
 def test_tag_aspects_belong_to_exactly_the_four_tag_actions():
-    # The streaming-table eligibility check admits only the tag aspects, so the
-    # actions carrying them are the complete set of statements the engine can
-    # aim at a streaming table. Growing this set is a policy decision, not a
-    # side effect: an action added with a tag aspect flows to streaming
-    # tables automatically.
+    # The tag-only scope admits exactly these aspects. Growing the action set is
+    # a policy decision, not a side effect: an action added with a tag aspect
+    # flows into tag reconciliation automatically.
     tag_aspects = {TableAspect.TABLE_TAGS, TableAspect.COLUMN_TAGS}
     tag_actions = {
         action_type.__name__
