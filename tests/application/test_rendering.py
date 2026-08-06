@@ -18,8 +18,7 @@ from delta_engine.application.failures import (
 )
 from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
-    ExecutionSucceeded,
-    ExecutionSummary,
+    ExecutionResult,
     TablePresent,
 )
 from delta_engine.application.relationships import TableResolution
@@ -632,32 +631,25 @@ def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failur
     )
 
 
-def _failed_execution(plan: ActionPlan, *, applied: int) -> ExecutionSummary:
-    succeeded = tuple(
-        ExecutionSucceeded(statement_index=index, statement=f"SQL {index}")
-        for index in range(applied)
-    )
-    failure = ExecutionFailure(
-        statement_index=applied,
-        exception_type="AnalysisException",
-        message="boom",
-        statement=f"SQL {applied}",
-    )
+def _failed_execution(plan: ActionPlan, *, applied: int) -> ExecutionResult:
     statements = tuple(f"SQL {index}" for index in range(len(plan)))
-    return ExecutionSummary(
+    return ExecutionResult(
         compiled_plan=build_compiled_plan(plan, statements),
-        results=(*succeeded, failure),
-    )
-
-
-def _successful_execution(plan: ActionPlan) -> ExecutionSummary:
-    statements = tuple(f"SQL {index}" for index in range(len(plan)))
-    return ExecutionSummary(
-        compiled_plan=build_compiled_plan(plan, statements),
-        results=tuple(
-            ExecutionSucceeded(statement_index=index, statement=statement)
-            for index, statement in enumerate(statements)
+        applied_count=applied,
+        failure=ExecutionFailure(
+            statement_index=applied,
+            exception_type="AnalysisException",
+            message="boom",
+            statement=f"SQL {applied}",
         ),
+    )
+
+
+def _successful_execution(plan: ActionPlan) -> ExecutionResult:
+    statements = tuple(f"SQL {index}" for index in range(len(plan)))
+    return ExecutionResult(
+        compiled_plan=build_compiled_plan(plan, statements),
+        applied_count=len(statements),
     )
 
 

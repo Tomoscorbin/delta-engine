@@ -4,16 +4,11 @@ from delta_engine.application.failures import ExecutionFailure
 from delta_engine.application.ports import (
     CompiledAction,
     CompiledPlan,
-    ExecutionSucceeded,
-    ExecutionSummary,
+    ExecutionResult,
 )
 from delta_engine.domain.model import QualifiedName
 from delta_engine.domain.plan import ActionPlan, SetTableComment
 from tests.builders import build_compiled_plan
-
-
-def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(statement_index=idx, statement=preview)
 
 
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
@@ -71,87 +66,69 @@ def test_compiled_plan_copies_mutable_compiled_actions_to_a_tuple():
     assert compiled.compiled_actions == (compiled_action,)
 
 
-def test_execution_summary_copies_mutable_results_to_a_tuple():
-    compiled = _compiled("SQL")
-    succeeded = _ok_exec(0, "SQL")
-    results = [succeeded]
-
-    summary = ExecutionSummary(
-        compiled_plan=compiled,
-        results=results,  # type: ignore[arg-type]
-    )
-    results.clear()
-
-    assert summary.results == (succeeded,)
-
-
-def test_execution_summary_reports_no_failure_when_every_statement_succeeds():
-    # Given a run whose statements all executed
+def test_execution_result_success_covers_the_complete_plan():
     compiled = _compiled("SQL 0", "SQL 1")
-    summary = ExecutionSummary(
-        compiled_plan=compiled,
-        results=(_ok_exec(0, "SQL 0"), _ok_exec(1, "SQL 1")),
-    )
 
-    # Then the summary reports success with no failures
-    assert not summary.failures
-    assert summary.applied_count == 2
+    result = ExecutionResult(compiled_plan=compiled, applied_count=2)
+
+    assert result.failures == ()
+    assert result.applied_count == 2
 
 
-def test_execution_summary_exposes_the_failures_among_mixed_results():
-    # Given a run whose second statement failed, leaving the third unattempted
+def test_execution_result_exposes_its_single_failure():
     compiled = _compiled("SQL 0", "SQL 1", "SQL 2")
-    summary = ExecutionSummary(
+
+    result = ExecutionResult(
         compiled_plan=compiled,
-        results=(_ok_exec(0, "SQL 0"), _failed_exec(1, "SQL 1", msg="bang")),
+        applied_count=1,
+        failure=_failed_exec(1, "SQL 1", msg="bang"),
     )
 
-    # Then the summary surfaces the single failure and the applied count
-    assert tuple(f.message for f in summary.failures) == ("bang",)
-    assert summary.applied_count == 1
+    assert tuple(f.message for f in result.failures) == ("bang",)
+    assert result.applied_count == 1
 
 
-def test_execution_summary_accepts_complete_execution_of_an_empty_plan():
-    summary = ExecutionSummary(compiled_plan=_compiled())
+def test_execution_result_accepts_complete_execution_of_an_empty_plan():
+    result = ExecutionResult(compiled_plan=_compiled())
 
-    # Then it is an empty, non-failing summary
-    assert summary.results == ()
-    assert not summary.failures
-    assert summary.applied_count == 0
+    assert result.failures == ()
+    assert result.applied_count == 0
 
 
-def test_execution_summary_rejects_non_contiguous_statement_indexes():
-    compiled = _compiled("SQL 0")
-
-    with pytest.raises(ValueError, match="contiguous"):
-        ExecutionSummary(compiled_plan=compiled, results=(_ok_exec(1, "SQL 0"),))
-
-
-def test_execution_summary_rejects_results_after_a_failure():
-    compiled = _compiled("SQL 0", "SQL 1")
-
-    with pytest.raises(ValueError, match="first failure"):
-        ExecutionSummary(
-            compiled_plan=compiled,
-            results=(_failed_exec(0, "SQL 0"), _ok_exec(1, "SQL 1")),
-        )
-
-
-def test_execution_summary_rejects_a_successful_partial_history():
-    compiled = _compiled("SQL 0", "SQL 1")
-
+def test_execution_result_rejects_a_successful_partial_history():
     with pytest.raises(ValueError, match="complete compiled plan"):
-        ExecutionSummary(
-            compiled_plan=compiled,
-            results=(_ok_exec(0, "SQL 0"),),
+        ExecutionResult(compiled_plan=_compiled("SQL 0", "SQL 1"), applied_count=1)
+
+
+def test_execution_result_rejects_an_applied_count_outside_the_plan():
+    with pytest.raises(ValueError, match="within the compiled plan"):
+        ExecutionResult(compiled_plan=_compiled("SQL 0"), applied_count=2)
+    with pytest.raises(ValueError, match="within the compiled plan"):
+        ExecutionResult(compiled_plan=_compiled("SQL 0"), applied_count=-1)
+
+
+def test_execution_result_rejects_a_failure_away_from_the_applied_prefix():
+    with pytest.raises(ValueError, match="first failure"):
+        ExecutionResult(
+            compiled_plan=_compiled("SQL 0", "SQL 1"),
+            applied_count=0,
+            failure=_failed_exec(1, "SQL 1"),
         )
 
 
-def test_execution_summary_rejects_a_statement_outside_the_compiled_plan():
-    compiled = _compiled("SQL 0")
+def test_execution_result_rejects_a_failure_for_a_different_statement():
+    with pytest.raises(ValueError, match="compiled statement"):
+        ExecutionResult(
+            compiled_plan=_compiled("SQL 0"),
+            applied_count=0,
+            failure=_failed_exec(0, "OTHER SQL"),
+        )
 
-    with pytest.raises(ValueError, match="compiled statement prefix"):
-        ExecutionSummary(
-            compiled_plan=compiled,
-            results=(_ok_exec(0, "OTHER SQL"),),
+
+def test_execution_result_rejects_a_failure_beyond_a_fully_applied_plan():
+    with pytest.raises(ValueError, match="within the compiled plan"):
+        ExecutionResult(
+            compiled_plan=_compiled("SQL 0"),
+            applied_count=1,
+            failure=_failed_exec(1, "SQL 0"),
         )

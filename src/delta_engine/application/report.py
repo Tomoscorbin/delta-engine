@@ -29,7 +29,7 @@ from delta_engine.application.planning import (
     PlanningResult,
     accepted_plan,
 )
-from delta_engine.application.ports import CompiledPlan, ExecutionSummary, ReadResult
+from delta_engine.application.ports import CompiledPlan, ExecutionResult, ReadResult
 from delta_engine.application.relationships import TableResolution
 from delta_engine.domain.collection_types import ListOrTuple
 from delta_engine.domain.model import DesiredTable, QualifiedName
@@ -223,7 +223,7 @@ class TableRun:
     read: ReadResult
     planning: PlanningResult | None = None
     compiled: CompiledPlan | None = None
-    execution: ExecutionSummary | None = None
+    execution: ExecutionResult | None = None
     blocked_failures: ListOrTuple[ForeignKeyFailure] = ()
 
     def __post_init__(self) -> None:

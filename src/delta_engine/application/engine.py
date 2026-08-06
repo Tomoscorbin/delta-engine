@@ -70,8 +70,6 @@ from delta_engine.application.ports import (
     CompiledPlan,
     DesiredTableSource,
     ExecutionResult,
-    ExecutionSucceeded,
-    ExecutionSummary,
     PlanExecutor,
     TablePresent,
 )
@@ -286,42 +284,34 @@ class Engine:
                 executed.append(run)
                 continue
 
-            summary = self._execute_compiled(compiled)
-            if summary.failures:
+            result = self._execute_compiled(compiled)
+            if result.failures:
                 not_converged.add(run.qualified_name)
 
             logger.info(
                 "Executed %d statement(s) for %s (%d failed)",
-                len(summary.results),
+                result.applied_count + len(result.failures),
                 run.qualified_name,
-                len(summary.failures),
+                len(result.failures),
             )
-            executed.append(replace(run, execution=summary))
+            executed.append(replace(run, execution=result))
 
         return tuple(executed)
 
-    def _execute_compiled(self, compiled: CompiledPlan) -> ExecutionSummary:
-        """Execute statements in order and stop after the first expected failure."""
-        results: list[ExecutionResult] = []
+    def _execute_compiled(self, compiled: CompiledPlan) -> ExecutionResult:
+        """Execute statements in order and stop at the first expected failure."""
         for index, statement in enumerate(compiled.statements):
             try:
                 self.executor.execute(statement)
             except ExecutionError as error:
-                results.append(
-                    ExecutionFailure(
+                return ExecutionResult(
+                    compiled_plan=compiled,
+                    applied_count=index,
+                    failure=ExecutionFailure(
                         statement_index=index,
                         statement=statement,
                         exception_type=error.exception_type,
                         message=str(error),
-                    )
+                    ),
                 )
-                break
-
-            results.append(
-                ExecutionSucceeded(
-                    statement_index=index,
-                    statement=statement,
-                )
-            )
-
-        return ExecutionSummary(compiled_plan=compiled, results=results)
+        return ExecutionResult(compiled_plan=compiled, applied_count=len(compiled.statements))

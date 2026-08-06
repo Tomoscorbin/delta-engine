@@ -16,8 +16,6 @@ from delta_engine.application.failures import (
 from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
     ExecutionResult,
-    ExecutionSucceeded,
-    ExecutionSummary,
     ReadResult,
     TableAbsent,
     TablePresent,
@@ -84,10 +82,6 @@ def _t1():
     return datetime(2025, 10, 2, 12, 5, 0)
 
 
-def _ok_exec(idx=0, preview="ALTER TABLE ..."):
-    return ExecutionSucceeded(statement_index=idx, statement=preview)
-
-
 def _failed_exec(idx=0, preview="ALTER TABLE ...", exc="ValueError", msg="boom"):
     return ExecutionFailure(
         statement_index=idx,
@@ -130,14 +124,23 @@ def _comment_plan(name: str, statement_count: int = 1) -> ActionPlan:
     )
 
 
-def _execution(plan: ActionPlan, *results: ExecutionResult) -> ExecutionSummary:
-    return ExecutionSummary(
-        compiled_plan=build_compiled_plan(
-            plan,
-            tuple(result.statement for result in results),
-        ),
-        results=results,
-    )
+def _execution(
+    plan: ActionPlan,
+    statements: tuple[str, ...] = (),
+    *,
+    failure: ExecutionFailure | None = None,
+) -> ExecutionResult:
+    """Build an execution result over ``plan``: complete unless ``failure`` is given."""
+    if not statements:
+        statements = tuple(
+            failure.statement
+            if failure is not None and failure.statement_index == index
+            else "ALTER TABLE ..."
+            for index in range(len(plan))
+        )
+    compiled = build_compiled_plan(plan, statements)
+    applied = len(statements) if failure is None else failure.statement_index
+    return ExecutionResult(compiled_plan=compiled, applied_count=applied, failure=failure)
 
 
 def _report(
@@ -148,7 +151,7 @@ def _report(
     statements: tuple[str, ...] = (),
     failures: tuple[Failure, ...] = (),
     dependencies: tuple[ForeignKeyConstraint, ...] = (),
-    execution: ExecutionSummary | None = None,
+    execution: ExecutionResult | None = None,
     blocked_failures: tuple[ForeignKeyFailure, ...] = (),
     diff: TableDiff | None = None,
 ) -> TableRun:
@@ -212,7 +215,7 @@ def test_table_status_success_when_all_actions_succeed():
     # Given successful read, no pre-execution failures, and only successful actions
     read = TablePresent(table=_an_observed_table())
     plan = _comment_plan("tbl", statement_count=2)
-    execution = _execution(plan, _ok_exec(0), _ok_exec(1))
+    execution = _execution(plan)
 
     # When aggregating
     report = _report(
@@ -234,12 +237,12 @@ def test_sync_report_has_failures_true_if_any_table_has_failures():
     t_ok = _report(
         desired=_a_desired_table("a"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(ok_plan, _ok_exec(0)),
+        execution=_execution(ok_plan),
     )
     t_bad = _report(
         desired=_a_desired_table("b"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(failed_plan, _failed_exec(0)),
+        execution=_execution(failed_plan, failure=_failed_exec(0)),
     )
 
     # When aggregating the sync
@@ -352,7 +355,7 @@ def test_a_failed_table_counts_as_failed_even_though_it_planned_changes():
         plan=plan,
         execution=_execution(
             plan,
-            ExecutionFailure(
+            failure=ExecutionFailure(
                 statement_index=0,
                 exception_type="SparkException",
                 message="boom",
@@ -403,7 +406,7 @@ def test_sync_report_failures_by_table_maps_only_failed_tables():
     t_ok = _report(
         desired=_a_desired_table("x"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(successful_plan, _ok_exec(0)),
+        execution=_execution(successful_plan),
     )
     t_bad = _report(
         desired=_a_desired_table("y"),
@@ -508,7 +511,7 @@ def test_table_run_with_no_failures_is_success():
     report = _report(
         desired=_a_desired_table("ok"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(plan, _ok_exec(0)),
+        execution=_execution(plan),
     )
 
     # Then it is a success and carries no failures
@@ -523,7 +526,7 @@ def test_status_reflects_the_earliest_failing_phase():
     exec_only = _report(
         desired=_a_desired_table("e"),
         read=read,
-        execution=_execution(plan, _failed_exec(0)),
+        execution=_execution(plan, failure=_failed_exec(0)),
     )
     # Then it is EXECUTION_FAILED
     assert exec_only.status is TableRunStatus.EXECUTION_FAILED
@@ -614,10 +617,7 @@ def test_table_run_rejects_execution_after_failed_resolution():
             planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
             compiled=compiled,
             resolution=TableResolution(desired, (), (failure,)),
-            execution=ExecutionSummary(
-                compiled_plan=compiled,
-                results=(_ok_exec(0, "SQL"),),
-            ),
+            execution=ExecutionResult(compiled_plan=compiled, applied_count=1),
         )
 
 
@@ -633,10 +633,7 @@ def test_table_run_rejects_execution_of_another_compiled_plan():
             planning=PlanningAccepted(diff=TableCreation(desired), plan=plan),
             compiled=reported,
             resolution=TableResolution(desired, (), ()),
-            execution=ExecutionSummary(
-                compiled_plan=executed,
-                results=(_ok_exec(0, "EXECUTED SQL"),),
-            ),
+            execution=ExecutionResult(compiled_plan=executed, applied_count=1),
         )
 
 
@@ -685,8 +682,8 @@ def test_statement_progress_counts_applied_against_planned():
         plan=plan,
         execution=_execution(
             plan,
-            ExecutionSucceeded(statement_index=0, statement=statements[0]),
-            ExecutionFailure(
+            statements,
+            failure=ExecutionFailure(
                 statement_index=1,
                 exception_type="SparkException",
                 message="boom",
@@ -795,20 +792,17 @@ def test_first_and_later_execution_failures_have_distinct_change_states():
     first_failed = _report(
         desired=_a_desired_table("first"),
         read=TablePresent(table=_an_observed_table()),
-        execution=ExecutionSummary(
+        execution=ExecutionResult(
             compiled_plan=build_compiled_plan(first_plan, statements),
-            results=(_failed_exec(0, statements[0]),),
+            applied_count=0,
+            failure=_failed_exec(0, statements[0]),
         ),
     )
     later_plan = _comment_plan("later", statement_count=2)
     later_failed = _report(
         desired=_a_desired_table("later"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(
-            later_plan,
-            _ok_exec(0, statements[0]),
-            _failed_exec(1, statements[1]),
-        ),
+        execution=_execution(later_plan, statements, failure=_failed_exec(1, statements[1])),
     )
 
     # When both table outcomes are aggregated in report order
@@ -832,7 +826,7 @@ def test_change_state_is_applied_after_complete_successful_execution():
     report = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(plan, _ok_exec(0), _ok_exec(1)),
+        execution=_execution(plan),
     )
 
     # When deriving change states through the validated aggregate
@@ -851,7 +845,7 @@ def test_sync_report_rejects_execution_results_on_a_dry_run():
     executed = _report(
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
-        execution=_execution(plan, _ok_exec()),
+        execution=_execution(plan),
     )
 
     # When constructing a dry-run aggregate
@@ -1020,7 +1014,9 @@ def test_an_execution_failure_record_carries_its_statement_facts():
         plan=plan,
         execution=_execution(
             plan,
-            _failed_exec(0, preview=statement, exc="DeltaAnalysisException", msg=long_message),
+            failure=_failed_exec(
+                0, preview=statement, exc="DeltaAnalysisException", msg=long_message
+            ),
         ),
     )
 
@@ -1124,7 +1120,9 @@ def _one_run_per_failure_variant() -> tuple[TableRun, ...]:
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
-        execution=_execution(plan, _failed_exec(0, exc="DeltaAnalysisException", msg="boom")),
+        execution=_execution(
+            plan, failure=_failed_exec(0, exc="DeltaAnalysisException", msg="boom")
+        ),
     )
     blocked = _report(
         desired=_a_desired_table("b"),
@@ -1168,7 +1166,7 @@ def test_table_to_dict_reports_execution_counts_when_executed():
         desired=_a_desired_table("orders"),
         read=TablePresent(table=_an_observed_table()),
         plan=plan,
-        execution=_execution(plan, _ok_exec(0, preview=statement)),
+        execution=_execution(plan, (statement,)),
     )
     assert report.to_dict()["execution"] == {"applied": 1, "total": 1}
 
