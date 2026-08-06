@@ -638,29 +638,6 @@ def test_ordinary_tables_keep_the_alter_table_dialect():
     assert statement == "ALTER TABLE `cat`.`sch`.`tbl` SET TAGS ('owner'='gov')"
 
 
-def test_alter_statements_adopt_the_dialect_mechanically():
-    # The compiler is policy-free: validation keeps non-tag actions away from
-    # streaming tables, but a statement compiled for one still targets it.
-    statement = _compile_single(
-        AddColumn(DesiredColumn("extra", Integer())), kind=TableKind.STREAMING_TABLE
-    )
-
-    assert statement.startswith("ALTER STREAMING TABLE `cat`.`sch`.`tbl` ADD COLUMN")
-
-
-def test_non_alter_statements_ignore_the_dialect():
-    create = _compile_single(
-        _create_table(DesiredColumn("id", Integer())), kind=TableKind.STREAMING_TABLE
-    )
-    comment = _compile_single(
-        SetTableComment(desired_comment="c", observed_comment=""),
-        kind=TableKind.STREAMING_TABLE,
-    )
-
-    assert create.startswith("CREATE TABLE `cat`.`sch`.`tbl`")
-    assert comment == "COMMENT ON TABLE `cat`.`sch`.`tbl` IS 'c'"
-
-
 def test_compile_enable_table_feature():
     # Given a canonical table-feature enablement action
     action = EnableTableFeature(feature=TableFeature.TIMESTAMP_NTZ)

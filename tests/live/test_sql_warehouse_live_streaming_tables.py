@@ -34,6 +34,7 @@ from delta_engine import SyncFailedError, TableRunStatus, ValidationFailure
 from delta_engine.adapters.databricks.warehouse._runner import WarehouseSqlRunner
 from delta_engine.adapters.databricks.warehouse.reader import WarehouseReader
 from delta_engine.application.ports import TablePresent
+from delta_engine.application.scopes import ScopeName
 from delta_engine.databricks import build_sql_engine
 from delta_engine.domain.model import QualifiedName, TableKind
 from delta_engine.schema import Column, DeltaTable, Integer
@@ -163,29 +164,35 @@ def test_the_engine_manages_a_streaming_tables_annotations_and_nothing_wider(
     # Anything wider than annotations is refused before planning — even when
     # the declaration mirrors the observed state exactly, so the refusal is
     # about the table's kind, not about drift.
-    full_scope = DeltaTable(
-        live_catalog(),
-        live_schema(),
-        table_name,
-        columns=(annotated_column,),
-        primary_key=["id"],
-        comment=table_comment,
-        tags=table_tags,
-    )
-    with pytest.raises(SyncFailedError) as error:
-        engine.sync(full_scope)
+    wider_scopes: tuple[ScopeName, ...] = ("metadata", "full")
+    for scope in wider_scopes:
+        wider_declaration = DeltaTable(
+            live_catalog(),
+            live_schema(),
+            table_name,
+            columns=(annotated_column,),
+            primary_key=["id"],
+            comment=table_comment,
+            tags=table_tags,
+            scope=scope,
+        )
+        with pytest.raises(SyncFailedError) as error:
+            engine.sync(wider_declaration)
 
-    [table_report] = error.value.report.table_runs
-    assert table_report.status is TableRunStatus.PLANNING_FAILED
-    assert "StreamingTableAnnotationsOnly" in {
-        failure.rule_name
-        for failure in table_report.failures
-        if isinstance(failure, ValidationFailure)
-    }
-    assert table_report.compiled is None
-    refused = read_live_table(live_connection, table_name)
-    assert refused["table_tags"] == table_tags
-    assert refused["column_tags"] == {("id", "pii"): "low"}
+        [table_report] = error.value.report.table_runs
+        assert table_report.status is TableRunStatus.PLANNING_FAILED
+        assert "StreamingTableAnnotationsOnly" in {
+            failure.rule_name
+            for failure in table_report.failures
+            if isinstance(failure, ValidationFailure)
+        }
+        assert table_report.compiled is None
+        refused = read_live_table(live_connection, table_name)
+        assert refused["comment"] == table_comment
+        assert [column["comment"] for column in refused["columns"]] == ["the id"]
+        assert refused["table_tags"] == table_tags
+        assert refused["column_tags"] == {("id", "pii"): "low"}
+        assert refused["primary_key"] == ("id",)
 
     # Clearing is the other half of managing an aspect, and the half with a
     # platform quirk: an empty desired comment compiles to COMMENT '' rather
