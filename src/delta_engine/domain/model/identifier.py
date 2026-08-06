@@ -4,6 +4,8 @@ The engine stores spelling verbatim; ``Identifier`` carries case-insensitive ide
 This module is the only place that canonicalization lives.
 """
 
+from typing import Self
+
 
 class Identifier(str):
     """
@@ -23,7 +25,7 @@ class Identifier(str):
 
     __slots__ = ()
 
-    def __new__(cls, spelling: str) -> "Identifier":
+    def __new__(cls, spelling: str) -> Self:
         """Validate and intern the spelling; blank identifiers are invalid."""
         if not spelling.strip():
             raise ValueError(f"Identifier must not be blank: {spelling!r}")

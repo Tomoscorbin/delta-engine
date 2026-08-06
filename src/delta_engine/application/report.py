@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, NamedTuple
+from typing import Any, Final, NamedTuple, Self
 
 from delta_engine.application.diff_entries import DiffEntry, drift_entries, plan_entries
 from delta_engine.application.failures import (
@@ -412,7 +412,7 @@ class SyncReport:
         ended_at: datetime,
         table_runs: ListOrTuple[TableRun],
         dry_run: bool,
-    ) -> "SyncReport":
+    ) -> Self:
         """
         Assemble the run report, deriving dependency blocking from the graph.
 
