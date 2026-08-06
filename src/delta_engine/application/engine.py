@@ -18,8 +18,8 @@ The steps are:
   4. Execute  — the one cross-table walk (real runs only): fold the blocking
                 rule over the runs and attach attempted statement results
                 to each executed table
-  5. Account  — assemble the aggregate report, deriving dependency blocking
-                from the same edges
+  5. Report   — assemble the aggregate ``SyncReport``, deriving dependency
+                blocking from the same edges
 
 Because the plan pass is read-only, every table is diffed and planned
 against the catalog as it stood before any statement ran, and a dry run is
@@ -35,9 +35,9 @@ other (CYCLE, UNRESOLVABLE_REFERENCE, ...). Whether a table is *blocked* by
 another table's failure is nobody's outcome to record: it is the derived
 consequence of the dependency edges and the other tables' fates. One rule
 states it — a table did not converge if it has failures of its own or a
-dependency did not — and execution and accounting each fold that same rule
-over the dependency-ordered runs: execution to decide what not to attempt,
-accounting to say why. Because it is derived rather than recorded, blocking
+dependency did not — and execution and report assembly each fold that same
+rule over the dependency-ordered runs: execution to decide what not to
+attempt, assembly to say why. Because it is derived rather than recorded, blocking
 is equally visible in a dry run, which attempts nothing.
 
 A table that fails an early phase returns early from its plan pass with
@@ -136,7 +136,7 @@ class Engine:
         """
         Synchronize all registered tables to their desired state.
 
-        Runs lower → resolve → plan → execute → account. Resolution orders
+        Runs lower → resolve → plan → execute → report. Resolution orders
         the tables dependency-first with their static facts, the plan pass
         takes each table through its read-only steps (read, plan, compile)
         and freezes one complete ``TableRun``, execution attaches
@@ -203,7 +203,7 @@ class Engine:
 
         Straight-line, table-local, and free of catalog mutations. Each early
         return is a lifecycle rule — a failed read leaves nothing to plan, a
-        refused plan leaves nothing to compile — so every ``None`` on the
+        rejected plan leaves nothing to compile — so every ``None`` on the
         returned run means "not applicable", never "not yet". Execution itself
         is deliberately absent: whether this table may execute depends on
         other tables' fates, which is the execute walk's concern.
@@ -251,7 +251,7 @@ class Engine:
         One walk in dependency order applies the single blocking rule: a table
         with failures of its own, or with a dependency that will not converge,
         joins the not-converged set and is skipped. Nothing is recorded on a
-        skipped table — the account derives blocking from the same edges — so
+        skipped table — the report derives blocking from the same edges — so
         the two arms differ only in what they can say about the skip. Compiled
         plan emptiness gates only statement execution: a no-op table still
         joins the set through the same rule when its dependency failed, so

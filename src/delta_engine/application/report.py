@@ -1,10 +1,10 @@
 """
-Run accounts: per-table and run-level outcome aggregates.
+Run records: per-table and run-level outcome aggregates.
 
-`TableRun` is the immutable account of one table's sync run, born complete
+`TableRun` is the immutable record of one table's sync run, born complete
 at the engine's plan pass and enriched afterwards with the cross-table
 facts (execution, dependency blocking); `SyncReport` aggregates those
-accounts for the whole run.
+records for the whole run.
 """
 
 from collections.abc import Iterable, Iterator, Mapping
@@ -195,7 +195,7 @@ def _failure_records(failures: tuple[Failure, ...]) -> list[dict[str, Any]]:
 @dataclass(frozen=True, slots=True)
 class TableRun:
     """
-    Frozen public account of one table's sync run.
+    Frozen public record of one table's sync run.
 
     Born complete at the engine's plan pass: everything the table can know
     alone — its resolution, read, planning outcome, and compiled SQL — is
@@ -215,7 +215,7 @@ class TableRun:
     own.
     ``diff`` is derived from the planning outcome, which retains the complete
     set of differences it planned from — actions and unresolvable differences
-    alike — so a table whose plan was refused can still show what drifted. It
+    alike — so a table whose plan was rejected can still show what drifted. It
     is ``None`` when the read failed, because planning never ran.
     """
 

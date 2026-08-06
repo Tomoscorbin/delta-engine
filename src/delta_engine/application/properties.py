@@ -237,7 +237,7 @@ _DEFINITIONS: Final[tuple[PropertyDefinition, ...]] = (
         is_valid_value=_is_column_mapping_mode,
         # Only none -> name is permitted. Databricks can remove column
         # mapping (SET mode='none' / DROP FEATURE), but removal rewrites
-        # every data file, so the engine refuses it as an in-place change.
+        # every data file, so the engine rejects it as an in-place change.
         # The absence of any (value, None) pair blocks removal by the same
         # mechanism — declaring the key absent is a transition to None.
         permitted_transitions=frozenset({("none", "name")}),

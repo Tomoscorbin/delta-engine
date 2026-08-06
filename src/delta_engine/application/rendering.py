@@ -94,12 +94,12 @@ def _render_diff_block(report: TableRun, *, change_state: TableChangeState | Non
     plan = report.plan
     if plan is None:
         # No plan means the diff was rejected, which is not the same as having
-        # found nothing. The failures section says which rule refused; this
-        # says what it refused.
-        refused = drift_entries(report.diff) if isinstance(report.diff, TableDrift) else ()
-        if refused:
+        # found nothing. The failures section says which rule rejected; this
+        # says what it rejected.
+        rejected = drift_entries(report.diff) if isinstance(report.diff, TableDrift) else ()
+        if rejected:
             return "\n".join(
-                [f"{header}  (REJECTED — no SQL planned)", *_render_entry_groups(refused)]
+                [f"{header}  (REJECTED — no SQL planned)", *_render_entry_groups(rejected)]
             )
         return f"{header}\n  ({_NO_CHANGES} — see failures)"
 

@@ -6,7 +6,7 @@ tags:
 # The safety model
 
 delta-engine mutates shared production tables, so its default posture is
-refusal: it only applies changes it can make safely in place, and everything
+rejection: it only applies changes it can make safely in place, and everything
 else fails with a named rule before any SQL runs. This page explains the four
 layers that enforce that, and the scoping concept — managed aspects — that
 decides what a declaration is responsible for at all.
@@ -48,7 +48,7 @@ after fixing the declaration is always safe.
 Every declaration manages a defined set of _aspects_ of its table — column
 structure, comments, properties, tags, partitioning, and key constraints. For
 catalog state it can represent, the engine reconciles drift in managed aspects
-and refuses to proceed when an unmanaged aspect has drifted. It never silently
+and rejects to proceed when an unmanaged aspect has drifted. It never silently
 reconciles something a declaration did not claim responsibility for.
 
 The read boundary upholds this by failing closed: a column whose type the
@@ -141,13 +141,13 @@ converging on the declaration is always safe. Details and examples:
 
 ## When the engine says no
 
-A refused change is not a dead end; the failure message and
+A rejected change is not a dead end; the failure message and
 [safe-change rules](reference-safe-change-rules.md) name the resolution for
 each rule. The patterns are:
 
 - **Stage the migration.** Add the column nullable and backfill. The tighten
   itself is an out-of-band step (`ALTER TABLE ... SET NOT NULL` — the engine
-  refuses to run it); once applied, declare `nullable=False` and the next sync
+  rejects to run it); once applied, declare `nullable=False` and the next sync
   sees no drift.
 - **Recreate out of band.** Type and partitioning changes require a rebuild;
   do it deliberately, then re-sync.

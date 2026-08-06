@@ -31,6 +31,10 @@ Version 2 renamed the planning-phase status from `VALIDATION_FAILED` to
 backwards-compatible, and a reader that does not know the key sees exactly the
 payload it saw before.
 
+The 2026-08 Python renames (`PlanningAccepted`/`PlanningRejected`,
+`TableCreation`, `ExecutionResult`) changed no serialized field or value;
+`schema_version` remains 2.
+
 The per-type failure fields (2026-08-05) were likewise added without a bump:
 every failure record still carries `phase`, `type`, and `message` with
 unchanged meaning, and the additional keys sit beside them.
@@ -44,8 +48,8 @@ did not run. Empty plans and plans rejected before compilation require no
 execution result.
 
 These checks apply when constructing a report directly as well as when the
-engine assembles one. `ExecutionSummary` separately validates the statement
-history inside an execution result.
+engine assembles one. `ExecutionResult` separately validates the statement
+history it records.
 
 ## Table change states
 
@@ -104,7 +108,7 @@ Each entry in `tables`, and the whole of `TableRun.to_dict()`:
 | `has_changes`            | `bool`           | True if this table has a planned change                      |
 | `has_failures`           | `bool`           | True if this table failed a phase                            |
 | `changes`                | `list[dict]`     | Summaries of the planned changes, in plan order (see below)  |
-| `rejected_changes`       | `list[dict]`     | Differences found but refused, when the plan was rejected; empty otherwise |
+| `rejected_changes`       | `list[dict]`     | Differences the rejected plan was built from; empty when the plan was accepted |
 | `planned_sql_statements` | `list[str]`      | Full compiled DDL the plan lowers to, in order               |
 | `failures`               | `list[dict]`     | Failure records, in phase order (see below)                  |
 | `execution`              | `dict` \| `None` | Execution counts, or `None` on a dry run or a skipped table  |
@@ -128,7 +132,7 @@ description is `planned_sql_statements`:
 
 When a table's diff is rejected, no plan exists, so `changes` is empty. The
 differences the engine did find are projected into `rejected_changes` in the
-same record shape, so a reader can see *what* was refused alongside the
+same record shape, so a reader can see *what* was rejected alongside the
 `failures` list that says *why*. It includes both the actions the engine would
 have taken and the differences no action can close (a column spelled
 differently from the catalog, a property set but undeclared, a partitioning

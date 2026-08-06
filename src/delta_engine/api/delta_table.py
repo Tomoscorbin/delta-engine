@@ -293,7 +293,7 @@ def _validate_column_names(
     permitted under column mapping, and change data feed reserves its output
     column names. Both bind only when the declaration manages column
     structure — a restricted scope mirrors columns the live table already
-    accepted, so it must be able to declare names this engine would refuse
+    accepted, so it must be able to declare names this engine would reject
     to create.
     """
     if TableAspect.COLUMN_STRUCTURE not in managed_aspects:

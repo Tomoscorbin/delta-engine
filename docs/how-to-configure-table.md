@@ -143,7 +143,7 @@ Two operations on this key are blocked at validation: changing `name` back
 to `none`, and declaring it `None` (a removal is a transition to absence,
 judged by the same `PropertyTransitionNotSupported` rule). Databricks can
 remove column mapping, but doing so rewrites every data file and conflicts
-with concurrent writes, so the engine refuses it as an in-place change —
+with concurrent writes, so the engine rejects it as an in-place change —
 the same class of operation as a partitioning change. Once a table has
 column mapping, its declaration must carry
 `Property.COLUMN_MAPPING_MODE: "name"`; remove the feature out of band if
