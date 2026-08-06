@@ -123,6 +123,7 @@ class TableScope(Enum):
         return self.value <= other.value
 
 
+# Each aspect records the narrowest scope allowed to manage it.
 _MINIMUM_SCOPE_BY_ASPECT: Final[Mapping[TableAspect, TableScope]] = MappingProxyType(
     {
         TableAspect.TABLE_TAGS: TableScope.TAGS,
