@@ -122,3 +122,17 @@ def test_policy_permits_first_write_of_a_restricted_property() -> None:
 def test_policy_permits_transitions_and_removal_for_unrestricted_properties(key: str) -> None:
     assert DELTA_PROPERTY_POLICY.permits_transition(key, observed="anything", desired="else")
     assert DELTA_PROPERTY_POLICY.permits_removal(key, observed="anything")
+
+
+def test_policy_rejects_a_transition_check_on_an_unmanaged_property() -> None:
+    with pytest.raises(ValueError, match=r"not managed.*delta\.enableRowTracking"):
+        DELTA_PROPERTY_POLICY.permits_transition(
+            "delta.enableRowTracking",
+            observed="true",
+            desired="false",
+        )
+
+
+def test_policy_rejects_a_removal_check_on_an_unmanaged_property() -> None:
+    with pytest.raises(ValueError, match=r"not managed.*delta\.enableRowTracking"):
+        DELTA_PROPERTY_POLICY.permits_removal("delta.enableRowTracking", observed="true")
