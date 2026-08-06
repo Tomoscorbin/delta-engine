@@ -61,8 +61,8 @@ from delta_engine.application.failures import (
     ReadFailure,
 )
 from delta_engine.application.planning import (
-    PlanningFailed,
-    PlanningSucceeded,
+    PlanningAccepted,
+    PlanningRejected,
     plan_changes,
 )
 from delta_engine.application.ports import (
@@ -229,10 +229,10 @@ class Engine:
         planning = plan_changes(resolution.desired, observed)
 
         match planning:
-            case PlanningFailed():
+            case PlanningRejected():
                 logger.error("Planning failed for %s", resolution.qualified_name)
                 return TableRun(resolution=resolution, read=read, planning=planning)
-            case PlanningSucceeded(plan=plan):
+            case PlanningAccepted(plan=plan):
                 compiled = self.executor.compile(plan)
                 logger.info(
                     "Planned %s: %d action(s), %d statement(s)",

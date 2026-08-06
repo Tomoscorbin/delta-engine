@@ -16,7 +16,7 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
+from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
     ExecutionSucceeded,
     ExecutionSummary,
@@ -496,7 +496,7 @@ def _report_with_empty_plan_and_failure() -> TableRun:
     )
     return TableRun(
         read=TablePresent(table=observed),
-        planning=PlanningFailed(
+        planning=PlanningRejected(
             diff=diff_table(desired, observed),
             failures=(ValidationFailure(rule_name="UnsupportedColumnTypeChange", message="nope"),),
         ),
@@ -520,7 +520,7 @@ def test_diff_block_shows_plain_no_changes_when_nothing_failed():
     plan = ActionPlan(target=report.desired.qualified_name)
     healthy = TableRun(
         read=report.read,
-        planning=PlanningSucceeded(diff=TableMissing(report.desired), plan=plan),
+        planning=PlanningAccepted(diff=TableMissing(report.desired), plan=plan),
         compiled=build_compiled_plan(plan, ()),
         resolution=report.resolution,
         execution=None,
@@ -606,9 +606,9 @@ def _grid_report(name, *, plan=None, failures=(), execution=None, blocked_failur
         failure for failure in failures if isinstance(failure, ValidationFailure)
     )
     planning = (
-        PlanningFailed(diff=TableMissing(desired), failures=planning_failures)
+        PlanningRejected(diff=TableMissing(desired), failures=planning_failures)
         if planning_failures
-        else PlanningSucceeded(diff=TableMissing(desired), plan=plan)
+        else PlanningAccepted(diff=TableMissing(desired), plan=plan)
     )
     statements = tuple(f"SQL {index}" for index in range(len(plan) if plan is not None else 0))
     if planning_failures:
@@ -1235,7 +1235,7 @@ def test_a_rejected_table_shows_the_drift_that_was_refused():
     )
     report = TableRun(
         read=TablePresent(table=observed),
-        planning=PlanningFailed(
+        planning=PlanningRejected(
             diff=diff_table(desired, observed),
             failures=(ValidationFailure(rule_name="NonNullableColumnAdd", message="nope"),),
         ),
@@ -1276,7 +1276,7 @@ def test_a_rejected_table_shows_the_differences_no_action_could_close():
     )
     report = TableRun(
         read=TablePresent(table=observed),
-        planning=PlanningFailed(
+        planning=PlanningRejected(
             diff=diff_table(desired, observed),
             failures=(ValidationFailure(rule_name="PartitioningIsImmutable", message="nope"),),
         ),

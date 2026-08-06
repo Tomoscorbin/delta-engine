@@ -39,8 +39,8 @@ DeclarationArgument = Annotated[
 
 
 @dataclass(frozen=True, slots=True)
-class PlanResult:
-    """The safe-to-render identity and report returned by the plan service."""
+class PlanView:
+    """The safe-to-render identity and report the plan command displays."""
 
     target: Target
     declaration: DeclarationRef
@@ -74,14 +74,14 @@ def plan(declaration: DeclarationArgument) -> None:
         raise typer.Exit(code=_EXIT_FAILURE if result.report.has_failures else _EXIT_SUCCESS)
 
 
-def _plan(reference: DeclarationRef) -> PlanResult:
+def _plan(reference: DeclarationRef) -> PlanView:
     """Load one collection, authenticate, and run one read-only engine sync."""
     with _engine_logging(), redirect_stdout(sys.stderr):
         tables = load_declarations(reference)
         with open_connection() as (target, connection):
             engine = build_sql_engine(connection)
             report = engine.sync(*tables, dry_run=True)
-    return PlanResult(target=target, declaration=reference, report=report)
+    return PlanView(target=target, declaration=reference, report=report)
 
 
 @contextmanager

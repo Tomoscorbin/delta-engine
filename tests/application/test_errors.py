@@ -14,7 +14,7 @@ from delta_engine.application.failures import (
     ReadFailure,
     ValidationFailure,
 )
-from delta_engine.application.planning import PlanningFailed, PlanningSucceeded
+from delta_engine.application.planning import PlanningAccepted, PlanningRejected
 from delta_engine.application.ports import (
     CompiledPlan,
     ExecutionSucceeded,
@@ -82,11 +82,11 @@ def _table_report(
         planning = None
         compiled = None
     elif planning_failures:
-        planning = PlanningFailed(diff=TableMissing(desired), failures=planning_failures)
+        planning = PlanningRejected(diff=TableMissing(desired), failures=planning_failures)
         compiled = None
     else:
         compiled = execution.compiled_plan if execution is not None else _compiled()
-        planning = PlanningSucceeded(diff=TableMissing(desired), plan=compiled.plan)
+        planning = PlanningAccepted(diff=TableMissing(desired), plan=compiled.plan)
     resolution = TableResolution(
         desired=desired,
         dependencies=(),

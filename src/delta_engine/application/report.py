@@ -25,7 +25,7 @@ from delta_engine.application.failures import (
     ValidationFailure,
 )
 from delta_engine.application.planning import (
-    PlanningFailed,
+    PlanningRejected,
     PlanningResult,
     accepted_plan,
 )
@@ -138,7 +138,7 @@ def _rejected_change_records(planning: PlanningResult | None) -> list[dict[str, 
     Empty for an accepted outcome: an accepted diff's differences are its
     changes, already projected by ``_change_records``.
     """
-    if not isinstance(planning, PlanningFailed) or not isinstance(planning.diff, TableDrift):
+    if not isinstance(planning, PlanningRejected) or not isinstance(planning.diff, TableDrift):
         return []
     return _entry_records(drift_entries(planning.diff))
 
@@ -229,7 +229,7 @@ class TableRun:
     def __post_init__(self) -> None:
         object.__setattr__(self, "blocked_failures", tuple(self.blocked_failures))
         read_failed = isinstance(self.read, ReadFailure)
-        planning_failed = isinstance(self.planning, PlanningFailed)
+        planning_failed = isinstance(self.planning, PlanningRejected)
         resolution_failed = bool(self.resolution.structural_failures)
 
         if read_failed and self.planning is not None:
@@ -285,7 +285,7 @@ class TableRun:
         failures.extend(self.resolution.structural_failures)
         if isinstance(self.read, ReadFailure):
             failures.append(self.read)
-        if isinstance(self.planning, PlanningFailed):
+        if isinstance(self.planning, PlanningRejected):
             failures.extend(self.planning.failures)
 
         if self.execution is not None:
