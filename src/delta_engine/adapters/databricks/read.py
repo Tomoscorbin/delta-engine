@@ -89,7 +89,7 @@ def read_catalog_state(run_query: RunQuery, qualified_name: QualifiedName) -> Ca
             return TableAbsent()
         kind = _supported_relation_kind(description)
         return TablePresent(table=_read_observed_table(run_query, description, kind))
-    except Exception as exception:
+    except Exception as exception:  # TODO: narroow this catch to avoid catching delta-engine errors
         message = exception_message(exception)
         raise ReadError(
             exception_type=exception_type_name(exception),
