@@ -339,29 +339,14 @@ def _classify_structural_failures(
             _foreign_key_failure(table, foreign_key, reason)
         )
 
-    # Primary-key columns of every registered table, keyed by qualified name.
+    # Primary key of every registered table, keyed by qualified name.
     # A foreign key declared through this engine always references the
     # referenced table's primary key — the API validates the mapping's values
     # against it.
     # (Databricks itself also accepts UNIQUE-constraint targets on DBR 18.2+,
-    # which this engine does not model.) Compared as sets: a primary key's
-    # declaration order is not part of its identity, and referenced_columns is
-    # aligned to local_columns, not PK order.
-    primary_key_by_name = {
-        table.qualified_name: table.primary_key.signature if table.primary_key else frozenset()
-        for table in tables
-    }
-
-    # Exact spelling of every registered primary key. The signature map above
-    # judges the key case-insensitively; this map lets the case arm state
-    # drift between two declarations precisely.
-    primary_key_spellings_by_name = {
-        table.qualified_name: frozenset(
-            str(column)
-            for column in (table.primary_key.columns if table.primary_key is not None else ())
-        )
-        for table in tables
-    }
+    # which this engine does not model.) The primary-key value owns the
+    # order-independent, case-insensitive column matching rule.
+    primary_key_by_name = {table.qualified_name: table.primary_key for table in tables}
 
     # Column types of every registered table, keyed by qualified name. A
     # foreign key's types were validated at declaration time against the
@@ -382,12 +367,17 @@ def _classify_structural_failures(
             referenced_table = foreign_key.referenced_table
             if referenced_table not in registered_names:
                 record(table, foreign_key, ForeignKeyFailureReason.UNRESOLVABLE_REFERENCE)
+                continue
+
+            primary_key = primary_key_by_name[referenced_table]
             # Structural FK-target checks run before the cycle test so that a
             # structural problem is reported per-FK even when the table also
             # participates in a cycle. The type check relies on the target
             # being the registered parent's primary key: only then is every
             # referenced column known to exist on the registered parent.
-            elif foreign_key.referenced_key_signature != primary_key_by_name[referenced_table]:
+            if primary_key is None or not primary_key.matches_columns(
+                foreign_key.referenced_columns
+            ):
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMNS_NOT_A_KEY)
             elif not _foreign_key_types_match(
                 foreign_key,
@@ -395,9 +385,9 @@ def _classify_structural_failures(
                 referenced_types=column_types_by_name[referenced_table],
             ):
                 record(table, foreign_key, ForeignKeyFailureReason.REFERENCED_COLUMN_TYPE_MISMATCH)
-            elif {
-                str(column) for column in foreign_key.referenced_columns
-            } != primary_key_spellings_by_name[referenced_table]:
+            elif {str(column) for column in foreign_key.referenced_columns} != {
+                str(column) for column in primary_key.columns
+            }:
                 # The NOT_A_KEY arm proved these columns ARE the key
                 # case-insensitively, so an exact-set mismatch is precisely a
                 # case drift between the declaration the FK was built against
