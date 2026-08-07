@@ -18,9 +18,6 @@ class Identifier(str):
     plain strings are case-insensitive in both directions (the subclass's
     reflected operator takes priority).
 
-    Identity uses ``str.lower``, deliberately not ``str.casefold``: the live
-    object-name pin distinguishes Python lowercasing from casefolding, and
-    identifier identity must not silently adopt new Unicode semantics.
     """
 
     __slots__ = ()
